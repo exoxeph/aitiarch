@@ -91,3 +91,11 @@ Phase 2.
 - Decide which parts of `.aitiarch/` a normal user commits (notebook, decisions) versus ignores (usage,
   runs, measurements, backups, `ui-state.json`).
 - Decide how the built bundle ships (not committed for now).
+
+## Invoked AI (Task 3 design)
+
+Aitiarch calls your own Claude or Codex CLI and never handles credentials.
+The policy on third-party use of Claude plan logins is unsettled; a working
+integration does not establish permission under a subscription agreement.
+See [the approved Task 3 design](../docs/phase2a-task3-design.md). No live
+provider call is enabled by the provider-interface test slice.
