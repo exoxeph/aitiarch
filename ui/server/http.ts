@@ -1,8 +1,9 @@
+import { UiStateStore } from './ui-state-store.ts';
 // Local HTTP server: JSON API + SSE + static UI. Loopback only, with Host/Origin checks, a per-launch
 // cookie token, and a strict Content-Security-Policy, because this process can write to your notes.
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
@@ -110,14 +111,10 @@ export function createApp(opts: AppOptions) {
     return a.length === b.length && timingSafeEqual(a, b);
   };
 
-  const uiStatePath = () => path.join(store.rootReal, "ui-state.json");
+  const uiStateStore = new UiStateStore(store.rootReal);
   async function readUiState(): Promise<UiState> {
-    try {
-      const raw = JSON.parse(await readFile(uiStatePath(), "utf8"));
-      return sanitizeUiState(raw);
-    } catch {
-      return { v: 1, tabs: [], active: null };
-    }
+    try { const {v,tabs,active}=await uiStateStore.read();return {v,tabs,active}; }
+    catch { return {v:1,tabs:[],active:null}; }
   }
   function sanitizeUiState(raw: unknown): UiState {
     const r = (raw ?? {}) as Record<string, unknown>;
@@ -135,16 +132,7 @@ export function createApp(opts: AppOptions) {
     const active = typeof r.active === "string" && tabs.includes(r.active) ? r.active : null;
     return { v: 1, tabs, active };
   }
-  async function writeUiState(s: UiState) {
-    const tmp = `${uiStatePath()}.${randomBytes(4).toString("hex")}.tmp`;
-    await writeFile(tmp, JSON.stringify(s, null, 2) + "\n", "utf8");
-    try {
-      await rename(tmp, uiStatePath());
-    } catch (e) {
-      await unlink(tmp).catch(() => {});
-      throw e;
-    }
-  }
+  async function writeUiState(s: UiState) { await uiStateStore.updateTabs(s); }
 
   async function api(req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
     const origin = (req.headers.origin ?? "").toLowerCase();

@@ -1,3 +1,5 @@
+import {execFileSync} from 'node:child_process';
+import {UiStateStore} from '../server/ui-state-store.ts';
 import http from "node:http";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -100,6 +102,13 @@ describe("file API", () => {
     const stale = await call("PUT", "/api/file", { headers: writeHeaders(), body: { path: "notebook.md", base: f.version, text: "overwrite attempt" } });
     expect(stale.status).toBe(409);
     expect(readFileSync(path.join(root, "notebook.md"), "utf8")).toBe("# T\n\nPara A edited.\n\nPara B.\n");
+  });
+  it("tab API writes preserve git-ignored human thread drafts",async()=>{
+    execFileSync('git',['init','-q'],{cwd:tmp,stdio:'pipe'});
+    writeFileSync(path.join(root,'.gitignore'),'/ui-state.json*\n');
+    const drafts=new UiStateStore(root);await drafts.saveDraft('notebook.md','thread-fixture','Human fixture draft.',null);
+    expect((await call('PUT','/api/ui-state',{headers:writeHeaders(),body:{tabs:['notebook.md'],active:'notebook.md'}})).status).toBe(200);
+    expect((await drafts.draft('notebook.md','thread-fixture'))?.text).toBe('Human fixture draft.');
   });
   it("ui-state keeps only valid note paths", async () => {
     const r = await call("PUT", "/api/ui-state", { headers: writeHeaders(), body: { tabs: ["notebook.md", "../evil.md", "runs/private.md", "notebook.md"], active: "notebook.md" } });

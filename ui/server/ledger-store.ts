@@ -27,7 +27,7 @@ export class LedgerStore {
       const lock = await open(lockPath, 'wx', 0o600), temp = this.file + '.' + randomUUID() + '.tmp';
       try {
         const d = await this.read();
-        if (d.events.some(e => e.inkId === event.inkId && e.event === event.event)) return;
+        if (d.events.some(e => e.inkId === event.inkId && e.requestId === event.requestId && e.event === event.event)) return;
         d.events.push(event);
         const f = await open(temp, 'wx', 0o600);
         try { await f.writeFile(JSON.stringify(d, null, 2) + '\n'); await f.sync(); } finally { await f.close(); }

@@ -1,0 +1,45 @@
+[
+  {
+    "name": "takeaway",
+    "extra": {
+      "takeaway": "synthetic forbidden field"
+    }
+  },
+  {
+    "name": "why",
+    "extra": {
+      "why": "synthetic forbidden field"
+    }
+  },
+  {
+    "name": "failedReason",
+    "extra": {
+      "failedReason": "synthetic forbidden field"
+    }
+  },
+  {
+    "name": "failed_reason",
+    "extra": {
+      "failed_reason": "synthetic forbidden field"
+    }
+  },
+  {
+    "name": "thread",
+    "extra": {
+      "thread": "synthetic forbidden field"
+    }
+  },
+  {
+    "name": "draft",
+    "extra": {
+      "draft": "synthetic forbidden field"
+    }
+  },
+  {
+    "name": "nested-owned-claim",
+    "extra": {},
+    "claimExtra": {
+      "takeaway": "synthetic forbidden field"
+    }
+  }
+]
