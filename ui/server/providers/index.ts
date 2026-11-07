@@ -11,7 +11,8 @@ import { failureMetadata, privateFailureLog, type FailureLog, type FailureMetada
 import { parseAnswerJson } from './answer-json.ts';
 import { ProductValidationError, validateResponseSchema, type ValidationRecord } from '../product-validation.ts';
 
-export type ProviderName = 'claude' | 'codex';
+export type CLIProviderName = 'claude' | 'codex';
+export type ProviderName = CLIProviderName | 'chatgpt-plan';
 export interface Request {
   id: string;
   action: 'think' | 'ask';
@@ -41,13 +42,14 @@ export interface Result {
   id: string; provider: ProviderName; model: string | null; answer: string;
   claims: unknown[]; usage: { inputTokens: number; outputTokens: number } | null;
 }
-export interface InvokeOptions { signal?: AbortSignal; timeoutMs?: number }
+export interface InvokeOptions { signal?: AbortSignal; timeoutMs?: number; retry503?:boolean }
 export interface Provider {
+  readonly name?: ProviderName;
   checkAvailability(): Promise<Availability>;
   invoke(request: Request, options?: InvokeOptions): Promise<Result>;
 }
 export interface Configuration {
-  provider: ProviderName;
+  provider: CLIProviderName;
   command: string;
   prefixArgs?: readonly string[];
   contract: 'fake' | 'unverified' | 'claude-canary-2.1.205';

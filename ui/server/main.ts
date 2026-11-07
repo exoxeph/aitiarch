@@ -8,25 +8,28 @@ import { createApp } from "./http.ts";
 import { Store } from "./store.ts";
 import { NoteWatcher } from "./watch.ts";
 import { createProvider } from "./providers/index.ts";
+import { ChatGPTPlan } from "./providers/chatgpt-plan.ts";
 import { sweepStaleProviderTemps } from "./providers/temp-cleanup.ts";
 
 function parseArgs(argv: string[]) {
-  const o = { root: undefined as string | undefined, port: undefined as number | undefined, open: true, origins: [] as string[], claude: undefined as string | undefined };
+  const o = { root: undefined as string | undefined, port: undefined as number | undefined, open: true, origins: [] as string[], claude: undefined as string | undefined, chatgptPlan:false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--root") o.root = argv[++i] ?? "";
     else if (a === "--port") o.port = Number(argv[++i]);
     else if (a === "--allow-origin") o.origins.push(argv[++i] ?? "");
     else if (a === "--claude") o.claude = argv[++i] ?? "";
+    else if (a === "--chatgpt-plan") o.chatgptPlan = true;
     else if (a === "--no-open") o.open = false;
     else if (a === "--help" || a === "-h") {
-      console.log("usage: aitiarch [--root <folder>] [--port N] [--no-open] [--claude <absolute native executable>]\nDefault root: ./.aitiarch in the current directory. Claude is the only supported live provider; an explicit action is required per call.");
+      console.log("usage: aitiarch [--root <folder>] [--port N] [--no-open] [--claude <absolute native executable> | --chatgpt-plan]\nDefault root: ./.aitiarch in the current directory. ChatGPT plan is disabled unless --chatgpt-plan is supplied. Each provider requires an explicit action per call.");
       process.exit(0);
     } else {
       console.error(`Unknown argument: ${a}`);
       process.exit(2);
     }
   }
+  if(o.claude&&o.chatgptPlan){console.error('Choose one provider per server: --claude or --chatgpt-plan.');process.exit(2);}
   return o;
 }
 
@@ -43,9 +46,10 @@ try {
 const watcher = new NoteWatcher(store!);
 await watcher.start();
 const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
-const provider = args.claude ? createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205" }) : undefined;
+const plan = args.chatgptPlan ? new ChatGPTPlan({enabled:true,notebookRoot:store!.rootReal}) : undefined;
+const provider = plan ?? (args.claude ? createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205" }) : undefined);
 if (provider) for (const warning of (await provider.checkAvailability()).warnings ?? []) console.warn(warning);
-const app = createApp({ store: store!, watcher, distDir, allowOrigins: args.origins, provider });
+const app = createApp({ store: store!, watcher, distDir, allowOrigins: args.origins, provider, plan });
 
 // Deterministic port per notebook folder, so the same project always opens at the same address.
 const h = parseInt(createHash("sha1").update(store!.rootReal.toLowerCase()).digest("hex").slice(0, 6), 16);
@@ -71,6 +75,7 @@ if (args.open) {
 }
 const shutdown = async () => {
   watcher.stop();
+  await plan?.close();
   await app.close();
   process.exit(0);
 };

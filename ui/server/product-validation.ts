@@ -38,7 +38,7 @@ export function validateResponseSchema(value:unknown) {
 interface Sources { note:string; decisions:{id:string;text:string}[] }
 // The production and offline paths share these checks and their original order.
 export function validateProductResult(result:Result,expectedId:string,sources:Sources,
-  redact:(value:string)=>string,hash:(value:string)=>string) {
+  redact:(value:string)=>string,hash:(value:string)=>string,expectedProvider:Result['provider']='claude') {
   const passedRules:ProductRule[]=[];
   let claimIndex=-1,sourceLength=-1;
   const requireRule=(rule:ProductRule,pass:boolean)=>{
@@ -46,7 +46,7 @@ export function validateProductResult(result:Result,expectedId:string,sources:So
     passedRules.push(rule);
   };
   requireRule('result_id',result.id===expectedId);
-  requireRule('result_provider',result.provider==='claude');
+  requireRule('result_provider',result.provider===expectedProvider);
   requireRule('answer_type',typeof result.answer==='string');
   requireRule('answer_empty',!!result.answer.trim());
   requireRule('answer_length',result.answer.length<=100000);

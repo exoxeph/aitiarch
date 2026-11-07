@@ -13,6 +13,7 @@ import type { NoteWatcher, WatchEvent } from "./watch.ts";
 import { Assistance } from "./assistance.ts";
 import { ProviderError, type Provider } from "./providers/index.ts";
 import type { Invocation } from "../shared/invocation.ts";
+import type { ChatGPTPlan } from "./providers/chatgpt-plan.ts";
 
 export interface AppOptions {
   store: Store;
@@ -20,6 +21,7 @@ export interface AppOptions {
   distDir: string;
   allowOrigins?: string[];
   provider?: Provider;
+  plan?: ChatGPTPlan;
 }
 
 export const CSP = [
@@ -164,6 +166,22 @@ export function createApp(opts: AppOptions) {
     }
 
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await store.tree());
+
+    if(url.pathname==='/api/chatgpt-plan'&&req.method==='GET')return json(res,200,opts.plan?await opts.plan.status():{enabled:false});
+    if(url.pathname.startsWith('/api/chatgpt-plan/')&&req.method==='PUT'){
+      if(!opts.plan)throw new ProviderError('unsupported_cli','ChatGPT plan is disabled. Restart with --chatgpt-plan to enable it.');
+      const b=await readBody(req) as Record<string,unknown>;
+      if(url.pathname.endsWith('/sign-in')){const attempt=await opts.plan.beginSignIn();void attempt.completed.catch(()=>{});return json(res,200,{url:attempt.url});}
+      if(url.pathname.endsWith('/sign-out'))return json(res,200,await opts.plan.signOut());
+      if(url.pathname.endsWith('/models'))return json(res,200,await opts.plan.listModels());
+      if(url.pathname.endsWith('/settings')){
+        if(typeof b.hourlyCap==='number')await opts.plan.setHourlyCap(b.hourlyCap);
+        if(typeof b.model==='string')opts.plan.setModel(b.model);
+        return json(res,200,await opts.plan.status());
+      }
+      if(url.pathname.endsWith('/acknowledge')){await opts.plan.acknowledge();return json(res,200,{});}
+      throw new PathError(400,'bad_body','Unknown ChatGPT connection action.');
+    }
 
     if (url.pathname === "/api/assistance" && req.method === "GET") return json(res, 200, await (await assistance).availability());
     if (url.pathname === "/api/assistance/status" && req.method === "GET") {

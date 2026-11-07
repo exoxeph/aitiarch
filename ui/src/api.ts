@@ -66,7 +66,9 @@ async function ok<T>(method: "GET" | "PUT", url: string, body?: unknown): Promis
 }
 
 export const api = {
-  assistance: () => ok<{ available: boolean; message?: string; warnings?: string[] }>("GET", "/api/assistance"),
+  assistance: () => ok<{ available: boolean; provider?: string; message?: string; warnings?: string[] }>("GET", "/api/assistance"),
+  planStatus:()=>ok<{enabled:boolean;connected?:boolean;model?:string|null;hourlyCap?:number;welcome?:boolean}>('GET','/api/chatgpt-plan'),
+  planAction:<T,>(action:string,body:unknown={})=>ok<T>('PUT','/api/chatgpt-plan/'+action,body),
   previewInvocation: (body: Invocation) => ok<unknown>("PUT", "/api/assistance/preview", body),
   invoke: (body: Invocation) => ok<InkSnapshot>("PUT", "/api/assistance/invoke", body),
   requestStatus: (id: string) => ok<{ status: string }>("GET", `/api/assistance/status?id=${encodeURIComponent(id)}`),

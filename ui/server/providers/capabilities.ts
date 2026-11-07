@@ -4,13 +4,13 @@ import { mkdtemp } from 'node:fs/promises';
 import { cleanupProviderTemp } from './temp-cleanup.ts';
 import os from 'node:os';
 import path from 'node:path';
-import type { Configuration, ErrorCode, ProviderName } from './index.ts';
+import type { Configuration, ErrorCode, CLIProviderName } from './index.ts';
 
 export type Availability = { available: true; hardening?: string[]; warnings?: string[] } | {
   available: false; code: ErrorCode; message: string; version?: string; warnings?: string[];
 };
 type Requirement = readonly [flag: string, meaning: RegExp];
-const requirements: Record<ProviderName, readonly Requirement[]> = {
+const requirements: Record<CLIProviderName, readonly Requirement[]> = {
   claude: [
     ['--print', /print response and exit/i],
     ['--tools', /use "" to disable all tools/i],

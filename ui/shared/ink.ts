@@ -3,7 +3,7 @@ import { resolveAnchor, validateAnchor, type Anchor, type Attachment } from "./a
 export interface Generation {
   requestId: string;
   action: "think" | "ask";
-  provider: "claude";
+  provider: "claude" | "chatgpt-plan";
   model: string | null;
   createdAt: string;
   status: "pending" | "complete" | "error" | "cancelled";
@@ -58,7 +58,7 @@ export function validateDocument(value: unknown, note: string): asserts value is
     if (i.generation !== undefined) {
       const g = i.generation;
       if (!keys(g, ["requestId", "action", "provider", "model", "createdAt", "status", "evidence", "dismissed"]) ||
-          g.requestId !== i.id || !["think", "ask"].includes(g.action) || g.provider !== "claude" ||
+          g.requestId !== i.id || !["think", "ask"].includes(g.action) || !["claude", "chatgpt-plan"].includes(g.provider) ||
           !(g.model === null || (typeof g.model === "string" && /^[\w.:-]{1,100}$/.test(g.model))) ||
           typeof g.createdAt !== "string" || !Number.isFinite(Date.parse(g.createdAt)) || typeof g.dismissed !== "boolean" ||
           !["pending", "complete", "error", "cancelled"].includes(g.status) || !Array.isArray(g.evidence) || g.evidence.length > 32 ||

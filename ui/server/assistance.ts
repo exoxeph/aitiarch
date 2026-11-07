@@ -27,7 +27,7 @@ export class Assistance {
     this.store = store; this.ink = ink; this.provider = provider; this.notify = notify;
     this.ledger = new LedgerStore(store.rootReal);
   }
-  availability() { return this.provider.checkAvailability(); }
+  async availability() { return { ...await this.provider.checkAvailability(), provider:this.provider.name??'claude' }; }
   preview(input: Invocation) {
     const frozen = freezeInvocation(input);
     return prepareRequest({ id: frozen.id, action: frozen.action, question: frozen.question,
@@ -64,7 +64,7 @@ export class Assistance {
     const packet = prepareRequest(request);
     const pending: InkItem = { id: frozen.id, kind: 'answer', body: 'Thinking…', originalAnchor: frozen.anchor, anchor: frozen.anchor,
       attachment: { status: 'attached', from: frozen.from, to: frozen.to }, generation: { requestId: frozen.id, action: frozen.action,
-        provider: 'claude', model: null, createdAt: new Date().toISOString(), status: 'pending', evidence: [], dismissed: false } };
+        provider: this.provider.name==='chatgpt-plan'?'chatgpt-plan':'claude', model: null, createdAt: new Date().toISOString(), status: 'pending', evidence: [], dismissed: false } };
     // Map the newly captured item too if disk changed after the click.
     const snapshot = await this.mutate(path, frozen.text, (items, text) => {
       if (items.some(i => i.id === frozen.id)) throw new Error('Request ID already exists.');
@@ -83,7 +83,7 @@ export class Assistance {
         if (controller.signal.aborted) throw new ProviderError('cancelled');
         result = await this.provider.invoke(request, { signal: controller.signal });resultReceived=true;
         if (controller.signal.aborted) throw new ProviderError('cancelled');
-        ({body,model,evidence}=validateProductResult(result,frozen.id,packet.data,redact,textHash));
+        ({body,model,evidence}=validateProductResult(result,frozen.id,packet.data,redact,textHash,this.provider.name??'claude'));
       } catch (e) {
         if(e instanceof ProductValidationError)await record(e.record);
         else if(e instanceof ProviderError&&e.validation)await record(e.validation);

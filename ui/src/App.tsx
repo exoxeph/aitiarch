@@ -8,6 +8,7 @@ import { EditorPane, type PaneHandle } from "./editor/EditorPane.tsx";
 import { indentLines, restoreFailed, setHeading, toggleCodeBlock, toggleInline, toggleList } from "./editor/format.ts";
 import type { SyncStatus } from "./editor/session.ts";
 import { makeWikiResolver } from "./frontmatter.ts";
+import { ChatGPTSettings } from "./ChatGPTSettings.tsx";
 
 type Boot = { state: "loading" } | { state: "error"; message: string } | { state: "ready"; rootName: string; rootPath: string };
 
@@ -298,6 +299,7 @@ export default function App() {
         <Tree tree={tree} active={active} onOpen={(p) => void openNote(p)} />
       </aside>
       <main className="editor-col">
+        <ChatGPTSettings/>
         {cacheNotice && <div className="notice" role="alert">
           Anchor snapshots are disabled. Add this exact line to <code>{cacheNotice.file}</code>: <code>{cacheNotice.line}</code>
           <button disabled={cacheBusy} onClick={async () => {
@@ -345,7 +347,7 @@ export default function App() {
             <h2>Requested answers</h2>
             {activeItems.filter(i => i.generation).map(i => <article className="orphan-card" key={i.id} data-ink-id={i.id}
               data-generated-complete={i.generation?.status === "complete" ? "true" : undefined}>
-              <div className="orphan-cap">Claude · {i.generation?.status}{i.generation?.dismissed ? " · dismissed" : ""}</div>
+              <div className="orphan-cap">{i.generation?.provider==='chatgpt-plan'?'ChatGPT plan':'Claude'} · {i.generation?.status}{i.generation?.dismissed ? " · dismissed" : ""}</div>
               <div>{i.body}</div>
               {i.generation?.status === "pending" && <p className="small muted">If the server restarted, this request was interrupted and will not be rerun automatically.</p>}
               {i.generation?.status === "complete" && !i.generation.dismissed && <button onClick={() => {

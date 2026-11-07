@@ -12,6 +12,8 @@ interface Running { id: string; status: string; error?: string }
 export function useInvocations(path: string, view: RefObject<EditorView | null>, session: RefObject<NoteSession | null>,
   saved: (snapshot: InkSnapshot) => void) {
   const [draft, setDraft] = useState<Draft | null>(null), [jobs, setJobs] = useState<Running[]>([]), [busy, setBusy] = useState(false);
+  const [providerLabel,setProviderLabel]=useState('Claude');
+  useEffect(()=>{void api.assistance().then(a=>setProviderLabel(a.provider==='chatgpt-plan'?'ChatGPT plan':'Claude')).catch(()=>{});},[]);
   const mounted = useRef(true), liveSaved = useRef(saved); liveSaved.current = saved;
   const merge = (snapshot: InkSnapshot) => {
     if (!mounted.current || !view.current) return;
@@ -85,23 +87,23 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
     finally { setBusy(false); }
   };
   const panel = <div className="invocation-panel">
-    {draft && <section aria-label="Review Claude request" className="invocation-review">
-      <strong>{draft.input.action === 'think' ? 'Think on this' : 'Ask Claude'}</strong>
+    {draft && <section aria-label={`Review ${providerLabel} request`} className="invocation-review">
+      <strong>{draft.input.action === 'think' ? 'Think on this' : `Ask ${providerLabel}`}</strong>
       <div className="small muted">Selection frozen at click. Editing the note will not change this request.</div>
       <blockquote>{draft.input.text.slice(draft.input.from, draft.input.to)}</blockquote>
-      {draft.input.action === 'ask' && !draft.packet && <label>Question for Claude<input aria-label="Question for Claude" maxLength={8000}
+      {draft.input.action === 'ask' && !draft.packet && <label>Question for {providerLabel}<input aria-label={`Question for ${providerLabel}`} maxLength={8000}
         value={draft.input.question} onChange={e => setDraft({ input: { ...draft.input, question: e.target.value } })} /></label>}
-      <p className="small muted">Claude CLI · transcript context: none. Redaction can miss prose secrets, unfamiliar or encoded credentials, and indirect identifiers. Review before sending.</p>
+      <p className="small muted">{providerLabel==='Claude'?'Claude CLI':'ChatGPT plan'} · transcript context: none. Redaction can miss prose secrets, unfamiliar or encoded credentials, and indirect identifiers. Review before sending.</p>
       {draft.packet !== undefined && <details><summary>Exact redacted request</summary><pre>{JSON.stringify(draft.packet, null, 2)}</pre></details>}
       {draft.error && <p role="alert">{draft.error}</p>}
       {draft.warnings?.map(warning => <p role="note" key={warning}>{warning}</p>)}
       <div className="attach-actions">{draft.packet !== undefined
-        ? <button disabled={busy} onClick={() => void send()}>Send to Claude</button>
+        ? <button disabled={busy} onClick={() => void send()}>Send to {providerLabel}</button>
         : <button disabled={busy || (draft.input.action === 'ask' && !draft.input.question.trim())} onClick={() => void review(draft.input)}>Review request</button>}
         <button disabled={busy} onClick={cancelPreview}>Cancel preview</button></div>
     </section>}
     {jobs.map(j => <div key={j.id} className="invocation-job" data-request-status={j.status}>
-      Claude: {j.status === 'persistence_error' ? 'Answer retained in memory; saving failed.' : j.status}
+      {providerLabel}: {j.status === 'persistence_error' ? 'Answer retained in memory; saving failed.' : j.status}
       {j.error && <span role="alert">{j.error}</span>}
       {['pending', 'queued'].includes(j.status) && <button onClick={() => void api.cancelRequest(j.id).catch(() => setJobs(all => all.map(k => k.id === j.id ? { ...k, error: 'Cancellation could not be confirmed.' } : k)))}>Cancel request</button>}
       {j.status === 'persistence_error' && <button onClick={() => void api.retryInkSave(j.id).then(async () => { merge(await api.ink(path)); setJobs(all => all.map(k => k.id === j.id ? { ...k, status: 'complete' } : k)); }).catch(() => {})}>Retry saving answer (no new call)</button>}
