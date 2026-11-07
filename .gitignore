@@ -1,0 +1,9 @@
+spike/results/
+spike/scratch/
+__pycache__/
+
+# Local probe contains fragments of real session messages; never publish.
+/spike/reliability_probe.py
+
+# Byte-exact original notes retained locally before publication redaction.
+/NOTES.private.md

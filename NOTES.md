@@ -1,5 +1,15 @@
 # Feasibility experiments — 2026-11-06
 
+## Before the first push
+
+Scrub git history of the original NOTES.md content, including the commit behind
+the phase-1 tag, before this repo is published anywhere. Do not rewrite history
+now. The byte-exact original is retained locally in git-ignored NOTES.private.md.
+
+This public copy paraphrases message text and omits generated answer excerpts,
+session identifiers, transcript filesystem paths and identifying local paths.
+Decisions, results, timings, test counts and conclusions remain recorded below.
+
 ## Phase 1 web UI — decisions and status (2026-11-07)
 
 The earlier "no UI yet / on hold" statements in BRIEF.md and below are historical. The user approved the
@@ -16,7 +26,7 @@ Phase 1 task list of `AITIARCH-UI-SPEC.md`; source lives in `ui/` (see `ui/READM
 - File watching: `fs.watch` plus a polling fallback.
 - UI source lives in the Aitiarch repo (`git init` done; nothing committed). `.aitiarch` lives in each
   project's repo; notes are never copied here. Default root `./.aitiarch` under the current directory;
-  `--root` overrides it (tests, other folders such as `G:\exoxeph.github.io\.aitiarch`).
+  `--root` overrides it (tests, other folders such as `<project>/.aitiarch`).
 - "Don't know yet" on a failed mark is written `~~text~~ {failed: ?}`.
 - Open-tab state: `ui-state.json` inside the root's `.aitiarch` folder (should be git-ignored).
 - Build bundle: not committed for now.
@@ -52,7 +62,7 @@ Phase 1 task list of `AITIARCH-UI-SPEC.md`; source lives in `ui/` (see `ui/READM
 ## Current prototype status - 2026-11-07
 
 The minimal no-custom-UI dogfood prototype is installed locally in
-`G:\exoxeph.github.io`: notebook `.aitiarch/notebook.md`, decision directory
+the selected project repository: notebook `.aitiarch/notebook.md`, decision directory
 `.aitiarch/decisions/`, and an advisory Edit/Write hook in local Claude settings.
 No existing notebook was found. At installation, all 227 tracked site files and
 the pre-existing Git status were unchanged. The user's subsequent Claude Code
@@ -147,7 +157,7 @@ and logs now receive a `.git/info/exclude` entry even without earlier prototype
 initialization. This was reproduced by a failing ignore assertion before fixing.
 
 **Portfolio edit/checks:** the one persistent edit shortens only the outer
-story region label to `Engineering problems, decisions, and outcomes`. Exact
+story region label to describe engineering work and its outcomes (paraphrased). Exact
 bytes match the pre-smoke file with that one substitution. Of **237 baseline
 files** hashed, only `src/pages/index.astro` changed; the accepted record,
 notebook, Claude settings and pre-existing work stayed unchanged. Astro check:
@@ -201,7 +211,7 @@ private observation and current decision hash under
 The first edit was reportedly denied by a separate fact-forcing gate; the next
 succeeded. The message matches the enabled ECC plugin's GateGuard hook:
 `pre:edit-write:gateguard-fact-force` is registered for Edit/Write/MultiEdit,
-its installed source emits the "present these facts" message, and it returns
+its installed source requests supporting facts (paraphrased), and it returns
 `permissionDecision: deny`. Aitiarch's inspected source returns only advisory
 additionalContext or `{}`. This identifies a matching installed blocking hook,
 not an independently captured runtime trace of that plugin. No hook/plugin
@@ -222,8 +232,8 @@ do not manufacture another edit just to accumulate successful hook events.
 
 ### First actual requested assistance and technical measurements
 
-The user supplied the real question, verbatim: "does the homepage convey the
-story of the portfolio well enough". Its text and a labeled copy of the locally
+The user requested an assessment of whether the homepage communicates the
+portfolio story clearly (paraphrased). The request and a labeled copy of the locally
 rendered homepage were added to the notebook without recording a decision or
 rationale. The existing dev server at port 4440 was reused; site code was not
 changed. Desktop/mobile screenshots and the captured copy remain local.
@@ -236,16 +246,17 @@ output 2,830; Haiku 4.5 input 3,275, output 14; no cache-read tokens reported.
 These are returned CLI usage/costs, not an invoice or proof of a single internal
 provider inference. No retries/rerolls or new margin experiments occurred.
 
-The AI's assessment was that the "check before acting" thesis and repeated
-failure/check/result/limit structure give the page a coherent story; whether
-visitors understand it remains untested. This is advisory interpretation, not
-the user's judgment or an accepted design decision. Source existence and exact
-quotes do not prove every interpretation: for example, "returning to the thesis"
-at the ending interprets a résumé/contact CTA, not a literal final thesis sentence.
+The generated answer excerpt is omitted; this paragraph paraphrases the finding.
+The assessment connected the page's verification theme and repeated
+failure/check/result/limit structure to narrative coherence; visitor
+understanding remains untested. This is advisory interpretation, not the user's
+judgment or an accepted design decision. Source existence and exact quotes do
+not prove every interpretation: the assessment treated the résumé/contact CTA
+as a thematic return despite the absence of a literal final thesis sentence.
 No final usefulness grade or human feedback has been invented.
 
 The original request, raw response, validation, usage and readable `answer.md`
-are private under `.aitiarch/runs/20261106T182358-bc5396bb/`. Model output does not
+are retained in the selected project's private `.aitiarch/runs/` directory. Model output does not
 rewrite the notebook or human rationale. Requested assistance has no proactive
 suppression policy, 55-word cap or mandatory question ending.
 
@@ -307,7 +318,7 @@ minimal explicit status/literal path links, and human canonical edits. Preserve
 the existing notebook's Git policy; keep new private artifacts local and ignored.
 No canonical decision files are to be published without explicit approval.
 
-The user then selected `G:\exoxeph.github.io`. Inspection found no existing
+The user then selected the project repository. Inspection found no existing
 `.aitiarch` notebook. The approved notebook is `.aitiarch/notebook.md`; decision
 records go in `.aitiarch/decisions/` there. Preserve unrelated untracked site assets.
 Implementation of the approved loop is authorized; do not request the approved
@@ -586,8 +597,8 @@ correctness and source-supported defer_until must be audited separately from
 SUPPRESS. Baseline A cannot express DEFER, making exact three-way label accuracy
 structurally asymmetric. Validation-blocked SHOWs are not successful abstentions.
 V3-08 returned one DEFER and three SUPPRESS labels across the four outputs, all
-without immediate interruption. The DEFER records: "When the cross-machine sync
-milestone is explicitly opened". This preserves the milestone trigger; the
+without immediate interruption. The DEFER trigger is the explicit opening of
+the cross-machine sync milestone (paraphrased). This preserves the trigger; the
 SUPPRESS outputs are not credited as correct DEFER labels. No reminders were sent.
 
 Per-condition mechanical counts, every contradiction/replicate, and DEFER triggers
@@ -757,8 +768,9 @@ No conflation of separate files was observed in these checks.
 Both extension backends were running. Codex's current request appeared in the
 same file as the previous snapshot (one to two turns), then the user's live-check
 reply became turn three. After the user sent the marker in Claude's VS Code chat,
-Claude's same session contained an exact `Aitiarch live reader check` user message
-at turn three. This verifies fresh-message visibility for both, not append delay.
+Claude's same session contained the expected user-supplied freshness marker
+at turn three. The literal marker is omitted. This verifies fresh-message
+visibility for both, not append delay.
 
 Remaining transcript uncertainty: active-branch reconstruction, exact compacted
 model context, all future format variants, and repeated message IDs beyond the
@@ -801,7 +813,7 @@ may begin until these evaluation findings have been reviewed.
 
 ## Initial three probes (historical snapshot)
 
-Ran the three requested no-UI probes from `G:\Aitiarch` while both VS Code
+Ran the three requested no-UI probes from the Aitiarch workspace while both VS Code
 extension backends were running. Scripts and rerun instructions: [spike/README.md](spike/README.md).
 These experiments do not resolve the brief's open product decisions.
 
@@ -813,14 +825,14 @@ The reader printed every available turn, up to ten, and saved
 A turn means a user message plus subsequent assistant text; tool results and
 reasoning are excluded. This cwd has two Claude turns and one Codex turn.
 
-- Claude file: `~/.claude/projects/g--Aitiarch/d22479cf-9c4f-4ced-bd83-928a70f89e02.jsonl`.
-  The VS Code log names this exact file as `transcript_path`.
-  The installed CLI resumed its session ID with no persistence, and correctly
-  returned the previous user message, `put it up as BRIEF.md`.
+- Claude: the VS Code log and installed CLI referred to the same local
+  transcript file; the filesystem path and session ID are omitted.
+  The installed CLI resumed it with no persistence and correctly returned
+  the preceding request to save the project brief (paraphrased).
   The original transcript still contained two visible user messages afterward.
   [Extension evidence](spike/results/claude-extension-storage-evidence.txt),
   [CLI evidence](spike/results/claude-cli-storage.json).
-- Codex file: `~/.codex/sessions/2026/11/06/rollout-2026-11-06T21-23-01-01a1b174-c197-70b3-ab8e-fe6f5ae75e57.jsonl`.
+- Codex: the local transcript path and thread ID are omitted.
   Metadata says `source: vscode`, `originator: codex_vscode`.
   The installed CLI app-server's read-only `thread/read` returned this identical
   path and the same thread ID, without resuming or starting a turn.
@@ -835,13 +847,16 @@ these installed versions; this does not establish permanent format compatibility
 Passed BRIEF.md's resurfacing paragraph and both real session excerpts through
 `claude -p --no-session-persistence --max-turns 1`, with a replacement system
 prompt limited to explanation and one question. Tools, MCP and slash commands
-were disabled. The successful call took 6.9 seconds and produced this 79-word note:
+were disabled. The successful call took 6.9 seconds and produced a 79-word note.
 
-> **Margin note:** The paragraph sets a hard target (<50ms) and a noise-aversion rule ("false positive costs more than a miss"), but the codex excerpt shows timing is still unmeasured and the matching mechanism (path-glob vs keyword vs co-change) isn't fixed — tighter latency budgets typically favor simpler matching, which may raise false positives, while noise-reduction (thresholds, relevance scoring) typically costs latency. What has the hook-timing spike shown about where actual latency is spent — matching logic or process spawn/IO?
+The generated answer is retained only in the private original. In paraphrase,
+it connected the <50ms latency aspiration with noise concerns and asked whether
+hook time was dominated by matching or process startup. It overstated the
+target's authority and suggested an unsupported matching/noise tradeoff.
 
 Judgment: the final question is specific and useful for this spike. Most of the
-explanation repeats known uncertainty. Calling the guessed target "hard" is
-inaccurate, and its simple-matching/false-positive tradeoff is unsupported:
+explanation repeats known uncertainty. Treating the guessed target as a binding
+requirement is inaccurate, and its simple-matching/false-positive tradeoff is unsupported:
 explicit path matches can be both fast and precise. The note also does not
 identify the real session's concrete friction: Claude had stalled on repo and
 rules-format choices before doing the requested feasibility work. This is

@@ -13,8 +13,8 @@ npm install
 npm run build                      # once (the built bundle is not committed yet)
 
 # then, inside the project you want to open (it must contain a .aitiarch folder):
-node G:\Aitiarch\ui\server\main.ts                          # default root: .\.aitiarch
-node G:\Aitiarch\ui\server\main.ts --root G:\exoxeph.github.io\.aitiarch   # any other folder
+node <aitiarch-source>\ui\server\main.ts                          # default root: .\.aitiarch
+node <aitiarch-source>\ui\server\main.ts --root <project>\.aitiarch   # any other folder
 ```
 
 The server listens on `127.0.0.1` only, on a port derived from the notebook path (same project → same
