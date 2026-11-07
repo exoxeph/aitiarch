@@ -1,5 +1,7 @@
 # ChatGPT plan provider: fake-server slice
 
+Signed in locally for development; provider disabled by default; any live call requires explicit user approval.
+
 Status: implemented behind `--chatgpt-plan`, disabled by default. No real sign-in,
 OpenAI authentication/API request, browser launch or live inference was performed
 for this slice. The tests use loopback servers, ephemeral signing keys and generated
