@@ -13,7 +13,11 @@ export type StreamCondition='content_type'|'body_missing'|'sse_line'|'json_synta
   |'final_snapshot'|'model'|'final_constraints'|'usage'|'stream_limit'|'utf8'|'stream_read'|'truncated'|'missing_completed';
 export interface StreamRejection {condition:StreamCondition;event?:string;field?:string;fieldType?:string;itemType?:string}
 export class StreamError extends ProviderError {
-  constructor(readonly streamRejection:StreamRejection){super('invalid_response','ChatGPT returned an unverified or incomplete stream.');}
+  readonly streamRejection:StreamRejection;
+  constructor(streamRejection:StreamRejection){
+    super('invalid_response','ChatGPT returned an unverified or incomplete stream.');
+    this.streamRejection=streamRejection;
+  }
 }
 export async function readPlanStream(response:Response,counts:Record<string,number>,fields:unknown[]){
   let currentEvent:string|undefined;

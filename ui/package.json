@@ -12,10 +12,11 @@
     "build": "vite build",
     "start": "node server/main.ts",
     "test": "vitest run",
+    "test:native": "node test/native-load.mjs",
     "test:holdout": "node scripts/anchoring-holdout.mjs mapping",
     "test:holdout:search": "node scripts/anchoring-holdout.mjs search",
     "test:anchors:sweep": "node scripts/anchoring-sweep.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --project tsconfig.server.json",
     "check:phase1": "vite build && node check/phase1.mjs",
     "check:invoked": "vite build && node check/invoked.mjs",
     "fixture": "node check/manual-fixture.mjs"
