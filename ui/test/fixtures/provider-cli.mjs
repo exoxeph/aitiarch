@@ -71,7 +71,8 @@ if (scenario.startsWith('verified-')) {
   if (scenario === 'verified-hook-prefixed') console.log(JSON.stringify({ type: 'system', subtype: 'hook_custom' }));
   if (scenario === 'verified-benign-subtype') console.log(JSON.stringify({ type: 'system', subtype: 'status' }));
   if (scenario.startsWith('verified-thinking-')) {
-    const status={type:'system',subtype:'thinking_tokens',tokens:12};
+    const status={type:'system',subtype:'thinking_tokens',estimated_tokens:12,estimated_tokens_delta:4,
+      uuid:'12345678-9abc-def0-1234-56789abcdef0',session_id:'87654321-abcd-ef01-4321-012345abcdef'};
     if(scenario==='verified-thinking-text')status.text='PRIVATE_STATUS_SENTINEL';
     if(scenario==='verified-thinking-long')status.detail='PRIVATE_STATUS_SENTINEL'.repeat(3);
     console.log(JSON.stringify(status));

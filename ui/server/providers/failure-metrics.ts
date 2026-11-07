@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectClaudeCanary } from './claude-canary.ts';
 import { parseAnswerJson } from './answer-json.ts';
-import { inspectThinkingTokens } from './thinking-status.ts';
+import { inspectThinkingTokens, type RejectedThinkingField } from './thinking-status.ts';
 const types = new Set(['system','assistant','user','result','rate_limit_event','stream_event','tool_progress','auth_status','tool_use_summary','permission_denied','prompt_suggestion']);
 const subtypes = new Set(['init','success','error_during_execution','error_max_turns','error_max_budget_usd','error_max_structured_output_retries',
   'hook_started','hook_progress','hook_response','status','compact_boundary','api_retry','task_started','task_progress','task_notification','task_updated',
@@ -47,7 +47,7 @@ export interface FailureMetadata {
   stdoutBytes: number; events: {type:string;subtype:string|null;count:number}[];
   parseError: ParseIssue|null; finalResultPresent: boolean; wallMs:number;
   usage: {source:'event'|'message'|'model'|'thinking_status';counters:Record<string,number>}[];
-  thinkingStatusFields:{fields:string[];rejectedFields:string[]}[];
+  thinkingStatusFields:{fields:string[];rejectedFields:string[];rejectedDetails:RejectedThinkingField[]}[];
   resultShape:ResultShape;
   systemSubtypeCounts:Record<string,number>;
   outputTokenSplit:{thinking:number;text:number};
@@ -94,7 +94,7 @@ export function failureMetadata(input: Observation): FailureMetadata {
     const last=out.events.at(-1);if(last&&last.type===type&&last.subtype===subtype)last.count++;else out.events.push({type,subtype,count:1});
     if(event.type==='system'&&event.subtype==='thinking_tokens'){
       const checked=inspectThinkingTokens(event);
-      out.thinkingStatusFields.push({fields:checked.fields,rejectedFields:checked.rejectedFields});
+      out.thinkingStatusFields.push({fields:checked.fields,rejectedFields:checked.rejectedFields,rejectedDetails:checked.rejectedDetails});
       if(checked.valid&&Object.keys(checked.tokenCounts).length)out.usage.push({source:'thinking_status',counters:checked.tokenCounts});
       return; // Do not inspect any other values or nested usage in a status event.
     }

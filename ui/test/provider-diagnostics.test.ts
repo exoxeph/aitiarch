@@ -53,11 +53,30 @@ for (const [scenario, code, final, stderr] of [
 }
 it('records reported thinking token observations without summing or inferring totals',()=>{
   const result=failureMetadata({exitCode:0,signal:null,stderr:'',stdoutBytes:100,wallMs:1,stream:true,
-    stdout:[{type:'system',subtype:'thinking_tokens',tokens:12,state:'running'},
-      {type:'system',subtype:'thinking_tokens',tokens:15,state:'running'}].map(e=>JSON.stringify(e)).join('\n')});
+    stdout:[{type:'system',subtype:'thinking_tokens',estimated_tokens:12,estimated_tokens_delta:12},
+      {type:'system',subtype:'thinking_tokens',estimated_tokens:15,estimated_tokens_delta:3}].map(e=>JSON.stringify(e)).join('\n')});
   expect(result.usage.filter(u=>u.source==='thinking_status')).toEqual([
-    {source:'thinking_status',counters:{tokens:12}},{source:'thinking_status',counters:{tokens:15}}]);
+    {source:'thinking_status',counters:{estimated_tokens:12,estimated_tokens_delta:12}},
+    {source:'thinking_status',counters:{estimated_tokens:15,estimated_tokens_delta:3}}]);
   expect(JSON.stringify(result)).not.toContain('running');
+});
+it('records rejected field types, string lengths and UUID matches without values',()=>{
+  const uuid='12345678-9abc-def0-1234-56789abcdef0';
+  const result=failureMetadata({exitCode:0,signal:null,stderr:'',stdoutBytes:100,wallMs:1,stream:true,
+    stdout:JSON.stringify({type:'system',subtype:'thinking_tokens',estimated_tokens_delta:'PRIVATE_STATUS_SENTINEL',
+      other:uuid,uuid:'bad_id',session_id:uuid,content:null,text:{secret:'PRIVATE_STATUS_SENTINEL'},message:[],summary:true,signature:42})});
+  expect(result.thinkingStatusFields[0]).toMatchObject({rejectedDetails:[
+    {name:'estimated_tokens_delta',type:'string',stringLength:23,uuidMatch:false},
+    {name:'other',type:'string',stringLength:36,uuidMatch:true},
+    {name:'uuid',type:'string',stringLength:6,uuidMatch:false},
+    {name:'content',type:'null',uuidMatch:false},
+    {name:'text',type:'object',uuidMatch:false},
+    {name:'message',type:'array',uuidMatch:false},
+    {name:'summary',type:'boolean',uuidMatch:false},
+    {name:'signature',type:'number',uuidMatch:false},
+  ]});
+  expect(JSON.stringify(result)).not.toMatch(/PRIVATE_STATUS_SENTINEL|12345678|bad_id|secret/);
+  expect(result.thinkingStatusFields[0].rejectedDetails.filter(d=>d.type!=='string').every(d=>!Object.hasOwn(d,'stringLength'))).toBe(true);
 });
 it('preserves event ordering, numeric usage and parse positions without copying arbitrary fields', () => {
   const result=failureMetadata({exitCode:0,signal:null,stderr:'TOKEN_SENTINEL /private/fixture.md',stdoutBytes:100,wallMs:25,
