@@ -5,22 +5,24 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectClaudeCanary } from './claude-canary.ts';
+import { parseAnswerJson } from './answer-json.ts';
 const types = new Set(['system','assistant','user','result','rate_limit_event','stream_event','tool_progress','auth_status','tool_use_summary','permission_denied','prompt_suggestion']);
 const subtypes = new Set(['init','success','error_during_execution','error_max_turns','error_max_budget_usd','error_max_structured_output_retries',
   'hook_started','hook_progress','hook_response','status','compact_boundary','api_retry','task_started','task_progress','task_notification','task_updated',
   'local_command_output','notification','informational','session_state_changed','commands_changed','files_persisted','background_tasks_changed']);
 const counters = new Set(['input_tokens','output_tokens','cache_read_input_tokens','cache_creation_input_tokens','cache_read_tokens','cache_write_tokens',
-  'inputTokens','outputTokens','cacheReadInputTokens','cacheCreationInputTokens','reasoning_tokens','cached_tokens','web_search_requests','web_fetch_requests']);
+  'inputTokens','outputTokens','cacheReadInputTokens','cacheCreationInputTokens','reasoning_tokens','thinking_tokens','text_tokens','cached_tokens','web_search_requests','web_fetch_requests']);
 type ParseIssue = { stage: 'event'|'result'; kind: 'empty'|'unexpected_end'|'syntax'; position: number|null; line: number };
 interface ResultShape {
   nonEmpty:boolean; startsWithFence:boolean; validJson:boolean; answerPresent:boolean; claimsPresent:boolean;
-  characterLength:number; parseErrorPosition:number; parseErrorKind:number; wrappedObjectJson:boolean;
+  characterLength:number; parseErrorPosition:number; parseErrorKind:number; wrappedObjectJson:boolean; answerCharacterLength:number;
 }
 function resultShape(value:unknown):ResultShape {
   const text=typeof value==='string'?value:'';
   const result:ResultShape={nonEmpty:!!text.trim(),startsWithFence:text.trimStart().startsWith('```'),validJson:false,
-    answerPresent:false,claimsPresent:false,characterLength:text.length,parseErrorPosition:-1,parseErrorKind:0,wrappedObjectJson:false};
+    answerPresent:false,claimsPresent:false,characterLength:text.length,parseErrorPosition:-1,parseErrorKind:0,wrappedObjectJson:false,answerCharacterLength:-1};
   if(typeof value!=='string')return result;
+  try{const decoded=parseAnswerJson(text) as {answer?:unknown}|null;if(typeof decoded?.answer==='string')result.answerCharacterLength=decoded.answer.length;}catch{}
   try {
     const parsed=JSON.parse(text);result.validJson=true;
     if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed)){
@@ -45,6 +47,8 @@ export interface FailureMetadata {
   parseError: ParseIssue|null; finalResultPresent: boolean; wallMs:number;
   usage: {source:'event'|'message'|'model';counters:Record<string,number>}[];
   resultShape:ResultShape;
+  systemSubtypeCounts:Record<string,number>;
+  outputTokenSplit:{thinking:number;text:number};
   isolation:{passed:boolean;fileCount:number;tools:number;mcpServers:number;plugins:number;hookEvents:number;toolAttempts:number;unknownEvents:number};
 }
 export interface FailureLog { write(record: FailureMetadata): Promise<void> }
@@ -53,10 +57,10 @@ export function failureMetadata(input: Observation): FailureMetadata {
   const out: FailureMetadata = {exitCode:input.exitCode,signal:input.signal,stdoutBytes:input.stdoutBytes,wallMs:Math.round(input.wallMs),
     stderrCategory: !input.stderr ? 'none' : /not logged in|unauthori[sz]ed|authentication|login required|please (?:log|sign) in/i.test(input.stderr) ? 'authentication'
       : /timed? ?out|timeout/i.test(input.stderr) ? 'timeout' : /rate.?limit|too many requests/i.test(input.stderr) ? 'rate_limit' : 'other',
-    events:[],parseError:null,finalResultPresent:false,usage:[],resultShape:resultShape(undefined),
+    events:[],parseError:null,finalResultPresent:false,usage:[],resultShape:resultShape(undefined),systemSubtypeCounts:Object.create(null),outputTokenSplit:{thinking:-1,text:-1},
     isolation:{passed:false,fileCount:input.fileCount??-1,tools:-1,mcpServers:-1,plugins:-1,hookEvents:0,toolAttempts:0,unknownEvents:0}};
   const parse = (text: string,stage: ParseIssue['stage'],line:number): any => {
-    try{return JSON.parse(text);}catch(error){
+    try{return stage==='result'?parseAnswerJson(text):JSON.parse(text);}catch(error){
       const message=error instanceof Error?error.message:'';
       const offset=/position (\d+)/i.exec(message);
       // Never retain exception text: V8 may quote the offending private content.
@@ -80,11 +84,20 @@ export function failureMetadata(input: Observation): FailureMetadata {
   lines.forEach((line,index)=>{
     const event=parse(line,'event',index+1);if(!event||typeof event!=='object'){invalidEvent=true;return;}
     events.push(event);
-    const type=types.has(event.type)?event.type:'unknown',subtype=event.subtype==null?null:subtypes.has(event.subtype)?event.subtype:'unknown';
+    const type=types.has(event.type)?event.type:'unknown';
+    const subtype=event.type==='system'
+      ?typeof event.subtype==='string'&&/^[a-z][a-z0-9_]{0,39}$/.exec(event.subtype)?.[0]===event.subtype?event.subtype:'unknown'
+      :event.subtype==null?null:subtypes.has(event.subtype)?event.subtype:'unknown';
+    if(event.type==='system')out.systemSubtypeCounts[subtype]=(out.systemSubtypeCounts[subtype]??0)+1;
     const last=out.events.at(-1);if(last&&last.type===type&&last.subtype===subtype)last.count++;else out.events.push({type,subtype,count:1});
     numeric(event.usage,'event');numeric(event.message?.usage,'message');numeric(event.event?.usage,'event');numeric(event.event?.message?.usage,'message');
     if(event.modelUsage&&typeof event.modelUsage==='object')for(const value of Object.values(event.modelUsage))numeric(value,'model');
-    if(event.type==='result'){out.finalResultPresent=true;out.resultShape=resultShape(event.result);}
+    if(event.type==='result'){
+      out.finalResultPresent=true;out.resultShape=resultShape(event.result);
+      const numericToken=(...values:unknown[])=>values.find(v=>typeof v==='number'&&Number.isFinite(v)&&v>=0) as number|undefined;
+      out.outputTokenSplit={thinking:numericToken(event.usage?.output_tokens_details?.thinking_tokens,event.usage?.output_tokens_details?.reasoning_tokens,event.usage?.thinking_tokens,event.usage?.reasoning_tokens)??-1,
+        text:numericToken(event.usage?.output_tokens_details?.text_tokens,event.usage?.text_tokens)??-1};
+    }
     if((event.type==='result'||!input.stream)&&typeof event.result==='string')parse(event.result,'result',index+1);
   });
   if(input.stream){

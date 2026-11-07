@@ -12,6 +12,7 @@ for (const [scenario, code, final, stderr] of [
   ['verified-truncated', 'invalid_response', false, 'none'],
   ['verified-unknown', 'invalid_response', true, 'none'],
   ['verified-hook', 'invalid_response', true, 'none'],
+  ['verified-hook-prefixed', 'invalid_response', true, 'none'],
   ['verified-empty-result', 'invalid_response', true, 'none'],
   ['verified-nonzero', 'provider_error', true, 'other'],
   ['verified-stderr-only', 'provider_error', false, 'authentication'],
@@ -32,10 +33,14 @@ for (const [scenario, code, final, stderr] of [
     expect(row.signal).toBe(null);
     expect(row.isolation.fileCount).toBe(0);
     expect(bytes).not.toMatch(/synthetic-secret|Private synthetic|Synthetic answer|Answer for|fixture\.md|TOKEN_SENTINEL|\/Users\/|transcript|prompt/);
-    expect(Object.keys(row).sort()).toEqual(['exitCode','signal','stderrCategory','stdoutBytes','events','parseError','finalResultPresent','wallMs','usage','resultShape','isolation'].sort());
+    expect(Object.keys(row).sort()).toEqual(['exitCode','signal','stderrCategory','stdoutBytes','events','parseError','finalResultPresent','wallMs','usage','resultShape','isolation','systemSubtypeCounts','outputTokenSplit'].sort());
     if(scenario==='verified-truncated') expect(row.parseError).toMatchObject({kind:'unexpected_end',stage:'event',position:expect.any(Number)});
     if(scenario==='verified-empty-result') expect(row.parseError).toMatchObject({kind:'empty',stage:'result',position:0});
     if(scenario==='verified-hook') expect(row.events).toContainEqual({type:'system',subtype:'hook_started',count:1});
+    if(scenario==='verified-hook-prefixed'){
+      expect(row.systemSubtypeCounts.hook_custom).toBe(1);
+      expect(row.isolation).toMatchObject({passed:false,hookEvents:1});
+    }
     if(scenario==='verified-unknown') expect(row.events).toContainEqual({type:'unknown',subtype:null,count:1});
     if(final)expect(row.usage.some((u: any)=>u.counters.input_tokens===12 && u.counters.output_tokens===8)).toBe(true);
   });
@@ -50,6 +55,25 @@ it('preserves event ordering, numeric usage and parse positions without copying 
   expect(JSON.stringify(result)).not.toMatch(/TOKEN_SENTINEL|fixture|secret_file_name/);
   expect(result.parseError).toMatchObject({stage:'result',kind:'syntax'});
   expect(result.usage).toContainEqual({source:'model',counters:{inputTokens:30,outputTokens:4}});
+});
+it('retains protocol-only system subtype identifiers and totals them across event runs',()=>{
+  const result=failureMetadata({exitCode:0,signal:null,stderr:'',stdoutBytes:100,wallMs:1,stream:true,
+    stdout:[{type:'system',subtype:'status'},{type:'assistant'},{type:'system',subtype:'status'},
+      {type:'system',subtype:'future_status_42'},{type:'system',subtype:'hook_custom'},
+      {type:'system',subtype:'/private/fixture.md'},{type:'system',subtype:'status\n'},
+      {type:'system',subtype:'a'.repeat(41)},{type:'system',subtype:'a'.repeat(40)}].map(e=>JSON.stringify(e)).join('\n')});
+  expect(result.systemSubtypeCounts).toEqual({status:2,future_status_42:1,hook_custom:1,unknown:3,['a'.repeat(40)]:1});
+  expect(result.events).toContainEqual({type:'system',subtype:'future_status_42',count:1});
+  expect(result.isolation).toMatchObject({passed:false,hookEvents:1});
+  expect(JSON.stringify(result)).not.toMatch(/fixture\.md|status\\n/);
+});
+it('reports answer length and only explicitly supplied output-token splits',()=>{
+  const observe=(usage:unknown)=>failureMetadata({exitCode:0,signal:null,stderr:'',stdoutBytes:100,wallMs:1,stream:true,
+    stdout:JSON.stringify({type:'result',subtype:'success',result:'```json\n{"answer":"Synthetic","claims":[]}\n```',usage})});
+  const result=observe({output_tokens:20,output_tokens_details:{thinking_tokens:12,text_tokens:8}});
+  expect(result.outputTokenSplit).toEqual({thinking:12,text:8});
+  expect(result.resultShape.answerCharacterLength).toBe(9);
+  expect(observe({output_tokens:20}).outputTokenSplit).toEqual({thinking:-1,text:-1});
 });
 it.each([
   ['{"answer":"Synthetic","claims":[]}',true,false,true,true,true,false,0],

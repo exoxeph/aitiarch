@@ -7,6 +7,7 @@ import { probeCapabilities } from './capabilities.ts';
 import type { Availability } from './capabilities.ts';
 import { claudeArguments, inspectClaudeCanary } from './claude-canary.ts';
 import { failureMetadata, privateFailureLog, type FailureLog, type FailureMetadata } from './failure-metrics.ts';
+import { parseAnswerJson } from './answer-json.ts';
 
 export type ProviderName = 'claude' | 'codex';
 export interface Request {
@@ -84,7 +85,7 @@ export function prepareRequest(request: Request): { instruction: string; data: R
     };
     return { id: turn.id, user: clip(turn.user), assistant: clip(turn.assistant) };
   });
-  return { instruction, omittedTurns: Math.max(0, request.turns.length - 4), clippedMessages,
+  return { instruction:instruction+(request.action==='think'?'\nReturn only one JSON object. No code fences or text before or after the JSON.':''), omittedTurns: Math.max(0, request.turns.length - 4), clippedMessages,
     data: { id: request.id, action: request.action, question: redact(request.question),
       selection: redact(request.selection), note: redact(request.note),
       decisions: request.decisions.map(d => ({ id: d.id, text: redact(d.text) })), turns } };
@@ -113,7 +114,7 @@ function parseResult(provider: ProviderName, id: string, stdout: string, stream 
       if (stream && !inspectClaudeCanary(events, []).passed) throw new Error();
       const envelope = stream ? events.find(e => e.type === 'result') : JSON.parse(stdout);
       if (envelope.is_error || envelope.subtype !== 'success') throw new Error();
-      response = JSON.parse(envelope.result); model = typeof envelope.model === 'string' ? envelope.model : null;
+      response = parseAnswerJson(envelope.result); model = typeof envelope.model === 'string' ? envelope.model : null;
       if (Number.isFinite(envelope.usage?.input_tokens) && Number.isFinite(envelope.usage?.output_tokens))
         usage = { inputTokens: envelope.usage.input_tokens, outputTokens: envelope.usage.output_tokens };
     } else {

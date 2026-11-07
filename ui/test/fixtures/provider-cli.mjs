@@ -68,10 +68,22 @@ if (scenario.startsWith('verified-')) {
   console.log(JSON.stringify(init));
   if(scenario==='verified-truncated'){process.stdout.write('{"type":"assistant","message":');process.exit(0);}
   if (scenario === 'verified-hook') console.log(JSON.stringify({ type: 'system', subtype: 'hook_started' }));
+  if (scenario === 'verified-hook-prefixed') console.log(JSON.stringify({ type: 'system', subtype: 'hook_custom' }));
+  if (scenario === 'verified-benign-subtype') console.log(JSON.stringify({ type: 'system', subtype: 'status' }));
   if (scenario === 'verified-unknown') console.log(JSON.stringify({ type: 'unexpected' }));
   console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: scenario === 'verified-attempt' ? 'tool_use' : 'text', text: 'Synthetic answer' }] } }));
+  let answerResult=JSON.stringify({ answer: `Answer for ${packet.data.id}`, claims: [] });
+  const fenced='```json\n'+answerResult+'\n```';
+  if(scenario==='verified-fence-json')answerResult=fenced;
+  if(scenario==='verified-fence-bare')answerResult=' \r\n```\r\n'+answerResult+'\r\n``` \r\n';
+  if(scenario==='verified-fence-multiple')answerResult=fenced+'\n'+fenced;
+  if(scenario==='verified-fence-prose-before')answerResult='Introduction\n'+fenced;
+  if(scenario==='verified-fence-prose-after')answerResult=fenced+'\nConclusion';
+  if(scenario==='verified-fence-unclosed')answerResult='```json\n'+answerResult;
+  if(scenario==='verified-fence-in-string')answerResult='```json\n'+JSON.stringify({answer:'Nested ``` fence',claims:[]})+'\n```';
+  if(scenario==='verified-fence-wrong-keys')answerResult='```json\n'+JSON.stringify({wrong:'Synthetic'})+'\n```';
   if (scenario !== 'verified-incomplete') console.log(JSON.stringify({ type: 'result', subtype: 'success',
-    result: scenario==='verified-empty-result'?'':JSON.stringify({ answer: `Answer for ${packet.data.id}`, claims: [] }), usage: { input_tokens: 12, output_tokens: 8 } }));
+    result: scenario==='verified-empty-result'?'':answerResult, usage: { input_tokens: 12, output_tokens: 8 } }));
   if(scenario==='verified-nonzero'){process.stderr.write('Failure TOKEN_SENTINEL /private/fixture.md');process.exit(9);}
   process.exit(0);
 }

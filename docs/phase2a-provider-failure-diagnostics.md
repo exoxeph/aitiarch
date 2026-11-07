@@ -2,8 +2,9 @@
 
 The help-recognition fix is committed separately as `f03d7b2`. This diagnostic
 change was committed as `c536db3`. The later result-shape instrumentation and
-recorded diagnostic below are uncommitted. Answer parsing and isolation
-acceptance rules are unchanged.
+recorded diagnostic below were committed as `5ce1ee7`. The subsequent approved
+bounded fence normalization and subtype measurements below are uncommitted.
+The system-event allowlist and isolation requirements remain unchanged.
 
 ## Private failure records
 
@@ -89,7 +90,7 @@ have error subtypes and error details rather than a required success answer.
 Initialization carries `model`, tools/MCP/plugins, skills and slash commands.
 Source: [message and result types](https://code.claude.com/docs/en/agent-sdk/typescript#sdkresultmessage).
 
-## Comparison with unchanged code
+## Comparison at the diagnostic baseline (`c536db3`)
 
 | Finding | Current code and consequence |
 | --- | --- |
@@ -193,7 +194,7 @@ observable additional CLI-associated usage; no field separates all CLI/system
 context from application input or reasoning from visible answer tokens. Exact
 total CLI overhead therefore cannot be isolated from these counters.
 
-### Parser proposal — not implemented
+### Earlier schema proposal — superseded by the approved fence rule below
 
 First investigate the documented `--json-schema` mechanism (also listed in the
 captured 2.1.205 help), requiring an object with only `answer` and `claims`, then
@@ -215,3 +216,61 @@ allowlist addition and event-shape tests. Do not accept all `system` events, and
 do not infer a harmless subtype from its count. Current metadata cannot identify
 it, and no extra live call is authorized. Provider acceptance stays fail-closed;
 Slice B remains paused.
+
+## Approved bounded normalization and subtype capture
+
+The parser now accepts plain JSON or exactly one complete outer triple-backtick
+block, optionally tagged `json`, with only whitespace outside. Opening and
+closing fences occupy their own lines; LF and CRLF are supported. It rejects
+multiple blocks, prose outside, unsupported tags, an unclosed block, and fences
+inside JSON strings (including escaped backticks). The decoded value still goes
+through the existing answer/claims type checks and downstream evidence checks.
+No `--json-schema` flag or system-event allowlist change is introduced.
+
+Think appends one instruction to the unchanged contract:
+
+> Return only one JSON object. No code fences or text before or after the JSON.
+
+System subtype names are retained only when the whole name matches
+`^[a-z][a-z0-9_]{0,39}$`; otherwise they become `unknown`. This rejects trailing
+newlines too. `systemSubtypeCounts` aggregates across separated event runs.
+Recording a valid identifier does not authorize its event: `system/status`, for
+example, is counted but still rejected. The existing conservative hook detection
+includes every hook-prefixed subtype and is unchanged. Fake hook-prefixed events
+fail closed and record their count. These tests are synthetic, not evidence of
+hooks running in a real session.
+
+Raw result-shape fields remain raw-text observations. `parseError` now describes
+JSON decoding after the approved outer-fence normalization, while
+`resultShape.parseErrorKind` continues to describe whole raw-result JSON validity.
+`resultShape.answerCharacterLength` reports the decoded answer's UTF-16 string
+length, or -1 if unavailable; it is an observation, not a schema-acceptance flag.
+
+`outputTokenSplit` reports explicitly supplied numeric thinking and text counters,
+or -1 for each unavailable value. Recognized locations are
+`usage.output_tokens_details.{thinking_tokens,reasoning_tokens,text_tokens}` and
+`usage.{thinking_tokens,reasoning_tokens,text_tokens}`. These are conditional
+observations, not a claim that this CLI version emits those fields. No split is
+inferred from total output tokens, character lengths or thinking/text blocks.
+
+### Next single Think check — approval required
+
+Propose exactly one Think request on the same synthetic cache note and selection
+used in the recorded diagnostic, through the product Assistance/provider path.
+Use the same isolation flags and metadata-only startup preflight, no transcript
+context, an initially empty external temporary fixture and the CLI's separate
+empty working directory. The prompt has only the approved Think suffix above.
+The event/file canary checks remain required and the fixture is deleted after
+inspection. No retries or Ask call are allowed.
+
+Capture only private metadata: the existing fields, original safe subtype names,
+per-subtype counts, explicitly reported thinking/text output tokens, and decoded
+answer length. Retained live metadata currently records no hook-prefixed subtype;
+the old `unknown` values cannot be reconstructed. If the next record contains any
+hook-prefixed system subtype, report that finding first and stop. Do not loosen
+the allowlist after seeing an unfamiliar subtype.
+
+Use approximately 6,000 input and 3,000 output tokens as a planning estimate,
+based on the previous per-model totals of 5,864/2,803. It is not a cap; report
+actual final and per-model usage and elapsed time. A thinking/text split may be
+unavailable. No new live call has run or is authorized by this document.
