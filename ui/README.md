@@ -95,6 +95,9 @@ branches, track changes and outline/backlinks remain later work. Wikilinks never
 ## Invoked AI (Slice A)
 
 Aitiarch calls your own Claude CLI and never handles Claude credentials. Codex is disabled.
+The optional ChatGPT plan provider stores ChatGPT tokens in a protected local
+file outside the repo and notebook root; it is disabled unless `--chatgpt-plan`
+is supplied. See [the fake-server implementation and approval stops](../docs/chatgpt-plan-provider.md).
 The policy on third-party use of Claude plan logins is unsettled; a working
 integration does not establish permission under a subscription agreement.
 See [the approved Task 3 design](../docs/phase2a-task3-design.md) and

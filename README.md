@@ -5,6 +5,10 @@ choices made while coding with AI. This workspace contains feasibility tools
 and a local notebook UI with separately stored ink and explicit Claude assistance.
 See [UI setup and fixture checks](ui/README.md). Proactive requests remain off.
 
+Aitiarch never handles Claude credentials. The optional, disabled-by-default
+ChatGPT plan provider stores ChatGPT tokens locally in protected user config,
+outside the repo and notebook root. See [its documentation and approval stops](docs/chatgpt-plan-provider.md).
+
 - [BRIEF.md](BRIEF.md): original vision and human-owned decision principles.
 - [JOURNEY.md](JOURNEY.md): chronological engineering account and measured lessons.
 - [NOTES.md](NOTES.md): technical findings and unresolved issues; earlier sections
