@@ -1,10 +1,13 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
 import { createProvider, prepareRequest, type Configuration } from '../server/providers/index.ts';
 import { assessCapabilities } from '../server/providers/capabilities.ts';
+import { validateProductResult } from '../server/product-validation.ts';
+import { textHash } from '../server/anchor-cache.ts';
+import { redact } from '../server/providers/index.ts';
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach(r => rmSync(r, { recursive: true, force: true })));
 const script = fileURLToPath(new URL('./fixtures/provider-cli.mjs', import.meta.url));
@@ -38,6 +41,28 @@ it('tightens Think to JSON only while preserving the rest of the existing contra
   const ask=prepareRequest({...request,action:'ask',question:'Explain this.'}).instruction;
   expect(think).toContain('Return only one JSON object. No code fences or text before or after the JSON.');
   expect(think.replace('\nReturn only one JSON object. No code fences or text before or after the JSON.','')).toBe(ask);
+});
+it.each(['think','ask'] as const)('specifies the exact quote contract for %s',action=>{
+  const prompt=prepareRequest({...request,action,question:action==='ask'?'Explain.':''}).instruction;
+  expect(prompt).toContain('{"sourceId":"N1","quote":"<verbatim substring of source N1, at most 240 characters>"}');
+  expect(prompt).toContain('The field is named exactly "quote"');
+  expect(prompt).toContain('character for character from the named source');
+  expect(prompt).toContain('No other fields are allowed in a claim.');
+  expect(prompt).toContain('one JSON object with exactly answer (string) and claims (array)');
+});
+it('accepts the exact quote key and rejects the field-names-only regression shape without renaming',()=>{
+  const shape=JSON.parse(readFileSync(new URL('./fixtures/claim-field-names.json',import.meta.url),'utf8'));
+  const source='A wholly synthetic sentence.';
+  const base={id:'synthetic',provider:'claude' as const,model:null,answer:'Synthetic answer.',usage:null};
+  const check=(claims:unknown[])=>validateProductResult({...base,claims},base.id,{note:source,decisions:[]},redact,textHash);
+  expect(check([{sourceId:'N1',quote:source}]).evidence).toHaveLength(1);
+  expect(shape.claimFields).toEqual([['sourceId','quotation'],['sourceId','quotation']]);
+  for(const fields of shape.claimFields){
+    const claim=Object.fromEntries(fields.map((field:string)=>[field,field==='sourceId'?'N1':source]));
+    try{check([claim]);throw new Error('Must reject alias');}
+    catch(error){expect(error).toMatchObject({record:{rule:'claim_quote_type'}});}
+    expect(Object.hasOwn(claim,'quote')).toBe(false);
+  }
 });
 it('disables a changed CLI version even when its help claims the same flags', async () => {
   expect(await createProvider(config('verified-version-change')).checkAvailability()).toMatchObject({ available: false, code: 'unsupported_cli' });
