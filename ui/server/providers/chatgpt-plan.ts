@@ -9,6 +9,13 @@ import { textHash } from '../anchor-cache.ts';
 
 export const planScopes='openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 const issuer='https://auth.openai.com',resource='https://api.openai.com/v1';
+type SignInCode='state_mismatch'|'oauth_error'|'client_id_missing'|'client_id_mismatch'|'code_missing'|'token_exchange_failed'|'id_token_invalid'|'nonce_mismatch'|'subject_mismatch'|'scope_not_granted'|'credential_persist_failed'|'cancelled';
+export class PlanSignInError extends ProviderError {
+  readonly tokensSaved=false;
+  readonly errorCode:SignInCode;
+  constructor(errorCode:SignInCode){super('not_logged_in',errorCode==='scope_not_granted'?"ChatGPT plan use isn't enabled for this app":'ChatGPT sign-in could not be verified.');this.errorCode=errorCode;}
+}
+const hasDirectGrant=(scopes:unknown)=>Array.isArray(scopes)&&scopes.some(s=>s==='chatgpt.tokens.use.direct');
 export interface PlanConfig { enabled?:boolean; configDirectory?:string; notebookRoot?:string; hourlyCap?:number; timeoutMs?:number; testOrigin?:string }
 const safeName=(name:unknown)=>typeof name==='string'&&/^[a-z][a-z0-9_.]{0,79}$/.test(name)?name:'unknown';
 const errors:Record<string,string>={
@@ -35,6 +42,9 @@ export class ChatGPTPlan implements Provider {
   private paused=false;
   private active=new Set<AbortController>();
   private authEpoch=0;
+  private signInPending=false;
+  private signInRejected=false;
+  private pendingHost='urn:uuid:'+randomUUID();
   constructor(config:PlanConfig={}){
     this.config={...config};this.vault=new PlanVault(config.configDirectory,config.notebookRoot);
     if(config.testOrigin){const u=new URL(config.testOrigin);if(u.protocol!=='http:'||u.hostname!=='127.0.0.1'||u.origin!==config.testOrigin)throw new Error('Fake transport must be an explicit loopback origin.');}
@@ -42,8 +52,8 @@ export class ChatGPTPlan implements Provider {
   }
   private ensureEnabled(){if(!this.config.enabled)throw new ProviderError('unsupported_cli','ChatGPT plan provider is disabled. Enable it explicitly in server configuration.');}
   async checkAvailability():Promise<Availability>{
-    try{this.ensureEnabled();await this.vault.check();const data=await this.vault.read();
-      if(!data.access_token||!data.scopes?.includes('chatgpt.tokens.use.direct'))return {available:false as const,code:'not_logged_in' as const,message:'ChatGPT plan is not connected or permission was not granted.'};
+    try{this.ensureEnabled();await this.vault.check();const data=await this.vault.peek();
+      if(this.signInPending||this.signInRejected||!data.access_token||!hasDirectGrant(data.scopes))return {available:false as const,code:'not_logged_in' as const,message:'ChatGPT plan is not connected or permission was not granted.'};
       if(!this.selectedModel)return {available:false as const,code:'unsupported_cli' as const,message:'Choose a model from this account’s catalog before sending.'};
       if(this.paused)return {available:false as const,code:'provider_error' as const,message:errors.subscription_sharing_usage_limit_exceeded};
       return {available:true as const};
@@ -66,9 +76,10 @@ export class ChatGPTPlan implements Provider {
     this.metadata=m;return m;
   }
   async beginSignIn(){
-    this.ensureEnabled();if(this.listener)throw new ProviderError('provider_error','A ChatGPT sign-in is already pending.');
+    this.ensureEnabled();if(this.signInPending)throw new ProviderError('provider_error','A ChatGPT sign-in is already pending.');
     const epoch=this.authEpoch;await this.vault.check();const meta=await this.discovery();
-    const saved=await this.vault.locked(async()=>{const d=await this.vault.read();d.ext_agent_host_id??='urn:uuid:'+randomUUID();await this.vault.write(d);return d;});
+    const saved=await this.vault.peek();saved.ext_agent_host_id??=this.pendingHost;
+    this.signInPending=true;
     const state=randomBytes(32).toString('base64url'),nonce=randomBytes(32).toString('base64url'),verifier=randomBytes(48).toString('base64url');
     let complete!:()=>void,reject!:(error:Error)=>void,consumed=false;
     const completed=new Promise<void>((resolve,fail)=>{complete=resolve;reject=fail;});void completed.catch(()=>{});
@@ -76,24 +87,39 @@ export class ChatGPTPlan implements Provider {
       const callback=new URL(req.url??'/',redirect);
       if(req.method!=='GET'||callback.pathname!=='/auth/callback'){res.writeHead(404).end();return;}
       if(consumed){res.writeHead(400).end('Sign-in attempt already used.');return;}
-      if(callback.searchParams.get('state')!==state){res.writeHead(400).end('Sign-in state did not match.');return;}
       consumed=true;
+      let token:any;
       try{
+        if(callback.searchParams.get('state')!==state)throw new PlanSignInError('state_mismatch');
+        if(callback.searchParams.has('error'))throw new PlanSignInError('oauth_error');
         const client=callback.searchParams.get('client_id')??saved.client_id;
-        if(callback.searchParams.has('error')||!client||client==='dynamic_agent_client'||(saved.client_id&&client!==saved.client_id)||!callback.searchParams.get('code'))throw new Error();
-        // Retain the issued registration for a new authorization after invalid_grant.
-        await this.vault.locked(async()=>{if(epoch!==this.authEpoch)throw new Error();await this.vault.write({...await this.vault.read(),client_id:client});});
-        const token=await this.token({grant_type:'authorization_code',client_id:client,code:callback.searchParams.get('code')!,code_verifier:verifier,redirect_uri:redirect,resource});
-        const identity=await this.identity(token.id_token,client,nonce);
-        if(saved.subject&&saved.subject!==identity.sub)throw new Error();
-        await this.vault.locked(async()=>{if(epoch!==this.authEpoch)throw new Error();await this.vault.write({...await this.vault.read(),client_id:client,subject:identity.sub,issuer:meta.issuer,...this.tokenRecord(token)});});
-        this.paused=false;res.writeHead(200,{'Content-Type':'text/plain','Cache-Control':'no-store'}).end('ChatGPT connection completed. Return to Aitiarch.');complete();
-      }catch{res.writeHead(400,{'Content-Type':'text/plain','Cache-Control':'no-store'}).end('ChatGPT sign-in could not be verified. No inference was sent.');reject(new ProviderError('not_logged_in','ChatGPT sign-in could not be verified.'));}
-      finally{clearTimeout(timer);server.close();this.listener=undefined;this.cancelSignIn=undefined;}
+        if(typeof client!=='string'||!client||client==='dynamic_agent_client')throw new PlanSignInError('client_id_missing');
+        if(saved.client_id&&client!==saved.client_id)throw new PlanSignInError('client_id_mismatch');
+        if(!callback.searchParams.get('code'))throw new PlanSignInError('code_missing');
+        try{token=await this.token({grant_type:'authorization_code',client_id:client,code:callback.searchParams.get('code')!,code_verifier:verifier,redirect_uri:redirect,resource});}
+        catch{throw new PlanSignInError('token_exchange_failed');}
+        let identity:any;
+        try{identity=await this.identity(token.id_token,client,nonce);}catch(e){throw e instanceof PlanSignInError?e:new PlanSignInError('id_token_invalid');}
+        if(saved.subject&&saved.subject!==identity.sub)throw new PlanSignInError('subject_mismatch');
+        const record=this.tokenRecord(token); // Exact grant from token response only, after identity validation.
+        if(epoch!==this.authEpoch)throw new PlanSignInError('cancelled');
+        try{await this.vault.locked(async()=>{if(epoch!==this.authEpoch)throw new PlanSignInError('cancelled');await this.vault.write({...saved,client_id:client,subject:identity.sub,issuer:meta.issuer,...record});});}
+        catch(e){throw e instanceof PlanSignInError?e:new PlanSignInError('credential_persist_failed');}
+        this.signInRejected=false;this.paused=false;this.signInPending=false;res.writeHead(200,{'Content-Type':'text/plain','Cache-Control':'no-store'}).end('ChatGPT connection completed. Return to Aitiarch.');complete();
+      }catch(e){
+        this.signInRejected=true;this.selectedModel=null;
+        if(token&&typeof token.refresh_token==='string'){
+          try{await this.fetch(meta.revocation_endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({token:token.refresh_token,token_type_hint:'refresh_token',client_id:callback.searchParams.get('client_id')??saved.client_id??''})});}catch{/* One best-effort revocation; no sensitive fallback. */}
+        }
+        let failure=e instanceof PlanSignInError?e:new PlanSignInError('id_token_invalid');
+        try{await this.vault.discardCredentials();}catch{failure=new PlanSignInError('credential_persist_failed');}
+        res.writeHead(400,{'Content-Type':'text/plain','Cache-Control':'no-store'}).end(failure.message);reject(failure);
+      }
+      finally{token=undefined;this.signInPending=false;clearTimeout(timer);server.close();this.listener=undefined;this.cancelSignIn=undefined;}
     });
     await new Promise<void>((resolve,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',()=>resolve());});this.listener=server;
     const redirect='http://127.0.0.1:'+(server.address() as {port:number}).port+'/auth/callback';
-    const stop=()=>{consumed=true;server.closeAllConnections();server.close();this.listener=undefined;reject(new ProviderError('cancelled','ChatGPT sign-in expired or was cancelled.'));};
+    const stop=()=>{consumed=true;this.signInPending=false;this.signInRejected=true;server.closeAllConnections();server.close();this.listener=undefined;reject(new ProviderError('cancelled','ChatGPT sign-in expired or was cancelled.'));};
     const timer=setTimeout(stop,300000);timer.unref();this.cancelSignIn=()=>{clearTimeout(timer);stop();};
     const url=new URL(meta.authorization_endpoint);
     const params:Record<string,string>={client_id:saved.client_id??'dynamic_agent_client',ext_agent_host_id:saved.ext_agent_host_id,response_type:'code',redirect_uri:redirect,scope:planScopes,resource,state,nonce,code_challenge_method:'S256',code_challenge:createHash('sha256').update(verifier).digest('base64url')};
@@ -109,8 +135,11 @@ export class ChatGPTPlan implements Provider {
     return r.json();
   }
   private tokenRecord(token:any){
-    if(!['access_token','refresh_token','id_token'].every(k=>typeof token[k]==='string'&&token[k].length>0)||token.token_type!=='Bearer'||typeof token.scope!=='string'||!Number.isFinite(token.expires_in)||token.expires_in<=0)throw new Error('Invalid token response.');
-    return {access_token:token.access_token,refresh_token:token.refresh_token,id_token:token.id_token,token_type:'Bearer',expires_in:token.expires_in,scopes:token.scope.split(/\s+/),saved_at:new Date().toISOString()};
+    if(typeof token.scope!=='string')throw new PlanSignInError('scope_not_granted');
+    if(!['access_token','refresh_token','id_token'].every(k=>typeof token[k]==='string'&&token[k].length>0)||token.token_type!=='Bearer'||!Number.isFinite(token.expires_in)||token.expires_in<=0)throw new PlanSignInError('token_exchange_failed');
+    const scopes=token.scope.split(/\s+/).filter(Boolean);
+    if(!hasDirectGrant(scopes))throw new PlanSignInError('scope_not_granted');
+    return {access_token:token.access_token,refresh_token:token.refresh_token,id_token:token.id_token,token_type:'Bearer',expires_in:token.expires_in,scopes,saved_at:new Date().toISOString()};
   }
   private async identity(jwt:unknown,client:string,nonce?:string){
     if(typeof jwt!=='string')throw new Error();const parts=jwt.split('.');if(parts.length!==3)throw new Error();
@@ -122,7 +151,8 @@ export class ChatGPTPlan implements Provider {
     if(!verify('RSA-SHA256',Buffer.from(parts[0]+'.'+parts[1]),createPublicKey({key:candidates[0],format:'jwk'}),Buffer.from(parts[2],'base64url')))throw new Error();
     const now=Date.now()/1000;
     if(!Number.isFinite(payload.exp)||!Number.isFinite(payload.iat)||(payload.nbf!==undefined&&!Number.isFinite(payload.nbf))||Array.isArray(payload.aud)&&payload.aud.length>1&&payload.azp!==client)throw new Error();
-    if(payload.iss!==meta.issuer||!(Array.isArray(payload.aud)?payload.aud.includes(client):payload.aud===client)||typeof payload.exp!=='number'||payload.exp<=now||typeof payload.iat!=='number'||payload.iat>now+5||(payload.nbf!==undefined&&payload.nbf>now+5)||typeof payload.sub!=='string'||!payload.sub||(nonce!==undefined&&payload.nonce!==nonce))throw new Error();
+    if(payload.iss!==meta.issuer||!(Array.isArray(payload.aud)?payload.aud.includes(client):payload.aud===client)||typeof payload.exp!=='number'||payload.exp<=now||typeof payload.iat!=='number'||payload.iat>now+5||(payload.nbf!==undefined&&payload.nbf>now+5)||typeof payload.sub!=='string'||!payload.sub)throw new Error();
+    if(nonce!==undefined&&payload.nonce!==nonce)throw new PlanSignInError('nonce_mismatch');
     return payload;
   }
   private withoutTokens(d:any){const {access_token,refresh_token,id_token,scopes,saved_at,expires_in,...registration}=d;return registration;}
@@ -135,6 +165,7 @@ export class ChatGPTPlan implements Provider {
   }
   async signOut(){
     this.ensureEnabled();this.authEpoch++;this.cancelSignIn?.();this.paused=true;this.selectedModel=null;for(const controller of this.active)controller.abort();
+    if(!Object.keys(await this.vault.peek()).length)return {revoked:true,message:'Signed out.'};
     return this.vault.locked(async()=>{const d=await this.vault.read();let revoked=!d.refresh_token;
       try{if(d.refresh_token){const meta=await this.discovery(),r=await this.fetch(meta.revocation_endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({token:d.refresh_token,token_type_hint:'refresh_token',client_id:d.client_id})});revoked=r.status===200;}}
       catch{/* Local clearing still proceeds; never report native text or URL. */}
@@ -142,7 +173,7 @@ export class ChatGPTPlan implements Provider {
       return {revoked,message:revoked?'Signed out.':'Signed out locally; remote revocation was not confirmed. Disconnect this app in ChatGPT Settings.'};
     });
   }
-  private async accessToken(){const d=await this.vault.read();if(!d.access_token||!d.scopes?.includes('chatgpt.tokens.use.direct'))throw new ProviderError('not_logged_in','ChatGPT plan permission is not enabled.');
+  private async accessToken(){const d=await this.vault.peek();if(this.signInPending||this.signInRejected||!d.access_token||!hasDirectGrant(d.scopes))throw new ProviderError('not_logged_in','ChatGPT plan permission is not enabled.');
     if(Date.parse(d.saved_at)+d.expires_in*1000<Date.now()+60000)await this.refresh();return (await this.vault.read()).access_token as string;
   }
   async listModels(){this.ensureEnabled();const token=await this.accessToken();const r=await this.fetch(this.config.testOrigin?this.authOrigin+'/models':resource+'/models',{headers:{Authorization:'Bearer '+token}});
@@ -153,8 +184,8 @@ export class ChatGPTPlan implements Provider {
   setModel(model:string){if(!this.models.includes(model))throw new ProviderError('unsupported_cli','Select a model from the current account catalog.');this.selectedModel=model;}
   async status(){
     if(!this.config.enabled)return {enabled:false,connected:false,model:null,hourlyCap:2,welcome:false};
-    await this.vault.check();const d=await this.vault.read(),settings=await this.vault.read('cap.json');
-    return {enabled:true,connected:!!d.access_token,model:this.selectedModel,hourlyCap:settings.limit??this.config.hourlyCap??2,welcome:!!d.access_token&&!d.welcomeSeen};
+    await this.vault.check();const d=await this.vault.peek(),settings=await this.vault.peek('cap.json'),connected=!this.signInPending&&!this.signInRejected&&!!d.access_token&&hasDirectGrant(d.scopes);
+    return {enabled:true,connected,model:this.selectedModel,hourlyCap:settings.limit??this.config.hourlyCap??2,welcome:connected&&!d.welcomeSeen};
   }
   async acknowledge(){await this.vault.locked(async()=>{const d=await this.vault.read();await this.vault.write({...d,welcomeSeen:true});});}
   async setHourlyCap(cap:number){if(!Number.isInteger(cap)||cap<1||cap>100)throw new ProviderError('context_limit','Hourly cap must be between 1 and 100.');await this.vault.locked(async()=>{const d=await this.vault.read('cap.json');await this.vault.write({...d,limit:cap},'cap.json');});}

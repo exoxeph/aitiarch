@@ -3,16 +3,27 @@ import { generateKeyPairSync, randomBytes, sign, createHash } from 'node:crypto'
 import { mkdtemp, rm, readFile, readdir, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { createApp } from '../server/http.ts';
 import { Store } from '../server/store.ts';
 import { NoteWatcher } from '../server/watch.ts';
 import { ChatGPTPlan } from '../server/providers/chatgpt-plan.ts';
 
+const faults=vi.hoisted(()=>({partialWrite:false}));
+vi.mock('node:fs/promises',async(importOriginal)=>{
+  const actual=await importOriginal<typeof import('node:fs/promises')>();
+  return {...actual,writeFile:async(...args:Parameters<typeof actual.writeFile>)=>{
+    if(faults.partialWrite&&String(args[0]).includes('.write-')){
+      await actual.writeFile(args[0],'{',args[2]);throw Object.assign(new Error('Simulated disk failure'),{code:'ENOSPC'});
+    }
+    return actual.writeFile(...args);
+  }};
+});
+
 // All credentials and signing keys are generated in RAM by this loopback fake.
 // No account, real token, transcript, or recorded model output is a fixture.
 const cleanup:(()=>Promise<void>)[]=[];
-afterEach(async()=>{for(const run of cleanup.splice(0).reverse())await run();});
+afterEach(async()=>{faults.partialWrite=false;for(const run of cleanup.splice(0).reverse())await run();});
 const request={id:'synthetic',action:'think' as const,question:'',selection:'A synthetic sentence.',note:'A synthetic sentence.',decisions:[],turns:[]};
 async function fixture(options:{enabled?:boolean;hourlyCap?:number;timeoutMs?:number}={}){
   const root=await mkdtemp(path.join(os.tmpdir(),'aitiarch-chatgpt-test-'));
@@ -24,10 +35,11 @@ async function fixture(options:{enabled?:boolean;hourlyCap?:number;timeoutMs?:nu
   const clientId='oaiapp_'+secret(),code=secret();
   const jwt=()=>{
     const header=Buffer.from(JSON.stringify({alg:'RS256',kid:'fake-key'})).toString('base64url');
-    const body=Buffer.from(JSON.stringify({iss:origin,aud:clientId,sub:'synthetic-subject',nonce,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600,...(mode==='bad-nonce'?{nonce:'wrong'}:mode==='bad-audience'?{aud:'other'}:mode==='expired-id'?{exp:1}:mode==='bad-issuer'?{iss:'http://invalid.example'}:{})})).toString('base64url');
-    return header+'.'+body+'.'+sign('RSA-SHA256',Buffer.from(header+'.'+body),privateKey).toString('base64url');
+    const body=Buffer.from(JSON.stringify({iss:origin,aud:clientId,sub:mode==='bad-subject'?'other-subject':'synthetic-subject',nonce,iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600,...(mode==='bad-nonce'?{nonce:'wrong'}:mode==='bad-audience'?{aud:'other'}:mode==='expired-id'?{exp:1}:mode==='bad-issuer'?{iss:'http://invalid.example'}:{})})).toString('base64url');
+    const signature=sign('RSA-SHA256',Buffer.from(header+'.'+body),privateKey);if(mode==='bad-signature')signature[0]^=1;
+    return header+'.'+body+'.'+signature.toString('base64url');
   };
-  const issue=()=>{refresh=secret();const a=secret(),id=jwt();tokens.push(refresh,a,id);return {access_token:a,refresh_token:refresh,id_token:id,token_type:'Bearer',expires_in:3600,scope:'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct'};};
+  const issue=()=>{refresh=secret();const a=secret(),id=jwt();tokens.push(refresh,a,id);return {access_token:a,refresh_token:refresh,id_token:id,token_type:'Bearer',expires_in:3600,scope:mode==='absent-scope'?undefined:mode==='missing-direct-scope'?'openid profile email offline_access resource.invoke':mode==='substring-scope'?'chatgpt.tokens.use.directx':mode==='case-scope'?'CHATGPT.TOKENS.USE.DIRECT':mode==='extra-scope'?'openid\tchatgpt.tokens.use.direct\nextra.scope':'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct'};};
   const server=createServer(async(req,res)=>{
     const u=new URL(req.url!,origin);let raw='';for await(const c of req)raw+=c;
     const body=req.headers['content-type']?.startsWith('application/json')?JSON.parse(raw):Object.fromEntries(new URLSearchParams(raw));
@@ -38,6 +50,10 @@ async function fixture(options:{enabled?:boolean;hourlyCap?:number;timeoutMs?:nu
     if(u.pathname==='/authorize'){
       nonce=u.searchParams.get('nonce')!;challenge=u.searchParams.get('code_challenge')!;
       const callback=new URL(u.searchParams.get('redirect_uri')!);callback.searchParams.set('code',code);callback.searchParams.set('state',mode==='bad-state'?'wrong':u.searchParams.get('state')!);callback.searchParams.set('client_id',clientId);
+      callback.searchParams.set('scope','chatgpt.tokens.use.direct'); // Must never substitute for the token response grant.
+      if(mode==='missing-client')callback.searchParams.delete('client_id');
+      if(mode==='different-client')callback.searchParams.set('client_id','other-client');
+      if(mode==='oauth-error')callback.searchParams.set('error','access_denied');
       res.writeHead(302,{Location:callback.href});return res.end();
     }
     if(u.pathname==='/token'){
@@ -82,6 +98,65 @@ async function fixture(options:{enabled?:boolean;hourlyCap?:number;timeoutMs?:nu
 it('disabled by default and startup/availability make no network requests',async()=>{
   const f=await fixture({enabled:false});await expect(f.provider.checkAvailability()).resolves.toMatchObject({available:false});expect(f.requests).toEqual([]);
   await expect(f.provider.beginSignIn()).rejects.toMatchObject({code:'unsupported_cli'});expect(f.requests).toEqual([]);
+});
+it('sign-in rejects a missing direct-use scope before saving any credential tokens',async()=>{
+  const f=await fixture();f.setMode('missing-direct-scope');
+  const attempt=await f.provider.beginSignIn();
+  const auth=await fetch(attempt.url,{redirect:'manual'});
+  await fetch(auth.headers.get('location')!);
+  let errorCode='none';
+  try{await attempt.completed;}catch(error){errorCode=(error as {errorCode:string}).errorCode;}
+  // Failure output contains booleans only, never even a fake credential value.
+  const tokensSaved=(await readdir(f.root)).includes('credentials.json');
+  expect({errorCode,tokensSaved}).toEqual({errorCode:'scope_not_granted',tokensSaved:false});
+  expect(await f.provider.status()).toMatchObject({connected:false});
+  expect(f.requests.filter(r=>r.route==='/revoke')).toHaveLength(1);
+});
+
+for(const [mode,errorCode] of [
+  ['substring-scope','scope_not_granted'],['case-scope','scope_not_granted'],['absent-scope','scope_not_granted'],
+  ['bad-signature','id_token_invalid'],['bad-nonce','nonce_mismatch'],['bad-audience','id_token_invalid'],
+  ['expired-id','id_token_invalid'],['bad-issuer','id_token_invalid'],['missing-client','client_id_missing'],
+  ['oauth-error','oauth_error'],['bad-state','state_mismatch'],
+] as const)it(`saves nothing and stays disconnected on ${mode}`,async()=>{
+  const f=await fixture();f.setMode(mode);const attempt=await f.provider.beginSignIn();
+  expect(await readdir(f.root)).toEqual([]);
+  const auth=await fetch(attempt.url,{redirect:'manual'});await fetch(auth.headers.get('location')!);
+  await expect(attempt.completed).rejects.toMatchObject({errorCode,tokensSaved:false});
+  if(errorCode==='scope_not_granted'){
+    await expect(attempt.completed).rejects.toMatchObject({message:"ChatGPT plan use isn't enabled for this app"});
+    expect(f.requests.filter(r=>r.route==='/revoke')).toHaveLength(1);
+    expect(f.requests.findIndex(r=>r.route==='/jwks')<f.requests.findIndex(r=>r.route==='/revoke')).toBe(true);
+  }
+  if(['state_mismatch','oauth_error','client_id_missing'].includes(errorCode))expect(f.requests.some(r=>r.route==='/token')).toBe(false);
+  expect((await readdir(f.root)).includes('credentials.json')).toBe(false);
+  expect(await f.provider.status()).toMatchObject({connected:false});
+  expect(await f.provider.checkAvailability()).toMatchObject({available:false});
+  expect(await readdir(f.root)).toEqual([]);
+});
+it('accepts extra scopes and whitespace only with the exact required grant',async()=>{
+  const f=await fixture();f.setMode('extra-scope');await f.login();expect(await f.provider.status()).toMatchObject({connected:true});
+});
+for(const [mode,errorCode]of [['bad-subject','subject_mismatch'],['different-client','client_id_mismatch']] as const)it(`reauthorization rejects ${mode} without retaining credentials`,async()=>{
+  const f=await fixture();await f.login();f.setMode(mode);await expect(f.login()).rejects.toMatchObject({errorCode,tokensSaved:false});
+  expect((await readdir(f.root)).includes('credentials.json')).toBe(false);expect(await f.provider.status()).toMatchObject({connected:false});
+});
+it('partial persistence failure removes the temporary file and never connects',async()=>{
+  const f=await fixture();faults.partialWrite=true;
+  await expect(f.login()).rejects.toMatchObject({errorCode:'credential_persist_failed',tokensSaved:false});
+  expect(await readdir(f.root)).toEqual([]);expect(await f.provider.status()).toMatchObject({connected:false});
+});
+it('preflight uses a bound loopback callback, fresh OAuth secrets, and hints only on registration',async()=>{
+  const f=await fixture();const first=await f.provider.beginSignIn(),a=new URL(first.url),callback=new URL(a.searchParams.get('redirect_uri')!);
+  expect({host:callback.hostname,path:callback.pathname,port:Number(callback.port)>0,hint:a.searchParams.get('agent_name_hint')}).toEqual({host:'127.0.0.1',path:'/auth/callback',port:true,hint:'Aitiarch'});
+  expect(await readdir(f.root)).toEqual([]);
+  const auth=await fetch(first.url,{redirect:'manual'});await fetch(auth.headers.get('location')!);await first.completed;
+  const exchange=f.requests.find(r=>r.route==='/token')!;expect(exchange.body.redirect_uri===callback.href).toBe(true);
+  const second=await f.provider.beginSignIn(),b=new URL(second.url);
+  expect(b.searchParams.has('agent_name_hint')).toBe(false);
+  for(const key of ['state','nonce','code_challenge'])expect(a.searchParams.get(key)!==b.searchParams.get(key)).toBe(true);
+  expect(a.searchParams.get('ext_agent_host_id')===b.searchParams.get('ext_agent_host_id')).toBe(true);
+  await f.provider.close();await expect(second.completed).rejects.toMatchObject({code:'cancelled'});
 });
 it('does full PKCE dynamic registration, stable host identity and strict inference',async()=>{
   const f=await fixture();await f.login();
@@ -131,7 +206,7 @@ it('enforces the hourly cap without an automatic request',async()=>{
 
 for(const mode of ['bad-nonce','bad-audience','bad-issuer','expired-id'])it(`rejects ${mode} before saving credentials`,async()=>{
   const f=await fixture();f.setMode(mode);await expect(f.login()).rejects.toMatchObject({code:'not_logged_in'});
-  const d=JSON.parse(await readFile(path.join(f.root,'credentials.json'),'utf8'));expect(d.access_token).toBeUndefined();
+  expect((await readdir(f.root)).includes('credentials.json')).toBe(false);
 });
 it('rejects callback state mismatch without exchanging the code',async()=>{
   const f=await fixture();f.setMode('bad-state');const attempt=await f.provider.beginSignIn();
@@ -195,7 +270,7 @@ it('cannot resurrect tokens when sign-out interrupts an in-flight sign-in',async
   const redirect=await fetch(attempt.url,{redirect:'manual'});const callback=fetch(redirect.headers.get('location')!).catch(()=>null);
   for(let i=0;i<100&&!f.requests.some(r=>r.route==='/token');i++)await new Promise(r=>setTimeout(r,5));
   await f.provider.signOut();await expect(attempt.completed).rejects.toMatchObject({code:'cancelled'});await callback;await new Promise(r=>setTimeout(r,200));
-  expect(JSON.parse(await readFile(path.join(f.root,'credentials.json'),'utf8')).access_token).toBeUndefined();
+  expect((await readdir(f.root)).includes('credentials.json')).toBe(false);
 });
 
 it('can enforce exactly one HTTP attempt for a separately approved live check',async()=>{

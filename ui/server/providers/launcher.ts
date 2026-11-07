@@ -59,9 +59,10 @@ export async function killTree(pid: number): Promise<void> {
 
 // Fixed OS permission operation, not a provider invocation. No prompt or token
 // enters argv/environment; the executable and script cannot be supplied by a caller.
-export async function protectPlanDirectory(directory:string){
+export async function protectPlanDirectory(directory:string,verifyOnly=false){
   const {promisify}=await import('node:util');const execute=promisify(execFile);
   const script=`$ErrorActionPreference='Stop'; $p=$env:AITIARCH_PRIVATE_DIRECTORY; $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; $acl=Get-Acl -LiteralPath $p; if($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value){throw 'owner'}; if(-not $acl.AreAccessRulesProtected){$acl.SetAccessRuleProtection($true,$false); foreach($old in @($acl.GetAccessRules($true,$false,[System.Security.Principal.SecurityIdentifier]))){$acl.RemoveAccessRuleSpecific($old)}; $r=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'); $acl.AddAccessRule($r); Set-Acl -LiteralPath $p -AclObject $acl}; foreach($item in @((Get-Item -LiteralPath $p)) + @(Get-ChildItem -LiteralPath $p -Force)){ if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'unsafe'}; $a=Get-Acl -LiteralPath $item.FullName; if($a.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value){throw 'owner'}; foreach($x in $a.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])){if($x.IdentityReference.Value -ne $sid.Value){throw 'permissions'}} }; 'verified'`;
-  const out=await execute(path.join(process.env.SystemRoot??'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe'),['-NoProfile','-NonInteractive','-Command',script],{windowsHide:true,timeout:10000,maxBuffer:4096,env:{...process.env,AITIARCH_PRIVATE_DIRECTORY:directory}});
+  const checkedScript=verifyOnly?script.replace('if(-not $acl.AreAccessRulesProtected){',"if(-not $acl.AreAccessRulesProtected){throw 'permissions'}; if($false){"):script;
+  const out=await execute(path.join(process.env.SystemRoot??'C:\\Windows','System32','WindowsPowerShell','v1.0','powershell.exe'),['-NoProfile','-NonInteractive','-Command',checkedScript],{windowsHide:true,timeout:10000,maxBuffer:4096,env:{...process.env,AITIARCH_PRIVATE_DIRECTORY:directory}});
   if(out.stdout.trim()!=='verified')throw new Error('Private storage permissions could not be verified.');
 }

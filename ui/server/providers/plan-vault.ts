@@ -19,6 +19,7 @@ export class PlanVault {
   readonly directory:string;
   private notebook?:string;
   private ready?:Promise<void>;
+  private readVerified=false;
   constructor(directory=planDirectory(),notebook?:string){this.directory=path.resolve(directory);this.notebook=notebook&&path.resolve(notebook);}
   async check(){
     const reject=(target:string)=>{if(inside(repository,target)||target.split(/[\\/]/).some(p=>p.toLowerCase()==='.aitiarch')||(this.notebook&&inside(this.notebook,target)))throw new Error('Unsafe private storage location.');};
@@ -45,6 +46,22 @@ export class PlanVault {
     return file;
   }
   async read(name='credentials.json'):Promise<any>{try{return JSON.parse(await readFile(await this.file(name),'utf8'));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return {};throw e;}}
+  // Authentication preflight and status must not create a directory, lock, or file.
+  async peek(name='credentials.json'):Promise<any>{
+    if(!['credentials.json','cap.json'].includes(name))throw new Error('Invalid private file.');
+    await this.check();const file=path.join(this.directory,name);
+    try{
+      const s=await lstat(file);if(s.isSymbolicLink()||!s.isFile()||s.nlink!==1)throw new Error('Unsafe private file.');
+      if(!this.readVerified&&!this.ready){
+        if(process.platform==='win32')await protectPlanDirectory(this.directory,true);
+        else if(((await lstat(this.directory)).mode&0o077)!==0)throw new Error('Private permissions are too broad.');
+        this.readVerified=true;
+      }
+      if(process.platform!=='win32'&&(s.mode&0o077)!==0)throw new Error('Private permissions are too broad.');
+      return JSON.parse(await readFile(file,'utf8'));
+    }catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return {};throw e;}
+  }
+  async discardCredentials(){await this.check();await rm(path.join(this.directory,'credentials.json'),{force:true});}
   async write(value:unknown,name='credentials.json'){
     const target=await this.file(name),temporary=path.join(this.directory,'.write-'+randomBytes(8).toString('hex'));
     try{await writeFile(temporary,JSON.stringify(value)+'\n',{flag:'wx',mode:0o600});await rename(temporary,target);}
