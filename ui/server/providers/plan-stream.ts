@@ -11,7 +11,7 @@ export type StreamCondition='content_type'|'body_missing'|'sse_line'|'json_synta
   |'event_type'|'event_name_mismatch'|'unexpected_field'|'field_type'|'sequence'|'server_failed'|'delta_shape'
   |'delta_item'|'text_limit'|'text_mismatch'|'item_type'|'item_shape'|'part_type'|'final_status'|'final_empty'
   |'final_snapshot'|'model'|'final_constraints'|'usage'|'stream_limit'|'utf8'|'stream_read'|'truncated'|'missing_completed';
-export interface StreamRejection {condition:StreamCondition;event?:string;field?:string;fieldType?:string;itemType?:string}
+export interface StreamRejection {condition:StreamCondition;event?:string;field?:string;fieldType?:string;itemType?:string;observedContentType?:string}
 export class StreamError extends ProviderError {
   readonly streamRejection:StreamRejection;
   constructor(streamRejection:StreamRejection){
@@ -31,7 +31,15 @@ export async function readPlanStream(response:Response,counts:Record<string,numb
     const extra=Object.keys(value).find(k=>!allowed.includes(k));
     if(extra!==undefined)fail('unexpected_field',{field:identifier(extra),fieldType:valueType(value[extra])});
   };
-  if(!response.headers.get('content-type')?.startsWith('text/event-stream'))fail('content_type');
+  const contentType=response.headers.get('content-type');
+  const [mediaType,...parameters]=(contentType??'').split(';').map(part=>part.trim().toLowerCase());
+  if(mediaType!=='text/event-stream'||parameters.length>1
+    ||parameters.length===1&&!/^charset *= *utf-8$/.test(parameters[0])){
+    // Only the bounded, explicitly approved header alphabet may enter metrics.
+    // Never inspect the body to infer or override its declared media type.
+    const observedContentType=contentType!==null&&/^[A-Za-z0-9/.+_;= -]{1,80}$/.test(contentType)?contentType:'unknown';
+    fail('content_type',{observedContentType});
+  }
   if(!response.body)fail('body_missing');
   const reader=response.body!.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});
   let buffer='',text='',bytes=0,finished=false,sequence=-1,item:string|undefined,model='';

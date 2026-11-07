@@ -29,9 +29,9 @@ for(const kind of ['no-completed','truncated','empty','mismatch','unknown-event'
 });
 
 // Real loopback HTTP responses; no account, credentials or captured output.
-async function localStream(data:any[],run:(response:Response)=>Promise<void>){
-  const raw=await response(data).text();
-  const server=createServer((_req,res)=>res.writeHead(200,{'Content-Type':'text/event-stream'}).end(raw));
+async function localStream(data:any[],run:(response:Response)=>Promise<void>,contentType='text/event-stream',body?:string){
+  const raw=body??await response(data).text();
+  const server=createServer((_req,res)=>res.writeHead(200,{'Content-Type':contentType}).end(raw));
   await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
   try{await run(await fetch('http://127.0.0.1:'+(server.address() as any).port));}
   finally{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}
@@ -49,6 +49,35 @@ it('accepts only reviewed metadata shapes and rebuilds the answer exclusively fr
     const counts={},fields:unknown[]=[];const result=await readPlanStream(r,counts,fields);
     expect(result.text).toBe(text);expect(counts).toMatchObject({'response.metadata':1,reasoning_items:1});
     expect(JSON.stringify({result,counts,fields})).not.toMatch(/PRIVATE_|private-id/);
+  });
+});
+for(const header of ['text/event-stream','TEXT/EVENT-STREAM',' text/event-stream ',
+  'text/event-stream; charset=utf-8','Text/Event-Stream ; Charset = UTF-8'])it(`accepts the precise SSE media type: ${header}`,async()=>{
+  await localStream(events(),async r=>{await expect(readPlanStream(r,{},[])).resolves.toMatchObject({text});},header);
+});
+for(const [header,observed] of [
+  ['application/json','application/json'],['text/html','text/html'],
+  ['text/event-streamish','text/event-streamish'],
+  ['text/event-stream; charset=latin-1','text/event-stream; charset=latin-1'],
+  ['text/event-stream; boundary=synthetic','text/event-stream; boundary=synthetic'],
+  ['text/event-stream; charset=utf-8; charset=utf-8','text/event-stream; charset=utf-8; charset=utf-8'],
+  ['text/event-stream;','text/event-stream;'],
+  ['application/json; note="synthetic"','unknown'],
+  ['x'.repeat(80),'x'.repeat(80)],['x'.repeat(81),'unknown'],
+] as const)it(`rejects unsafe or unexpected SSE header shape ${header.length}:${header.slice(0,35)}`,async()=>{
+  await localStream([],async r=>{
+    let error:any;try{await readPlanStream(r,{},[]);}catch(e){error=e;}
+    expect(error).toMatchObject({code:'invalid_response',streamRejection:{condition:'content_type',observedContentType:observed}});
+    expect(JSON.stringify(error)).not.toContain('PRIVATE_BODY_SENTINEL');
+  },header,'{"error":"PRIVATE_BODY_SENTINEL"}');
+});
+for(const partType of ['refusal','unreviewed_part'])for(const where of ['part','snapshot'])it(`rejects ${partType} in ${where} without rendering its text`,async()=>{
+  const e:any[]=events();const part={type:partType,text:'PRIVATE_BODY_SENTINEL',refusal:'PRIVATE_BODY_SENTINEL'};
+  if(where==='part')e[3].part=part;else e.at(-1).response.output[0].content=[part];
+  await localStream(e,async r=>{
+    let error:any;try{await readPlanStream(r,{},[]);}catch(caught){error=caught;}
+    expect(error).toMatchObject({code:'invalid_response',streamRejection:{condition:'part_type',itemType:partType}});
+    expect(JSON.stringify(error)).not.toContain('PRIVATE_BODY_SENTINEL');
   });
 });
 for(const [name,mutate,want] of [

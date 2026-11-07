@@ -70,6 +70,8 @@ async function fixture(options:{enabled?:boolean;hourlyCap?:number;timeoutMs?:nu
     if(u.pathname==='/revoke'){if(mode==='revoke-failure')return json({},503);expect(body.token).toBe(refresh);expect(body.token_type_hint).toBe('refresh_token');return res.writeHead(200).end();}
     if(u.pathname==='/models')return json({models:[{slug:'synthetic-model',display_name:'Synthetic',visibility:'list'}]});
     if(u.pathname==='/responses'){
+      if(mode==='json-with-200')return json({error:{message:tokens[0]}},200);
+      if(mode==='unsafe-content-type')return res.writeHead(200,{'Content-Type':'application/json; note="synthetic"'}).end(JSON.stringify({error:{message:tokens[0]}}));
       if(mode==='hang'){req.on('close',()=>res.destroy());return;}
       if(mode.startsWith('error:')){const [_,status,error]=mode.split(':');if(status==='503')res.setHeader('Retry-After',mode.split(':')[3]??'0');return json({error:{code:error,message:tokens[0]}},Number(status));}
       res.writeHead(200,{'Content-Type':'text/event-stream'});
@@ -222,6 +224,14 @@ it('persists the first stream rejection as names and types only',async()=>{
   const log=await readFile(path.join(f.root,'failures.jsonl'),'utf8');
   expect(JSON.parse(log).streamRejection).toEqual({condition:'unexpected_field',event:'response.output_text.delta',field:'secret',fieldType:'string'});
   for(const value of [...f.tokens,request.note,'bad'])expect(log).not.toContain(value);
+});
+for(const [mode,value] of [['json-with-200','application/json'],['unsafe-content-type','unknown']])it(`persists safe HTTP header diagnostics without error-body text: ${mode}`,async()=>{
+  const f=await fixture();await f.login();f.setMode(mode);
+  await expect(f.provider.invoke(request,{retry503:false})).rejects.toMatchObject({code:'invalid_response'});
+  const log=await readFile(path.join(f.root,'failures.jsonl'),'utf8');
+  expect(JSON.parse(log).streamRejection).toEqual({condition:'content_type',observedContentType:value});
+  for(const token of f.tokens)expect(log).not.toContain(token);
+  expect(f.requests.filter(r=>r.route==='/responses')).toHaveLength(1);
 });
 it('refuses credentials in the repository or a notebook root before network',async()=>{
   const repo=new ChatGPTPlan({enabled:true,configDirectory:path.resolve('test','forbidden-chatgpt')});
