@@ -44,17 +44,6 @@ export function captureAnchor(text: string, from: number, to: number): Anchor {
   return anchor;
 }
 
-function sharedStart(a: string, b: string): number {
-  let n = 0;
-  while (n < a.length && n < b.length && a[n] === b[n]) n++;
-  return n;
-}
-function sharedEnd(a: string, b: string): number {
-  let n = 0;
-  while (n < a.length && n < b.length && a[a.length - 1 - n] === b[b.length - 1 - n]) n++;
-  return n;
-}
-
 /** Bounded Levenshtein comparison; long selections can still resolve exactly. */
 function similarity(a: string, b: string): number {
   if (a === b) return 1;
@@ -84,43 +73,15 @@ export function suggestAnchorCandidates(text: string, anchor: Anchor): Array<{ f
 export function resolveAnchor(text: string, anchor: Anchor): Attachment {
   validateAnchor(anchor);
   const exact = occurrences(text, anchor.quote);
-  // A selected quote already repeated in the original has no identity token.
-  // Moves and deletions can transfer its old context to a surviving copy.
-  if (anchor.quoteCount > 1) return { status: "orphaned", reason: "ambiguous" };
-  const ranges = new Map<string, { from: number; to: number }>();
-  const add = (from: number, to: number) => { if (to > from) ranges.set(`${from}:${to}`, { from, to }); };
-  exact.forEach(from => add(from, from + anchor.quote.length));
+  if (anchor.quoteCount > 1) {
+    // The context-margin experiment lives on its own branch until reviewed.
+    return { status: "orphaned", reason: "ambiguous" };
+  }
   // An originally unique quote that still occurs once has a stronger identity
   // claim than a merely similar paragraph with inherited surrounding text.
   if (exact.length === 1) return { status: "attached", from: exact[0], to: exact[0] + anchor.quote.length };
-  if (anchor.quote.length >= 12 && anchor.quote.length <= 2000) {
-    // Paragraphs cover ordinary edits. Matching context also recovers sub-paragraph selections.
-    for (const m of text.matchAll(/[^\n]+(?:\n(?!\n)[^\n]+)*/g)) {
-      if (ranges.size > 2000) break;
-      if (Math.abs(m[0].length - anchor.quote.length) <= anchor.quote.length * 0.25) add(m.index, m.index + m[0].length);
-    }
-    const starts = anchor.prefix ? occurrences(text, anchor.prefix).map(n => n + anchor.prefix.length) : [0];
-    const ends = anchor.suffix ? occurrences(text, anchor.suffix) : [text.length];
-    for (const from of starts) for (const to of ends) {
-      if (to - from >= anchor.quote.length * 0.8 && to - from <= anchor.quote.length * 1.25) add(from, to);
-    }
-  }
-  const candidates = [...ranges.values()].map(r => {
-    const prefix = sharedEnd(anchor.prefix, text.slice(Math.max(0, r.from - CONTEXT), r.from));
-    const suffix = sharedStart(anchor.suffix, text.slice(r.to, r.to + CONTEXT));
-    const full = Number(anchor.prefix ? prefix === anchor.prefix.length : r.from === 0) +
-      Number(anchor.suffix ? suffix === anchor.suffix.length : r.to === text.length);
-    const evidence = (anchor.prefix.slice(anchor.prefix.length - prefix) + anchor.suffix.slice(0, suffix)).replace(/\s/g, "").length;
-    return { ...r, full, evidence, similarity: similarity(anchor.quote, text.slice(r.from, r.to)), distance: Math.abs(r.from - anchor.position.from) };
-  }).filter(c => c.similarity === 1 || (c.similarity >= 0.7 && c.full === 2));
-  if (!candidates.length) return { status: "orphaned", reason: "missing" };
-  candidates.sort((a, b) => b.full - a.full || b.evidence - a.evidence || b.similarity - a.similarity || a.distance - b.distance);
-  const best = candidates[0];
-  if (exact.length > 1 && best.full < 2) return { status: "orphaned", reason: "ambiguous" };
-  const ties = candidates.filter(c => c.full === best.full && c.evidence === best.evidence && c.similarity === best.similarity);
-  // A position hint cannot invent identity when identical copies have appeared/disappeared.
-  if (ties.length > 1) {
-    return { status: "orphaned", reason: "ambiguous" };
-  }
-  return { status: "attached", from: best.from, to: best.to };
+  // Text-only search cannot prove whether a similar survivor was edited or the
+  // selected paragraph was deleted, nor which newly duplicated copy is original.
+  // Keep those locations as suggestions; mapping uses the known previous text.
+  return { status: "orphaned", reason: exact.length ? "ambiguous" : "missing" };
 }

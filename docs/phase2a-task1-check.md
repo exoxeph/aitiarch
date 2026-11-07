@@ -1,5 +1,26 @@
 # Phase 2a Task 1 check
 
+## Correction: resolver safety claim
+
+The original zero-wrong figures below describe only the 30-case set and two
+specified fixed seeds. They do **not** establish zero wrong attachments for
+the full resolver. A later 20,000-edit sweep found eight pre-existing wrong
+attachments: three after duplication and five after deletion. All eight
+reproduce on commit `a8a0131`. The earlier general safety wording was too
+broad. See `anchoring-eight-regressions.md` for every complete before/after
+fixture, captured context and candidate score; the fixtures are permanent
+regressions in `ui/test/fixtures/anchoring-wrong-attachments.json`.
+
+The fix makes search-only recovery strict: only an originally unique quote
+that still occurs exactly once attaches automatically. Edited and duplicated
+locations remain suggestions. Recovery through a verified previous version
+belongs to the separate mapping path. Zero measured wrong attachments is
+always a statement about the stated evaluation set, not arbitrary edits.
+At this strict-search checkpoint, the 30-case set has zero wrong attachments
+and 15 unnecessary orphans (previously seven). All eight new regressions pass,
+and all 24,000 seeded edits across the original/realistic mixes and extra seeds
+report zero wrong attachments across every anchor, not just repeated quotes.
+
 Task 1 implements the ink store, anchoring and re-anchoring only. There is no
 AI caller, UI integration, export, thread implementation or proactive work.
 The changes remain uncommitted for review.

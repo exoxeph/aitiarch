@@ -1,0 +1,107 @@
+[
+  {
+    "name": "706199775-948-duplicate",
+    "seed": 706199775,
+    "iteration": 948,
+    "operation": "duplicate",
+    "before": "The service uses Redis for temporary session storage.\n\nA short answer should cite the selected project evidence.\n\nA short answer should cite the selected project evidence.\n\nA short answer should cite the selected project evidence.\n\nA short answer should cite the selected project evidence.\n\nCache invalidation follows the deployment boundary.\n\nA short answer should cite the selected project evidence.",
+    "after": "The service uses Redis for temporary session storage.\n\nA short answer should cite the selected project evidence.\n\nA short answer should cite the selected project evidence.\n\nA short answer should cite the selected project evidence.\n\nCache invalidation follows the deployment boundary.\n\nA short answer should cite the selected project evidence.\n\nCache invalidation follows the deployment boundary.\n\nA short answer should cite the selected project evidence.",
+    "from": 291,
+    "to": 342,
+    "originalAfter": {
+      "from": 344,
+      "to": 395
+    },
+    "expected": null
+  },
+  {
+    "name": "706199776-668-duplicate",
+    "seed": 706199776,
+    "iteration": 668,
+    "operation": "duplicate",
+    "before": "The migration waits for a human review of the evidence.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nA short answer should cite the selected project evidence.\n\nThe service uses SQLite for temporary session storage.",
+    "after": "The migration waits for a human review of the evidence.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nA short answer should cite the selected project evidence.\n\nThe service uses SQLite for temporary session storage.\n\nA short answer should cite the selected project evidence.\n\nThe service uses SQLite for temporary session storage.",
+    "from": 281,
+    "to": 338,
+    "originalAfter": {
+      "from": 340,
+      "to": 397
+    },
+    "expected": null
+  },
+  {
+    "name": "706199780-578-duplicate",
+    "seed": 706199780,
+    "iteration": 578,
+    "operation": "duplicate",
+    "before": "The migration waits for a human review of the evidence.\n\nA short answer should cite the selected project evidence.\n\nA short answer should cite the selected project evidence.\n\nThe service uses SQLite for temporary session storage.\n\nA short answer should cite the selected project evidence.",
+    "after": "The migration waits for a human review of the evidence.\n\nA short answer should cite the selected project evidence.\n\nThe service uses SQLite for temporary session storage.\n\nA short answer should cite the selected project evidence.\n\nThe service uses SQLite for temporary session storage.\n\nA short answer should cite the selected project evidence.",
+    "from": 175,
+    "to": 229,
+    "originalAfter": {
+      "from": 231,
+      "to": 285
+    },
+    "expected": null
+  },
+  {
+    "name": "706199782-386-delete",
+    "seed": 706199782,
+    "iteration": 386,
+    "operation": "delete",
+    "before": "The migration waits for a human review of the evidence.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe migration waits for a human review of the evidence.\n\nCache invalidation follows the deployment boundary.",
+    "after": "The migration waits for a human review of the evidence.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe migration waits for a human review of the evidence.\n\nCache invalidation follows the deployment boundary.",
+    "from": 57,
+    "to": 111,
+    "originalAfter": null,
+    "expected": null
+  },
+  {
+    "name": "706199782-411-delete",
+    "seed": 706199782,
+    "iteration": 411,
+    "operation": "delete",
+    "before": "Cache invalidation follows the deployment boundary.\n\nThe migration waits for a human review of the evidence.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nA short answer should cite the selected project evidence.",
+    "after": "Cache invalidation follows the deployment boundary.\n\nThe migration waits for a human review of the evidence.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nA short answer should cite the selected project evidence.",
+    "from": 110,
+    "to": 163,
+    "originalAfter": null,
+    "expected": null
+  },
+  {
+    "name": "706199784-176-delete",
+    "seed": 706199784,
+    "iteration": 176,
+    "operation": "delete",
+    "before": "The service uses SQLite for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.",
+    "after": "The service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.",
+    "from": 0,
+    "to": 54,
+    "originalAfter": null,
+    "expected": null
+  },
+  {
+    "name": "706199784-411-delete",
+    "seed": 706199784,
+    "iteration": 411,
+    "operation": "delete",
+    "before": "The service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses SQLite for temporary session storage.",
+    "after": "The service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.",
+    "from": 220,
+    "to": 274,
+    "originalAfter": null,
+    "expected": null
+  },
+  {
+    "name": "706199784-781-delete",
+    "seed": 706199784,
+    "iteration": 781,
+    "operation": "delete",
+    "before": "A short answer should cite the selected project evidence.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nA short answer should cite the selected project evidence.",
+    "after": "A short answer should cite the selected project evidence.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nA short answer should cite the selected project evidence.",
+    "from": 59,
+    "to": 113,
+    "originalAfter": null,
+    "expected": null
+  }
+]
