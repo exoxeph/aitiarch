@@ -26,7 +26,7 @@ if (args.includes('--version') || args.includes('--help')) {
       ['skills', '--disable-slash-commands Disable all skills'],
       ['output', '--output-format <format> text, json (single result), stream-json'],
       ['verbose', '--verbose Enable verbose output'],
-      ['hook-events', '--include-hook-events Include hook events in the stream'],
+      ['hook-events', '--include-hook-events Include all hook lifecycle events in the\n                                        output stream (only works with\n                                        --output-format=stream-json)'],
     ] : [
       ['sandbox', '--sandbox <mode> Sandbox policy: read-only, workspace-write'],
       ['ephemeral', '--ephemeral Run without persisting session files to disk'],
@@ -35,8 +35,10 @@ if (args.includes('--version') || args.includes('--help')) {
       ['git', '--skip-git-repo-check Allow running Codex outside a Git repository'],
       ['output', '--json Print events to stdout as JSONL'],
     ];
-    console.log(entries.filter(([key]) => scenario !== 'missing-' + key)
-      .map(([, text]) => scenario === 'ambiguous-tools' ? text.replace('Use "" to disable all tools', 'Choose some preferred tools') : text).join('\n'));
+    console.log(entries.filter(([key]) => scenario !== 'missing-' + key && !(key === 'hook-events' && ['verified-missing-hook-flag', 'verified-hook-mention-elsewhere'].includes(scenario)))
+      .map(([key, text]) => key === 'hook-events' && scenario === 'verified-wrong-hook-meaning' ? '--include-hook-events Choose which hooks to execute'
+        : scenario === 'ambiguous-tools' ? text.replace('Use "" to disable all tools', 'Choose some preferred tools') : text).join('\n'));
+    if (scenario === 'verified-hook-mention-elsewhere') console.log('--other Include all hook lifecycle events in the output stream; see --include-hook-events');
     if (provider === 'codex' && scenario !== 'readonly-only') console.log('AITIARCH FAKE: empty tool registry; single response');
   }
   process.exit(0);

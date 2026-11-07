@@ -66,7 +66,7 @@ async function ok<T>(method: "GET" | "PUT", url: string, body?: unknown): Promis
 }
 
 export const api = {
-  assistance: () => ok<{ available: boolean; message?: string }>("GET", "/api/assistance"),
+  assistance: () => ok<{ available: boolean; message?: string; warnings?: string[] }>("GET", "/api/assistance"),
   previewInvocation: (body: Invocation) => ok<unknown>("PUT", "/api/assistance/preview", body),
   invoke: (body: Invocation) => ok<InkSnapshot>("PUT", "/api/assistance/invoke", body),
   requestStatus: (id: string) => ok<{ status: string }>("GET", `/api/assistance/status?id=${encodeURIComponent(id)}`),

@@ -42,6 +42,7 @@ const watcher = new NoteWatcher(store!);
 await watcher.start();
 const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
 const provider = args.claude ? createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205" }) : undefined;
+if (provider) for (const warning of (await provider.checkAvailability()).warnings ?? []) console.warn(warning);
 const app = createApp({ store: store!, watcher, distDir, allowOrigins: args.origins, provider });
 
 // Deterministic port per notebook folder, so the same project always opens at the same address.

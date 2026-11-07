@@ -114,3 +114,49 @@ reported usage when available, never infer remaining subscription allowance.
 
 Stop for explicit human approval before either inference call. With the current
 unresolved contracts, neither provider is ready for a live canary yet.
+
+## Hook-event help recognition and launcher guard
+
+The 2.1.205 help says ?Include all hook lifecycle events in the output stream.?
+The old matcher incorrectly required the adjacent words ?hook events.? Startup
+now recognizes the installed wording explicitly. It still requires the flag,
+streaming output and the exact verified version. Wrapped flag references in
+another option's description do not count as option declarations. Missing or
+unrecognized required options still disable the provider.
+
+Audit incident: a mistaken positional `help` invocation started an unauthorized Claude conversation in the repository; its response capture was removed after review, and private CLI session evidence was retained outside the repository.
+
+All provider process launches now pass through a guarded launcher. Outside the
+isolated provider path, Claude accepts only the exact `--help` or `--version`
+argument. Native prefix arguments are rejected. Isolated Claude launches must
+match the fixed profile, have no positional prompt, and start in an empty
+OS-temp directory; request data travels on stdin. A regression check rejects
+new direct child-process imports in provider modules outside that boundary.
+This guard covers application code; it cannot prevent a human or shell agent
+from directly running an unrelated shell command.
+
+### Observation limits and managed-policy warning
+
+Managed hooks can survive safe mode, and some hook types emit no events.
+Consequently, **zero hook events is an observation, not a proof that no hook
+ran**. Empty tools/MCP/plugins registries and rejected hook/tool/unknown events
+remain required observations; those checks are unchanged. The CLI reference
+also notes that managed policy remains effective. Neither safe mode nor an
+empty setting-source list proves that no managed setting was loaded.
+
+At startup, check only the presence of `managed-settings.json` and
+`managed-settings.d/` at the documented system directory:
+
+- Windows: `C:\Program Files\ClaudeCode\`
+- macOS: `/Library/Application Support/ClaudeCode/`
+- Linux/WSL: `/etc/claude-code/`
+
+Presence produces a plain warning in startup output and the request preview,
+without reading contents or blocking the provider. An inaccessible location
+warns that presence is unknown. Absence does not rule out registry, MDM,
+server-delivered or host-supplied policies. The legacy Windows ProgramData
+location is not checked because the current documentation says it is not read.
+
+Sources: [CLI reference](https://code.claude.com/docs/en/cli-reference),
+[hooks reference](https://code.claude.com/docs/en/hooks), and
+[managed settings locations](https://code.claude.com/docs/en/managed-settings#where-each-mechanism-stores-the-policy).

@@ -1,6 +1,6 @@
 import { access, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { spawn, execFile } from 'node:child_process';
+import { spawnIsolated, killTree } from './launcher.ts';
 import os from 'node:os';
 import path from 'node:path';
 import { probeCapabilities } from './capabilities.ts';
@@ -101,12 +101,6 @@ function environment(): NodeJS.ProcessEnv {
   result.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
   return result;
 }
-async function killTree(pid: number): Promise<void> {
-  if (process.platform === 'win32') {
-    await new Promise<void>(resolve => execFile(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'),
-      ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => resolve()));
-  } else { try { process.kill(-pid, 'SIGKILL'); } catch { /* Already exited. */ } }
-}
 function parseResult(provider: ProviderName, id: string, stdout: string, stream = false): Result {
   try {
     let response: unknown, model: string | null = null, usage: Result['usage'] = null;
@@ -165,7 +159,7 @@ export function createProvider(configuration: Configuration): Provider {
     try {
       if (options.signal?.aborted) throw new ProviderError('cancelled');
       const output = await new Promise<string>((resolve, reject) => {
-        const child = spawn(config.command, [...config.prefixArgs, ...argumentsFor(config.provider, availability.hardening, stream)],
+        const child = spawnIsolated(config, argumentsFor(config.provider, availability.hardening, stream),
           { cwd, env: environment(), shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: 'pipe' });
         const stdout: Buffer[] = [], stderr: Buffer[] = [];
         let bytes = 0, failure: ProviderError | undefined;

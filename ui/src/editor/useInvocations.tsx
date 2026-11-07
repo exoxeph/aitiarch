@@ -7,7 +7,7 @@ import type { NoteSession } from './session.ts';
 import type { SelectedSource } from './toolbar.ts';
 import { addInk, removeInk, setInk } from './ink.ts';
 
-interface Draft { input: Invocation; packet?: unknown; error?: string }
+interface Draft { input: Invocation; packet?: unknown; error?: string; warnings?: string[] }
 interface Running { id: string; status: string; error?: string }
 export function useInvocations(path: string, view: RefObject<EditorView | null>, session: RefObject<NoteSession | null>,
   saved: (snapshot: InkSnapshot) => void) {
@@ -56,7 +56,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       const availability = await api.assistance();
       if (!availability.available) throw new Error(availability.message ?? 'Claude is unavailable.');
       const packet = await api.previewInvocation(input);
-      if (mounted.current) setDraft({ input, packet });
+      if (mounted.current) setDraft({ input, packet, warnings: availability.warnings });
     } catch (e) { if (mounted.current) setDraft({ input, error: e instanceof Error ? e.message : 'Context preview failed.' }); }
     finally { if (mounted.current) setBusy(false); }
   };
@@ -94,6 +94,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       <p className="small muted">Claude CLI · transcript context: none. Redaction can miss prose secrets, unfamiliar or encoded credentials, and indirect identifiers. Review before sending.</p>
       {draft.packet !== undefined && <details><summary>Exact redacted request</summary><pre>{JSON.stringify(draft.packet, null, 2)}</pre></details>}
       {draft.error && <p role="alert">{draft.error}</p>}
+      {draft.warnings?.map(warning => <p role="note" key={warning}>{warning}</p>)}
       <div className="attach-actions">{draft.packet !== undefined
         ? <button disabled={busy} onClick={() => void send()}>Send to Claude</button>
         : <button disabled={busy || (draft.input.action === 'ask' && !draft.input.question.trim())} onClick={() => void review(draft.input)}>Review request</button>}

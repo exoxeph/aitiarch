@@ -27,3 +27,13 @@ for (const scenario of ['verified-tools', 'verified-hook', 'verified-mcp', 'veri
 it('disables a changed CLI version even when its help claims the same flags', async () => {
   expect(await createProvider(config('verified-version-change')).checkAvailability()).toMatchObject({ available: false, code: 'unsupported_cli' });
 });
+it('recognizes the actual 2.1.205 hook lifecycle wording with wrapped lines', async () => {
+  expect(await createProvider(config('verified-real-hook-wording')).checkAvailability()).toMatchObject({ available: true });
+});
+for (const scenario of ['verified-missing-hook-flag', 'verified-wrong-hook-meaning', 'verified-hook-mention-elsewhere']) {
+  it(`fails closed for ${scenario} before sending context`, async () => {
+    const cli = createProvider(config(scenario));
+    expect(await cli.checkAvailability()).toMatchObject({ available: false, message: expect.stringContaining('--include-hook-events') });
+    await expect(cli.invoke(request)).rejects.toMatchObject({ code: 'unsupported_cli' });
+  });
+}
