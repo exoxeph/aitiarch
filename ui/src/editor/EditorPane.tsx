@@ -2,12 +2,16 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { Compartment, EditorState } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { resolveAnchor } from "../../shared/anchors.ts";
+import type { InkItem } from "../../shared/ink.ts";
+import { MarginRail, type PlacedMargin } from "../ink/MarginRail.tsx";
 import { api, type NoteFile, type ServerEvent } from "../api.ts";
 import { conflictDecorations, conflictHandlers, conflictsField } from "./conflicts.ts";
 import { toggleInline } from "./format.ts";
 import { livePreview, previewHandlers, wikiResolver } from "./livepreview.ts";
 import { externalChange, NoteSession, type SyncStatus } from "./session.ts";
+import { inkField, setInk } from "./ink.ts";
 import { selectionToolbar } from "./toolbar.ts";
 
 export interface PaneHandle {
@@ -24,10 +28,14 @@ interface Props {
   onDoc: (path: string, text: string) => void;
   subscribe: (fn: (e: ServerEvent) => void) => () => void;
   register: (path: string, h: PaneHandle | null) => void;
+  inkItems?: InkItem[];
+  trustedText?: string | null;
 }
 
 export function EditorPane(props: Props) {
   const host = useRef<HTMLDivElement>(null);
+  const surface = useRef<HTMLDivElement>(null);
+  const [margin, setMargin] = useState<PlacedMargin[]>([]);
   const live = useRef(props);
   live.current = props;
   const resolverSlot = useRef(new Compartment());
@@ -52,6 +60,7 @@ export function EditorPane(props: Props) {
             ...historyKeymap,
           ]),
           conflictsField,
+          inkField,
           conflictDecorations,
           conflictHandlers.of({ resolve: (id, choice) => session.resolve(id, choice) }),
           previewHandlers.of({ openWiki: (t) => live.current.onOpenWiki(t) }),
@@ -60,6 +69,7 @@ export function EditorPane(props: Props) {
           selectionToolbar,
           EditorView.contentAttributes.of({ "aria-label": `Editing ${path}`, spellcheck: "true" }),
           EditorView.updateListener.of((u) => {
+            if (u.docChanged || u.viewportChanged || u.transactions.some(t => t.effects.some(e => e.is(setInk)))) queueMargin();
             if (!u.docChanged) return;
             if (!u.transactions.some((t) => t.annotation(externalChange))) session.userChanged();
             queueDoc();
@@ -78,11 +88,33 @@ export function EditorPane(props: Props) {
       if (spec) v.dispatch(spec);
     }
     let raf = 0;
+    let marginRaf = 0;
+    function queueMargin() {
+      cancelAnimationFrame(marginRaf);
+      marginRaf = requestAnimationFrame(() => {
+        if (!surface.current || !live.current.visible) return;
+        const doc = view.state.doc.toString();
+        const bounds = surface.current.getBoundingClientRect();
+        const ink = view.state.field(inkField);
+        const rows = ink.items.filter(i => i.kind === "margin").flatMap(item => {
+          const anchor = ink.trustedText === doc && item.attachment.status === "attached" && doc.slice(item.attachment.from, item.attachment.to) === item.anchor.quote
+            ? item.attachment : resolveAnchor(doc, item.anchor);
+          if (anchor.status !== "attached") return [];
+          const coords = view.coordsAtPos(anchor.from);
+          return coords ? [{ item, top: Math.max(8, coords.top - bounds.top) }] : [];
+        }).sort((a, b) => a.top - b.top);
+        let next = 8;
+        setMargin(rows.map(row => { const top = Math.max(row.top, next); next = top + 90; return { ...row, top }; }));
+      });
+    }
     function queueDoc() {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => live.current.onDoc(path, view.state.doc.toString()));
     }
     live.current.onDoc(path, props.file.text);
+    host.current?.addEventListener("scroll", queueMargin, { passive: true });
+    const observer = new ResizeObserver(queueMargin);
+    if (host.current) observer.observe(host.current);
 
     const unsub = props.subscribe((e) => {
       if (e.type === "changed" && e.path === path) {
@@ -115,6 +147,9 @@ export function EditorPane(props: Props) {
       window.removeEventListener("pagehide", onPageHide);
       unsub();
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(marginRaf);
+      host.current?.removeEventListener("scroll", queueMargin);
+      observer.disconnect();
       void session.flush().finally(() => session.dispose());
       live.current.register(path, null);
       view.destroy();
@@ -132,5 +167,12 @@ export function EditorPane(props: Props) {
     if (props.visible) viewRef.current?.focus();
   }, [props.visible]);
 
-  return <div className={props.visible ? "pane" : "pane pane-hidden"} ref={host} data-path={props.file.path} />;
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: setInk.of({ items: props.inkItems ?? [], trustedText: props.trustedText ?? null }) });
+  }, [props.inkItems, props.trustedText]);
+
+  return <div className={props.visible ? "ink-surface" : "ink-surface surface-hidden"} ref={surface}>
+    <div className="pane" ref={host} data-path={props.file.path} />
+    <MarginRail placed={margin} />
+  </div>;
 }

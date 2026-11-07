@@ -109,6 +109,19 @@ describe("file API", () => {
 });
 
 describe("polling fallback", () => {
+  it("emits an ink event when an external process changes a sidecar", async () => {
+    const w = new NoteWatcher(await Store.open(root), 50, 10, false);
+    await w.start();
+    try {
+      mkdirSync(path.join(root, "ink"), { recursive: true });
+      const changed = new Promise<string>((resolve, reject) => {
+        w.on("event", e => { if (e.type === "ink") resolve(e.path); });
+        setTimeout(() => reject(new Error("No sidecar event")), 1500);
+      });
+      writeFileSync(path.join(root, "ink", "notebook.ink.json"), "fixture sidecar change");
+      expect(await changed).toBe("notebook.md");
+    } finally { w.stop(); rmSync(path.join(root, "ink"), { recursive: true, force: true }); }
+  });
   it("detects an outside edit within a second with fs.watch switched OFF", async () => {
     const store = await Store.open(root);
     const w = new NoteWatcher(store, 100, 10, false);

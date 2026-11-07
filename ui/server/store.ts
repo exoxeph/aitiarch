@@ -1,9 +1,10 @@
 // Notebook store: listing, reading, and compare-and-write saving of notes under one root.
 import { randomBytes } from "node:crypto";
-import { open, readdir, readFile, realpath, rename, stat, unlink } from "node:fs/promises";
+import { open, readdir, readFile, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { decode, encode, eolLabel, NotUtf8Error, versionOf, type Decoded, type EolLabel } from "./codec.ts";
 import { HIDDEN_DIRS, isNotePath, PathError, resolveNote } from "./paths.ts";
+import { resolveRoot } from "./root.ts";
 
 export const MAX_NOTE_BYTES = 2 * 1024 * 1024;
 
@@ -44,15 +45,8 @@ export class Store {
     this.rootReal = rootReal;
   }
 
-  static async open(root: string): Promise<Store> {
-    let real: string;
-    try {
-      real = await realpath(root);
-      if (!(await stat(real)).isDirectory()) throw new Error("not a directory");
-    } catch {
-      throw new Error(`Notebook folder not found: ${root}`);
-    }
-    return new Store(real);
+  static async open(root?: string): Promise<Store> {
+    return new Store(await resolveRoot({ root }));
   }
 
   /** All note paths (root-relative) with their stat signature; skips hidden dirs and links. */

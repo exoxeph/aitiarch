@@ -23,6 +23,8 @@ export interface UiState {
   tabs: string[];
   active: string | null;
 }
+import type { InkDocument } from "../shared/ink.ts";
+export interface InkSnapshot { document: InkDocument; version: string | null }
 
 export type SaveResult =
   | { ok: true; version: string; changed: boolean }
@@ -66,6 +68,9 @@ export const api = {
   session: () => ok<{ rootName: string; rootPath: string }>("GET", "/api/session"),
   tree: () => ok<TreeNode>("GET", "/api/tree"),
   file: (path: string) => ok<NoteFile>("GET", `/api/file?path=${encodeURIComponent(path)}`),
+  ink: (path: string) => ok<InkSnapshot>("GET", `/api/ink?path=${encodeURIComponent(path)}`),
+  attachInk: (body: { path: string; id: string; inkVersion: string | null; noteVersion: string; from: number; to: number }) =>
+    ok<InkSnapshot>("PUT", "/api/ink/attach", body),
   /** Like file() but resolves null when the note no longer exists. */
   async load(path: string): Promise<NoteFile | null> {
     try {
@@ -93,6 +98,7 @@ export type ServerEvent =
   | { type: "changed"; path: string; version: string }
   | { type: "removed"; path: string }
   | { type: "tree" }
+  | { type: "ink"; path: string }
   | { type: "open" }
   | { type: "closed" };
 
@@ -101,7 +107,7 @@ export function connectEvents(onEvent: (e: ServerEvent) => void): () => void {
   const es = new EventSource("/api/events");
   es.onopen = () => onEvent({ type: "open" });
   es.onerror = () => onEvent({ type: "closed" });
-  for (const t of ["changed", "removed", "tree"] as const) {
+  for (const t of ["changed", "removed", "tree", "ink"] as const) {
     es.addEventListener(t, (m) => {
       try {
         onEvent(JSON.parse((m as MessageEvent).data));

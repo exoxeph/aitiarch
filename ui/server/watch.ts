@@ -3,13 +3,14 @@
 // place that decides what changed, by comparing content versions, so duplicate events are harmless.
 import { EventEmitter } from "node:events";
 import { watch, type FSWatcher } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import type { Store } from "./store.ts";
 
 export type WatchEvent =
   | { type: "changed"; path: string; version: string }
   | { type: "removed"; path: string }
+  | { type: "ink"; path: string }
   | { type: "tree" };
 
 interface Known {
@@ -22,6 +23,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class NoteWatcher extends EventEmitter {
   private known = new Map<string, Known>();
+  private knownInk = new Map<string, string>();
   private fsw?: FSWatcher;
   private timer?: NodeJS.Timeout;
   private running = false;
@@ -132,6 +134,34 @@ export class NoteWatcher extends EventEmitter {
       }
     }
     if (treeChanged && this.initialized) this.emit("event", { type: "tree" } satisfies WatchEvent);
+    await this.scanInk();
     this.initialized = true;
+  }
+
+  private async scanInk(): Promise<void> {
+    const inkRoot = path.join(this.store.rootReal, "ink");
+    const seen = new Map<string, string>();
+    const visit = async (dir: string, depth: number): Promise<void> => {
+      if (depth > 8) return;
+      for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+        const abs = path.join(dir, entry.name);
+        if (entry.isDirectory()) await visit(abs, depth + 1);
+        else if (entry.isFile() && entry.name.endsWith(".ink.json")) {
+          const rel = path.relative(inkRoot, abs).replace(/\\/g, "/");
+          const s = await stat(abs).catch(() => undefined);
+          if (s) seen.set(rel, `${s.mtimeMs}:${s.size}`);
+        }
+      }
+    };
+    await visit(inkRoot, 0);
+    for (const [rel, signature] of seen) {
+      if (this.initialized && this.knownInk.get(rel) !== signature)
+        this.emit("event", { type: "ink", path: rel.slice(0, -".ink.json".length) + ".md" } satisfies WatchEvent);
+    }
+    for (const rel of this.knownInk.keys()) {
+      if (this.initialized && !seen.has(rel))
+        this.emit("event", { type: "ink", path: rel.slice(0, -".ink.json".length) + ".md" } satisfies WatchEvent);
+    }
+    this.knownInk = seen;
   }
 }

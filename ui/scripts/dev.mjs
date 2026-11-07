@@ -4,11 +4,12 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveRoot } from "../server/root.ts";
 
 const uiDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const ri = args.indexOf("--root");
-const root = ri >= 0 ? path.resolve(args[ri + 1]) : path.join(process.cwd(), ".aitiarch");
+const root = await resolveRoot({ root: ri >= 0 ? args[ri + 1] ?? "" : undefined });
 
 const server = spawn(
   process.execPath,

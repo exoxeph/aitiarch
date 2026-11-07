@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, connectEvents, type NoteFile, type ServerEvent, type TreeNode } from "./api.ts";
+import { api, ApiError, connectEvents, type InkSnapshot, type NoteFile, type ServerEvent, type TreeNode } from "./api.ts";
+import { resolveStoredAttachment, type InkItem } from "../shared/ink.ts";
+import { OrphanList } from "./ink/OrphanList.tsx";
+import { EditorView } from "@codemirror/view";
 import { flattenTree, Overlay, PropertiesPanel, StatusBar, Tabs, Tree, type OverlayItem } from "./components.tsx";
 import { EditorPane, type PaneHandle } from "./editor/EditorPane.tsx";
 import { indentLines, restoreFailed, setHeading, toggleCodeBlock, toggleInline, toggleList } from "./editor/format.ts";
@@ -12,6 +15,8 @@ export default function App() {
   const [boot, setBoot] = useState<Boot>({ state: "loading" });
   const [tree, setTree] = useState<TreeNode | null>(null);
   const [files, setFiles] = useState<Record<string, NoteFile>>({});
+  const [inkFiles, setInkFiles] = useState<Record<string, InkSnapshot>>({});
+  const [attachDraft, setAttachDraft] = useState<null | { path: string; id: string; from: number; to: number; noteVersion: string; noteText: string; inkVersion: string | null; quote: string; target: string }>(null);
   const [tabs, setTabs] = useState<string[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [status, setStatus] = useState<Record<string, SyncStatus>>({});
@@ -19,6 +24,7 @@ export default function App() {
   const [online, setOnline] = useState(true);
   const [overlay, setOverlay] = useState<null | "palette" | "switcher">(null);
   const [showProps, setShowProps] = useState(true);
+  const [rightTab, setRightTab] = useState<"details" | "activity">("details");
   const [notice, setNotice] = useState<string | null>(null);
   const panes = useRef(new Map<string, PaneHandle>());
   const listeners = useRef(new Set<(e: ServerEvent) => void>());
@@ -30,6 +36,9 @@ export default function App() {
   }, []);
 
   const refreshTree = useCallback(() => api.tree().then(setTree).catch(() => {}), []);
+  const refreshInk = useCallback((path: string) => api.ink(path).then(s => setInkFiles(m => ({ ...m, [path]: s }))).catch(() => {
+    setNotice(`Ink for ${path} could not be loaded. Its sidecar is preserved.`);
+  }), []);
   const paths = useMemo(() => flattenTree(tree), [tree]);
   const resolver = useMemo(() => makeWikiResolver(paths), [paths]);
 
@@ -46,7 +55,8 @@ export default function App() {
     }
     setTabs((t) => (t.includes(path) ? t : [...t, path]));
     setActive(path);
-  }, [files]);
+    void refreshInk(path);
+  }, [files, refreshInk]);
 
   // ---- boot: session, tree, restore tabs ----
   useEffect(() => {
@@ -72,6 +82,9 @@ export default function App() {
         }
         const ok = want.filter((p) => loadedFiles[p]);
         setFiles(loadedFiles);
+        const loadedInk: Record<string, InkSnapshot> = {};
+        for (const p of ok) try { loadedInk[p] = await api.ink(p); } catch { setNotice(`Ink for ${p} could not be loaded. Its sidecar is preserved.`); }
+        setInkFiles(loadedInk);
         setTabs(ok);
         setActive(ui.active && ok.includes(ui.active) ? ui.active : (ok[0] ?? null));
         setBoot({ state: "ready", rootName: s.rootName, rootPath: s.rootPath });
@@ -80,6 +93,7 @@ export default function App() {
           if (e.type === "open") setOnline(true);
           if (e.type === "closed") setOnline(false);
           if (e.type === "tree" || e.type === "removed") void refreshTree();
+          if (e.type === "ink" && e.path) void refreshInk(e.path);
           for (const l of listeners.current) l(e);
         });
       } catch (e) {
@@ -87,7 +101,7 @@ export default function App() {
       }
     })();
     return () => off();
-  }, [refreshTree]);
+  }, [refreshTree, refreshInk]);
 
   // ---- persist open tabs (a small file in the notebook folder) ----
   useEffect(() => {
@@ -147,6 +161,45 @@ export default function App() {
   }, []);
 
   const activeHandle = () => (active ? panes.current.get(active) : undefined);
+  const activeText = active ? (docs[active] ?? files[active]?.text ?? "") : "";
+  const currentInk = active ? inkFiles[active] : undefined;
+  const openVersion = active ? (panes.current.get(active)?.session.base.version ?? files[active]?.version ?? null) : null;
+  const trustedText = active && currentInk?.document.noteVersion === openVersion && status[active] !== "dirty" && status[active] !== "conflict"
+    && activeText === (panes.current.get(active)?.session.base.text ?? files[active]?.text) ? activeText : null;
+  const activeItems = useMemo(() => (currentInk?.document.items ?? []).map(item => ({ ...item,
+    attachment: active && status[active] === "missing" ? { status: "orphaned" as const, reason: "note-missing" as const }
+      : resolveStoredAttachment(activeText, item, currentInk?.document.noteVersion ?? null, trustedText === null ? null : openVersion),
+  })), [currentInk, active, activeText, status, openVersion, trustedText]);
+  useEffect(() => {
+    if (activeItems.some(i => i.attachment.status === "orphaned")) setRightTab("activity");
+  }, [active, currentInk]);
+  const prepareAttach = async (item: InkItem, from: number, to: number) => {
+    if (!active || !currentInk) return;
+    const h = panes.current.get(active);
+    if (!h || h.session.status !== "saved") return setNotice("Save or resolve this note before re-attaching ink.");
+    const text = h.view.state.doc.toString();
+    if (from < 0 || to > text.length || from >= to) return setNotice("Select some text to re-attach the ink.");
+    try {
+      const disk = await api.file(active);
+      if (disk.version !== h.session.base.version || disk.text !== text) return setNotice("The note changed. Reload it before re-attaching ink.");
+      h.view.dispatch({ effects: EditorView.scrollIntoView(from, { y: "center" }) });
+      setAttachDraft({ path: active, id: item.id, from, to, noteVersion: disk.version, noteText: text, inkVersion: currentInk.version,
+        quote: item.anchor.quote, target: text.slice(from, to) });
+    } catch { setNotice("Can't verify the selected text against the saved note."); }
+  };
+  const saveAttach = async () => {
+    const d = attachDraft;
+    if (!d) return;
+    const h = panes.current.get(d.path);
+    if (!h || h.session.status !== "saved" || h.view.state.doc.toString() !== d.noteText) {
+      setAttachDraft(null); return setNotice("The note changed since selection. Select the target again.");
+    }
+    try {
+      const s = await api.attachInk({ path: d.path, id: d.id, inkVersion: d.inkVersion, noteVersion: d.noteVersion, from: d.from, to: d.to });
+      setInkFiles(m => ({ ...m, [d.path]: s }));
+      setAttachDraft(null);
+    } catch (e) { setAttachDraft(null); setNotice(e instanceof ApiError && e.status === 409 ? "The note or ink changed since selection. Review it and try again." : "Re-attachment could not be saved."); }
+  };
   const withView = (fn: (h: PaneHandle) => void) => () => {
     const h = activeHandle();
     if (h) fn(h);
@@ -211,7 +264,8 @@ export default function App() {
         )}
         {tabs.map((p) =>
           files[p] ? (
-            <EditorPane key={p} file={files[p]} visible={p === active} resolver={resolver} onOpenWiki={onOpenWiki} onStatus={onStatus} onDoc={onDoc} subscribe={subscribe} register={register} />
+            <EditorPane key={p} file={files[p]} visible={p === active} resolver={resolver} onOpenWiki={onOpenWiki} onStatus={onStatus} onDoc={onDoc} subscribe={subscribe} register={register}
+              inkItems={p === active ? activeItems : inkFiles[p]?.document.items} trustedText={p === active ? trustedText : null} />
           ) : null,
         )}
         {tabs.length === 0 && (
@@ -222,8 +276,23 @@ export default function App() {
         )}
       </main>
       {showProps && (
-        <aside className="rightpanel" aria-label="Note details">
-          <PropertiesPanel text={active ? (docs[active] ?? activeFile?.text) : undefined} />
+        <aside className="rightpanel" aria-label="Note details and activity">
+          <div className="right-tabs"><button className={rightTab === "details" ? "on" : ""} onClick={() => setRightTab("details")}>Details</button>
+            <button className={rightTab === "activity" ? "on" : ""} onClick={() => setRightTab("activity")}>Activity{activeItems.filter(i => i.attachment.status === "orphaned").length ? ` (${activeItems.filter(i => i.attachment.status === "orphaned").length})` : ""}</button></div>
+          {rightTab === "details" && <PropertiesPanel text={active ? (docs[active] ?? activeFile?.text) : undefined} />}
+          {rightTab === "activity" && active && <OrphanList text={activeText} items={activeItems} onPick={(item, from, to) => void prepareAttach(item, from, to)}
+            onSelect={item => {
+              const h = activeHandle();
+              if (!h) return;
+              const sel = h.view.state.selection.main;
+              void prepareAttach(item, sel.from, sel.to);
+            }} />}
+          {rightTab === "activity" && attachDraft && <section className="attach-preview" aria-label="Review re-attachment">
+            <h2>Review re-attachment</h2>
+            <div className="small muted">Old quote</div><blockquote>{attachDraft.quote}</blockquote>
+            <div className="small muted">New selected text</div><blockquote>{attachDraft.target}</blockquote>
+            <div className="attach-actions"><button onClick={() => void saveAttach()}>Save re-attachment</button><button onClick={() => setAttachDraft(null)}>Cancel</button></div>
+          </section>}
         </aside>
       )}
       <footer className="statusbar">

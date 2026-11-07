@@ -9,10 +9,10 @@ import { Store } from "./store.ts";
 import { NoteWatcher } from "./watch.ts";
 
 function parseArgs(argv: string[]) {
-  const o = { root: path.join(process.cwd(), ".aitiarch"), port: undefined as number | undefined, open: true, origins: [] as string[] };
+  const o = { root: undefined as string | undefined, port: undefined as number | undefined, open: true, origins: [] as string[] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--root") o.root = path.resolve(argv[++i] ?? "");
+    if (a === "--root") o.root = argv[++i] ?? "";
     else if (a === "--port") o.port = Number(argv[++i]);
     else if (a === "--allow-origin") o.origins.push(argv[++i] ?? "");
     else if (a === "--no-open") o.open = false;
@@ -32,7 +32,7 @@ let store: Store;
 try {
   store = await Store.open(args.root);
 } catch {
-  console.error(`No notebook folder at ${args.root}\nRun this inside a project that has a .aitiarch folder, or pass --root <folder>.`);
+  console.error(`No notebook folder at ${args.root ?? "./.aitiarch"}\nRun this inside a project that has a .aitiarch folder, or pass --root <folder>.`);
   process.exit(2);
 }
 

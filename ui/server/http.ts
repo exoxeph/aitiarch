@@ -8,6 +8,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { normalizeRel, isNotePath, PathError } from "./paths.ts";
 import type { Store } from "./store.ts";
+import { InkStore } from "./ink-store.ts";
 import type { NoteWatcher, WatchEvent } from "./watch.ts";
 
 export interface AppOptions {
@@ -53,6 +54,7 @@ interface UiState {
 
 export function createApp(opts: AppOptions) {
   const { store, watcher } = opts;
+  const inkReady = InkStore.open(store.rootReal);
   const token = randomBytes(24).toString("hex");
   const clients = new Set<http.ServerResponse>();
   let port = 0;
@@ -154,6 +156,22 @@ export function createApp(opts: AppOptions) {
     }
 
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await store.tree());
+
+    if (url.pathname === "/api/ink" && req.method === "GET") {
+      return json(res, 200, await (await inkReady).read(url.searchParams.get("path") ?? ""));
+    }
+    if (url.pathname === "/api/ink/attach" && req.method === "PUT") {
+      const b = (await readBody(req)) as Record<string, unknown>;
+      if (typeof b.path !== "string" || typeof b.id !== "string" ||
+          !(b.inkVersion === null || typeof b.inkVersion === "string") || typeof b.noteVersion !== "string" ||
+          !Number.isSafeInteger(b.from) || !Number.isSafeInteger(b.to)) throw new PathError(400, "bad_body", "Invalid re-attachment request.");
+      try { return json(res, 200, await (await inkReady).attach(b.path, b.id, b.inkVersion, b.noteVersion, b.from as number, b.to as number)); }
+      catch (e) {
+        if (/conflict|busy|already attached/i.test(String(e))) return json(res, 409, { error: "conflict", message: String(e) });
+        if (/invalid|not found/i.test(String(e))) return json(res, 400, { error: "bad_selection", message: String(e) });
+        throw e;
+      }
+    }
 
     if (url.pathname === "/api/file" && req.method === "GET") {
       return json(res, 200, await store.read(url.searchParams.get("path")));
