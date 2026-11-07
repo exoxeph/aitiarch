@@ -4,6 +4,7 @@ import { constants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inspectClaudeCanary } from './claude-canary.ts';
 const types = new Set(['system','assistant','user','result','rate_limit_event','stream_event','tool_progress','auth_status','tool_use_summary','permission_denied','prompt_suggestion']);
 const subtypes = new Set(['init','success','error_during_execution','error_max_turns','error_max_budget_usd','error_max_structured_output_retries',
   'hook_started','hook_progress','hook_response','status','compact_boundary','api_retry','task_started','task_progress','task_notification','task_updated',
@@ -11,19 +12,49 @@ const subtypes = new Set(['init','success','error_during_execution','error_max_t
 const counters = new Set(['input_tokens','output_tokens','cache_read_input_tokens','cache_creation_input_tokens','cache_read_tokens','cache_write_tokens',
   'inputTokens','outputTokens','cacheReadInputTokens','cacheCreationInputTokens','reasoning_tokens','cached_tokens','web_search_requests','web_fetch_requests']);
 type ParseIssue = { stage: 'event'|'result'; kind: 'empty'|'unexpected_end'|'syntax'; position: number|null; line: number };
+interface ResultShape {
+  nonEmpty:boolean; startsWithFence:boolean; validJson:boolean; answerPresent:boolean; claimsPresent:boolean;
+  characterLength:number; parseErrorPosition:number; parseErrorKind:number; wrappedObjectJson:boolean;
+}
+function resultShape(value:unknown):ResultShape {
+  const text=typeof value==='string'?value:'';
+  const result:ResultShape={nonEmpty:!!text.trim(),startsWithFence:text.trimStart().startsWith('```'),validJson:false,
+    answerPresent:false,claimsPresent:false,characterLength:text.length,parseErrorPosition:-1,parseErrorKind:0,wrappedObjectJson:false};
+  if(typeof value!=='string')return result;
+  try {
+    const parsed=JSON.parse(text);result.validJson=true;
+    if(parsed&&typeof parsed==='object'&&!Array.isArray(parsed)){
+      result.answerPresent=Object.hasOwn(parsed,'answer');result.claimsPresent=Object.hasOwn(parsed,'claims');
+    }
+  } catch(error) {
+    const message=error instanceof Error?error.message:'',offset=/position (\d+)/i.exec(message);
+    const end=/unexpected end|unterminated|end of json/i.test(message);
+    result.parseErrorKind=!text.trim()?1:end?2:3;
+    result.parseErrorPosition=!text.trim()?0:end?text.length:offset?Number(offset[1]):-1;
+    // Observation only: this probe never supplies an answer to the product parser.
+    const from=text.indexOf('{'),to=text.lastIndexOf('}');
+    if(from>=0&&to>from&&(text.slice(0,from).trim()||text.slice(to+1).trim())){
+      try {const wrapped=JSON.parse(text.slice(from,to+1));result.wrappedObjectJson=!!wrapped&&typeof wrapped==='object'&&!Array.isArray(wrapped);}catch{}
+    }
+  }
+  return result;
+}
 export interface FailureMetadata {
   exitCode: number|null; signal: string|null; stderrCategory: 'none'|'authentication'|'timeout'|'rate_limit'|'other';
   stdoutBytes: number; events: {type:string;subtype:string|null;count:number}[];
   parseError: ParseIssue|null; finalResultPresent: boolean; wallMs:number;
   usage: {source:'event'|'message'|'model';counters:Record<string,number>}[];
+  resultShape:ResultShape;
+  isolation:{passed:boolean;fileCount:number;tools:number;mcpServers:number;plugins:number;hookEvents:number;toolAttempts:number;unknownEvents:number};
 }
 export interface FailureLog { write(record: FailureMetadata): Promise<void> }
-interface Observation { exitCode:number|null;signal:string|null;stderr:string;stdout:string;stdoutBytes:number;wallMs:number;stream:boolean }
+interface Observation { exitCode:number|null;signal:string|null;stderr:string;stdout:string;stdoutBytes:number;wallMs:number;stream:boolean;fileCount?:number }
 export function failureMetadata(input: Observation): FailureMetadata {
   const out: FailureMetadata = {exitCode:input.exitCode,signal:input.signal,stdoutBytes:input.stdoutBytes,wallMs:Math.round(input.wallMs),
     stderrCategory: !input.stderr ? 'none' : /not logged in|unauthori[sz]ed|authentication|login required|please (?:log|sign) in/i.test(input.stderr) ? 'authentication'
       : /timed? ?out|timeout/i.test(input.stderr) ? 'timeout' : /rate.?limit|too many requests/i.test(input.stderr) ? 'rate_limit' : 'other',
-    events:[],parseError:null,finalResultPresent:false,usage:[]};
+    events:[],parseError:null,finalResultPresent:false,usage:[],resultShape:resultShape(undefined),
+    isolation:{passed:false,fileCount:input.fileCount??-1,tools:-1,mcpServers:-1,plugins:-1,hookEvents:0,toolAttempts:0,unknownEvents:0}};
   const parse = (text: string,stage: ParseIssue['stage'],line:number): any => {
     try{return JSON.parse(text);}catch(error){
       const message=error instanceof Error?error.message:'';
@@ -44,16 +75,24 @@ export function failureMetadata(input: Observation): FailureMetadata {
     }};
     visit(value);if(Object.keys(clean).length)out.usage.push({source,counters:clean});
   };
-  const lines=input.stream?input.stdout.trim().split(/\r?\n/):[input.stdout];
+  const lines=input.stream?input.stdout.trim().split(/\r?\n/):[input.stdout],events:Record<string,any>[]=[];
+  let invalidEvent=false;
   lines.forEach((line,index)=>{
-    const event=parse(line,'event',index+1);if(!event||typeof event!=='object')return;
+    const event=parse(line,'event',index+1);if(!event||typeof event!=='object'){invalidEvent=true;return;}
+    events.push(event);
     const type=types.has(event.type)?event.type:'unknown',subtype=event.subtype==null?null:subtypes.has(event.subtype)?event.subtype:'unknown';
     const last=out.events.at(-1);if(last&&last.type===type&&last.subtype===subtype)last.count++;else out.events.push({type,subtype,count:1});
     numeric(event.usage,'event');numeric(event.message?.usage,'message');numeric(event.event?.usage,'event');numeric(event.event?.message?.usage,'message');
     if(event.modelUsage&&typeof event.modelUsage==='object')for(const value of Object.values(event.modelUsage))numeric(value,'model');
-    if(event.type==='result')out.finalResultPresent=true;
+    if(event.type==='result'){out.finalResultPresent=true;out.resultShape=resultShape(event.result);}
     if((event.type==='result'||!input.stream)&&typeof event.result==='string')parse(event.result,'result',index+1);
   });
+  if(input.stream){
+    const checked=inspectClaudeCanary(events,[]);
+    out.isolation={passed:checked.passed&&input.fileCount===0&&!invalidEvent,fileCount:input.fileCount??-1,
+      tools:checked.registries.tools??-1,mcpServers:checked.registries.mcpServers??-1,plugins:checked.registries.plugins??-1,
+      hookEvents:checked.hookEvents,toolAttempts:checked.toolAttempts,unknownEvents:checked.unknownEvents};
+  }
   return out;
 }
 const repository = fileURLToPath(new URL('../../../', import.meta.url));

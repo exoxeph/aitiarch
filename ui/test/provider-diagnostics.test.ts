@@ -30,8 +30,9 @@ for (const [scenario, code, final, stderr] of [
     expect(row.wallMs).toBeGreaterThan(0); expect(row.stdoutBytes).toBeGreaterThanOrEqual(0);
     expect(row.exitCode).toBe(scenario.includes('nonzero')||scenario.includes('stderr-only')?9:0);
     expect(row.signal).toBe(null);
+    expect(row.isolation.fileCount).toBe(0);
     expect(bytes).not.toMatch(/synthetic-secret|Private synthetic|Synthetic answer|Answer for|fixture\.md|TOKEN_SENTINEL|\/Users\/|transcript|prompt/);
-    expect(Object.keys(row).sort()).toEqual(['exitCode','signal','stderrCategory','stdoutBytes','events','parseError','finalResultPresent','wallMs','usage'].sort());
+    expect(Object.keys(row).sort()).toEqual(['exitCode','signal','stderrCategory','stdoutBytes','events','parseError','finalResultPresent','wallMs','usage','resultShape','isolation'].sort());
     if(scenario==='verified-truncated') expect(row.parseError).toMatchObject({kind:'unexpected_end',stage:'event',position:expect.any(Number)});
     if(scenario==='verified-empty-result') expect(row.parseError).toMatchObject({kind:'empty',stage:'result',position:0});
     if(scenario==='verified-hook') expect(row.events).toContainEqual({type:'system',subtype:'hook_started',count:1});
@@ -50,9 +51,40 @@ it('preserves event ordering, numeric usage and parse positions without copying 
   expect(result.parseError).toMatchObject({stage:'result',kind:'syntax'});
   expect(result.usage).toContainEqual({source:'model',counters:{inputTokens:30,outputTokens:4}});
 });
+it.each([
+  ['{"answer":"Synthetic","claims":[]}',true,false,true,true,true,false,0],
+  ['```json\n{"answer":"Synthetic","claims":[]}\n```',true,true,false,false,false,true,3],
+  ['Introduction\n{"answer":"Synthetic","claims":[]}\nConclusion',true,false,false,false,false,true,3],
+  ['{"other":"Synthetic"}',true,false,true,false,false,false,0],
+  ['',false,false,false,false,false,false,1],
+  ['{"answer":',true,false,false,false,false,false,2],
+] as const)('records text-free result shape for case %#', (text,nonEmpty,startsWithFence,validJson,answerPresent,claimsPresent,wrappedObjectJson,parseErrorKind) => {
+  const result=failureMetadata({exitCode:0,signal:null,stderr:'',stdoutBytes:100,wallMs:1,
+    stdout:JSON.stringify({type:'result',subtype:'success',result:text}),stream:true});
+  expect(result.resultShape).toMatchObject({nonEmpty,startsWithFence,validJson,answerPresent,claimsPresent,wrappedObjectJson,parseErrorKind,characterLength:text.length});
+  expect(Object.values(result.resultShape).every(value=>typeof value==='boolean'||typeof value==='number')).toBe(true);
+  expect(JSON.stringify(result)).not.toContain('Synthetic');
+});
+it('supplies metadata on success without changing the parsed provider result', async () => {
+  const root=mkdtempSync(path.join(os.tmpdir(),'aitiarch-metrics-test-'));roots.push(root);
+  const observations:any[]=[];
+  const cli=createProvider({provider:'claude',command:process.execPath,
+    prefixArgs:[script,'verified-success',path.join(root,'record'),'claude'],contract:'claude-canary-2.1.205',
+    failureLog:{async write(){throw new Error('Must not write on success');}},onMetadata:record=>{observations.push(record);}});
+  await expect(cli.invoke({id:'success',action:'think',question:'',selection:'Synthetic',note:'Synthetic',decisions:[],turns:[]})).resolves.toMatchObject({answer:'Answer for success'});
+  expect(observations).toHaveLength(1);
+  expect(observations[0].resultShape).toMatchObject({validJson:true,answerPresent:true,claimsPresent:true});
+  expect(observations[0].isolation).toMatchObject({passed:true,fileCount:0,tools:0,mcpServers:0,plugins:0,hookEvents:0,toolAttempts:0,unknownEvents:0});
+});
 it('reports an unavailable parse offset as null rather than inventing zero', () => {
   const result=failureMetadata({exitCode:0,signal:null,stderr:'',stdoutBytes:3,wallMs:1,stdout:'NaN',stream:true});
   expect(result.parseError).toMatchObject({kind:'syntax',position:null});
+});
+it('does not report isolation passed when malformed events follow a fenced result', () => {
+  const stdout=[{type:'system',subtype:'init',tools:[],mcp_servers:[],plugins:[]},
+    {type:'assistant',message:{content:[{type:'text',text:'Synthetic'}]}},
+    {type:'result',subtype:'success',result:'```json\n{"answer":"Synthetic","claims":[]}\n```'}].map(e=>JSON.stringify(e)).join('\n')+'\n{';
+  expect(failureMetadata({exitCode:0,signal:null,stderr:'',stdoutBytes:stdout.length,wallMs:1,stdout,stream:true,fileCount:0}).isolation.passed).toBe(false);
 });
 it('does not create a failure log for a successful request', async () => {
   const root=mkdtempSync(path.join(os.tmpdir(),'aitiarch-metrics-test-'));roots.push(root);

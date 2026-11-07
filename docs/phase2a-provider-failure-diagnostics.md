@@ -1,8 +1,9 @@
 # Provider failure diagnostics and stream-format review
 
 The help-recognition fix is committed separately as `f03d7b2`. This diagnostic
-change is uncommitted. No provider call was made for this review. Answer parsing
-and isolation acceptance rules are unchanged.
+change was committed as `c536db3`. The later result-shape instrumentation and
+recorded diagnostic below are uncommitted. Answer parsing and isolation
+acceptance rules are unchanged.
 
 ## Private failure records
 
@@ -25,6 +26,8 @@ Only these fields are recorded:
 | `finalResultPresent` | Whether a parsed final-result event was observed, including an error result |
 | `wallMs` | Elapsed milliseconds through failure, including startup and termination |
 | `usage` | Numeric usage counters, labeled by event, message or model source |
+| `resultShape` | Booleans/numbers describing non-empty text, starting fence, whole-result JSON validity, answer/claims key presence, UTF-16 character length, first result parse error and an observation-only wrapped-object probe |
+| `isolation` | Existing canary's registry/event counts and pass observation, plus file count; unknown counts are -1 |
 
 Error kinds are `empty`, `unexpected_end`, and `syntax`; an unavailable offset is
 null. Event names come from a finite vocabulary: arbitrary names become
@@ -32,6 +35,15 @@ null. Event names come from a finite vocabulary: arbitrary names become
 Unknown numeric usage keys become `unknown_1`, etc.; their values are retained,
 but arbitrary keys and model names are discarded. Usage entries are observations,
 not a total: final and per-message counters can overlap and must not be summed.
+
+`resultShape.parseErrorKind` is numeric: 0 means none/not attempted, 1 empty,
+2 unexpected end, 3 syntax. Its position is -1 when unavailable/not applicable.
+Key-presence booleans concern the entire parsed result only; when JSON parsing
+fails they are false, which does not establish whether a wrapped object has
+those keys. `wrappedObjectJson` only checks whether the span from the first
+opening brace to the last closing brace is a JSON object surrounded by other
+text. It never supplies a value to the answer parser. A metadata-only callback
+can observe successful or failed calls in memory; it cannot alter acceptance.
 
 No messages, prompts, output excerpts, stderr text, exception text, session/turn
 identifiers, request identifiers, model names or file names enter the record.
@@ -95,13 +107,14 @@ The extra JSON requirement and event rejection are possible explanations for the
 earlier failure, not an established diagnosis: its missing metadata cannot be
 reconstructed. No parser, event acceptance rule or isolation check was changed.
 
-## Proposed single diagnostic call — approval required
+## Approved single diagnostic call
 
 Run the metadata-only startup check first. Then make exactly one request through
 the product provider path in an initially empty OS-temp directory outside the
-repository, with no note store and no transcript context. The request question
-is `reply with the word ok`; the product's existing JSON-answer instruction
-remains in place. Use the exact product flags: print, safe mode, no persistence,
+repository. A synthetic note is created in a separate, initially empty disposable
+fixture. Use the real Assistance Think request, with its frozen selection,
+empty question and no transcript context; the product's existing JSON-answer
+instruction remains in place. Use the exact product flags: print, safe mode, no persistence,
 empty tools, strict empty MCP config, empty setting sources, disable-all-hooks
 settings, disabled slash commands, stream-json, verbose and hook events (plus
 only optional hardening verified by startup).
@@ -134,4 +147,71 @@ thousands of input tokens. The earlier 3,000 input + 300 output estimate is a
 planning allowance, not a cap. Only reported usage can establish actual overhead.
 This is an observational canary, with the managed-hook limitation above.
 
-No diagnostic live call is approved by this document. Slice B remains paused.
+### Recorded result
+
+Exactly one product provider invocation ran. Help/version preflight passed with
+no managed-settings warning. The provider rejected the response and no retry or
+Ask call ran. The fixture was deleted, its synthetic Markdown stayed unchanged,
+and no raw response or transcript was persisted to the repository. The parser
+function is unchanged from `c536db3`.
+
+| Observation | Value |
+| --- | --- |
+| Provider error | `invalid_response` |
+| Exit / stderr | 0 / none |
+| Wall time | 33,197 ms |
+| Stdout bytes | 20,637 |
+| Events in order | system/init x1; rate_limit_event x1; system/unknown x17; assistant x2; result/success x1 |
+| Tools / MCP / plugins | 0 / 0 / 0 |
+| Hook events / tool attempts / files | 0 / 0 / 0 |
+| Unrecognized events | 17 |
+| Final result | Present, non-empty, 2,390 UTF-16 characters |
+| Starts with a fence | true |
+| Whole-result JSON | false |
+| Wrapped JSON object probe | true |
+| First JSON error | Result syntax error, stream line 22; character position unavailable |
+
+Two independent blockers occurred: **(d)** first, the canary rejected `system`
+events with unrecognized subtypes; **(a)** independently, a fenced result had a
+valid JSON object inside but was not itself JSON. The sanitizer retained the
+event type `system` but deliberately replaced the unknown subtype with
+`unknown`. Its original spelling cannot be recovered from retained metadata.
+There is no evidence here for wrong keys: key inspection did not run on a valid
+whole-result object. The raw events were not retained to investigate further.
+
+Final-result usage: 2 uncached input + 1,783 cache-creation input + 3,289
+cache-read input = **5,074 input**, with **2,787 output** tokens. Per-model
+counters additionally report **790 input and 16 output** in a separate bucket;
+summing the per-model buckets gives **5,864 input and 2,803 output**. Message
+usage observations repeat counters and are excluded from these totals. Cached
+input is included according to Anthropic's
+[documented token breakdown](https://platform.claude.com/docs/en/build-with-claude/prompt-caching#tracking-cache-performance).
+
+Against 3,000 input + 300 output, the per-model aggregate is **2,864 additional
+input and 2,503 additional output** tokens. The separate 790/16 bucket is
+observable additional CLI-associated usage; no field separates all CLI/system
+context from application input or reasoning from visible answer tokens. Exact
+total CLI overhead therefore cannot be isolated from these counters.
+
+### Parser proposal — not implemented
+
+First investigate the documented `--json-schema` mechanism (also listed in the
+captured 2.1.205 help), requiring an object with only `answer` and `claims`, then
+read and strictly validate `structured_output`. Require a non-empty bounded
+answer, a bounded claims array, permitted fields and validated source references.
+Do not extract arbitrary JSON from prose or tolerate fences. See the
+[CLI structured-output documentation](https://code.claude.com/docs/en/headless#get-structured-output).
+
+This is not yet an approved compatible fix: the SDK documentation explicitly
+says schema mode adds a `StructuredOutput` tool and may use retries. Whether the
+installed CLI's schema flag has identical behavior is unverified; it cannot be
+assumed to preserve an empty tool registry and a single model turn. Our current
+checks would reject those tool events. No formatter exception or retry behavior
+will be introduced without a human decision. Source:
+[StructuredOutput events](https://code.claude.com/docs/en/agent-sdk/structured-outputs#recognize-the-structuredoutput-tool-call).
+
+Separately, identify the actual unknown system subtype before proposing an exact
+allowlist addition and event-shape tests. Do not accept all `system` events, and
+do not infer a harmless subtype from its count. Current metadata cannot identify
+it, and no extra live call is authorized. Provider acceptance stays fail-closed;
+Slice B remains paused.
