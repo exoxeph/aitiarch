@@ -8,6 +8,7 @@ import type { Availability } from './capabilities.ts';
 import { claudeArguments, inspectClaudeCanary } from './claude-canary.ts';
 import { failureMetadata, privateFailureLog, type FailureLog, type FailureMetadata } from './failure-metrics.ts';
 import { parseAnswerJson } from './answer-json.ts';
+import { ProductValidationError, validateResponseSchema, type ValidationRecord } from '../product-validation.ts';
 
 export type ProviderName = 'claude' | 'codex';
 export interface Request {
@@ -31,6 +32,7 @@ const messages: Record<ErrorCode, string> = {
   context_limit: 'Context is too large. Narrow the selected sources before sending.',
 };
 export class ProviderError extends Error {
+  validation?:ValidationRecord;
   readonly code: ErrorCode;
   constructor(code: ErrorCode, detail?: string) { super(detail ?? messages[code]); this.name = 'ProviderError'; this.code = code; }
 }
@@ -106,6 +108,11 @@ function environment(): NodeJS.ProcessEnv {
   result.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
   return result;
 }
+export function validateProviderResponse(response:unknown) {
+  const safe=JSON.parse(redact(JSON.stringify(response)));
+  validateResponseSchema(safe);
+  return safe as {answer:string;claims:unknown[]};
+}
 function parseResult(provider: ProviderName, id: string, stdout: string, stream = false): Result {
   try {
     let response: unknown, model: string | null = null, usage: Result['usage'] = null;
@@ -131,10 +138,13 @@ function parseResult(provider: ProviderName, id: string, stdout: string, stream 
       }
       if (messages !== 1 || completed !== 1) throw new Error();
     }
-    const safe = JSON.parse(redact(JSON.stringify(response)));
-    if (typeof safe.answer !== 'string' || !Array.isArray(safe.claims)) throw new Error();
+    const safe = validateProviderResponse(response);
     return { id, provider, model, answer: safe.answer, claims: safe.claims, usage };
-  } catch { throw new ProviderError('invalid_response'); }
+  } catch(error) {
+    const failure=new ProviderError('invalid_response');
+    if(error instanceof ProductValidationError)failure.validation=error.record;
+    throw failure;
+  }
 }
 export function createProvider(configuration: Configuration): Provider {
   // Copy caller-owned configuration so concurrent mutations cannot change commands.
@@ -155,6 +165,7 @@ export function createProvider(configuration: Configuration): Provider {
   return { checkAvailability, async invoke(request, options = {}) {
     const start=performance.now(), stdout:Buffer[]=[], stderr:Buffer[]=[];
     let exitCode:number|null=null, signal:string|null=null, stdoutBytes=0, cwd:string|undefined, fileCount:number|undefined;
+    let productValidation:ValidationRecord|undefined;
     const stream = config.contract === 'claude-canary-2.1.205';
     try {
     // Freeze and redact synchronously, before any asynchronous boundary.
@@ -206,14 +217,15 @@ export function createProvider(configuration: Configuration): Provider {
       if (fileCount !== 0) throw new ProviderError('invalid_response');
       return parseResult(config.provider, requestId, output, stream);
     } catch(error) {
+      if(error instanceof ProviderError)productValidation=error.validation;
       if(cwd&&fileCount===undefined){try{fileCount=(await readdir(cwd)).length;}catch{/* Unknown file count stays unavailable. */}}
       try { await (config.failureLog??privateFailureLog()).write(failureMetadata({exitCode,signal,stdoutBytes,fileCount,
-        stdout:Buffer.concat(stdout).toString('utf8'),stderr:Buffer.concat(stderr).toString('utf8'),wallMs:performance.now()-start,stream})); }
+        stdout:Buffer.concat(stdout).toString('utf8'),stderr:Buffer.concat(stderr).toString('utf8'),wallMs:performance.now()-start,stream,productValidation})); }
       catch { if(error instanceof Error)error.message+=' Private failure metrics could not be saved.'; }
       throw error;
     } finally {
       try { config.onMetadata?.(failureMetadata({exitCode,signal,stdoutBytes,fileCount,
-        stdout:Buffer.concat(stdout).toString('utf8'),stderr:Buffer.concat(stderr).toString('utf8'),wallMs:performance.now()-start,stream})); }catch{/* Observers cannot change acceptance or the provider outcome. */}
+        stdout:Buffer.concat(stdout).toString('utf8'),stderr:Buffer.concat(stderr).toString('utf8'),wallMs:performance.now()-start,stream,productValidation})); }catch{/* Observers cannot change acceptance or the provider outcome. */}
       if(cwd)await rm(cwd, { recursive: true, force: true });
     }
   } };

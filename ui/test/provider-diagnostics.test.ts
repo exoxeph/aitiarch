@@ -4,7 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
 import { createProvider } from '../server/providers/index.ts';
-import { privateFailureLog, failureMetadata } from '../server/providers/failure-metrics.ts';
+import { privateFailureLog, privateValidationLog, failureMetadata } from '../server/providers/failure-metrics.ts';
+import { validationCounts } from '../server/product-validation.ts';
 const roots: string[] = [];
 afterEach(() => roots.splice(0).forEach(r => rmSync(r, { recursive: true, force: true })));
 const script = fileURLToPath(new URL('./fixtures/provider-cli.mjs', import.meta.url));
@@ -15,6 +16,7 @@ for (const [scenario, code, final, stderr] of [
   ['verified-hook-prefixed', 'invalid_response', true, 'none'],
   ['verified-thinking-text', 'invalid_response', true, 'none'],
   ['verified-thinking-long', 'invalid_response', true, 'none'],
+  ['verified-fence-wrong-keys', 'invalid_response', true, 'none'],
   ['verified-empty-result', 'invalid_response', true, 'none'],
   ['verified-nonzero', 'provider_error', true, 'other'],
   ['verified-stderr-only', 'provider_error', false, 'authentication'],
@@ -35,7 +37,8 @@ for (const [scenario, code, final, stderr] of [
     expect(row.signal).toBe(null);
     expect(row.isolation.fileCount).toBe(0);
     expect(bytes).not.toMatch(/synthetic-secret|Private synthetic|Synthetic answer|Answer for|fixture\.md|TOKEN_SENTINEL|PRIVATE_STATUS_SENTINEL|\/Users\/|transcript|prompt/);
-    expect(Object.keys(row).sort()).toEqual(['exitCode','signal','stderrCategory','stdoutBytes','events','parseError','finalResultPresent','wallMs','usage','resultShape','isolation','systemSubtypeCounts','outputTokenSplit','thinkingStatusFields'].sort());
+    expect(Object.keys(row).sort()).toEqual(['exitCode','signal','stderrCategory','stdoutBytes','events','parseError','finalResultPresent','wallMs','usage','resultShape','isolation','systemSubtypeCounts','outputTokenSplit','thinkingStatusFields','productValidation'].sort());
+    if(scenario==='verified-fence-wrong-keys')expect(row.productValidation).toMatchObject({rule:'response_schema'});
     if(scenario==='verified-truncated') expect(row.parseError).toMatchObject({kind:'unexpected_end',stage:'event',position:expect.any(Number)});
     if(scenario==='verified-empty-result') expect(row.parseError).toMatchObject({kind:'empty',stage:'result',position:0});
     if(scenario==='verified-hook') expect(row.events).toContainEqual({type:'system',subtype:'hook_started',count:1});
@@ -170,4 +173,13 @@ it('also rejects repository child names beginning with two dots', async () => {
   expect(existsSync(dir)).toBe(false);mkdirSync(dir);roots.push(dir);
   await expect(privateFailureLog(dir).write(failureMetadata({stdout:'',stderr:'',stdoutBytes:0,exitCode:null,signal:null,wallMs:0,stream:true}))).rejects.toThrow();
   expect(existsSync(path.join(dir,'provider-failures.jsonl'))).toBe(false);
+});
+it('stores product validation metadata privately with the same destination protections',async()=>{
+  const root=mkdtempSync(path.join(os.tmpdir(),'aitiarch-product-metrics-'));roots.push(root);
+  const record={rule:'claim_quote_exact' as const,counts:validationCounts({answer:'PRIVATE_ANSWER',claims:[{quote:'PRIVATE_QUOTE',sourceId:'N1'}]},0,65)};
+  await privateValidationLog(root).write(record);
+  const saved=readFileSync(path.join(root,'product-validation-failures.jsonl'),'utf8');
+  expect(JSON.parse(saved)).toEqual(record);expect(saved).not.toMatch(/PRIVATE_|N1/);
+  await expect(privateValidationLog(fileURLToPath(new URL('../',import.meta.url))).write(record)).rejects.toThrow();
+  await expect(privateValidationLog(path.join(root,'.aitiarch')).write(record)).rejects.toThrow();
 });

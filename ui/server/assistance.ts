@@ -8,6 +8,8 @@ import { Store } from './store.ts';
 import { normalizeRel } from './paths.ts';
 import { LedgerStore } from './ledger-store.ts';
 import { prepareRequest, ProviderError, redact, type Provider, type Request } from './providers/index.ts';
+import { ProductValidationError, validateProductResult, validationCounts, type ValidationLog, type ValidationRecord } from './product-validation.ts';
+import { privateValidationLog } from './providers/failure-metrics.ts';
 
 interface Job { path: string; controller: AbortController; done: Promise<void>; run: () => Promise<void>; status: 'queued' | 'pending' | 'complete' | 'error' | 'cancelled' | 'persistence_error'; retry?: () => Promise<void> }
 export class Assistance {
@@ -19,7 +21,9 @@ export class Assistance {
   private ink: InkStore;
   private provider: Provider;
   private notify: (path: string) => void;
-  constructor(store: Store, ink: InkStore, provider: Provider, notify: (path: string) => void = () => {}) {
+  private readonly validationLog:ValidationLog;
+  constructor(store: Store, ink: InkStore, provider: Provider, notify: (path: string) => void = () => {}, validationLog:ValidationLog=privateValidationLog()) {
+    this.validationLog=validationLog;
     this.store = store; this.ink = ink; this.provider = provider; this.notify = notify;
     this.ledger = new LedgerStore(store.rootReal);
   }
@@ -73,28 +77,26 @@ export class Assistance {
     let finish!: () => void;
     const job: Job = { path, controller, status: 'queued', done: new Promise(resolve => { finish = resolve; }), run: async () => {
       let body = '', status: Generation['status'] = 'complete', model: string | null = null, evidence: Generation['evidence'] = [];
+      let resultReceived=false,result:Awaited<ReturnType<Provider['invoke']>>|undefined;
+      const record=async(row:ValidationRecord)=>{try{await this.validationLog.write(row);}catch{/* Metrics never change acceptance or persistence. */}};
       try {
         if (controller.signal.aborted) throw new ProviderError('cancelled');
-        const result = await this.provider.invoke(request, { signal: controller.signal });
+        result = await this.provider.invoke(request, { signal: controller.signal });resultReceived=true;
         if (controller.signal.aborted) throw new ProviderError('cancelled');
-        if (result.id !== frozen.id || result.provider !== 'claude' || typeof result.answer !== 'string' || !result.answer.trim() ||
-            result.answer.length > 100000 || !Array.isArray(result.claims) || result.claims.length > 32 ||
-            !(result.model === null || (typeof result.model === 'string' && /^[\w.:-]{1,100}$/.test(result.model)))) throw new ProviderError('invalid_response');
-        body = redact(result.answer); model = result.model;
-        evidence = result.claims.map(value => {
-          const c = value as { sourceId: string; quote: string };
-          const text = c?.sourceId === 'N1' ? packet.data.note : packet.data.decisions.find(d => d.id === c?.sourceId)?.text;
-          if (!text || typeof c.quote !== 'string' || !c.quote.trim() || c.quote.length > 240 || !text.includes(c.quote)) throw new ProviderError('invalid_response');
-          return { sourceId: c.sourceId, sourceHash: textHash(text), quote: c.quote };
-        });
+        ({body,model,evidence}=validateProductResult(result,frozen.id,packet.data,redact,textHash));
       } catch (e) {
+        if(e instanceof ProductValidationError)await record(e.record);
+        else if(e instanceof ProviderError&&e.validation)await record(e.validation);
+        else if(resultReceived&&!controller.signal.aborted)await record({rule:'product_processing',counts:validationCounts(result)});
         status = controller.signal.aborted ? 'cancelled' : 'error';
-        body = status === 'cancelled' ? 'Request cancelled. No automatic retry.' : e instanceof ProviderError ? e.message : 'Request failed. No automatic retry.';
+        body = status === 'cancelled' ? 'Request cancelled. No automatic retry.' : e instanceof ProviderError||e instanceof ProductValidationError ? e.message : 'Request failed. No automatic retry.';
         evidence = []; model = null;
       }
       const persist = async () => {
-        await this.mutate(path, frozen.text, items => items.map(i => i.id === frozen.id ? { ...i, body,
-          generation: { ...i.generation!, status, model, evidence } } : i));
+        try {
+          await this.mutate(path, frozen.text, items => items.map(i => i.id === frozen.id ? { ...i, body,
+            generation: { ...i.generation!, status, model, evidence } } : i));
+        }catch(error){await record({rule:'ink_persist',counts:validationCounts(result)});throw error;}
         job.status = status; job.retry = undefined;
       };
       try { await persist(); } catch { job.status = 'persistence_error'; job.retry = persist; }

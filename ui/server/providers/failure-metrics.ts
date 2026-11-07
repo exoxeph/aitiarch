@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { inspectClaudeCanary } from './claude-canary.ts';
 import { parseAnswerJson } from './answer-json.ts';
 import { inspectThinkingTokens, type RejectedThinkingField } from './thinking-status.ts';
+import type { ValidationRecord, ValidationLog } from '../product-validation.ts';
 const types = new Set(['system','assistant','user','result','rate_limit_event','stream_event','tool_progress','auth_status','tool_use_summary','permission_denied','prompt_suggestion']);
 const subtypes = new Set(['init','success','error_during_execution','error_max_turns','error_max_budget_usd','error_max_structured_output_retries',
   'hook_started','hook_progress','hook_response','status','compact_boundary','api_retry','task_started','task_progress','task_notification','task_updated',
@@ -43,6 +44,7 @@ function resultShape(value:unknown):ResultShape {
   return result;
 }
 export interface FailureMetadata {
+  productValidation:ValidationRecord|null;
   exitCode: number|null; signal: string|null; stderrCategory: 'none'|'authentication'|'timeout'|'rate_limit'|'other';
   stdoutBytes: number; events: {type:string;subtype:string|null;count:number}[];
   parseError: ParseIssue|null; finalResultPresent: boolean; wallMs:number;
@@ -54,9 +56,9 @@ export interface FailureMetadata {
   isolation:{passed:boolean;fileCount:number;tools:number;mcpServers:number;plugins:number;hookEvents:number;toolAttempts:number;unknownEvents:number};
 }
 export interface FailureLog { write(record: FailureMetadata): Promise<void> }
-interface Observation { exitCode:number|null;signal:string|null;stderr:string;stdout:string;stdoutBytes:number;wallMs:number;stream:boolean;fileCount?:number }
+interface Observation { exitCode:number|null;signal:string|null;stderr:string;stdout:string;stdoutBytes:number;wallMs:number;stream:boolean;fileCount?:number;productValidation?:ValidationRecord }
 export function failureMetadata(input: Observation): FailureMetadata {
-  const out: FailureMetadata = {exitCode:input.exitCode,signal:input.signal,stdoutBytes:input.stdoutBytes,wallMs:Math.round(input.wallMs),
+  const out: FailureMetadata = {productValidation:input.productValidation??null,exitCode:input.exitCode,signal:input.signal,stdoutBytes:input.stdoutBytes,wallMs:Math.round(input.wallMs),
     stderrCategory: !input.stderr ? 'none' : /not logged in|unauthori[sz]ed|authentication|login required|please (?:log|sign) in/i.test(input.stderr) ? 'authentication'
       : /timed? ?out|timeout/i.test(input.stderr) ? 'timeout' : /rate.?limit|too many requests/i.test(input.stderr) ? 'rate_limit' : 'other',
     events:[],parseError:null,finalResultPresent:false,usage:[],thinkingStatusFields:[],resultShape:resultShape(undefined),systemSubtypeCounts:Object.create(null),outputTokenSplit:{thinking:-1,text:-1},
@@ -119,8 +121,11 @@ export function failureMetadata(input: Observation): FailureMetadata {
 const repository = fileURLToPath(new URL('../../../', import.meta.url));
 const queues = new Map<string,Promise<void>>();
 const inside=(base:string,target:string)=>{const rel=path.relative(base,target);return !rel||(rel!=='..'&&!rel.startsWith(`..${path.sep}`)&&!path.isAbsolute(rel));};
-export function privateFailureLog(directory = path.join(os.homedir(),...(process.platform==='win32'?['AppData','Local']:['.config']),'Aitiarch','metrics')): FailureLog {
-  const dir=path.resolve(directory),file=path.join(dir,'provider-failures.jsonl');
+const defaultDirectory=()=>path.join(os.homedir(),...(process.platform==='win32'?['AppData','Local']:['.config']),'Aitiarch','metrics');
+export const privateFailureLog=(directory=defaultDirectory()):FailureLog=>privateLog<FailureMetadata>('provider-failures.jsonl',directory);
+export const privateValidationLog=(directory=defaultDirectory()):ValidationLog=>privateLog<ValidationRecord>('product-validation-failures.jsonl',directory);
+function privateLog<T>(name:string,directory:string):{write(record:T):Promise<void>} {
+  const dir=path.resolve(directory),file=path.join(dir,name);
   const confined=(target:string)=>{if(inside(repository,target)||target.split(/[\\/]/).some(p=>p.toLowerCase()==='.aitiarch'))throw new Error('Private failure metrics cannot be written in the repository or a notebook root.');};
   return {write(record){
     const run=(queues.get(file)??Promise.resolve()).catch(()=>{}).then(async()=>{

@@ -11,7 +11,7 @@ import type { Provider, Request, Result } from '../server/providers/index.ts';
 const roots: string[] = [];
 afterEach(async () => { for (const r of roots.splice(0)) await rm(r, { recursive: true, force: true }); });
 const note = '# Fixture\n\nThe selected paragraph is useful.\n\nA different paragraph.\n';
-async function fixture() {
+async function fixture(validationRecords?: unknown[]) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'aitiarch-invoke-test-')); roots.push(root);
   const bytes = Buffer.from('\uFEFF' + note.replace(/\n/g, '\r\n'));
   await writeFile(path.join(root, 'fixture.md'), bytes);
@@ -23,7 +23,8 @@ async function fixture() {
       options?.signal?.addEventListener('abort', () => reject(new Error('cancelled')));
     }),
   };
-  const store = await Store.open(root), ink = await InkStore.open(root), service = new Assistance(store, ink, provider);
+  const store = await Store.open(root), ink = await InkStore.open(root), service = new Assistance(store, ink, provider, undefined,
+    { write: async (record: unknown) => { validationRecords?.push(record); } });
   const from = note.indexOf('The selected'), to = from + 'The selected paragraph is useful.'.length;
   const input = { id: 'request-one', path: 'fixture.md', action: 'think' as const, question: '', text: note, from, to };
   const complete = (n = 0) => calls[n].resolve({ id: calls[n].request.id, provider: 'claude', model: null,
@@ -133,6 +134,44 @@ it('rejects oversized provider output as an error instead of an unsaveable answe
   await f.service.wait(f.input.id);
   expect(f.service.status(f.input.id).status).toBe('error');
   expect((await f.ink.read('fixture.md')).document.items[0].generation?.status).toBe('error');
+});
+for(const [rule,patch] of [
+  ['result_id',{id:'wrong'}],['result_provider',{provider:'codex'}],['answer_type',{answer:12}],
+  ['answer_empty',{answer:'  '}],['answer_length',{answer:'x'.repeat(100001)}],
+  ['claims_array',{claims:{}}],['claims_count',{claims:Array(33).fill({})}],['model',{model:'invalid model'}],
+  ['claim_source',{claims:[{sourceId:'missing',quote:'Private synthetic'}]}],
+  ['claim_quote_type',{claims:[{sourceId:'N1',quotation:'Private synthetic'}]}],
+  ['claim_quote_empty',{claims:[{sourceId:'N1',quote:' '}]}],
+  ['claim_quote_length',{claims:[{sourceId:'N1',quote:'x'.repeat(241)}]}],
+  ['claim_quote_exact',{claims:[{sourceId:'N1',quote:'Private synthetic'}]}],
+] as const){
+  it(`privately records the first failed product rule: ${rule}`,async()=>{
+    const records:unknown[]=[];const f=await fixture(records);await f.service.start(f.input);
+    f.calls[0].resolve({id:f.input.id,provider:'claude',model:null,answer:'Private synthetic answer',claims:[],usage:null,...patch} as Result);
+    await f.service.wait(f.input.id);
+    expect(f.service.status(f.input.id).status).toBe('error');
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({rule,counts:{answerLength:expect.any(Number),claimsCount:expect.any(Number),claimIndex:expect.any(Number)}});
+    const row=records[0] as {rule:string;counts:Record<string,number>};
+    expect(Object.keys(row).sort()).toEqual(['counts','rule']);
+    expect(Object.values(row.counts).every(v=>typeof v==='number'&&Number.isFinite(v))).toBe(true);
+    expect(JSON.stringify(row)).not.toMatch(/Private synthetic|invalid model|request-one|fixture.md/);
+    expect(await readFile(path.join(f.root,'fixture.md'))).toEqual(f.bytes);
+  });
+}
+it('records unexpected product processing exceptions without retaining exception text',async()=>{
+  const records:unknown[]=[];const f=await fixture(records);await f.service.start(f.input);
+  const result={id:f.input.id,provider:'claude',model:null,claims:[],usage:null,get answer(){throw new Error('PRIVATE_EXCEPTION_SENTINEL');}};
+  f.calls[0].resolve(result as unknown as Result);await f.service.wait(f.input.id);
+  expect(records).toMatchObject([{rule:'product_processing'}]);
+  expect(JSON.stringify(records)).not.toContain('PRIVATE_EXCEPTION_SENTINEL');
+});
+it('records ink persistence rejection separately from answer validation',async()=>{
+  const records:unknown[]=[];const f=await fixture(records);await f.service.start(f.input);
+  const lock=path.join(f.root,'ink/fixture.ink.json.lock');await writeFile(lock,'fixture lock');
+  f.complete();await f.service.wait(f.input.id);await unlink(lock);
+  expect(f.service.status(f.input.id).status).toBe('persistence_error');
+  expect(records).toMatchObject([{rule:'ink_persist'}]);
 });
 it('maps from the latest verified checkpoint rather than an obsolete request snapshot', async () => {
   const f = await fixture(); await f.service.start(f.input);
