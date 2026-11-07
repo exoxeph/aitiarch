@@ -23,7 +23,7 @@ vi.mock('node:fs/promises',async(importOriginal)=>{
 // All credentials and signing keys are generated in RAM by this loopback fake.
 // No account, real token, transcript, or recorded model output is a fixture.
 const cleanup:(()=>Promise<void>)[]=[];
-afterEach(async()=>{faults.partialWrite=false;for(const run of cleanup.splice(0).reverse())await run();});
+afterEach(async()=>{vi.restoreAllMocks();faults.partialWrite=false;for(const run of cleanup.splice(0).reverse())await run();});
 const request={id:'synthetic',action:'think' as const,question:'',selection:'A synthetic sentence.',note:'A synthetic sentence.',decisions:[],turns:[]};
 async function fixture(options:{enabled?:boolean;hourlyCap?:number;timeoutMs?:number}={}){
   const root=await mkdtemp(path.join(os.tmpdir(),'aitiarch-chatgpt-test-'));
@@ -103,7 +103,9 @@ it('sign-in rejects a missing direct-use scope before saving any credential toke
   const f=await fixture();f.setMode('missing-direct-scope');
   const attempt=await f.provider.beginSignIn();
   const auth=await fetch(attempt.url,{redirect:'manual'});
-  await fetch(auth.headers.get('location')!);
+  const failurePage=await fetch(auth.headers.get('location')!);
+  const failureText=await failurePage.text();expect(failureText).toContain('You can close this tab.');
+  for(const token of f.tokens)expect(failureText.includes(token)).toBe(false);
   let errorCode='none';
   try{await attempt.completed;}catch(error){errorCode=(error as {errorCode:string}).errorCode;}
   // Failure output contains booleans only, never even a fake credential value.
@@ -150,13 +152,36 @@ it('preflight uses a bound loopback callback, fresh OAuth secrets, and hints onl
   const f=await fixture();const first=await f.provider.beginSignIn(),a=new URL(first.url),callback=new URL(a.searchParams.get('redirect_uri')!);
   expect({host:callback.hostname,path:callback.pathname,port:Number(callback.port)>0,hint:a.searchParams.get('agent_name_hint')}).toEqual({host:'127.0.0.1',path:'/auth/callback',port:true,hint:'Aitiarch'});
   expect(await readdir(f.root)).toEqual([]);
-  const auth=await fetch(first.url,{redirect:'manual'});await fetch(auth.headers.get('location')!);await first.completed;
+  const auth=await fetch(first.url,{redirect:'manual'});const callbackPage=await fetch(auth.headers.get('location')!);await first.completed;
+  expect(await callbackPage.text()).toContain('You can close this tab.');
   const exchange=f.requests.find(r=>r.route==='/token')!;expect(exchange.body.redirect_uri===callback.href).toBe(true);
   const second=await f.provider.beginSignIn(),b=new URL(second.url);
   expect(b.searchParams.has('agent_name_hint')).toBe(false);
   for(const key of ['state','nonce','code_challenge'])expect(a.searchParams.get(key)!==b.searchParams.get(key)).toBe(true);
   expect(a.searchParams.get('ext_agent_host_id')===b.searchParams.get('ext_agent_host_id')).toBe(true);
   await f.provider.close();await expect(second.completed).rejects.toMatchObject({code:'cancelled'});
+});
+it('rejects a callback after the five-minute window with no save and query-free timeout metadata',async()=>{
+  const f=await fixture(),nativeTimeout=globalThis.setTimeout;let deadline!:()=>void,handle!:NodeJS.Timeout;
+  vi.spyOn(globalThis,'setTimeout').mockImplementation(((callback:(...args:any[])=>void,ms?:number,...args:any[])=>{
+    if(ms===300000){deadline=()=>callback(...args);handle=nativeTimeout(()=>{},ms);return handle;}
+    return nativeTimeout(callback,ms,...args);
+  }) as typeof setTimeout);
+  const attempt=await f.provider.beginSignIn();
+  const openedAt=Date.now();
+  attempt.markBrowserOpened();
+  const auth=await fetch(attempt.url,{redirect:'manual'}),callback=auth.headers.get('location')!,url=new URL(callback);
+  await fetch(url.origin+'/favicon.ico?private=do-not-record-this');
+  vi.spyOn(Date,'now').mockReturnValue(openedAt+300000);clearTimeout(handle);deadline();
+  let failure:any;try{await attempt.completed;}catch(e){failure=e;}
+  vi.restoreAllMocks();
+  const lateCallbackReached=await fetch(callback).then(()=>true,()=>false);
+  expect(lateCallbackReached).toBe(false);
+  expect(failure).toMatchObject({errorCode:'sign_in_timeout',tokensSaved:false,signInDiagnostics:{listenerStarted:true,port:Number(url.port),requestCount:1,paths:{'/favicon.ico':1},secondsFromBrowserOpen:300}});
+  expect(JSON.stringify(failure.signInDiagnostics)).not.toContain('do-not-record-this');
+  expect(await readdir(f.root)).toEqual([]);
+  expect(await f.provider.status()).toMatchObject({connected:false});
+  expect(f.requests.some(r=>r.route==='/token')).toBe(false);
 });
 it('does full PKCE dynamic registration, stable host identity and strict inference',async()=>{
   const f=await fixture();await f.login();

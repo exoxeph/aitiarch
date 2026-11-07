@@ -9,11 +9,12 @@ import { textHash } from '../anchor-cache.ts';
 
 export const planScopes='openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 const issuer='https://auth.openai.com',resource='https://api.openai.com/v1';
-type SignInCode='state_mismatch'|'oauth_error'|'client_id_missing'|'client_id_mismatch'|'code_missing'|'token_exchange_failed'|'id_token_invalid'|'nonce_mismatch'|'subject_mismatch'|'scope_not_granted'|'credential_persist_failed'|'cancelled';
+type SignInCode='state_mismatch'|'oauth_error'|'client_id_missing'|'client_id_mismatch'|'code_missing'|'token_exchange_failed'|'id_token_invalid'|'nonce_mismatch'|'subject_mismatch'|'scope_not_granted'|'credential_persist_failed'|'sign_in_timeout'|'cancelled';
+interface SignInDiagnostics {listenerStarted:boolean;port:number|null;requestCount:number;paths:Record<string,number>;secondsFromBrowserOpen:number|null}
 export class PlanSignInError extends ProviderError {
   readonly tokensSaved=false;
   readonly errorCode:SignInCode;
-  constructor(errorCode:SignInCode){super('not_logged_in',errorCode==='scope_not_granted'?"ChatGPT plan use isn't enabled for this app":'ChatGPT sign-in could not be verified.');this.errorCode=errorCode;}
+  constructor(errorCode:SignInCode){super(errorCode==='cancelled'?'cancelled':errorCode==='sign_in_timeout'?'timeout':'not_logged_in',errorCode==='scope_not_granted'?"ChatGPT plan use isn't enabled for this app":errorCode==='sign_in_timeout'?'ChatGPT sign-in timed out. No credentials were saved.':'ChatGPT sign-in could not be verified.');this.errorCode=errorCode;}
 }
 const hasDirectGrant=(scopes:unknown)=>Array.isArray(scopes)&&scopes.some(s=>s==='chatgpt.tokens.use.direct');
 export interface PlanConfig { enabled?:boolean; configDirectory?:string; notebookRoot?:string; hourlyCap?:number; timeoutMs?:number; testOrigin?:string }
@@ -76,6 +77,10 @@ export class ChatGPTPlan implements Provider {
     this.metadata=m;return m;
   }
   async beginSignIn(){
+    const diagnostics:SignInDiagnostics={listenerStarted:false,port:null,requestCount:0,paths:{},secondsFromBrowserOpen:null};
+    let browserOpenedAt:number|undefined,callbackAt:number|undefined;
+    const failureMetadata=()=>({...diagnostics,paths:{...diagnostics.paths},secondsFromBrowserOpen:browserOpenedAt===undefined?null:Math.max(0,Math.round(((callbackAt??Date.now())-browserOpenedAt)/1000))});
+    try{
     this.ensureEnabled();if(this.signInPending)throw new ProviderError('provider_error','A ChatGPT sign-in is already pending.');
     const epoch=this.authEpoch;await this.vault.check();const meta=await this.discovery();
     const saved=await this.vault.peek();saved.ext_agent_host_id??=this.pendingHost;
@@ -85,9 +90,14 @@ export class ChatGPTPlan implements Provider {
     const completed=new Promise<void>((resolve,fail)=>{complete=resolve;reject=fail;});void completed.catch(()=>{});
     const server=createServer(async(req,res)=>{
       const callback=new URL(req.url??'/',redirect);
+      diagnostics.requestCount++;
+      // Only fixed callback/browser paths are retained; never query strings or arbitrary path text.
+      const requestPath=['/auth/callback','/favicon.ico','/'].includes(callback.pathname)?callback.pathname:'other';
+      diagnostics.paths[requestPath]=(diagnostics.paths[requestPath]??0)+1;
       if(req.method!=='GET'||callback.pathname!=='/auth/callback'){res.writeHead(404).end();return;}
       if(consumed){res.writeHead(400).end('Sign-in attempt already used.');return;}
       consumed=true;
+      callbackAt=Date.now();clearTimeout(timer);
       let token:any;
       try{
         if(callback.searchParams.get('state')!==state)throw new PlanSignInError('state_mismatch');
@@ -105,7 +115,7 @@ export class ChatGPTPlan implements Provider {
         if(epoch!==this.authEpoch)throw new PlanSignInError('cancelled');
         try{await this.vault.locked(async()=>{if(epoch!==this.authEpoch)throw new PlanSignInError('cancelled');await this.vault.write({...saved,client_id:client,subject:identity.sub,issuer:meta.issuer,...record});});}
         catch(e){throw e instanceof PlanSignInError?e:new PlanSignInError('credential_persist_failed');}
-        this.signInRejected=false;this.paused=false;this.signInPending=false;res.writeHead(200,{'Content-Type':'text/plain','Cache-Control':'no-store'}).end('ChatGPT connection completed. Return to Aitiarch.');complete();
+        this.signInRejected=false;this.paused=false;this.signInPending=false;res.writeHead(200,{'Content-Type':'text/plain','Cache-Control':'no-store'}).end('ChatGPT connection completed. You can close this tab. Return to Aitiarch.');complete();
       }catch(e){
         this.signInRejected=true;this.selectedModel=null;
         if(token&&typeof token.refresh_token==='string'){
@@ -113,19 +123,23 @@ export class ChatGPTPlan implements Provider {
         }
         let failure=e instanceof PlanSignInError?e:new PlanSignInError('id_token_invalid');
         try{await this.vault.discardCredentials();}catch{failure=new PlanSignInError('credential_persist_failed');}
-        res.writeHead(400,{'Content-Type':'text/plain','Cache-Control':'no-store'}).end(failure.message);reject(failure);
+        res.writeHead(400,{'Content-Type':'text/plain','Cache-Control':'no-store'}).end(failure.message+' You can close this tab. Return to Aitiarch.');reject(Object.assign(failure,{signInDiagnostics:failureMetadata()}));
       }
       finally{token=undefined;this.signInPending=false;clearTimeout(timer);server.close();this.listener=undefined;this.cancelSignIn=undefined;}
     });
     await new Promise<void>((resolve,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',()=>resolve());});this.listener=server;
+    diagnostics.listenerStarted=true;diagnostics.port=(server.address() as {port:number}).port;
     const redirect='http://127.0.0.1:'+(server.address() as {port:number}).port+'/auth/callback';
-    const stop=()=>{consumed=true;this.signInPending=false;this.signInRejected=true;server.closeAllConnections();server.close();this.listener=undefined;reject(new ProviderError('cancelled','ChatGPT sign-in expired or was cancelled.'));};
-    const timer=setTimeout(stop,300000);timer.unref();this.cancelSignIn=()=>{clearTimeout(timer);stop();};
+    const stop=(reason:'sign_in_timeout'|'cancelled')=>{this.authEpoch++;consumed=true;this.signInPending=false;this.signInRejected=true;server.closeAllConnections();server.close();this.listener=undefined;this.cancelSignIn=undefined;reject(Object.assign(new PlanSignInError(reason),{signInDiagnostics:failureMetadata()}));};
+    let timer=setTimeout(()=>stop('sign_in_timeout'),300000);timer.unref();this.cancelSignIn=()=>{clearTimeout(timer);stop('cancelled');};
     const url=new URL(meta.authorization_endpoint);
     const params:Record<string,string>={client_id:saved.client_id??'dynamic_agent_client',ext_agent_host_id:saved.ext_agent_host_id,response_type:'code',redirect_uri:redirect,scope:planScopes,resource,state,nonce,code_challenge_method:'S256',code_challenge:createHash('sha256').update(verifier).digest('base64url')};
     if(!saved.client_id)params.agent_name_hint='Aitiarch';else if(saved.id_token)params.id_token_hint=saved.id_token;
     for(const [k,v]of Object.entries(params))url.searchParams.set(k,v);
-    return {url:url.href,completed}; // Explicit UI action opens it; never log this URL.
+    // The browser launcher marks this immediately before opening, once per attempt.
+    const markBrowserOpened=()=>{if(browserOpenedAt!==undefined||consumed)return;browserOpenedAt=Date.now();clearTimeout(timer);timer=setTimeout(()=>stop('sign_in_timeout'),300000);timer.unref();};
+    return {url:url.href,completed,markBrowserOpened}; // Never log the authorization URL.
+    }catch(e){const failure=e instanceof ProviderError?e:new ProviderError('provider_error','ChatGPT sign-in could not be started.');throw Object.assign(failure,{signInDiagnostics:failureMetadata()});}
   }
   private async token(body:Record<string,string>){
     const meta=await this.discovery(),r=await this.fetch(meta.token_endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(body)});
