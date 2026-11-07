@@ -215,6 +215,14 @@ for(const mode of ['incomplete','empty','quote-mismatch','unknown','unknown-fiel
   const f=await fixture();await f.login();f.setMode(mode);
   await expect(f.provider.invoke(request,{timeoutMs:400})).rejects.toMatchObject({code:mode==='hang'?'timeout':'invalid_response'});
 });
+
+it('persists the first stream rejection as names and types only',async()=>{
+  const f=await fixture();await f.login();f.setMode('unknown-field');
+  await expect(f.provider.invoke(request,{retry503:false})).rejects.toMatchObject({code:'invalid_response'});
+  const log=await readFile(path.join(f.root,'failures.jsonl'),'utf8');
+  expect(JSON.parse(log).streamRejection).toEqual({condition:'unexpected_field',event:'response.output_text.delta',field:'secret',fieldType:'string'});
+  for(const value of [...f.tokens,request.note,'bad'])expect(log).not.toContain(value);
+});
 it('refuses credentials in the repository or a notebook root before network',async()=>{
   const repo=new ChatGPTPlan({enabled:true,configDirectory:path.resolve('test','forbidden-chatgpt')});
   await expect(repo.checkAvailability()).resolves.toMatchObject({available:false});

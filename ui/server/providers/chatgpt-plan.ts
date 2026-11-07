@@ -233,13 +233,15 @@ export class ChatGPTPlan implements Provider {
       rule='product';validateProductResult(result,request.id,packet.data,redact,textHash,'chatgpt-plan');
       return result;
     }catch(e){
+      const {StreamError}=await import('./plan-stream.ts');
+      const streamRejection=e instanceof StreamError?e.streamRejection:undefined;
       const streamCode=(e as {planCode?:unknown})?.planCode;
       if(typeof streamCode==='string'&&Object.hasOwn(errors,streamCode)){
         code=streamCode;if(code==='subscription_sharing_usage_limit_exceeded')this.paused=true;
         e=new ProviderError('provider_error',errors[code]);
       }
       if(e instanceof ProductValidationError)rule=e.record.rule;
-      try{await this.vault.append('failures.jsonl',{rule,status,code:safeName(code),events:counts,fields,counts:e instanceof ProductValidationError?e.record.counts:null,wallMs:Math.round(performance.now()-start)});}catch{/* No sensitive fallback logs. */}
+      try{await this.vault.append('failures.jsonl',{rule,status,code:safeName(code),events:counts,fields,...(streamRejection?{streamRejection}:{}),counts:e instanceof ProductValidationError?e.record.counts:null,wallMs:Math.round(performance.now()-start)});}catch{/* No sensitive fallback logs. */}
       if(options.signal?.aborted||own.signal.aborted)throw new ProviderError('cancelled');if(signal.aborted)throw new ProviderError('timeout');
       if(e instanceof ProductValidationError){const failure=new ProviderError('invalid_response','ChatGPT returned an invalid answer.');failure.validation=e.record;throw failure;}if(e instanceof ProviderError)throw e;throw new ProviderError('invalid_response');
     }finally{this.active.delete(own);}
