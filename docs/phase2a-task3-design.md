@@ -1,8 +1,9 @@
 # Task 3: invoked AI — approved design
 
 Status: approved with the quotation and isolation conditions below. Tasks 1/2 and housekeeping are
-committed as `22b39d0` and `b15b58d` on `phase-2`. No Task 3 code or live
-provider call has run. Proactivity remains Off; Task 2b stays gated.
+committed as `22b39d0` and `b15b58d` on `phase-2`. The provider slice and one separately approved
+Claude isolation canary preceded product integration. See [Slice A implementation and checks](phase2a-task3-product-check.md).
+No product live check has run. Proactivity remains Off; Task 2b stays gated.
 
 ## Request and context
 
@@ -67,7 +68,11 @@ an unavailable model never silently changes. Store the actual reported model,
 or null if the CLI cannot identify it.
 
 Claude adapter uses print/JSON mode, safe mode, disabled tools/customizations
-and session persistence, explicit `--max-turns 1`, stdin input and an empty isolated temporary working folder
+and session persistence, stdin input and an empty isolated temporary working folder.
+`--max-turns 1` is optional hardening, passed only when advertised; it is not an
+availability requirement. The required boundary is tools off, verified by the
+approved canary. Explicit empty MCP configuration and disabled user hooks are
+part of that profile. The disposable folder is
 outside the project. Codex uses noninteractive exec, JSON events, ephemeral
 mode, an empty isolated working folder, guarded configuration and a read-only sandbox.
 Both adapters are single-response calls with no tools enabled. Notes, decisions
@@ -76,7 +81,9 @@ For Codex, read-only is insufficient evidence of disabled tools. Until an instal
 version has a verified no-tools contract, the production adapter fails closed;
 fake-CLI contract tests do not certify a real executable.
 Installed CLI help must confirm these capabilities; the 2026-11-07 check found
-unresolved single-turn/no-tools guarantees and both real providers stay disabled.
+unresolved guarantees. A later approved Claude canary passed with tools off;
+Codex stays disabled, and no product integration is enabled by that canary.
+See [the Claude result and Codex options](phase2a-claude-canary-codex-findings.md).
 See [the versioned isolation check and canary plan](phase2a-cli-isolation.md).
 Exact argument arrays get executable-contract tests before enabling an adapter. Read-only alone does
 not mean tools are disabled: tool/MCP/hook isolation must be verified, and an
@@ -214,17 +221,17 @@ one Ask, using the selected logged-in provider (or one call per adapter if
 both are selected). Edit one anchor during a delayed response, dismiss one,
 reload, and inspect ink/ledger plus unchanged note bytes. No automatic retries.
 
-Aim for roughly 1–2k input tokens and 300–800 visible output tokens per call:
-about 2–4k input and 600–1,600 visible output tokens across the two calls, plus
+Aim for roughly 3,000 input tokens and 300 visible output tokens per call:
+about 6,000 input and 600 visible output tokens across the two calls, plus
 CLI/system overhead and any reasoning tokens. These are estimates, not a
 quota cap or a promise about subscription allowance. Wall timeout and output
 byte limits cannot cap reasoning usage already billed. Record reported token
 usage if available; do not invent remaining quota or dollar cost. This check
 uses two provider requests; the later five-question Phase 2a check is separate.
 
-## Current implementation boundary
+## Historical provider-slice boundary
 
-The next slice implements only the provider interface and fake-CLI tests. It does
+The initial slice implemented only the provider interface and fake-CLI tests. It did
 not wire toolbar actions, transcript discovery, evidence chips, ink generation or
 the ledger. Automated tests must cover timeout, cancellation, two simultaneous
 requests, missing executable and missing login, plus argument isolation. No live

@@ -118,8 +118,9 @@ try {
   if (readFileSync(note, "utf8") !== expectedNote) throw new Error("Typing did not save expected Markdown text.");
   const cursor = await page.evaluate(() => window.__aitiarch?.["notebook.md"].view.state.selection.main.head);
   if (cursor !== selectedEnd + " typed".length) throw new Error("Ink changed the typing cursor.");
-  if (await page.locator(".margin-card").count() !== 2) throw new Error("Typing lost margin ink.");
-  console.log("TASK 2 LAYOUT PASS: inline 1, margin 2, orphans 2, candidates, narrow/mobile view, scroll, live sidecar refresh, reload, both re-attach paths, typing/cursor, byte-exact note except typed bytes");
+  // Re-attaching the candidate orphan adds a third margin card.
+  await page.waitForFunction(() => document.querySelectorAll(".margin-card").length === 3);
+  console.log("TASK 2 LAYOUT PASS: initially inline 1/margin 2/orphans 2; after re-attachment inline 2/margin 3/orphans 0; candidates, narrow/mobile view, scroll, live sidecar refresh, reload, typing/cursor, byte-exact note except typed bytes");
   console.log(path.join(out, "ink-layout-wide.png"));
   console.log(path.join(out, "ink-layout-narrow.png"));
   console.log(path.join(out, "ink-layout-mobile.png"));

@@ -24,6 +24,7 @@ export interface UiState {
   active: string | null;
 }
 import type { InkDocument, InkItem } from "../shared/ink.ts";
+import type { Invocation } from "../shared/invocation.ts";
 export interface InkSnapshot { document: InkDocument; version: string | null }
 
 export type SaveResult =
@@ -65,6 +66,13 @@ async function ok<T>(method: "GET" | "PUT", url: string, body?: unknown): Promis
 }
 
 export const api = {
+  assistance: () => ok<{ available: boolean; message?: string }>("GET", "/api/assistance"),
+  previewInvocation: (body: Invocation) => ok<unknown>("PUT", "/api/assistance/preview", body),
+  invoke: (body: Invocation) => ok<InkSnapshot>("PUT", "/api/assistance/invoke", body),
+  requestStatus: (id: string) => ok<{ status: string }>("GET", `/api/assistance/status?id=${encodeURIComponent(id)}`),
+  cancelRequest: (id: string) => ok<unknown>("PUT", "/api/assistance/cancel", { id }),
+  retryInkSave: (id: string) => ok<unknown>("PUT", "/api/assistance/retry-save", { id }),
+  inkEvent: (path: string, id: string, event: "shown" | "dismissed") => ok<unknown>("PUT", "/api/assistance/event", { path, id, event }),
   enableAnchorCache: () => ok<{ enabled: boolean }>("PUT", "/api/anchor-cache/enable", { action: "add-ignore-line" }),
   session: () => ok<{ rootName: string; rootPath: string; anchorCache: { enabled: boolean; ignoreFile: string; ignoreLine: string } }>("GET", "/api/session"),
   tree: () => ok<TreeNode>("GET", "/api/tree"),

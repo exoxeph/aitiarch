@@ -25,7 +25,7 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 for (const provider of ['claude', 'codex'] as const) {
   it(`${provider}: records safe arguments, sends data via stdin, removes empty cwd`, async () => {
     const { cli, record } = fixture(provider);
-    expect(await cli.checkAvailability()).toEqual({ available: true });
+    expect(await cli.checkAvailability()).toMatchObject({ available: true });
     const result = await cli.invoke(request());
     expect(result).toMatchObject({ id: 'synthetic-request', provider, answer: 'Answer for synthetic-request', claims: [] });
     const recording = JSON.parse(readFileSync(record, 'utf8'));
@@ -145,11 +145,12 @@ it('preserves multibyte response text across stdout chunks', async () => {
   expect(result.answer).toBe('雪'.repeat(40000));
 });
 for (const [provider, scenario, flag] of [
-  ['claude', 'missing-tools', '--tools'], ['claude', 'missing-turns', '--max-turns'],
+  ['claude', 'missing-tools', '--tools'],
   ['claude', 'missing-persistence', '--no-session-persistence'], ['claude', 'missing-safe', '--safe-mode'],
   ['claude', 'missing-mcp', '--strict-mcp-config'], ['claude', 'missing-settings', '--setting-sources'],
   ['claude', 'missing-skills', '--disable-slash-commands'], ['claude', 'missing-output', '--output-format'],
   ['claude', 'missing-print', '--print'],
+  ['claude', 'missing-explicit-mcp', '--mcp-config'], ['claude', 'missing-hook-settings', '--settings'],
   ['codex', 'missing-sandbox', '--sandbox'], ['codex', 'missing-ephemeral', '--ephemeral'],
   ['codex', 'missing-config', '--ignore-user-config'], ['codex', 'missing-output', '--json'],
   ['codex', 'missing-override', '--config'], ['codex', 'missing-git', '--skip-git-repo-check'],
@@ -193,6 +194,12 @@ it('metadata errors disable the provider and never send context', async () => {
 });
 it('metadata probes close stdin without sending any prompt', async () => {
   const { cli, record } = fixture('claude', 'metadata-eof');
-  expect(await cli.checkAvailability()).toEqual({ available: true });
+  expect(await cli.checkAvailability()).toMatchObject({ available: true });
   expect(existsSync(record)).toBe(false);
 }, 10000);
+it('Claude can run with tools disabled when optional --max-turns is not advertised', async () => {
+  const { cli, record } = fixture('claude', 'missing-turns');
+  expect(await cli.checkAvailability()).toMatchObject({ available: true });
+  await cli.invoke(request());
+  expect(JSON.parse(readFileSync(record, 'utf8')).args).not.toContain('--max-turns');
+});

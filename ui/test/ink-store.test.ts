@@ -181,12 +181,13 @@ describe("persisted re-anchoring", () => {
     await expect(store.read("fixture.md")).rejects.toThrow(/unsupported/);
     expect(readFileSync(file(), "utf8")).toBe(old);
   });
-  it("falls back to strict search when the private snapshot is missing", async () => {
+  it("falls back to strict search after restart when the private snapshot is missing", async () => {
     const s = await seed();
     const cache = path.join(root, ".cache");
     if (existsSync(cache)) rmSync(cache, { recursive: true });
     writeFileSync(path.join(root, "fixture.md"), text.replace(quote, quote.replace("Redis", "Valkey")));
-    const result = await store.reanchor("fixture.md", s.version);
+    const reopened = await InkStore.open(root);
+    const result = await reopened.reanchor("fixture.md", s.version);
     expect(result.document.items[0].attachment.status).toBe("orphaned");
   });
   it("follows successive edits, retaining the original selector and every item", async () => {

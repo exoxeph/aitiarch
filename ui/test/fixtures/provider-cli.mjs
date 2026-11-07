@@ -11,7 +11,7 @@ if (args.includes('--version') || args.includes('--help')) {
     if (input) process.exit(93);
   }
   if (scenario === 'metadata-error') process.exit(2);
-  if (args.includes('--version')) console.log(provider === 'claude' ? '2.1.205 (Claude Code)' : 'codex-cli 0.167.0');
+  if (args.includes('--version')) console.log(provider === 'claude' ? `${scenario === 'verified-version-change' ? '2.1.206' : '2.1.205'} (Claude Code)` : 'codex-cli 0.167.0');
   else {
     const entries = provider === 'claude' ? [
       ['print', '-p, --print Print response and exit'],
@@ -20,9 +20,13 @@ if (args.includes('--version') || args.includes('--help')) {
       ['persistence', '--no-session-persistence Disable session persistence; sessions will not be saved to disk'],
       ['safe', '--safe-mode Start with all customizations (CLAUDE.md, skills, plugins, hooks, MCP servers) disabled'],
       ['mcp', '--strict-mcp-config Only use MCP servers from --mcp-config, ignoring all other MCP configurations'],
+      ['explicit-mcp', '--mcp-config <configs...> Load MCP servers from JSON files or strings'],
+      ['hook-settings', '--settings <file-or-json> Path to a settings JSON file or a JSON string to load additional settings from'],
       ['settings', '--setting-sources <sources> Comma-separated list of setting sources to load'],
       ['skills', '--disable-slash-commands Disable all skills'],
       ['output', '--output-format <format> text, json (single result), stream-json'],
+      ['verbose', '--verbose Enable verbose output'],
+      ['hook-events', '--include-hook-events Include hook events in the stream'],
     ] : [
       ['sandbox', '--sandbox <mode> Sandbox policy: read-only, workspace-write'],
       ['ephemeral', '--ephemeral Run without persisting session files to disk'],
@@ -39,7 +43,7 @@ if (args.includes('--version') || args.includes('--help')) {
 }
 const value = flag => args[args.indexOf(flag) + 1];
 const isolated = provider === 'claude'
-  ? args.includes('--tools') && value('--tools') === '' && value('--max-turns') === '1'
+  ? args.includes('--tools') && value('--tools') === '' && (!args.includes('--max-turns') || value('--max-turns') === '1')
     && args.includes('--safe-mode') && args.includes('--no-session-persistence')
   : value('--sandbox') === 'read-only' && args.includes('--ephemeral')
     && args.includes('--ignore-user-config') && args.includes('features.shell_tool=false')
@@ -50,6 +54,35 @@ if (!isolated || readdirSync(process.cwd()).length) {
 }
 const input = readFileSync(0, 'utf8');
 const packet = JSON.parse(input);
+if (scenario.startsWith('verified-')) {
+  if (value('--output-format') !== 'stream-json' || !args.includes('--include-hook-events') || !args.includes('--verbose') ||
+      value('--setting-sources') !== '' || JSON.parse(value('--settings')).disableAllHooks !== true ||
+      JSON.stringify(JSON.parse(value('--mcp-config'))) !== '{"mcpServers":{}}') process.exit(92);
+  const init = { type: 'system', subtype: 'init', tools: [], mcp_servers: [], plugins: [] };
+  if (scenario === 'verified-tools') init.tools.push('Write');
+  if (scenario === 'verified-mcp') init.mcp_servers.push('unsafe');
+  if (scenario === 'verified-plugin') init.plugins.push('unsafe');
+  console.log(JSON.stringify(init));
+  if (scenario === 'verified-hook') console.log(JSON.stringify({ type: 'system', subtype: 'hook_started' }));
+  if (scenario === 'verified-unknown') console.log(JSON.stringify({ type: 'unexpected' }));
+  console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: scenario === 'verified-attempt' ? 'tool_use' : 'text', text: 'Synthetic answer' }] } }));
+  if (scenario !== 'verified-incomplete') console.log(JSON.stringify({ type: 'result', subtype: 'success',
+    result: JSON.stringify({ answer: `Answer for ${packet.data.id}`, claims: [] }), usage: { input_tokens: 12, output_tokens: 8 } }));
+  process.exit(0);
+}
+if (scenario === 'stream') {
+  if (value('--output-format') !== 'stream-json' || !args.includes('--include-hook-events')
+    || !args.includes('--verbose') || value('--setting-sources') !== ''
+    || JSON.stringify(JSON.parse(value('--mcp-config'))) !== '{"mcpServers":{}}'
+    || JSON.parse(value('--settings')).disableAllHooks !== true) process.exit(92);
+  writeFileSync(record, JSON.stringify({ args }));
+  for (const event of [
+    { type: 'system', subtype: 'init', tools: [], mcp_servers: [], plugins: [] },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'Synthetic answer.' }] } },
+    { type: 'result', subtype: 'success', usage: { input_tokens: 20, output_tokens: 7 } },
+  ]) console.log(JSON.stringify(event));
+  process.exit(0);
+}
 const worker = scenario === 'tree' ? spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { windowsHide: true }) : null;
 writeFileSync(scenario === 'many' ? record + '.' + packet.data.id : record, JSON.stringify({ args, cwd: process.cwd(), input,
   inheritedKey: process.env.OPENAI_API_KEY ?? null, pid: process.pid, childPid: worker?.pid }));

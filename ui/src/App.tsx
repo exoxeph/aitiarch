@@ -35,6 +35,38 @@ export default function App() {
   const listeners = useRef(new Set<(e: ServerEvent) => void>());
   const loaded = useRef(false);
 
+  // Intersection, document visibility and the visible pane determine "shown".
+  // Completion in an inactive tab alone must never produce a ledger event.
+  useEffect(() => {
+    if (boot.state !== "ready") return;
+    const observed = new Set<Element>(), seen = new Set<string>();
+    const show = (el: Element) => {
+      if (document.visibilityState !== "visible" || !el.getClientRects().length) return;
+      const id = (el as HTMLElement).dataset.inkId, path = el.closest<HTMLElement>("[data-note-path]")?.dataset.notePath;
+      if (!id || !path) return;
+      const key = `${path}:${id}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      void api.inkEvent(path, id, "shown").catch(() => { seen.delete(key); setNotice("Could not record that this answer was shown. The answer is preserved."); });
+    };
+    const observer = new IntersectionObserver(entries => { for (const e of entries) if (e.isIntersecting) show(e.target); });
+    const scan = () => {
+      document.querySelectorAll('[data-generated-complete="true"]').forEach(el => {
+        if (!observed.has(el)) { observed.add(el); observer.observe(el); }
+      });
+    };
+    const visible = () => {
+      scan();
+      for (const el of observed) {
+        const r = el.getBoundingClientRect();
+        if (r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth) show(el);
+      }
+    };
+    const mutations = new MutationObserver(scan); mutations.observe(document.body, { childList: true, subtree: true });
+    document.addEventListener("visibilitychange", visible); scan();
+    return () => { observer.disconnect(); mutations.disconnect(); document.removeEventListener("visibilitychange", visible); };
+  }, [boot.state]);
+
   const subscribe = useCallback((fn: (e: ServerEvent) => void) => {
     listeners.current.add(fn);
     return () => void listeners.current.delete(fn);
@@ -298,7 +330,7 @@ export default function App() {
         )}
       </main>
       {showProps && (
-        <aside className="rightpanel" aria-label="Note details and activity">
+        <aside className="rightpanel" aria-label="Note details and activity" data-note-path={active ?? undefined}>
           <div className="right-tabs"><button className={rightTab === "details" ? "on" : ""} onClick={() => setRightTab("details")}>Details</button>
             <button className={rightTab === "activity" ? "on" : ""} onClick={() => setRightTab("activity")}>Activity{activeItems.filter(i => i.attachment.status === "orphaned").length ? ` (${activeItems.filter(i => i.attachment.status === "orphaned").length})` : ""}</button></div>
           {rightTab === "details" && <PropertiesPanel text={active ? (docs[active] ?? activeFile?.text) : undefined} />}
@@ -309,6 +341,18 @@ export default function App() {
               const sel = h.view.state.selection.main;
               void prepareAttach(item, sel.from, sel.to);
             }} />}
+          {rightTab === "activity" && active && <section className="orphan-list" data-note-path={active} aria-label="Requested answers">
+            <h2>Requested answers</h2>
+            {activeItems.filter(i => i.generation).map(i => <article className="orphan-card" key={i.id} data-ink-id={i.id}
+              data-generated-complete={i.generation?.status === "complete" ? "true" : undefined}>
+              <div className="orphan-cap">Claude · {i.generation?.status}{i.generation?.dismissed ? " · dismissed" : ""}</div>
+              <div>{i.body}</div>
+              {i.generation?.status === "pending" && <p className="small muted">If the server restarted, this request was interrupted and will not be rerun automatically.</p>}
+              {i.generation?.status === "complete" && !i.generation.dismissed && <button onClick={() => {
+                void api.inkEvent(active, i.id, "dismissed").then(() => refreshInk(active)).catch(() => setNotice("Dismissal could not be recorded. The answer is preserved."));
+              }}>Dismiss answer</button>}
+            </article>)}
+          </section>}
           {rightTab === "activity" && attachDraft && <section className="attach-preview" aria-label="Review re-attachment">
             <h2>Review re-attachment</h2>
             <div className="small muted">Old quote</div><blockquote>{attachDraft.quote}</blockquote>

@@ -10,12 +10,16 @@ import { normalizeRel, isNotePath, PathError } from "./paths.ts";
 import type { Store } from "./store.ts";
 import { InkStore } from "./ink-store.ts";
 import type { NoteWatcher, WatchEvent } from "./watch.ts";
+import { Assistance } from "./assistance.ts";
+import { ProviderError, type Provider } from "./providers/index.ts";
+import type { Invocation } from "../shared/invocation.ts";
 
 export interface AppOptions {
   store: Store;
   watcher: NoteWatcher;
   distDir: string;
   allowOrigins?: string[];
+  provider?: Provider;
 }
 
 export const CSP = [
@@ -57,6 +61,10 @@ export function createApp(opts: AppOptions) {
   const inkReady = InkStore.open(store.rootReal);
   const token = randomBytes(24).toString("hex");
   const clients = new Set<http.ServerResponse>();
+  const assistance = inkReady.then(ink => new Assistance(store, ink, opts.provider ?? {
+    checkAvailability: async () => ({ available: false, code: "unsupported_cli", message: "Claude is not configured. Start with --claude and an absolute executable path. Codex is disabled." }),
+    invoke: async () => { throw new ProviderError("unsupported_cli"); },
+  }, path => { for (const c of clients) c.write(`event: ink\ndata: ${JSON.stringify({ type: "ink", path })}\n\n`); }));
   let port = 0;
   const extraOrigins = new Set((opts.allowOrigins ?? []).map((o) => o.toLowerCase()));
 
@@ -156,6 +164,27 @@ export function createApp(opts: AppOptions) {
     }
 
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await store.tree());
+
+    if (url.pathname === "/api/assistance" && req.method === "GET") return json(res, 200, await (await assistance).availability());
+    if (url.pathname === "/api/assistance/status" && req.method === "GET") {
+      try { return json(res, 200, (await assistance).status(url.searchParams.get("id") ?? "")); }
+      catch { return json(res, 404, { error: "interrupted", message: "Request not found or interrupted by server restart. It was not rerun." }); }
+    }
+    if (url.pathname.startsWith("/api/assistance/") && req.method === "PUT") {
+      const b = await readBody(req) as Record<string, unknown>, service = await assistance;
+      if (url.pathname === "/api/assistance/preview" || url.pathname === "/api/assistance/invoke") {
+        const input = { id: b.id, path: b.path, action: b.action, question: b.question, text: b.text, from: b.from, to: b.to } as Invocation;
+        if (url.pathname.endsWith("preview")) return json(res, 200, service.preview(input));
+        return json(res, 202, await service.start(input));
+      }
+      if (typeof b.id !== "string") throw new PathError(400, "bad_body", "Invalid request ID.");
+      if (url.pathname.endsWith("/cancel")) { await service.cancel(b.id); return json(res, 200, {}); }
+      if (url.pathname.endsWith("/retry-save")) { await service.retrySave(b.id); return json(res, 200, {}); }
+      if (url.pathname.endsWith("/event") && typeof b.path === "string" && (b.event === "shown" || b.event === "dismissed")) {
+        await service.event(b.path, b.id, b.event); return json(res, 200, {});
+      }
+      throw new PathError(400, "bad_body", "Invalid assistance action.");
+    }
 
     if (url.pathname === "/api/anchor-cache/enable" && req.method === "PUT") {
       const b = (await readBody(req)) as Record<string, unknown>;
@@ -263,6 +292,7 @@ export function createApp(opts: AppOptions) {
     } catch (e) {
       if (res.headersSent) return res.end();
       if (e instanceof PathError) return json(res, e.status, { error: e.code, message: e.message });
+      if (e instanceof ProviderError) return json(res, 400, { error: e.code, message: e.message });
       json(res, 500, { error: "internal" });
     }
   });

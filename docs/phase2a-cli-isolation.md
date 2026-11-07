@@ -1,5 +1,9 @@
 # Installed CLI isolation check and proposed canary
 
+Historical baseline, committed before the subsequent human decision that makes
+Claude's max-turns optional. See [the approved Claude canary result and current
+Codex findings](phase2a-claude-canary-codex-findings.md) for the later outcome.
+
 Checked 2026-11-07, using local metadata commands only. No inference, login,
 credential inspection or provider network call was requested. Versions:
 **Claude Code 2.1.205**, **codex-cli 0.167.0**. Sources are the installed

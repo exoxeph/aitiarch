@@ -82,9 +82,9 @@ In: file tree, tabs (restored from `ui-state.json` inside the notebook folder), 
 format toolbar with **S = failed** (reason is yours; “Don't know yet” writes `{failed: ?}`), read-only
 Properties panel, Ctrl+P commands, Ctrl+O quick switcher, live sync.
 
-Not yet (later phases): block ids, margin/ink/threads, AI actions, diagrams from agents, decision cards,
-branches, track changes, outline/backlinks. Wikilinks never create files. Tables and richer polish come after
-Phase 2.
+Phase 2a now adds inline ink, the margin rail, orphan review and explicitly requested Claude answers.
+Anchors live only in JSON sidecars; no ids are added to Markdown. Threads, decision cards,
+branches, track changes and outline/backlinks remain later work. Wikilinks never create files.
 
 ## Later
 
@@ -92,10 +92,20 @@ Phase 2.
   runs, measurements, backups, `ui-state.json`).
 - Decide how the built bundle ships (not committed for now).
 
-## Invoked AI (Task 3 design)
+## Invoked AI (Slice A)
 
-Aitiarch calls your own Claude or Codex CLI and never handles credentials.
+Aitiarch calls your own Claude CLI and never handles Claude credentials. Codex is disabled.
 The policy on third-party use of Claude plan logins is unsettled; a working
 integration does not establish permission under a subscription agreement.
-See [the approved Task 3 design](../docs/phase2a-task3-design.md). No live
-provider call is enabled by the provider-interface test slice.
+See [the approved Task 3 design](../docs/phase2a-task3-design.md) and
+[Slice A checks and live-check approval boundary](../docs/phase2a-task3-product-check.md).
+
+After building, configure an absolute native executable with
+`node server/main.ts --root <disposable-project>/.aitiarch --claude <absolute-claude-executable> --no-open`.
+Configuration checks version/help only; it makes no model call. Select text and use **Think on this**
+(Ctrl/Cmd+Enter) or **Ask...**. Review the frozen, redacted packet, then explicitly **Send to Claude**.
+Do not perform the live fixture check until separately approved. No automatic requests run.
+
+`npm run check:invoked` builds the UI and exercises it in Edge against an injected fake provider,
+using only an OS-temp synthetic fixture. It never discovers an installed provider. Screenshots
+in `check/out/` are generated, ignored review artifacts. `npm test` includes the held-out mapping gate.

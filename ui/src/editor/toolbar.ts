@@ -1,8 +1,17 @@
-// Floating selection toolbar (Phase 1: format rows + the S = "failed" mark). The AI rows
-// ("Think on this", "Ask…", "Make decision", "Branch") belong to later phases and are not here.
-import { StateField, type EditorState, type TransactionSpec } from "@codemirror/state";
-import { showTooltip, type EditorView, type Tooltip, type TooltipView, type ViewUpdate } from "@codemirror/view";
+// Formatting remains human-only. Invoked AI freezes the selection without editing it.
+import { Facet, StateField, type EditorState, type TransactionSpec } from "@codemirror/state";
+import { keymap, showTooltip, type EditorView, type Tooltip, type TooltipView, type ViewUpdate } from "@codemirror/view";
 import { failedMarkAt, indentLines, markFailed, restoreFailed, setHeading, toggleCodeBlock, toggleInline, toggleList } from "./format.ts";
+
+export type SelectedSource = { text: string; from: number; to: number };
+export const invocationHandlers = Facet.define<{ invoke: (action: "think" | "ask", source: SelectedSource) => void }, { invoke: (action: "think" | "ask", source: SelectedSource) => void } | null>({ combine: values => values[0] ?? null });
+function invoke(view: EditorView, action: "think" | "ask") {
+  const handler = view.state.facet(invocationHandlers), range = view.state.selection.main;
+  if (!handler || range.empty) return false;
+  handler.invoke(action, { text: view.state.doc.toString(), from: range.from, to: range.to });
+  return true;
+}
+export const invokedKeys = keymap.of([{ key: "Mod-Enter", run: view => invoke(view, "think") }]);
 
 function create(view: EditorView): TooltipView {
   const dom = document.createElement("div");
@@ -86,6 +95,10 @@ function create(view: EditorView): TooltipView {
           render();
         }, "failed-btn", multiLine);
     dom.replaceChildren(
+      ...(view.state.facet(invocationHandlers) ? [row(
+        button("Think on this", "Think on this (Ctrl+Enter)", () => { invoke(view, "think"); }),
+        button("Ask...", "Ask about the frozen selection", () => { invoke(view, "ask"); }),
+      )] : []),
       row(
         button("¶", "Plain paragraph", () => apply(setHeading(view.state, 0))),
         ...[1, 2, 3, 4].map((n) => button(`H${n}`, `Heading ${n}`, () => apply(setHeading(view.state, n)))),

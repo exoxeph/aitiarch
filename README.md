@@ -2,7 +2,8 @@
 
 A local-first decision notebook for understanding and defending architectural
 choices made while coding with AI. This workspace contains feasibility tools
-and the minimal local dogfood prototype, without a custom UI.
+and a local notebook UI with separately stored ink and explicit Claude assistance.
+See [UI setup and fixture checks](ui/README.md). Proactive requests remain off.
 
 - [BRIEF.md](BRIEF.md): original vision and human-owned decision principles.
 - [JOURNEY.md](JOURNEY.md): chronological engineering account and measured lessons.

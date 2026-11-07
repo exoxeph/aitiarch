@@ -1,5 +1,16 @@
 import { resolveAnchor, validateAnchor, type Anchor, type Attachment } from "./anchors.ts";
 
+export interface Generation {
+  requestId: string;
+  action: "think" | "ask";
+  provider: "claude";
+  model: string | null;
+  createdAt: string;
+  status: "pending" | "complete" | "error" | "cancelled";
+  evidence: { sourceId: string; sourceHash: string; quote: string }[];
+  dismissed: boolean;
+}
+
 export interface InkItem {
   id: string;
   kind: "answer" | "margin";
@@ -8,6 +19,7 @@ export interface InkItem {
   anchorHistory?: Anchor[];
   anchor: Anchor;
   attachment: Attachment;
+  generation?: Generation;
 }
 export interface InkDocument {
   v: 2;
@@ -38,11 +50,21 @@ export function validateDocument(value: unknown, note: string): asserts value is
       !Array.isArray(d.items) || d.items.length > 1000) throw new Error("Invalid or unsupported ink document.");
   const ids = new Set<string>();
   for (const i of d.items) {
-    if (!(keys(i, ["id", "kind", "body", "originalAnchor", "anchor", "attachment"]) ||
-          keys(i, ["id", "kind", "body", "originalAnchor", "anchor", "attachment", "anchorHistory"])) ||
+    if (!keys(i, ["id", "kind", "body", "originalAnchor", "anchor", "attachment",
+          ...(i.anchorHistory !== undefined ? ["anchorHistory"] : []), ...(i.generation !== undefined ? ["generation"] : [])]) ||
         typeof i.id !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(i.id) || ids.has(i.id) ||
         !["answer", "margin"].includes(i.kind) || typeof i.body !== "string" || i.body.length > 100000) throw new Error("Invalid ink item.");
     ids.add(i.id);
+    if (i.generation !== undefined) {
+      const g = i.generation;
+      if (!keys(g, ["requestId", "action", "provider", "model", "createdAt", "status", "evidence", "dismissed"]) ||
+          g.requestId !== i.id || !["think", "ask"].includes(g.action) || g.provider !== "claude" ||
+          !(g.model === null || (typeof g.model === "string" && /^[\w.:-]{1,100}$/.test(g.model))) ||
+          typeof g.createdAt !== "string" || !Number.isFinite(Date.parse(g.createdAt)) || typeof g.dismissed !== "boolean" ||
+          !["pending", "complete", "error", "cancelled"].includes(g.status) || !Array.isArray(g.evidence) || g.evidence.length > 32 ||
+          g.evidence.some(e => !keys(e, ["sourceId", "sourceHash", "quote"]) || !/^(?:N1|D[1-8])$/.test(e.sourceId) ||
+            !/^[a-f0-9]{64}$/.test(e.sourceHash) || typeof e.quote !== "string" || e.quote.length > 240)) throw new Error("Invalid generation metadata.");
+    }
     if (i.anchorHistory !== undefined && (!Array.isArray(i.anchorHistory) || i.anchorHistory.length > 100)) throw new Error("Invalid ink anchor history.");
     for (const a of [i.anchor, i.originalAnchor, ...(i.anchorHistory ?? [])]) {
       if (!keys(a, ["quote", "prefix", "suffix", "position", "quoteCount", "contextCount"]) || !keys(a.position, ["from", "to"])) throw new Error("Invalid ink anchor.");

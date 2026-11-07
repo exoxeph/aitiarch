@@ -5,13 +5,14 @@ import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
 import type { InkItem } from "../../shared/ink.ts";
 import { MarginRail, type PlacedMargin } from "../ink/MarginRail.tsx";
-import { api, type InkSnapshot, type NoteFile, type ServerEvent } from "../api.ts";
+import { api, ApiError, type InkSnapshot, type NoteFile, type ServerEvent } from "../api.ts";
 import { conflictDecorations, conflictHandlers, conflictsField } from "./conflicts.ts";
 import { toggleInline } from "./format.ts";
 import { livePreview, previewHandlers, wikiResolver } from "./livepreview.ts";
 import { externalChange, NoteSession, type SyncStatus } from "./session.ts";
-import { inkField, setInk } from "./ink.ts";
-import { selectionToolbar } from "./toolbar.ts";
+import { addInk, removeInk, inkField, setInk } from "./ink.ts";
+import { invocationHandlers, invokedKeys, selectionToolbar } from "./toolbar.ts";
+import { useInvocations } from "./useInvocations.tsx";
 
 export interface PaneHandle {
   view: EditorView;
@@ -44,6 +45,14 @@ export function EditorPane(props: Props) {
   const resolverSlot = useRef(new Compartment());
   const viewRef = useRef<EditorView | null>(null);
   const inkVersionRef = useRef(props.inkVersion ?? null);
+  const knownIds = useRef(new Set((props.inkItems ?? []).map(i => i.id)));
+  const sessionRef = useRef<NoteSession | null>(null);
+  const invoked = useInvocations(props.file.path, viewRef, sessionRef, snapshot => {
+    inkVersionRef.current = snapshot.version;
+    knownIds.current = new Set(snapshot.document.items.map(i => i.id));
+    live.current.onInkSaved?.(props.file.path, snapshot);
+  });
+  const invokeRef = useRef(invoked.begin); invokeRef.current = invoked.begin;
 
   useEffect(() => {
     const path = props.file.path;
@@ -51,14 +60,29 @@ export function EditorPane(props: Props) {
     let checkpointing: Promise<void> = Promise.resolve();
     let lastCheckpoint = "";
     async function checkpoint(noteVersion: string, items: InkItem[]) {
+      items = items.filter(i => knownIds.current.has(i.id));
       if (!items.length) return;
-      const key = JSON.stringify([noteVersion, items]);
+      const key = JSON.stringify([noteVersion, items.map(({ id, anchor, attachment }) => ({ id, anchor, attachment }))]);
       if (key === lastCheckpoint) return;
       const job = checkpointing.catch(() => {}).then(async () => {
-        const snapshot = await api.checkpointInk({ path, inkVersion: inkVersionRef.current, noteVersion, items });
-        inkVersionRef.current = snapshot.version;
-        lastCheckpoint = key;
-        live.current.onInkSaved?.(path, snapshot);
+        let updates = items;
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const snapshot = await api.checkpointInk({ path, inkVersion: inkVersionRef.current, noteVersion, items: updates });
+            inkVersionRef.current = snapshot.version;
+            lastCheckpoint = key;
+            live.current.onInkSaved?.(path, snapshot);
+            return;
+          } catch (e) {
+            if (!(e instanceof ApiError) || e.status !== 409 || attempt >= 3) throw e;
+            // A completion may have changed only body/metadata or appended a
+            // second request. Merge mappings, never replace those new fields.
+            const latest = await api.ink(path);
+            if (latest.document.noteVersion !== noteVersion) throw e;
+            inkVersionRef.current = latest.version;
+            updates = latest.document.items.map(i => items.find(u => u.id === i.id) ?? i);
+          }
+        }
       });
       checkpointing = job;
       await job.catch(() => live.current.onInkError?.("Ink mapping could not be saved. Its sidecar is preserved; reload may use strict search."));
@@ -72,6 +96,7 @@ export function EditorPane(props: Props) {
           drawSelection(),
           EditorView.lineWrapping,
           markdown({ addKeymap: false }), // no auto-inserted list markers: the editor never writes text you didn't type
+          invokedKeys,
           keymap.of([
             { key: "Mod-b", run: (v) => (act(v, toggleInline(v.state, "**")), true) },
             { key: "Mod-i", run: (v) => (act(v, toggleInline(v.state, "*")), true) },
@@ -85,11 +110,14 @@ export function EditorPane(props: Props) {
           previewHandlers.of({ openWiki: (t) => live.current.onOpenWiki(t) }),
           resolverSlot.current.of(wikiResolver.of(props.resolver)),
           livePreview,
+          invocationHandlers.of({ invoke: (action, source) => invokeRef.current(action, source) }),
           selectionToolbar,
           EditorView.contentAttributes.of({ "aria-label": `Editing ${path}`, spellcheck: "true" }),
           EditorView.updateListener.of((u) => {
-            if (u.docChanged || u.transactions.some(t => t.effects.some(e => e.is(setInk)))) live.current.onInk?.(path, u.state.field(inkField).items);
-            if (u.docChanged || u.viewportChanged || u.transactions.some(t => t.effects.some(e => e.is(setInk)))) queueMargin();
+            const inkChanged = u.transactions.some(t => t.effects.some(e => e.is(setInk) || e.is(addInk) || e.is(removeInk)));
+            if (u.docChanged || inkChanged) live.current.onInk?.(path, u.state.field(inkField).items);
+            if (u.docChanged || u.viewportChanged || inkChanged) queueMargin();
+            if (inkChanged && session) queueDoc();
             if (!u.docChanged) return;
             if (!u.transactions.some((t) => t.annotation(externalChange))) session.userChanged();
             queueDoc();
@@ -107,6 +135,7 @@ export function EditorPane(props: Props) {
       onStatus: (s) => live.current.onStatus(path, s),
     });
     live.current.onStatus(path, "saved");
+    sessionRef.current = session;
     live.current.register(path, { view, session });
 
     function act(v: EditorView, spec: ReturnType<typeof toggleInline>) {
@@ -181,6 +210,7 @@ export function EditorPane(props: Props) {
       live.current.register(path, null);
       view.destroy();
       viewRef.current = null;
+      sessionRef.current = null;
     };
     // The pane is keyed by path; props.file is only the initial content for this editor instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -195,11 +225,13 @@ export function EditorPane(props: Props) {
   }, [props.visible]);
 
   useEffect(() => {
+    knownIds.current = new Set((props.inkItems ?? []).map(i => i.id));
     if (props.trustedText != null && props.inkVersion !== undefined) inkVersionRef.current = props.inkVersion;
     viewRef.current?.dispatch({ effects: setInk.of({ items: props.inkItems ?? [], trustedText: props.trustedText ?? null }) });
   }, [props.inkItems, props.trustedText, props.inkVersion]);
 
-  return <div className={props.visible ? "ink-surface" : "ink-surface surface-hidden"} ref={surface}>
+  return <div className={props.visible ? "ink-surface" : "ink-surface surface-hidden"} ref={surface} data-note-path={props.file.path}>
+    {invoked.panel}
     <div className="pane" ref={host} data-path={props.file.path} />
     <MarginRail placed={margin} />
   </div>;

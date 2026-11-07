@@ -13,7 +13,7 @@ export function OrphanList({ text, items, onPick, onSelect }: {
     {orphaned.length === 0 && <p className="muted small">No orphaned ink in this note.</p>}
     {orphaned.map(item => {
       const choices = suggestAnchorCandidates(text, item.anchor);
-      return <article className="orphan-card" key={item.id} data-ink-id={item.id}>
+      return <article className="orphan-card" key={item.id} data-ink-id={item.id} data-generated-complete={item.generation?.status === "complete" ? "true" : undefined}>
         <div className="orphan-cap">{item.kind === "answer" ? "Inline answer" : "Margin note"} · {item.attachment.status === "orphaned" ? item.attachment.reason : ""}</div>
         <div className="orphan-body">{item.body}</div>
         <blockquote>{item.anchor.quote}</blockquote>

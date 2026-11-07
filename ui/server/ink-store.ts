@@ -18,6 +18,9 @@ const MAX_INK_BYTES = 8 * 1024 * 1024;
 export class InkStore {
   readonly rootReal: string;
   readonly cache: AnchorCache;
+  // Live mapping provenance remains usable even when disk persistence is off.
+  // A snapshot is authoritative only for its exact normalized-text hash.
+  private seen = new Map<string, string>();
   private constructor(root: string) { this.rootReal = root; this.cache = new AnchorCache(root); }
   static async open(root?: string): Promise<InkStore> { return new InkStore(await resolveRoot({ root })); }
 
@@ -63,6 +66,12 @@ export class InkStore {
   }
 
   private sidecar(rel: string): string { return `ink/${rel.slice(0, -3)}.ink.json`; }
+
+  async lastSeenText(input: string, expectedHash: string | null): Promise<string | null> {
+    const rel = await this.notePath(input), text = this.seen.get(rel);
+    if (text !== undefined && expectedHash !== null && textHash(text) === expectedHash) return text;
+    return this.cache.load(rel, expectedHash);
+  }
 
   async read(input: string): Promise<InkSnapshot> {
     const rel = await this.notePath(input);
@@ -119,7 +128,7 @@ export class InkStore {
         }
       }
       // A crash/cache failure only disables mapping: the sidecar remains valid and search is conservative.
-      if (note) await this.cache.save(rel, note.text).catch(() => false);
+      if (note) { this.seen.set(rel, note.text); await this.cache.save(rel, note.text).catch(() => false); }
       return versionOf(bytes);
     } finally {
       await unlink(temp).catch(e => { if (!missing(e)) throw e; });
@@ -134,7 +143,7 @@ export class InkStore {
     if (snapshot.version !== expectedVersion) throw new Error("Ink version conflict.");
     const note = await this.note(rel);
     if (note?.version === snapshot.document.noteVersion) return snapshot;
-    const previous = await this.cache.load(rel, snapshot.document.lastSeenTextHash);
+    const previous = await this.lastSeenText(rel, snapshot.document.lastSeenTextHash);
     const document: InkDocument = { ...snapshot.document, noteVersion: note?.version ?? null, lastSeenTextHash: note ? textHash(note.text) : null,
       items: note && previous !== null ? mapInkItems(previous, note.text, snapshot.document.items) : snapshot.document.items.map(item => {
         const attachment = note ? resolveAnchor(note.text, item.anchor) : { status: "orphaned" as const, reason: "note-missing" as const };

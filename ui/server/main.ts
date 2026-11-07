@@ -7,17 +7,19 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "./http.ts";
 import { Store } from "./store.ts";
 import { NoteWatcher } from "./watch.ts";
+import { createProvider } from "./providers/index.ts";
 
 function parseArgs(argv: string[]) {
-  const o = { root: undefined as string | undefined, port: undefined as number | undefined, open: true, origins: [] as string[] };
+  const o = { root: undefined as string | undefined, port: undefined as number | undefined, open: true, origins: [] as string[], claude: undefined as string | undefined };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--root") o.root = argv[++i] ?? "";
     else if (a === "--port") o.port = Number(argv[++i]);
     else if (a === "--allow-origin") o.origins.push(argv[++i] ?? "");
+    else if (a === "--claude") o.claude = argv[++i] ?? "";
     else if (a === "--no-open") o.open = false;
     else if (a === "--help" || a === "-h") {
-      console.log("usage: aitiarch [--root <folder>] [--port N] [--no-open]\nDefault root: ./.aitiarch in the current directory.");
+      console.log("usage: aitiarch [--root <folder>] [--port N] [--no-open] [--claude <absolute native executable>]\nDefault root: ./.aitiarch in the current directory. Claude is the only supported live provider; an explicit action is required per call.");
       process.exit(0);
     } else {
       console.error(`Unknown argument: ${a}`);
@@ -39,7 +41,8 @@ try {
 const watcher = new NoteWatcher(store!);
 await watcher.start();
 const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
-const app = createApp({ store: store!, watcher, distDir, allowOrigins: args.origins });
+const provider = args.claude ? createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205" }) : undefined;
+const app = createApp({ store: store!, watcher, distDir, allowOrigins: args.origins, provider });
 
 // Deterministic port per notebook folder, so the same project always opens at the same address.
 const h = parseInt(createHash("sha1").update(store!.rootReal.toLowerCase()).digest("hex").slice(0, 6), 16);
