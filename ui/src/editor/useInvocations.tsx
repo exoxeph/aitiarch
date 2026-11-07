@@ -6,6 +6,7 @@ import { api, ApiError, type InkSnapshot } from '../api.ts';
 import type { NoteSession } from './session.ts';
 import type { SelectedSource } from './toolbar.ts';
 import { addInk, removeInk, setInk } from './ink.ts';
+import {rememberQuestion} from '../threads/questions.ts';
 
 interface Draft { input: Invocation; packet?: unknown; error?: string; warnings?: string[] }
 interface Running { id: string; status: string; error?: string }
@@ -82,6 +83,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       await session.current?.flush();
       if (session.current?.status !== 'saved') throw new Error('Save or resolve this note before sending.');
       const snapshot = await api.invoke(input);
+      rememberQuestion(path,input.id,input.question||'Think on this');
       merge(snapshot); setJobs(all => [...all, { id: input.id, status: 'pending' }]); setDraft(null);
     } catch (e) { setDraft({ ...draft, error: e instanceof Error ? e.message : 'Invocation failed. No automatic retry.' }); }
     finally { setBusy(false); }

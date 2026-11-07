@@ -65,6 +65,7 @@ export function EditorPane(props: Props) {
       const key = JSON.stringify([noteVersion, items.map(({ id, anchor, attachment }) => ({ id, anchor, attachment }))]);
       if (key === lastCheckpoint) return;
       const job = checkpointing.catch(() => {}).then(async () => {
+        if(key===lastCheckpoint)return;
         let updates = items;
         for (let attempt = 0; ; attempt++) {
           try {
@@ -74,11 +75,12 @@ export function EditorPane(props: Props) {
             live.current.onInkSaved?.(path, snapshot);
             return;
           } catch (e) {
-            if (!(e instanceof ApiError) || e.status !== 409 || attempt >= 3) throw e;
+            if (!(e instanceof ApiError) || e.status !== 409 || attempt >= 7) throw e;
+            await new Promise(resolve=>setTimeout(resolve,20*(attempt+1)));
             // A completion may have changed only body/metadata or appended a
             // second request. Merge mappings, never replace those new fields.
             const latest = await api.ink(path);
-            if (latest.document.noteVersion !== noteVersion) throw e;
+            if (latest.document.noteVersion !== noteVersion) { if(session.base.version!==noteVersion)return;throw e; }
             inkVersionRef.current = latest.version;
             updates = latest.document.items.map(i => items.find(u => u.id === i.id) ?? i);
           }

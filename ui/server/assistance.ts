@@ -15,6 +15,7 @@ interface Job { path: string; controller: AbortController; done: Promise<void>; 
 export class Assistance {
   readonly ledger: LedgerStore;
   private jobs = new Map<string, Job>();
+  private starting = new Set<string>();
   private active = 0;
   private writes: Promise<unknown> = Promise.resolve();
   private store: Store;
@@ -54,7 +55,7 @@ export class Assistance {
   }
   async start(input: Invocation): Promise<InkSnapshot> {
     const frozen = freezeInvocation(input), path = normalizeRel(frozen.path);
-    if (this.jobs.has(frozen.id)) throw new Error('Request ID already exists.');
+    if (this.jobs.has(frozen.id)||this.starting.has(frozen.id)) throw new Error('Request ID already exists.');
     const availability = await this.provider.checkAvailability();
     if (!availability.available) throw new ProviderError(availability.code, availability.message);
     const request: Request = { id: frozen.id, action: frozen.action, question: frozen.question, selection: frozen.selection,
@@ -66,11 +67,12 @@ export class Assistance {
       attachment: { status: 'attached', from: frozen.from, to: frozen.to }, generation: { requestId: frozen.id, action: frozen.action,
         provider: this.provider.name==='chatgpt-plan'?'chatgpt-plan':'claude', model: null, createdAt: new Date().toISOString(), status: 'pending', evidence: [], dismissed: false } };
     // Map the newly captured item too if disk changed after the click.
+    this.starting.add(frozen.id);
     const snapshot = await this.mutate(path, frozen.text, (items, text) => {
       if (items.some(i => i.id === frozen.id)) throw new Error('Request ID already exists.');
       return [...items, text === null ? { ...pending, attachment: { status: 'orphaned' as const, reason: 'note-missing' as const } }
         : text === frozen.text ? pending : mapInkItems(frozen.text, text, [pending])[0]];
-    });
+    }).catch(e=>{this.starting.delete(frozen.id);throw e;});
     // The first write requires the current note range. When it changed before
     // submission, retrying via the normal mapping is handled below in mutate.
     const controller = new AbortController();
@@ -102,7 +104,7 @@ export class Assistance {
       try { await persist(); } catch { job.status = 'persistence_error'; job.retry = persist; }
       finally { job.run = async () => {}; finish(); }
     } };
-    this.jobs.set(frozen.id, job); this.pump(); return snapshot;
+    this.jobs.set(frozen.id, job); this.starting.delete(frozen.id);this.pump(); return snapshot;
   }
   private pump() {
     for (const job of this.jobs.values()) if (this.active < 2 && job.status === 'queued') {
@@ -111,6 +113,8 @@ export class Assistance {
     }
   }
   status(id: string) { const j = this.jobs.get(id); if (!j) throw new Error('Request not found or interrupted by server restart.'); return { id, path: j.path, status: j.status }; }
+  activeIds() { return new Set([...this.starting,...[...this.jobs].filter(([,j])=>['queued','pending','persistence_error'].includes(j.status)).map(([id])=>id)]); }
+  async close() {for(const id of this.activeIds())await this.cancel(id);await Promise.allSettled([...this.jobs.values()].map(j=>j.done));}
   wait(id: string) { return this.jobs.get(id)?.done ?? Promise.reject(new Error('Request not found.')); }
   async retrySave(id: string) { const j = this.jobs.get(id); if (!j?.retry) throw new Error('No persistence retry available.'); await j.retry(); }
   async cancel(id: string) {

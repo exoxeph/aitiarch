@@ -1,4 +1,4 @@
-import {lstat,readFile,open,rename,unlink} from 'node:fs/promises';
+import {lstat,readFile,open,rename,unlink,writeFile} from 'node:fs/promises';
 import {execFile} from 'node:child_process';import {promisify} from 'node:util';
 import {randomUUID,createHash} from 'node:crypto';import path from 'node:path';
 import {normalizeRel,isNotePath} from './paths.ts';
@@ -9,7 +9,20 @@ export interface SavedUiState {v:1;tabs:string[];active:string|null;threadDrafts
 const key=(note:string,id:string)=>createHash('sha256').update(note+'\0'+id).digest('hex');
 export class UiStateStore {
  private root:string;private file:string;
+ private tail:Promise<unknown>=Promise.resolve();
  constructor(root:string){this.root=root;this.file=path.join(root,'ui-state.json');}
+ async draftStatus(){let enabled=false;try{await this.ignored(this.file+'.ignore-probe.tmp');enabled=true;}catch{}return {enabled,ignoreLine:'/ui-state.json*',ignoreFile:path.join(this.root,'.gitignore')};}
+ /** Only the authenticated, explicit setup button calls this. No implicit edits. */
+ async enableDrafts(){
+  if((await this.draftStatus()).enabled)return this.draftStatus();
+  const file=path.join(this.root,'.gitignore'),lock=await open(file+'.aitiarch.lock','wx',0o600),temp=file+'.'+randomUUID()+'.tmp';
+  const read=async()=>{try{const s=await lstat(file);if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1||s.size>1024*1024)throw new Error('Unsafe ignore file.');return await readFile(file);}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return Buffer.alloc(0);throw e;}};
+  try{const previous=await read(),text=new TextDecoder('utf-8',{fatal:true}).decode(previous),eol=text.includes('\r\n')?'\r\n':'\n';
+   await writeFile(temp,Buffer.concat([previous,Buffer.from((text&&!text.endsWith('\n')?eol:'')+'/ui-state.json*'+eol)]),{flag:'wx',mode:0o600});
+   if(!(await read()).equals(previous))throw new Error('Ignore file changed.');await rename(temp,file);
+   const status=await this.draftStatus();if(!status.enabled)throw new Error('Ignore coverage could not be verified. Drafts remain in memory.');return status;
+  }finally{await unlink(temp).catch(()=>{});await lock.close();await unlink(file+'.aitiarch.lock');}
+ }
  private async safe(){try{const s=await lstat(this.file);if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1||s.size>2*1024*1024)throw new Error('Unsafe UI state.');}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}}
  async read():Promise<SavedUiState>{await this.safe();let d:any;try{d=JSON.parse(await readFile(this.file,'utf8'));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return {v:1,tabs:[],active:null};throw e;}
   if(!d||typeof d!=='object'||Array.isArray(d))throw new Error('Invalid UI state.');
@@ -21,7 +34,10 @@ export class UiStateStore {
   }return state;
  }
  private async ignored(temporary:string){try{await exec('git',['check-ignore','-q','--',this.file],{cwd:this.root,windowsHide:true,timeout:3000});await exec('git',['check-ignore','-q','--',temporary],{cwd:this.root,windowsHide:true,timeout:3000});}catch{throw new Error('Draft persistence disabled: ui-state.json must be git-ignored. Add /ui-state.json* explicitly (covers atomic temporary files too).');}}
- private async mutate<T>(fn:(s:SavedUiState)=>T,requireIgnored=false){
+ private mutate<T>(fn:(s:SavedUiState)=>T,requireIgnored=false):Promise<T>{
+  const job=this.tail.catch(()=>{}).then(()=>this.mutateLocked(fn,requireIgnored));this.tail=job;return job;
+ }
+ private async mutateLocked<T>(fn:(s:SavedUiState)=>T,requireIgnored=false){
   await this.safe();const lock=await open(this.file+'.lock','wx',0o600),temp=this.file+'.'+randomUUID()+'.tmp';
   try{const s=await this.read();if(requireIgnored||Object.keys(s.threadDrafts??{}).length)await this.ignored(temp);const result=fn(s),data=JSON.stringify(s,null,2)+'\n';if(Buffer.byteLength(data)>2*1024*1024)throw new Error('UI state too large.');
    const f=await open(temp,'wx',0o600);try{await f.writeFile(data);await f.sync();}finally{await f.close();}await this.safe();await rename(temp,this.file);return result;

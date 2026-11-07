@@ -66,6 +66,12 @@ async function ok<T>(method: "GET" | "PUT", url: string, body?: unknown): Promis
 }
 
 export const api = {
+  threads:(path:string)=>ok<InkSnapshot>('GET',`/api/threads?path=${encodeURIComponent(path)}`),
+  threadAction:(path:string,id:string,version:string|null,action:unknown)=>ok<InkSnapshot>('PUT','/api/threads/action',{path,id,version,action}),
+  threadCall:<T,>(action:string,body:unknown)=>ok<T>('PUT','/api/threads/'+action,body),
+  threadDraft:(path:string,id:string)=>ok<{enabled:boolean;ignoreLine:string;ignoreFile:string;draft:{text:string;revision:string}|null}>('GET',`/api/thread-drafts?path=${encodeURIComponent(path)}&id=${encodeURIComponent(id)}`),
+  saveThreadDraft:(path:string,id:string,text:string,revision:string|null)=>ok<{revision:string}>('PUT','/api/thread-drafts/save',{path,id,text,revision}),
+  enableThreadDrafts:()=>ok<{enabled:boolean}>('PUT','/api/thread-drafts/enable',{action:'add-ignore-line'}),
   assistance: () => ok<{ available: boolean; provider?: string; message?: string; warnings?: string[] }>("GET", "/api/assistance"),
   planStatus:()=>ok<{enabled:boolean;connected?:boolean;model?:string|null;hourlyCap?:number;welcome?:boolean}>('GET','/api/chatgpt-plan'),
   planAction:<T,>(action:string,body:unknown={})=>ok<T>('PUT','/api/chatgpt-plan/'+action,body),

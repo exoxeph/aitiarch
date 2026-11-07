@@ -9,6 +9,8 @@ import { indentLines, restoreFailed, setHeading, toggleCodeBlock, toggleInline, 
 import type { SyncStatus } from "./editor/session.ts";
 import { makeWikiResolver } from "./frontmatter.ts";
 import { ChatGPTSettings } from "./ChatGPTSettings.tsx";
+import {ThreadPanel} from './threads/ThreadPanel.tsx';
+import {previewTakeawayInsertion} from '../shared/takeaway-insertion.ts';
 
 type Boot = { state: "loading" } | { state: "error"; message: string } | { state: "ready"; rootName: string; rootPath: string };
 
@@ -21,6 +23,8 @@ export default function App() {
   const onInk = useCallback((path: string, items: InkItem[]) => setMappedInk(m => ({ ...m, [path]: items })), []);
   const onInkSaved = useCallback((path: string, snapshot: InkSnapshot) => setInkFiles(m => ({ ...m, [path]: snapshot })), []);
   const [attachDraft, setAttachDraft] = useState<null | { path: string; id: string; from: number; to: number; noteVersion: string; noteText: string; inkVersion: string | null; quote: string; target: string }>(null);
+  const [threadId,setThreadId]=useState<string|null>(null);
+  const [insertPreview,setInsertPreview]=useState<null|{path:string;id:string;noteText:string;inkVersion:string|null;preview:ReturnType<typeof previewTakeawayInsertion>}>(null);
   const [tabs, setTabs] = useState<string[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [status, setStatus] = useState<Record<string, SyncStatus>>({});
@@ -35,6 +39,7 @@ export default function App() {
   const panes = useRef(new Map<string, PaneHandle>());
   const listeners = useRef(new Set<(e: ServerEvent) => void>());
   const loaded = useRef(false);
+  useEffect(()=>{const open=(event:Event)=>{setThreadId((event as CustomEvent<{id:string}>).detail.id);setRightTab('activity');setShowProps(true);};window.addEventListener('open-thread',open);return()=>window.removeEventListener('open-thread',open);},[]);
 
   // Intersection, document visibility and the visible pane determine "shown".
   // Completion in an inactive tab alone must never produce a ledger event.
@@ -242,6 +247,24 @@ export default function App() {
       setAttachDraft(null);
     } catch (e) { setAttachDraft(null); setNotice(e instanceof ApiError && e.status === 409 ? "The note or ink changed since selection. Review it and try again." : "Re-attachment could not be saved."); }
   };
+  const prepareInsert=async(item:InkItem)=>{
+    if(!active)return;const h=panes.current.get(active);if(!h)throw new Error('Open the note first.');
+    await h.session.flush();if(h.session.status!=='saved')throw new Error('Save or resolve the note before insertion.');
+    const [disk,s]=await Promise.all([api.file(active),api.threads(active)]),latest=s.document.items.find(i=>i.id===item.id);
+    if(disk.version!==h.session.base.version||disk.text!==h.view.state.doc.toString()||!latest)throw new Error('The note changed. Review it before insertion.');
+    setInsertPreview({path:active,id:item.id,noteText:disk.text,inkVersion:s.version,preview:previewTakeawayInsertion(disk,latest,disk.version)});
+  };
+  const applyInsert=async()=>{
+    const p=insertPreview;if(!p)return;setInsertPreview(null);
+    try{const h=panes.current.get(p.path);if(!h||h.session.status!=='saved'||h.view.state.doc.toString()!==p.noteText)throw new Error('The note changed. Review a new insertion preview.');
+      const [disk,s]=await Promise.all([api.file(p.path),api.threads(p.path)]);
+      const latest=s.document.items.find(i=>i.id===p.id);
+      if(!latest||disk.version!==p.preview.noteVersion)throw new Error('The note or thread changed. Review a new insertion preview.');
+      const checked=previewTakeawayInsertion(disk,latest,p.preview.noteVersion);
+      if(JSON.stringify(checked)!==JSON.stringify(p.preview))throw new Error('The note or takeaway changed. Review a new insertion preview.');
+      h.view.dispatch({changes:p.preview.changes});await h.session.flush();if(h.session.status!=='saved')throw new Error('Insertion has a save conflict. Resolve it in the editor.');
+    }catch(e){setNotice(e instanceof Error?e.message:'Insertion failed.');}
+  };
   const withView = (fn: (h: PaneHandle) => void) => () => {
     const h = activeHandle();
     if (h) fn(h);
@@ -343,18 +366,8 @@ export default function App() {
               const sel = h.view.state.selection.main;
               void prepareAttach(item, sel.from, sel.to);
             }} />}
-          {rightTab === "activity" && active && <section className="orphan-list" data-note-path={active} aria-label="Requested answers">
-            <h2>Requested answers</h2>
-            {activeItems.filter(i => i.generation).map(i => <article className="orphan-card" key={i.id} data-ink-id={i.id}
-              data-generated-complete={i.generation?.status === "complete" ? "true" : undefined}>
-              <div className="orphan-cap">{i.generation?.provider==='chatgpt-plan'?'ChatGPT plan':'Claude'} · {i.generation?.status}{i.generation?.dismissed ? " · dismissed" : ""}</div>
-              <div>{i.body}</div>
-              {i.generation?.status === "pending" && <p className="small muted">If the server restarted, this request was interrupted and will not be rerun automatically.</p>}
-              {i.generation?.status === "complete" && !i.generation.dismissed && <button onClick={() => {
-                void api.inkEvent(active, i.id, "dismissed").then(() => refreshInk(active)).catch(() => setNotice("Dismissal could not be recorded. The answer is preserved."));
-              }}>Dismiss answer</button>}
-            </article>)}
-          </section>}
+          {active&&<div hidden={rightTab!=='activity'}><ThreadPanel path={active} items={activeItems} version={currentInk?.version??null} saved={s=>onInkSaved(active,s)} insert={prepareInsert} openId={threadId} onOpen={setThreadId} visible={rightTab==='activity'}/></div>}
+          {rightTab==='activity'&&insertPreview&&<section className="attach-preview" aria-label="Review takeaway insertion"><h2>Insert your takeaway</h2><p>This adds only your submitted text through the editor. Undo works normally.</p><pre>{insertPreview.preview.changes.insert}</pre><button onClick={()=>void applyInsert()}>Insert my takeaway</button><button onClick={()=>setInsertPreview(null)}>Cancel insertion</button></section>}
           {rightTab === "activity" && attachDraft && <section className="attach-preview" aria-label="Review re-attachment">
             <h2>Review re-attachment</h2>
             <div className="small muted">Old quote</div><blockquote>{attachDraft.quote}</blockquote>

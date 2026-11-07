@@ -7,7 +7,7 @@ export type HumanThreadAction={type:'open'|'skip'|'reopen'|'dismiss'|'restore'}|
 interface ReplyInput {id:string;parentId:string;provider:ThreadProvider;action:'think'|'ask';purpose:'followup'|'summary'}
 export class ThreadStore {
  private ink:InkStore;private drafts:UiStateStore;readonly ledger:LedgerStore;
- constructor(ink:InkStore,drafts:UiStateStore){this.ink=ink;this.drafts=drafts;this.ledger=new LedgerStore(ink.rootReal);}
+ constructor(ink:InkStore,drafts:UiStateStore,ledger?:LedgerStore){this.ink=ink;this.drafts=drafts;this.ledger=ledger??new LedgerStore(ink.rootReal);}
  async read(note:string){const s=await this.ink.read(note);return {...s,document:{...s.document,items:s.document.items.map(i=>({...i,thread:i.thread??newThread(i)}))}};}
  private async change(note:string,id:string,version:string|null,fn:(i:InkItem)=>void){
   let s=await this.ink.read(note);if(s.version!==version)throw new Error('Ink version conflict.');s=await this.ink.reanchor(note,version);
@@ -69,7 +69,7 @@ export class ThreadStore {
   if(i.thread?.summary.reply?.id===replyId){if(!this.canSummarize(i))throw new Error('Takeaway reveal required.');if(!i.thread.summary.revealedAt)s=await this.change(note,id,s.version,item=>{item.thread!.summary.revealedAt=new Date().toISOString();});}
   await this.ledger.append({id:randomUUID(),inkId:id,requestId:replyId,note,event:'shown',at:new Date().toISOString()});return s;
  }
- async reconcileInterrupted(note:string,active:ReadonlySet<string>){const s=await this.ink.read(note);for(const i of s.document.items){if(!i.thread&&!i.generation)continue;const current=await this.ink.read(note);
+ async reconcileInterrupted(note:string,active:ReadonlySet<string>){const s=await this.ink.read(note);for(const i of s.document.items){if(![...(i.generation?[{id:i.id,generation:i.generation}]:[]),...(i.thread?.followups??[]),...(i.thread?.summary.reply?[i.thread.summary.reply]:[])].some(r=>r.generation.status==='pending'&&!active.has(r.id)))continue;const current=await this.ink.read(note);
   await this.change(note,i.id,current.version,item=>{if(item.generation?.status==='pending'&&!active.has(item.id)){item.generation.status='error';item.body='Request interrupted. No automatic retry.';item.generation.evidence=[];}
    for(const r of [...item.thread!.followups,...(item.thread!.summary.reply?[item.thread!.summary.reply]:[])])if(r.generation.status==='pending'&&!active.has(r.id)){r.generation.status='error';r.body='';r.failure={code:'interrupted'};r.generation.evidence=[];}
   });}return this.read(note);

@@ -1,4 +1,7 @@
 import { UiStateStore } from './ui-state-store.ts';
+import {ThreadStore} from './thread-store.ts';
+import {ThreadRuntime,type ThreadRequest} from './thread-runtime.ts';
+import {validId} from '../shared/threads.ts';
 // Local HTTP server: JSON API + SSE + static UI. Loopback only, with Host/Origin checks, a per-launch
 // cookie token, and a strict Content-Security-Policy, because this process can write to your notes.
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -112,6 +115,10 @@ export function createApp(opts: AppOptions) {
   };
 
   const uiStateStore = new UiStateStore(store.rootReal);
+  const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
+  const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
+    name:'claude',checkAvailability:async()=>({available:false,code:'unsupported_cli',message:'Provider disabled. Enable it explicitly at server startup.'}),invoke:async()=>{throw new ProviderError('unsupported_cli');}
+  },path=>{for(const c of clients)c.write(`event: ink\ndata: ${JSON.stringify({type:'ink',path})}\n\n`);}));
   async function readUiState(): Promise<UiState> {
     try { const {v,tabs,active}=await uiStateStore.read();return {v,tabs,active}; }
     catch { return {v:1,tabs:[],active:null}; }
@@ -154,6 +161,36 @@ export function createApp(opts: AppOptions) {
     }
 
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await store.tree());
+
+    if(url.pathname==='/api/threads'&&req.method==='GET'){
+      const active=new Set([...(await assistance).activeIds(),...(await runtimeReady).activeIds()]);
+      return json(res,200,await (await threadsReady).reconcileInterrupted(url.searchParams.get('path')??'',active));
+    }
+    if(url.pathname==='/api/thread-drafts/status'&&req.method==='GET')return json(res,200,await uiStateStore.draftStatus());
+    if(url.pathname==='/api/thread-drafts'&&req.method==='GET'){
+      const status=await uiStateStore.draftStatus();return json(res,200,{...status,draft:status.enabled?await uiStateStore.draft(url.searchParams.get('path')??'',url.searchParams.get('id')??''):null});
+    }
+    if((url.pathname.startsWith('/api/threads/')||url.pathname.startsWith('/api/thread-drafts/'))&&req.method==='PUT'){
+      const b=await readBody(req) as any,threads=await threadsReady,runtime=await runtimeReady;
+      try{
+        if(url.pathname==='/api/thread-drafts/enable'){
+          if(b.action!=='add-ignore-line')throw new Error('Explicit ignore setup action required.');return json(res,200,await uiStateStore.enableDrafts());
+        }
+        if(typeof b.path!=='string'||!validId(b.id))throw new Error('Invalid thread target.');
+        if(url.pathname==='/api/thread-drafts/save')return json(res,200,await threads.saveDraft(b.path,b.id,b.text,b.revision));
+        if(url.pathname==='/api/threads/action')return json(res,200,await threads.act(b.path,b.id,b.version,b.action));
+        if(url.pathname==='/api/threads/notice'){
+          const a=await (await assistance).availability();return json(res,200,await threads.providerNotice(b.path,b.id,a.provider==='chatgpt-plan'?'chatgpt-plan':'claude'));
+        }
+        if(url.pathname==='/api/threads/preview')return json(res,200,await runtime.preview(b));
+        if(url.pathname==='/api/threads/invoke')return json(res,202,await runtime.start(b as ThreadRequest));
+        if(url.pathname==='/api/threads/shown')return json(res,200,await threads.shown(b.path,b.id,b.replyId));
+        if(url.pathname==='/api/threads/status')return json(res,200,{status:runtime.status(b.replyId)});
+        if(url.pathname==='/api/threads/retry-save'){await runtime.retrySave(b.replyId);return json(res,200,await threads.read(b.path));}
+        if(url.pathname==='/api/threads/cancel'){runtime.cancel(b.replyId);return json(res,200,{});}
+      }catch(e){return json(res,409,{error:'thread_conflict',message:e instanceof Error?e.message:'Thread action failed. Original preserved.'});}
+      throw new PathError(400,'bad_body','Unknown thread action.');
+    }
 
     if(url.pathname==='/api/chatgpt-plan'&&req.method==='GET')return json(res,200,opts.plan?await opts.plan.status():{enabled:false});
     if(url.pathname.startsWith('/api/chatgpt-plan/')&&req.method==='PUT'){
@@ -325,11 +362,12 @@ export function createApp(opts: AppOptions) {
         });
       });
     },
-    close(): Promise<void> {
+    async close(): Promise<void> {
       clearInterval(ka);
       for (const c of clients) c.end();
       server.closeAllConnections();
-      return new Promise((r) => server.close(() => r()));
+      await new Promise<void>((r) => server.close(() => r()));
+      await (await assistance).close();await (await runtimeReady).close();
     },
   };
 }

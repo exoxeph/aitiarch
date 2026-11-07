@@ -47,6 +47,11 @@ it('freezes context before awaiting and persists pending v2 ink without changing
   expect((await f.ink.read('fixture.md')).document.items[0]).toMatchObject({ body: 'Synthetic explanation.', generation: { status: 'complete', provider: 'claude' } });
   expect(await readFile(path.join(f.root, 'fixture.md'))).toEqual(f.bytes);
 });
+it('marks a newly written initial answer active before notifying thread reconciliation',async()=>{
+ const f=await fixture();let reserved=false;let service!:Assistance;
+ service=new Assistance(f.store,f.ink,{name:'claude',checkAvailability:async()=>({available:true}),invoke:async r=>({id:r.id,provider:'claude',model:null,answer:'Synthetic.',claims:[],usage:null})},()=>{reserved=reserved||service.activeIds().has(f.input.id);},{write:async()=>{}});
+ await service.start(f.input);await service.wait(f.input.id);expect(reserved).toBe(true);
+});
 it('maps a delayed answer through an external insertion and survives reload', async () => {
   const f = await fixture(); await f.service.start(f.input);
   await writeFile(path.join(f.root, 'fixture.md'), 'An external insertion.\n\n' + note);

@@ -69,7 +69,7 @@ try {
   console.log('invoked check: reload reached');
   await page.getByRole('button', { name: /^Activity/ }).click();
   await page.getByRole('region', { name: 'Orphaned ink' }).getByText('Synthetic answer 2.', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Dismiss answer', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Dismiss thread', exact: true }).first().click();
   console.log('invoked check: dismissal reached');
   await page.waitForTimeout(400);
   const ledger = JSON.parse(await readFile(path.join(root, 'ledger.json'), 'utf8'));
@@ -100,7 +100,9 @@ try {
   await select('A unique selected sentence.'); await page.keyboard.press('Control+Enter');
   await page.getByRole('button', { name: 'Send to Claude', exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll('[data-request-status="pending"]').length === 1);
-  const lockPath = path.join(root, 'ink/fixture.ink.json.lock'); await writeFile(lockPath, 'Synthetic lock');
+  const lockPath = path.join(root, 'ink/fixture.ink.json.lock');
+  // Acquire our fixture lock; never truncate a lock owned by an in-flight checkpoint.
+  for(let n=0;;n++){try{await writeFile(lockPath,'Synthetic lock',{flag:'wx'});break;}catch(e){if(e.code!=='EEXIST'||n>=100)throw e;await new Promise(r=>setTimeout(r,20));}}
   pending.shift()();
   try { await page.getByRole('button', { name: 'Retry saving answer (no new call)', exact: true }).waitFor(); }
   catch (e) {
@@ -116,10 +118,10 @@ try {
   assert.equal(calls.length, 4, 'reload and save-only retry must not call inference again');
   after = await readFile(path.join(root, 'fixture.md'));
   assert(after.toString('utf8').startsWith('\uFEFFTyped while loading.\r\n\r\n'));
-  await mkdir(path.join(here, 'out'), { recursive: true });
-  await page.screenshot({ path: path.join(here, 'out/invoked-wide.png'), fullPage: true });
+  const screenshots=await mkdtemp(path.join(os.tmpdir(),'aitiarch-invoked-screens-'));
+  await page.screenshot({ path: path.join(screenshots, 'invoked-wide.png'), fullPage: true });
   await page.setViewportSize({ width: 620, height: 850 });
-  await page.screenshot({ path: path.join(here, 'out/invoked-narrow.png'), fullPage: true });
+  await page.screenshot({ path: path.join(screenshots, 'invoked-narrow.png'), fullPage: true });
   console.log(JSON.stringify({ passed: true, calls: calls.length, provider: 'fake only', checks: ['toolbar', 'Ctrl+Enter', 'Ask', 'preview-no-call', 'frozen selection',
     'typing while loading', 'delayed mapping', 'preview-time duplication persisted', 'orphan preservation', 'reload', 'save-only retry after reload', 'shown/dismissed ledger', 'BOM+CRLF preserved', 'wide/narrow'] }));
 } finally { await browser?.close(); await app.close(); await rm(root, { recursive: true, force: true }); }
