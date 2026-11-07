@@ -1,4 +1,5 @@
-import { access, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { access, mkdtemp, readdir } from 'node:fs/promises';
+import { cleanupProviderTemp, type CleanupLog } from './temp-cleanup.ts';
 import { constants } from 'node:fs';
 import { spawnIsolated, killTree } from './launcher.ts';
 import os from 'node:os';
@@ -51,6 +52,7 @@ export interface Configuration {
   prefixArgs?: readonly string[];
   contract: 'fake' | 'unverified' | 'claude-canary-2.1.205';
   failureLog?: FailureLog;
+  cleanupLog?: CleanupLog;
   // Optional in-memory diagnostic observer; never receives output or prompt text.
   onMetadata?: (record:FailureMetadata)=>void;
 }
@@ -205,6 +207,8 @@ export function createProvider(configuration: Configuration): Provider {
         });
         // EPIPE can occur after cancellation or a CLI rejecting input; close handles it.
         child.stdin.on('error', () => {});
+        // EOF is insufficient: wait for full process/stdio close and tree-kill
+        // completion before validating output or releasing the working directory.
         child.once('close', async (code, closedSignal) => {
           exitCode=code;signal=closedSignal;
           clearTimeout(timer); options.signal?.removeEventListener('abort', abort);
@@ -228,7 +232,7 @@ export function createProvider(configuration: Configuration): Provider {
     } finally {
       try { config.onMetadata?.(failureMetadata({exitCode,signal,stdoutBytes,fileCount,
         stdout:Buffer.concat(stdout).toString('utf8'),stderr:Buffer.concat(stderr).toString('utf8'),wallMs:performance.now()-start,stream,productValidation})); }catch{/* Observers cannot change acceptance or the provider outcome. */}
-      if(cwd)await rm(cwd, { recursive: true, force: true });
+      if(cwd)await cleanupProviderTemp(cwd,{log:config.cleanupLog});
     }
   } };
 }

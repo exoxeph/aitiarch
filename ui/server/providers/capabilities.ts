@@ -1,6 +1,7 @@
 import { metadataOutput } from './launcher.ts';
 import { managedSettingsWarnings } from './managed-settings.ts';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
+import { cleanupProviderTemp } from './temp-cleanup.ts';
 import os from 'node:os';
 import path from 'node:path';
 import type { Configuration, ErrorCode, ProviderName } from './index.ts';
@@ -82,5 +83,5 @@ export async function probeCapabilities(config: Configuration, env: NodeJS.Proce
   } catch {
     return { available: false, code: 'unsupported_cli',
       message: 'Provider disabled: metadata check failed, timed out, or exceeded its output limit. No request was sent.' };
-  } finally { await rm(cwd, { recursive: true, force: true }); }
+  } finally { await cleanupProviderTemp(cwd,{log:config.cleanupLog}); }
 }

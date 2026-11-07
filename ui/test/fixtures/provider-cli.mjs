@@ -110,6 +110,13 @@ if (scenario === 'stream') {
 const worker = scenario === 'tree' ? spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { windowsHide: true }) : null;
 writeFileSync(scenario === 'many' ? record + '.' + packet.data.id : record, JSON.stringify({ args, cwd: process.cwd(), input,
   inheritedKey: process.env.OPENAI_API_KEY ?? null, pid: process.pid, childPid: worker?.pid }));
+if (scenario === 'late-exit' || scenario === 'late-hang') {
+  process.stdout.end(JSON.stringify({subtype:'success',result:JSON.stringify({answer:`Answer for ${packet.data.id}`,claims:[]})}));
+  process.stderr.end();
+  if(scenario==='late-hang')setInterval(()=>{},1000);
+  else setTimeout(()=>{writeFileSync(record+'.exited','exited');process.exit(0);},300);
+  await new Promise(()=>{});
+}
 if (scenario === 'login') { process.stderr.write('Not logged in: synthetic-private-detail'); process.exit(1); }
 if (scenario === 'invalid') { process.stdout.write('not JSON'); process.exit(0); }
 if (scenario === 'overflow') { process.stdout.write('x'.repeat(300_000)); process.exit(0); }

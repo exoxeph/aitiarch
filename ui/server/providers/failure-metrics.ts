@@ -124,6 +124,7 @@ const inside=(base:string,target:string)=>{const rel=path.relative(base,target);
 const defaultDirectory=()=>path.join(os.homedir(),...(process.platform==='win32'?['AppData','Local']:['.config']),'Aitiarch','metrics');
 export const privateFailureLog=(directory=defaultDirectory()):FailureLog=>privateLog<FailureMetadata>('provider-failures.jsonl',directory);
 export const privateValidationLog=(directory=defaultDirectory()):ValidationLog=>privateLog<ValidationRecord>('product-validation-failures.jsonl',directory);
+export const privateCleanupLog=(directory=defaultDirectory())=>privateLog<import('./temp-cleanup.ts').CleanupNote>('provider-cleanup.jsonl',directory);
 function privateLog<T>(name:string,directory:string):{write(record:T):Promise<void>} {
   const dir=path.resolve(directory),file=path.join(dir,name);
   const confined=(target:string)=>{if(inside(repository,target)||target.split(/[\\/]/).some(p=>p.toLowerCase()==='.aitiarch'))throw new Error('Private failure metrics cannot be written in the repository or a notebook root.');};

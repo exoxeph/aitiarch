@@ -160,3 +160,18 @@ location is not checked because the current documentation says it is not read.
 Sources: [CLI reference](https://code.claude.com/docs/en/cli-reference),
 [hooks reference](https://code.claude.com/docs/en/hooks), and
 [managed settings locations](https://code.claude.com/docs/en/managed-settings#where-each-mechanism-stores-the-policy).
+
+### Temporary-directory cleanup
+
+Provider calls wait for child-process and stdio closure, including process-tree
+termination on timeout or cancellation, before cleaning their empty working
+directory. Cleanup retries EBUSY, EPERM and ENOTEMPTY up to five total attempts
+with 100/200/400/800 ms backoff. An exhausted cleanup cannot replace a validated
+answer or its primary validation error. The private `provider-cleanup.jsonl`
+contains only the error code and attempt count, never a path or output text.
+
+At application startup, sweep only direct, real OS-temp directories named
+`aitiarch-headless-` or `aitiarch-capabilities-` followed by the six-character
+generated suffix, and only when their modification time is older than 24 hours.
+Skip directory links. Replay and capture directories are excluded, including
+saved `result.txt` and `context.json` evidence awaiting explicit deletion.

@@ -8,6 +8,7 @@ import { createApp } from "./http.ts";
 import { Store } from "./store.ts";
 import { NoteWatcher } from "./watch.ts";
 import { createProvider } from "./providers/index.ts";
+import { sweepStaleProviderTemps } from "./providers/temp-cleanup.ts";
 
 function parseArgs(argv: string[]) {
   const o = { root: undefined as string | undefined, port: undefined as number | undefined, open: true, origins: [] as string[], claude: undefined as string | undefined };
@@ -30,6 +31,7 @@ function parseArgs(argv: string[]) {
 }
 
 const args = parseArgs(process.argv.slice(2));
+await sweepStaleProviderTemps();
 let store: Store;
 try {
   store = await Store.open(args.root);
