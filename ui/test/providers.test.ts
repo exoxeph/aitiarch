@@ -10,7 +10,7 @@ const script = fileURLToPath(new URL('./fixtures/provider-cli.mjs', import.meta.
 function fixture(provider: 'claude' | 'codex' = 'claude', scenario = 'success') {
   const root = mkdtempSync(path.join(os.tmpdir(), 'aitiarch-provider-test-')); roots.push(root);
   const record = path.join(root, 'record.json');
-  const cli = createProvider({ provider, contract: 'fake', command: process.execPath,
+  const cli = createProvider({ provider, contract: 'fake', command: process.execPath, failureLog:{write:async()=>{}},
     prefixArgs: [script, scenario, record, provider] });
   return { cli, record };
 }
@@ -39,12 +39,12 @@ for (const provider of ['claude', 'codex'] as const) {
   });
 }
 it('blocks unverified production CLI contracts before spawning', async () => {
-  const cli = createProvider({ provider: 'codex', command: process.execPath, contract: 'unverified' });
+  const cli = createProvider({ provider: 'codex', command: process.execPath, contract: 'unverified',failureLog:{write:async()=>{}} });
   expect(await cli.checkAvailability()).toMatchObject({ available: false, code: 'unsupported_cli' });
   await expect(cli.invoke(request())).rejects.toMatchObject({ code: 'unsupported_cli' });
 });
 it('missing CLI is actionable, with no provider fallback', async () => {
-  const cli = createProvider({ provider: 'claude', command: path.join(os.tmpdir(), 'aitiarch-no-such-cli.exe'), contract: 'fake' });
+  const cli = createProvider({ provider: 'claude', command: path.join(os.tmpdir(), 'aitiarch-no-such-cli.exe'), contract: 'fake',failureLog:{write:async()=>{}} });
   expect(await cli.checkAvailability()).toMatchObject({ available: false, code: 'missing_cli' });
   await expect(cli.invoke(request())).rejects.toMatchObject({ code: 'missing_cli' });
 });

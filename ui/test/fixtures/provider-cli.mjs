@@ -60,16 +60,19 @@ if (scenario.startsWith('verified-')) {
   if (value('--output-format') !== 'stream-json' || !args.includes('--include-hook-events') || !args.includes('--verbose') ||
       value('--setting-sources') !== '' || JSON.parse(value('--settings')).disableAllHooks !== true ||
       JSON.stringify(JSON.parse(value('--mcp-config'))) !== '{"mcpServers":{}}') process.exit(92);
+  if(scenario==='verified-stderr-only'){process.stderr.write('Unauthorized TOKEN_SENTINEL /private/fixture.md');process.exit(9);}
   const init = { type: 'system', subtype: 'init', tools: [], mcp_servers: [], plugins: [] };
   if (scenario === 'verified-tools') init.tools.push('Write');
   if (scenario === 'verified-mcp') init.mcp_servers.push('unsafe');
   if (scenario === 'verified-plugin') init.plugins.push('unsafe');
   console.log(JSON.stringify(init));
+  if(scenario==='verified-truncated'){process.stdout.write('{"type":"assistant","message":');process.exit(0);}
   if (scenario === 'verified-hook') console.log(JSON.stringify({ type: 'system', subtype: 'hook_started' }));
   if (scenario === 'verified-unknown') console.log(JSON.stringify({ type: 'unexpected' }));
   console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: scenario === 'verified-attempt' ? 'tool_use' : 'text', text: 'Synthetic answer' }] } }));
   if (scenario !== 'verified-incomplete') console.log(JSON.stringify({ type: 'result', subtype: 'success',
-    result: JSON.stringify({ answer: `Answer for ${packet.data.id}`, claims: [] }), usage: { input_tokens: 12, output_tokens: 8 } }));
+    result: scenario==='verified-empty-result'?'':JSON.stringify({ answer: `Answer for ${packet.data.id}`, claims: [] }), usage: { input_tokens: 12, output_tokens: 8 } }));
+  if(scenario==='verified-nonzero'){process.stderr.write('Failure TOKEN_SENTINEL /private/fixture.md');process.exit(9);}
   process.exit(0);
 }
 if (scenario === 'stream') {

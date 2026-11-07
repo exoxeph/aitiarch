@@ -12,7 +12,7 @@ const request = { id: 'product', action: 'think' as const, question: '', selecti
 const config = (scenario: string): Configuration => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'aitiarch-verified-fake-')); roots.push(dir);
   return { provider: 'claude', command: process.execPath, prefixArgs: [script, scenario, path.join(dir, 'record'), 'claude'],
-    contract: 'claude-canary-2.1.205' as Configuration['contract'] };
+    contract: 'claude-canary-2.1.205' as Configuration['contract'],failureLog:{write:async()=>{}} };
 };
 it('accepts the canary-verified Claude profile only after checking flags and structured registries', async () => {
   const cli = createProvider(config('verified-success'));
