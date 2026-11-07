@@ -6,6 +6,7 @@ export { claudeArguments } from './claude-arguments.ts';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { inspectThinkingTokens } from './thinking-status.ts';
 
 type Event = Record<string, any>;
 export function inspectClaudeCanary(events: Event[], files: string[]) {
@@ -28,7 +29,8 @@ export function inspectClaudeCanary(events: Event[], files: string[]) {
     if (/hook/i.test(String(event.type)) || /hook/i.test(String(event.subtype))) hookEvents++;
     if (event.type === 'assistant' && event.message?.content?.some((b: any) => b.type === 'text' && b.text?.trim())) answers++;
     if (!['assistant', 'result', 'rate_limit_event', 'stream_event'].includes(event.type)
-      && !(event.type === 'system' && event.subtype === 'init') && !/hook/i.test(String(event.subtype))) unknownEvents++;
+      && !(event.type === 'system' && (event.subtype === 'init'||(event.subtype==='thinking_tokens'&&inspectThinkingTokens(event).valid)))
+      && !/hook/i.test(String(event.subtype))) unknownEvents++;
   }
   const results = events.filter(e => e.type === 'result');
   const result = results[0];

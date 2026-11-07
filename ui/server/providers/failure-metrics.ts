@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectClaudeCanary } from './claude-canary.ts';
 import { parseAnswerJson } from './answer-json.ts';
+import { inspectThinkingTokens } from './thinking-status.ts';
 const types = new Set(['system','assistant','user','result','rate_limit_event','stream_event','tool_progress','auth_status','tool_use_summary','permission_denied','prompt_suggestion']);
 const subtypes = new Set(['init','success','error_during_execution','error_max_turns','error_max_budget_usd','error_max_structured_output_retries',
   'hook_started','hook_progress','hook_response','status','compact_boundary','api_retry','task_started','task_progress','task_notification','task_updated',
@@ -45,7 +46,8 @@ export interface FailureMetadata {
   exitCode: number|null; signal: string|null; stderrCategory: 'none'|'authentication'|'timeout'|'rate_limit'|'other';
   stdoutBytes: number; events: {type:string;subtype:string|null;count:number}[];
   parseError: ParseIssue|null; finalResultPresent: boolean; wallMs:number;
-  usage: {source:'event'|'message'|'model';counters:Record<string,number>}[];
+  usage: {source:'event'|'message'|'model'|'thinking_status';counters:Record<string,number>}[];
+  thinkingStatusFields:{fields:string[];rejectedFields:string[]}[];
   resultShape:ResultShape;
   systemSubtypeCounts:Record<string,number>;
   outputTokenSplit:{thinking:number;text:number};
@@ -57,7 +59,7 @@ export function failureMetadata(input: Observation): FailureMetadata {
   const out: FailureMetadata = {exitCode:input.exitCode,signal:input.signal,stdoutBytes:input.stdoutBytes,wallMs:Math.round(input.wallMs),
     stderrCategory: !input.stderr ? 'none' : /not logged in|unauthori[sz]ed|authentication|login required|please (?:log|sign) in/i.test(input.stderr) ? 'authentication'
       : /timed? ?out|timeout/i.test(input.stderr) ? 'timeout' : /rate.?limit|too many requests/i.test(input.stderr) ? 'rate_limit' : 'other',
-    events:[],parseError:null,finalResultPresent:false,usage:[],resultShape:resultShape(undefined),systemSubtypeCounts:Object.create(null),outputTokenSplit:{thinking:-1,text:-1},
+    events:[],parseError:null,finalResultPresent:false,usage:[],thinkingStatusFields:[],resultShape:resultShape(undefined),systemSubtypeCounts:Object.create(null),outputTokenSplit:{thinking:-1,text:-1},
     isolation:{passed:false,fileCount:input.fileCount??-1,tools:-1,mcpServers:-1,plugins:-1,hookEvents:0,toolAttempts:0,unknownEvents:0}};
   const parse = (text: string,stage: ParseIssue['stage'],line:number): any => {
     try{return stage==='result'?parseAnswerJson(text):JSON.parse(text);}catch(error){
@@ -90,6 +92,12 @@ export function failureMetadata(input: Observation): FailureMetadata {
       :event.subtype==null?null:subtypes.has(event.subtype)?event.subtype:'unknown';
     if(event.type==='system')out.systemSubtypeCounts[subtype]=(out.systemSubtypeCounts[subtype]??0)+1;
     const last=out.events.at(-1);if(last&&last.type===type&&last.subtype===subtype)last.count++;else out.events.push({type,subtype,count:1});
+    if(event.type==='system'&&event.subtype==='thinking_tokens'){
+      const checked=inspectThinkingTokens(event);
+      out.thinkingStatusFields.push({fields:checked.fields,rejectedFields:checked.rejectedFields});
+      if(checked.valid&&Object.keys(checked.tokenCounts).length)out.usage.push({source:'thinking_status',counters:checked.tokenCounts});
+      return; // Do not inspect any other values or nested usage in a status event.
+    }
     numeric(event.usage,'event');numeric(event.message?.usage,'message');numeric(event.event?.usage,'event');numeric(event.event?.message?.usage,'message');
     if(event.modelUsage&&typeof event.modelUsage==='object')for(const value of Object.values(event.modelUsage))numeric(value,'model');
     if(event.type==='result'){

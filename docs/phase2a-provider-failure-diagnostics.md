@@ -274,3 +274,23 @@ Use approximately 6,000 input and 3,000 output tokens as a planning estimate,
 based on the previous per-model totals of 5,864/2,803. It is not a cap; report
 actual final and per-model usage and elapsed time. A thinking/text split may be
 unavailable. No new live call has run or is authorized by this document.
+
+## Approved `thinking_tokens` exception
+
+Only exact `system/thinking_tokens` is additionally permitted, after validating
+every field as a finite number, boolean or whole short identifier matching
+`^[a-z][a-z0-9_]{0,39}$`. Nested containers and text/content/message/thinking/
+summary-like field names fail closed. Exact numeric token fields `tokens`,
+`token_count` and `thinking_tokens` are permitted; their non-negative integer
+values are retained as separate `thinking_status` usage observations under the
+original field names. They are never summed or inferred to be totals. Other
+status values are validated and discarded. Rejected events record only safe
+field names in `thinkingStatusFields`, never their values. No envelope-field
+exemptions or other subtype additions are made. Existing hook rejection remains.
+
+The authorized product check is Think with an edit during loading, followed by
+Ask with deletion during loading, using disposable synthetic notes. Stop on the
+first failure; no retry or additional call is authorized. Reload ink and ledger,
+verify the intended human edit bytes and absence of human-owned fields, then
+delete the fixtures. Planning usage is approximately 6,000 input and 1,500
+output tokens per call; actual usage may differ. Slice B remains paused.

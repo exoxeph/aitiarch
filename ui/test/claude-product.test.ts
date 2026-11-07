@@ -20,11 +20,14 @@ it('accepts the canary-verified Claude profile only after checking flags and str
   expect(await cli.invoke(request)).toMatchObject({ answer: 'Answer for product', usage: { inputTokens: 12, outputTokens: 8 } });
 });
 for (const scenario of ['verified-tools', 'verified-hook', 'verified-hook-prefixed', 'verified-benign-subtype', 'verified-mcp', 'verified-plugin', 'verified-attempt', 'verified-incomplete', 'verified-unknown',
-  'verified-fence-multiple','verified-fence-prose-before','verified-fence-prose-after','verified-fence-unclosed','verified-fence-in-string','verified-fence-wrong-keys']) {
+  'verified-fence-multiple','verified-fence-prose-before','verified-fence-prose-after','verified-fence-unclosed','verified-fence-in-string','verified-fence-wrong-keys','verified-thinking-text','verified-thinking-long']) {
   it(`rejects ${scenario} without accepting an answer`, async () => {
     await expect(createProvider(config(scenario)).invoke(request)).rejects.toMatchObject({ code: 'invalid_response' });
   });
 }
+it('accepts thinking_tokens by exact name with a valid numeric metadata payload',async()=>{
+  await expect(createProvider(config('verified-thinking-numeric')).invoke(request)).resolves.toMatchObject({answer:'Answer for product'});
+});
 for(const scenario of ['verified-fence-json','verified-fence-bare']){
   it(`accepts only a single complete fenced JSON answer: ${scenario}`,async()=>{
     await expect(createProvider(config(scenario)).invoke(request)).resolves.toMatchObject({answer:'Answer for product',claims:[]});

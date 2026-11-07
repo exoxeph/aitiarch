@@ -13,6 +13,8 @@ for (const [scenario, code, final, stderr] of [
   ['verified-unknown', 'invalid_response', true, 'none'],
   ['verified-hook', 'invalid_response', true, 'none'],
   ['verified-hook-prefixed', 'invalid_response', true, 'none'],
+  ['verified-thinking-text', 'invalid_response', true, 'none'],
+  ['verified-thinking-long', 'invalid_response', true, 'none'],
   ['verified-empty-result', 'invalid_response', true, 'none'],
   ['verified-nonzero', 'provider_error', true, 'other'],
   ['verified-stderr-only', 'provider_error', false, 'authentication'],
@@ -32,8 +34,8 @@ for (const [scenario, code, final, stderr] of [
     expect(row.exitCode).toBe(scenario.includes('nonzero')||scenario.includes('stderr-only')?9:0);
     expect(row.signal).toBe(null);
     expect(row.isolation.fileCount).toBe(0);
-    expect(bytes).not.toMatch(/synthetic-secret|Private synthetic|Synthetic answer|Answer for|fixture\.md|TOKEN_SENTINEL|\/Users\/|transcript|prompt/);
-    expect(Object.keys(row).sort()).toEqual(['exitCode','signal','stderrCategory','stdoutBytes','events','parseError','finalResultPresent','wallMs','usage','resultShape','isolation','systemSubtypeCounts','outputTokenSplit'].sort());
+    expect(bytes).not.toMatch(/synthetic-secret|Private synthetic|Synthetic answer|Answer for|fixture\.md|TOKEN_SENTINEL|PRIVATE_STATUS_SENTINEL|\/Users\/|transcript|prompt/);
+    expect(Object.keys(row).sort()).toEqual(['exitCode','signal','stderrCategory','stdoutBytes','events','parseError','finalResultPresent','wallMs','usage','resultShape','isolation','systemSubtypeCounts','outputTokenSplit','thinkingStatusFields'].sort());
     if(scenario==='verified-truncated') expect(row.parseError).toMatchObject({kind:'unexpected_end',stage:'event',position:expect.any(Number)});
     if(scenario==='verified-empty-result') expect(row.parseError).toMatchObject({kind:'empty',stage:'result',position:0});
     if(scenario==='verified-hook') expect(row.events).toContainEqual({type:'system',subtype:'hook_started',count:1});
@@ -42,9 +44,21 @@ for (const [scenario, code, final, stderr] of [
       expect(row.isolation).toMatchObject({passed:false,hookEvents:1});
     }
     if(scenario==='verified-unknown') expect(row.events).toContainEqual({type:'unknown',subtype:null,count:1});
+    if(scenario.startsWith('verified-thinking-')){
+      expect(row.thinkingStatusFields[0].rejectedFields).toContain(scenario.endsWith('text')?'text':'detail');
+      expect(row.usage.some((u:any)=>u.source==='thinking_status')).toBe(false);
+    }
     if(final)expect(row.usage.some((u: any)=>u.counters.input_tokens===12 && u.counters.output_tokens===8)).toBe(true);
   });
 }
+it('records reported thinking token observations without summing or inferring totals',()=>{
+  const result=failureMetadata({exitCode:0,signal:null,stderr:'',stdoutBytes:100,wallMs:1,stream:true,
+    stdout:[{type:'system',subtype:'thinking_tokens',tokens:12,state:'running'},
+      {type:'system',subtype:'thinking_tokens',tokens:15,state:'running'}].map(e=>JSON.stringify(e)).join('\n')});
+  expect(result.usage.filter(u=>u.source==='thinking_status')).toEqual([
+    {source:'thinking_status',counters:{tokens:12}},{source:'thinking_status',counters:{tokens:15}}]);
+  expect(JSON.stringify(result)).not.toContain('running');
+});
 it('preserves event ordering, numeric usage and parse positions without copying arbitrary fields', () => {
   const result=failureMetadata({exitCode:0,signal:null,stderr:'TOKEN_SENTINEL /private/fixture.md',stdoutBytes:100,wallMs:25,
     stdout:[{type:'assistant',message:{usage:{input_tokens:2,secret_file_name:9}}},

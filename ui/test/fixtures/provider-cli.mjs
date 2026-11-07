@@ -70,6 +70,12 @@ if (scenario.startsWith('verified-')) {
   if (scenario === 'verified-hook') console.log(JSON.stringify({ type: 'system', subtype: 'hook_started' }));
   if (scenario === 'verified-hook-prefixed') console.log(JSON.stringify({ type: 'system', subtype: 'hook_custom' }));
   if (scenario === 'verified-benign-subtype') console.log(JSON.stringify({ type: 'system', subtype: 'status' }));
+  if (scenario.startsWith('verified-thinking-')) {
+    const status={type:'system',subtype:'thinking_tokens',tokens:12};
+    if(scenario==='verified-thinking-text')status.text='PRIVATE_STATUS_SENTINEL';
+    if(scenario==='verified-thinking-long')status.detail='PRIVATE_STATUS_SENTINEL'.repeat(3);
+    console.log(JSON.stringify(status));
+  }
   if (scenario === 'verified-unknown') console.log(JSON.stringify({ type: 'unexpected' }));
   console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: scenario === 'verified-attempt' ? 'tool_use' : 'text', text: 'Synthetic answer' }] } }));
   let answerResult=JSON.stringify({ answer: `Answer for ${packet.data.id}`, claims: [] });
