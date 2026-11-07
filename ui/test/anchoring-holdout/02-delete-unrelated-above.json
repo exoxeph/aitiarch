@@ -1,0 +1,10 @@
+{
+  "before": "# Auth plan\n\nScratch: compare Redis and Memcached later.\n\n## Sessions\n\nSessions live in Redis with a seven day TTL.\n\n## Tokens\n\nWe keep JWTs out of localStorage because of XSS exposure.\n\n## Rollout\n\nShip to staging first, then production after approval.",
+  "from": 128,
+  "to": 185,
+  "after": "# Auth plan\n\n## Sessions\n\nSessions live in Redis with a seven day TTL.\n\n## Tokens\n\nWe keep JWTs out of localStorage because of XSS exposure.\n\n## Rollout\n\nShip to staging first, then production after approval.",
+  "expected": {
+    "from": 83,
+    "to": 140
+  }
+}

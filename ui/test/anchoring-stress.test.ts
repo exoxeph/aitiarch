@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { captureAnchor, resolveAnchor } from "../shared/anchors.ts";
+import { mapAnchor } from "../shared/anchor-mapping.ts";
 
 // The model tracks paragraph identity outside Markdown. This lets the oracle
 // distinguish an original paragraph from an identical duplicate.
@@ -34,7 +35,7 @@ function render(paragraphs: Paragraph[]) {
   return { text, ranges };
 }
 
-function runCorpus(label: string, seed: number, source: (rnd: ReturnType<typeof random>) => string[], mix: "balanced" | "realistic" = "balanced") {
+function runCorpus(label: string, seed: number, source: (rnd: ReturnType<typeof random>) => string[], mix: "balanced" | "realistic" = "balanced", mapping = false) {
   const rnd = random(seed);
   const ops = ["insert", "delete", "move", "duplicate", "partial rewrite"] as const;
   const counts = Object.fromEntries(ops.map(op => [op, 0])) as Record<typeof ops[number], number>;
@@ -92,7 +93,7 @@ function runCorpus(label: string, seed: number, source: (rnd: ReturnType<typeof 
     if (expected) recoverable++;
     const stillUnchanged = !!expected && paragraphs.find(p => p.id === target)?.text === originalText;
     if (stillUnchanged) { unchanged++; unchangedByOp[op]++; }
-    const result = resolveAnchor(after.text, anchor);
+    const result = mapping ? mapAnchor(before.text, after.text, anchor) : resolveAnchor(after.text, anchor);
     if (result.status === "orphaned") {
       orphans++;
       orphansByOp[op]++;
@@ -101,7 +102,7 @@ function runCorpus(label: string, seed: number, source: (rnd: ReturnType<typeof 
         unchangedOrphans++;
         unchangedOrphansByOp[op]++;
         unchangedOrphansByCapture[anchor.quoteCount > 1 ? "repeatedAtCapture" : "uniqueAtCapture"]++;
-        if (unchangedOrphanExamples.length < 3) unchangedOrphanExamples.push({ seed, iteration, op, quote: anchor.quote,
+        if (unchangedOrphanExamples.length < (label.includes("additional seed") ? 3 : 1000)) unchangedOrphanExamples.push({ seed, iteration, op, quote: anchor.quote,
           before: before.text, after: after.text, expected, reason: result.reason });
       }
     } else if (!expected || result.from !== expected.from || result.to !== expected.to) {
@@ -111,7 +112,7 @@ function runCorpus(label: string, seed: number, source: (rnd: ReturnType<typeof 
         original: initial, expected, actual: result, anchor });
     }
   }
-  const report = { label, mix, seed, edits: EDITS, counts, orphansByOp, wrongAttachments, wrongAttachmentsByCapture, orphans, orphanRate: orphans / EDITS,
+  const report = { label, path: mapping ? "mapping" : "search", mix, seed, edits: EDITS, counts, orphansByOp, wrongAttachments, wrongAttachmentsByCapture, orphans, orphanRate: orphans / EDITS,
     recoverable, unnecessaryOrphans, recoverableOrphanRate: unnecessaryOrphans / recoverable,
     unchanged, unchangedByOp, unchangedOrphans, unchangedOrphanRate: unchangedOrphans / unchanged, unchangedOrphansByOp, unchangedOrphansByCapture,
     unchangedOrphanExamples, failures };
@@ -156,20 +157,38 @@ it.each(["repeated", "mostly unique"] as const)("evaluates a realistic edit mix 
   expect(report.counts).toEqual({ insert: 700, delete: 150, move: 25, duplicate: 25, "partial rewrite": 100 });
 });
 
-it("checks all attachments on ten additional seeds in both corpora", () => {
-  for (let i = 1; i <= 10; i++) {
-    runCorpus(`repeated synthetic; additional seed ${i}`, SEED + i, rnd => {
+// New fixed seeds, separate from the previously explored SEED + 1..10.
+const regularSeeds = [143137, 804221, 1730159, 3674107, 706201011, 706202027, 987631, 1224523, 2204909, 314159265];
+const extraSweep = Number(process.env.AITIARCH_ANCHOR_SWEEP ?? 0);
+const evaluatedSeeds = [...regularSeeds, ...Array.from({ length: extraSweep }, (_, i) => SEED + 1 + i)];
+it("checks both paths on ten fixed new seeds, plus an explicitly requested larger sweep", () => {
+  for (const mapping of [false, true]) for (const seed of evaluatedSeeds) {
+    runCorpus(`repeated synthetic; additional seed ${seed}`, seed, rnd => {
       const texts = Array.from({ length: 4 + rnd(6) }, () => sentences[rnd(sentences.length)]);
       if (rnd(2) === 0) texts.splice(rnd(texts.length + 1), 0, texts[rnd(texts.length)]);
       return texts;
-    });
-    runCorpus(`mostly unique synthetic; additional seed ${i}`, (SEED ^ 0x5eed) + i, rnd => {
+    }, "balanced", mapping);
+    runCorpus(`mostly unique synthetic; additional seed ${seed}`, seed ^ 0x5eed, rnd => {
       const texts = Array.from({ length: 4 + rnd(6) }, () =>
         `The ${actors[rnd(actors.length)]} ${verbs[rnd(verbs.length)]} ${objects[rnd(objects.length)]} ${moments[rnd(moments.length)]}.`);
       if (rnd(10) === 0) texts.splice(rnd(texts.length + 1), 0, texts[rnd(texts.length)]);
       return texts;
-    });
+    }, "balanced", mapping);
   }
+});
+
+it.each(["balanced", "realistic"] as const)("maps both synthetic corpora with the %s edit mix", mix => {
+  runCorpus("repeated synthetic", SEED, rnd => {
+    const texts = Array.from({ length: 4 + rnd(6) }, () => sentences[rnd(sentences.length)]);
+    if (rnd(2) === 0) texts.splice(rnd(texts.length + 1), 0, texts[rnd(texts.length)]);
+    return texts;
+  }, mix, true);
+  runCorpus("mostly unique synthetic", SEED ^ 0x5eed, rnd => {
+    const texts = Array.from({ length: 4 + rnd(6) }, () =>
+      `The ${actors[rnd(actors.length)]} ${verbs[rnd(verbs.length)]} ${objects[rnd(objects.length)]} ${moments[rnd(moments.length)]}.`);
+    if (rnd(10) === 0) texts.splice(rnd(texts.length + 1), 0, texts[rnd(texts.length)]);
+    return texts;
+  }, mix, true);
 });
 
 // Only a user-supplied, already redacted copy may be passed here. The test

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { captureAnchor, resolveAnchor } from "../shared/anchors.ts";
+import { mapAnchor } from "../shared/anchor-mapping.ts";
 
 const quote = "Use Redis for temporary session storage.";
 const changed = "Use Redis for short-lived session storage.";
@@ -59,6 +60,19 @@ const cases = [
 ] as const;
 
 describe("anchoring evaluation set", () => {
+  it("reports the mapping path on the same thirty cases without changing their labels", () => {
+    let wrongAttachments = 0, unnecessaryOrphans = 0;
+    const orphanedCases: string[] = [];
+    for (const c of cases) {
+      const selected = "selected" in c ? c.selected : quote;
+      const r = mapAnchor(c.before, c.text, captureAnchor(c.before, c.from, c.from + selected.length));
+      if (r.status === "attached" && (c.expected === null || r.from !== c.expected || c.text.slice(r.from, r.to) !== c.body)) wrongAttachments++;
+      if (r.status === "orphaned" && c.expected !== null) { unnecessaryOrphans++; orphanedCases.push(c.name); }
+    }
+    console.log(JSON.stringify({ path: "mapping", cases: cases.length, wrongAttachments, unnecessaryOrphans, orphanedCases }));
+    expect(wrongAttachments).toBe(0);
+    expect(unnecessaryOrphans).toBe(3);
+  });
   it.each(cases)("$name", (c) => {
     const selected = "selected" in c ? c.selected : quote;
     const original = captureAnchor(c.before, c.from, c.from + selected.length);

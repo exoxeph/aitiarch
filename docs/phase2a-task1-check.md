@@ -52,6 +52,11 @@ temporary directories; the real notebook is never opened by these checks.
 
 ## Anchor selection and tie rules
 
+The rules below describe the original committed resolver, retained as history.
+For the corrected strict search and v2 mapping rules/results, see
+`phase2a-mapping-results.md`. In particular, context and fuzzy similarity now
+produce suggestions only; they cannot automatically select a search result.
+
 Selectors contain quoted text, up to 64 UTF-16 units of prefix and suffix,
 the original range, quote occurrence count and identical-context count. All
 offsets refer to the editor's LF-normalized text. Selectors exist only in JSON.
@@ -86,6 +91,9 @@ the user's explicit selection. Automatic recovery cannot guarantee identity
 under every arbitrary edit. The reported zero applies to the test set.
 
 ## Evaluation and regression results
+
+These are historical Task 1 measurements, superseded by the correction above
+and `phase2a-mapping-results.md`.
 
 The 30-case labeled set includes edits, deletion, moved paragraphs, inserted
 copies, surviving decoys, partial and multi-paragraph selections, Unicode,

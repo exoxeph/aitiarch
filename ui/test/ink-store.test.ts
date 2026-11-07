@@ -18,6 +18,7 @@ const quote = "Use Redis for temporary session storage.";
 beforeEach(async () => {
   root = realpathSync(mkdtempSync(path.join(os.tmpdir(), "aitiarch-ink-")));
   writeFileSync(path.join(root, "fixture.md"), text);
+  writeFileSync(path.join(root, ".gitignore"), "/.cache/\n");
   store = await InkStore.open(root);
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -105,7 +106,7 @@ describe("ink sidecars", () => {
       store.write("fixture.md", { ...first.document, items: [] }, first.version)]);
     expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
     expect(results.filter(r => r.status === "rejected")).toHaveLength(1);
-    expect(JSON.parse(readFileSync(file(), "utf8"))).toHaveProperty("v", 1);
+    expect(JSON.parse(readFileSync(file(), "utf8"))).toHaveProperty("v", 2);
   });
 
   it("refuses a busy lock without removing evidence or changing saved ink", async () => {
@@ -154,6 +155,40 @@ describe("ink sidecars", () => {
 });
 
 describe("persisted re-anchoring", () => {
+  it("checkpoints browser identity through reload and rejects stale versions without changing human fields", async () => {
+    const s = await seed();
+    const at = text.indexOf(quote), after = text.slice(0, at) + quote + "\n\n" + text.slice(at);
+    writeFileSync(path.join(root, "fixture.md"), after);
+    const fresh = await (await Store.open(root)).read("fixture.md");
+    const anchor = captureAnchor(after, at + quote.length + 2, at + quote.length * 2 + 2);
+    const update = { id: "answer-1", anchor, attachment: { status: "attached" as const, ...anchor.position } };
+    const saved = await store.checkpoint("fixture.md", s.version, fresh.version, [update]);
+    const reopened = await (await InkStore.open(root)).reanchor("fixture.md", saved.version);
+    expect(reopened.document.items[0].attachment).toEqual(update.attachment);
+    expect(reopened.document.items[0].body).toBe(s.document.items[0].body);
+    expect(reopened.document.items[0].originalAnchor).toEqual(s.document.items[0].originalAnchor);
+    const bytes = readFileSync(file());
+    await expect(store.checkpoint("fixture.md", s.version, fresh.version, [update])).rejects.toThrow(/conflict/);
+    expect(readFileSync(file())).toEqual(bytes);
+    expect(readFileSync(path.join(root, "fixture.md"), "utf8")).toBe(after);
+  });
+  it("writes v2 with a normalized-text hash and rejects v1 without changing it", async () => {
+    const s = await seed();
+    expect(s.document.v).toBe(2);
+    expect(s.document).toHaveProperty("lastSeenTextHash");
+    const old = JSON.stringify({ ...s.document, v: 1 });
+    writeFileSync(file(), old);
+    await expect(store.read("fixture.md")).rejects.toThrow(/unsupported/);
+    expect(readFileSync(file(), "utf8")).toBe(old);
+  });
+  it("falls back to strict search when the private snapshot is missing", async () => {
+    const s = await seed();
+    const cache = path.join(root, ".cache");
+    if (existsSync(cache)) rmSync(cache, { recursive: true });
+    writeFileSync(path.join(root, "fixture.md"), text.replace(quote, quote.replace("Redis", "Valkey")));
+    const result = await store.reanchor("fixture.md", s.version);
+    expect(result.document.items[0].attachment.status).toBe("orphaned");
+  });
   it("follows successive edits, retaining the original selector and every item", async () => {
     let saved = await seed();
     const original = saved.document.items[0].originalAnchor;

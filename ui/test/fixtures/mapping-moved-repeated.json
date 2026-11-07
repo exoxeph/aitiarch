@@ -1,0 +1,32 @@
+﻿{
+    "seed":  706199777,
+    "iteration":  592,
+    "op":  "move",
+    "affected":  5,
+    "before":  "Cache invalidation follows the deployment boundary.\n\nThe service uses Redis for temporary session storage.\n\nCache invalidation follows the deployment boundary.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nThe notebook keeps every decision near its supporting quote.\n\nThe service uses SQLite for temporary session storage.\n\nThe migration waits for a human review of the evidence.",
+    "after":  "Cache invalidation follows the deployment boundary.\n\nThe service uses Redis for temporary session storage.\n\nCache invalidation follows the deployment boundary.\n\nThe service uses Redis for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nThe service uses SQLite for temporary session storage.\n\nThe notebook keeps every decision near its supporting quote.\n\nThe service uses SQLite for temporary session storage.\n\nThe migration waits for a human review of the evidence.",
+    "original":  {
+                     "from":  273,
+                     "to":  326
+                 },
+    "expected":  {
+                     "from":  161,
+                     "to":  214
+                 },
+    "actual":  {
+                   "status":  "attached",
+                   "from":  272,
+                   "to":  326
+               },
+    "anchor":  {
+                   "quote":  "The service uses Redis for temporary session storage.",
+                   "prefix":  "orage.\n\nThe service uses SQLite for temporary session storage.\n\n",
+                   "suffix":  "\n\nThe service uses SQLite for temporary session storage.\n\nThe no",
+                   "position":  {
+                                    "from":  273,
+                                    "to":  326
+                                },
+                   "quoteCount":  2,
+                   "contextCount":  1
+               }
+}

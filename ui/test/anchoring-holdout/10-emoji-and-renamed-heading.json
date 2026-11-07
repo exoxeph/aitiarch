@@ -1,0 +1,10 @@
+{
+  "before": "# Launch notes\n\nTeam mood is high \ud83d\ude80 after the demo.\n\nWe decided to ship the beta on Friday.\n\nFollow up on pricing.",
+  "from": 54,
+  "to": 92,
+  "after": "# Launch plan and notes\n\nTeam mood is high \ud83d\ude80 after the demo.\n\nWe decided to ship the beta on Friday.\n\nFollow up on pricing.",
+  "expected": {
+    "from": 63,
+    "to": 101
+  }
+}

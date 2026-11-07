@@ -144,7 +144,7 @@ export function createApp(opts: AppOptions) {
 
     if (url.pathname === "/api/session" && req.method === "GET") {
       res.setHeader("Set-Cookie", `aitiarch=${token}; Path=/; HttpOnly; SameSite=Strict`);
-      return json(res, 200, { rootName: path.basename(path.dirname(store.rootReal)) || path.basename(store.rootReal), rootPath: store.rootReal });
+      return json(res, 200, { rootName: path.basename(path.dirname(store.rootReal)) || path.basename(store.rootReal), rootPath: store.rootReal, anchorCache: await (await inkReady).cache.status() });
     }
     if (!tokenOk(req)) return json(res, 401, { error: "no_session" });
 
@@ -157,8 +157,20 @@ export function createApp(opts: AppOptions) {
 
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await store.tree());
 
+    if (url.pathname === "/api/anchor-cache/enable" && req.method === "PUT") {
+      const b = (await readBody(req)) as Record<string, unknown>;
+      if (b.action !== "add-ignore-line") throw new PathError(400, "bad_body", "Explicit cache setup action required.");
+      return json(res, 200, await (await inkReady).cache.enable());
+    }
     if (url.pathname === "/api/ink" && req.method === "GET") {
-      return json(res, 200, await (await inkReady).read(url.searchParams.get("path") ?? ""));
+      const ink = await inkReady, path = url.searchParams.get("path") ?? "", snapshot = await ink.read(path);
+      return json(res, 200, url.searchParams.get("resolve") === "1" && snapshot.version !== null ? await ink.reanchor(path, snapshot.version) : snapshot);
+    }
+    if (url.pathname === "/api/ink/checkpoint" && req.method === "PUT") {
+      const b = (await readBody(req)) as Record<string, unknown>;
+      if (typeof b.path !== "string" || !(b.inkVersion === null || typeof b.inkVersion === "string") || typeof b.noteVersion !== "string" || !Array.isArray(b.items)) throw new PathError(400, "bad_body", "Invalid mapping checkpoint.");
+      try { return json(res, 200, await (await inkReady).checkpoint(b.path, b.inkVersion, b.noteVersion, b.items as Parameters<InkStore["checkpoint"]>[3])); }
+      catch (e) { if (/conflict|busy/i.test(String(e))) return json(res, 409, { error: "conflict", message: String(e) }); throw e; }
     }
     if (url.pathname === "/api/ink/attach" && req.method === "PUT") {
       const b = (await readBody(req)) as Record<string, unknown>;

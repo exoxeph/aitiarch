@@ -23,7 +23,7 @@ export interface UiState {
   tabs: string[];
   active: string | null;
 }
-import type { InkDocument } from "../shared/ink.ts";
+import type { InkDocument, InkItem } from "../shared/ink.ts";
 export interface InkSnapshot { document: InkDocument; version: string | null }
 
 export type SaveResult =
@@ -65,10 +65,12 @@ async function ok<T>(method: "GET" | "PUT", url: string, body?: unknown): Promis
 }
 
 export const api = {
-  session: () => ok<{ rootName: string; rootPath: string }>("GET", "/api/session"),
+  enableAnchorCache: () => ok<{ enabled: boolean }>("PUT", "/api/anchor-cache/enable", { action: "add-ignore-line" }),
+  session: () => ok<{ rootName: string; rootPath: string; anchorCache: { enabled: boolean; ignoreFile: string; ignoreLine: string } }>("GET", "/api/session"),
   tree: () => ok<TreeNode>("GET", "/api/tree"),
   file: (path: string) => ok<NoteFile>("GET", `/api/file?path=${encodeURIComponent(path)}`),
-  ink: (path: string) => ok<InkSnapshot>("GET", `/api/ink?path=${encodeURIComponent(path)}`),
+  ink: (path: string, resolve = false) => ok<InkSnapshot>("GET", `/api/ink?path=${encodeURIComponent(path)}${resolve ? "&resolve=1" : ""}`),
+  checkpointInk: (body: { path: string; inkVersion: string | null; noteVersion: string; items: Pick<InkItem, "id" | "anchor" | "attachment">[] }) => ok<InkSnapshot>("PUT", "/api/ink/checkpoint", body),
   attachInk: (body: { path: string; id: string; inkVersion: string | null; noteVersion: string; from: number; to: number }) =>
     ok<InkSnapshot>("PUT", "/api/ink/attach", body),
   /** Like file() but resolves null when the note no longer exists. */

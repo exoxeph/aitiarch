@@ -1,0 +1,10 @@
+{
+  "before": "# Auth plan\n\n## Sessions\n\nSessions live in Redis with a seven day TTL.\n\n## Tokens\n\nWe keep JWTs out of localStorage because of XSS exposure.\n\n## Rollout\n\nShip to staging first, then production after approval.",
+  "from": 83,
+  "to": 140,
+  "after": "# Auth plan\n\n## Sessions\n\nSessions live in Redis with a seven day TTL.\n\n## Tokens\n\nWe keep JWTs out of localStorage because of XSS exposure.\n\n## Rollout\n\nShip to staging first, then production after approval.\n\n## Appendix\n\nWe keep JWTs out of localStorage because of XSS exposure.\n\nSee the security review.",
+  "expected": {
+    "from": 83,
+    "to": 140
+  }
+}

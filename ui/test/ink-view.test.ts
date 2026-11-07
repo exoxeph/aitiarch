@@ -39,6 +39,20 @@ afterAll(async () => { watcher.stop(); await app.close(); rmSync(project, { recu
 const get = (p: string) => fetch(url() + p, { headers: { cookie } });
 const put = (p: string, body: unknown) => fetch(url() + p, { method: "PUT", headers: { cookie, "Content-Type": "application/json", "X-Aitiarch": "1", Origin: url() }, body: JSON.stringify(body) });
 
+it("requires an authenticated explicit action before merging the cache ignore line", async () => {
+  const ignore = path.join(root, ".gitignore");
+  writeFileSync(ignore, "# Existing fixture rules\n/private/\n");
+  const before = readFileSync(ignore);
+  await get("/api/session");
+  expect(readFileSync(ignore)).toEqual(before);
+  expect((await put("/api/anchor-cache/enable", {})).status).toBe(400);
+  expect(readFileSync(ignore)).toEqual(before);
+  const response = await put("/api/anchor-cache/enable", { action: "add-ignore-line" });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ enabled: true });
+  expect(readFileSync(ignore, "utf8")).toBe(before.toString("utf8") + "/.cache/\n");
+});
+
 it("exposes persisted fake ink to the authenticated UI without modifying Markdown", async () => {
   expect((await fetch(url() + "/api/ink?path=notebook.md")).status).toBe(401);
   const before = readFileSync(path.join(root, "notebook.md"));

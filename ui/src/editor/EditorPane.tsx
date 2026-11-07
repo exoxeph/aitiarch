@@ -3,10 +3,9 @@ import { markdown } from "@codemirror/lang-markdown";
 import { Compartment, EditorState } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
-import { resolveAnchor } from "../../shared/anchors.ts";
 import type { InkItem } from "../../shared/ink.ts";
 import { MarginRail, type PlacedMargin } from "../ink/MarginRail.tsx";
-import { api, type NoteFile, type ServerEvent } from "../api.ts";
+import { api, type InkSnapshot, type NoteFile, type ServerEvent } from "../api.ts";
 import { conflictDecorations, conflictHandlers, conflictsField } from "./conflicts.ts";
 import { toggleInline } from "./format.ts";
 import { livePreview, previewHandlers, wikiResolver } from "./livepreview.ts";
@@ -30,6 +29,10 @@ interface Props {
   register: (path: string, h: PaneHandle | null) => void;
   inkItems?: InkItem[];
   trustedText?: string | null;
+  inkVersion?: string | null;
+  onInk?: (path: string, items: InkItem[]) => void;
+  onInkSaved?: (path: string, snapshot: InkSnapshot) => void;
+  onInkError?: (message: string) => void;
 }
 
 export function EditorPane(props: Props) {
@@ -40,10 +43,26 @@ export function EditorPane(props: Props) {
   live.current = props;
   const resolverSlot = useRef(new Compartment());
   const viewRef = useRef<EditorView | null>(null);
+  const inkVersionRef = useRef(props.inkVersion ?? null);
 
   useEffect(() => {
     const path = props.file.path;
     let session!: NoteSession;
+    let checkpointing: Promise<void> = Promise.resolve();
+    let lastCheckpoint = "";
+    async function checkpoint(noteVersion: string, items: InkItem[]) {
+      if (!items.length) return;
+      const key = JSON.stringify([noteVersion, items]);
+      if (key === lastCheckpoint) return;
+      const job = checkpointing.catch(() => {}).then(async () => {
+        const snapshot = await api.checkpointInk({ path, inkVersion: inkVersionRef.current, noteVersion, items });
+        inkVersionRef.current = snapshot.version;
+        lastCheckpoint = key;
+        live.current.onInkSaved?.(path, snapshot);
+      });
+      checkpointing = job;
+      await job.catch(() => live.current.onInkError?.("Ink mapping could not be saved. Its sidecar is preserved; reload may use strict search."));
+    }
     const view = new EditorView({
       parent: host.current!,
       state: EditorState.create({
@@ -69,6 +88,7 @@ export function EditorPane(props: Props) {
           selectionToolbar,
           EditorView.contentAttributes.of({ "aria-label": `Editing ${path}`, spellcheck: "true" }),
           EditorView.updateListener.of((u) => {
+            if (u.docChanged || u.transactions.some(t => t.effects.some(e => e.is(setInk)))) live.current.onInk?.(path, u.state.field(inkField).items);
             if (u.docChanged || u.viewportChanged || u.transactions.some(t => t.effects.some(e => e.is(setInk)))) queueMargin();
             if (!u.docChanged) return;
             if (!u.transactions.some((t) => t.annotation(externalChange))) session.userChanged();
@@ -78,7 +98,12 @@ export function EditorPane(props: Props) {
       }),
     });
     viewRef.current = view;
-    session = new NoteSession(view, { save: (p, b, t) => api.save(p, b, t), load: (p) => api.load(p) }, path, props.file, {
+    session = new NoteSession(view, { save: async (p, b, t) => {
+      const items = view.state.field(inkField).items;
+      const result = await api.save(p, b, t);
+      if (result.ok) await checkpoint(result.version, items);
+      return result;
+    }, load: (p) => api.load(p) }, path, props.file, {
       onStatus: (s) => live.current.onStatus(path, s),
     });
     live.current.onStatus(path, "saved");
@@ -93,12 +118,10 @@ export function EditorPane(props: Props) {
       cancelAnimationFrame(marginRaf);
       marginRaf = requestAnimationFrame(() => {
         if (!surface.current || !live.current.visible) return;
-        const doc = view.state.doc.toString();
         const bounds = surface.current.getBoundingClientRect();
         const ink = view.state.field(inkField);
         const rows = ink.items.filter(i => i.kind === "margin").flatMap(item => {
-          const anchor = ink.trustedText === doc && item.attachment.status === "attached" && doc.slice(item.attachment.from, item.attachment.to) === item.anchor.quote
-            ? item.attachment : resolveAnchor(doc, item.anchor);
+          const anchor = item.attachment;
           if (anchor.status !== "attached") return [];
           const coords = view.coordsAtPos(anchor.from);
           return coords ? [{ item, top: Math.max(8, coords.top - bounds.top) }] : [];
@@ -109,7 +132,11 @@ export function EditorPane(props: Props) {
     }
     function queueDoc() {
       cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => live.current.onDoc(path, view.state.doc.toString()));
+      raf = requestAnimationFrame(() => {
+        const text = view.state.doc.toString();
+        live.current.onDoc(path, text);
+        if (session.status === "saved" && session.base.text === text) void checkpoint(session.base.version, view.state.field(inkField).items);
+      });
     }
     live.current.onDoc(path, props.file.text);
     host.current?.addEventListener("scroll", queueMargin, { passive: true });
@@ -168,8 +195,9 @@ export function EditorPane(props: Props) {
   }, [props.visible]);
 
   useEffect(() => {
+    if (props.trustedText != null && props.inkVersion !== undefined) inkVersionRef.current = props.inkVersion;
     viewRef.current?.dispatch({ effects: setInk.of({ items: props.inkItems ?? [], trustedText: props.trustedText ?? null }) });
-  }, [props.inkItems, props.trustedText]);
+  }, [props.inkItems, props.trustedText, props.inkVersion]);
 
   return <div className={props.visible ? "ink-surface" : "ink-surface surface-hidden"} ref={surface}>
     <div className="pane" ref={host} data-path={props.file.path} />

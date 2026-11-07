@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, connectEvents, type InkSnapshot, type NoteFile, type ServerEvent, type TreeNode } from "./api.ts";
-import { resolveStoredAttachment, type InkItem } from "../shared/ink.ts";
+import type { InkItem } from "../shared/ink.ts";
 import { OrphanList } from "./ink/OrphanList.tsx";
 import { EditorView } from "@codemirror/view";
 import { flattenTree, Overlay, PropertiesPanel, StatusBar, Tabs, Tree, type OverlayItem } from "./components.tsx";
@@ -16,6 +16,9 @@ export default function App() {
   const [tree, setTree] = useState<TreeNode | null>(null);
   const [files, setFiles] = useState<Record<string, NoteFile>>({});
   const [inkFiles, setInkFiles] = useState<Record<string, InkSnapshot>>({});
+  const [mappedInk, setMappedInk] = useState<Record<string, InkItem[]>>({});
+  const onInk = useCallback((path: string, items: InkItem[]) => setMappedInk(m => ({ ...m, [path]: items })), []);
+  const onInkSaved = useCallback((path: string, snapshot: InkSnapshot) => setInkFiles(m => ({ ...m, [path]: snapshot })), []);
   const [attachDraft, setAttachDraft] = useState<null | { path: string; id: string; from: number; to: number; noteVersion: string; noteText: string; inkVersion: string | null; quote: string; target: string }>(null);
   const [tabs, setTabs] = useState<string[]>([]);
   const [active, setActive] = useState<string | null>(null);
@@ -26,6 +29,8 @@ export default function App() {
   const [showProps, setShowProps] = useState(true);
   const [rightTab, setRightTab] = useState<"details" | "activity">("details");
   const [notice, setNotice] = useState<string | null>(null);
+  const [cacheNotice, setCacheNotice] = useState<null | { file: string; line: string }>(null);
+  const [cacheBusy, setCacheBusy] = useState(false);
   const panes = useRef(new Map<string, PaneHandle>());
   const listeners = useRef(new Set<(e: ServerEvent) => void>());
   const loaded = useRef(false);
@@ -36,7 +41,7 @@ export default function App() {
   }, []);
 
   const refreshTree = useCallback(() => api.tree().then(setTree).catch(() => {}), []);
-  const refreshInk = useCallback((path: string) => api.ink(path).then(s => setInkFiles(m => ({ ...m, [path]: s }))).catch(() => {
+  const refreshInk = useCallback((path: string, resolve = false) => api.ink(path, resolve).then(s => setInkFiles(m => ({ ...m, [path]: s }))).catch(() => {
     setNotice(`Ink for ${path} could not be loaded. Its sidecar is preserved.`);
   }), []);
   const paths = useMemo(() => flattenTree(tree), [tree]);
@@ -55,7 +60,7 @@ export default function App() {
     }
     setTabs((t) => (t.includes(path) ? t : [...t, path]));
     setActive(path);
-    void refreshInk(path);
+    void refreshInk(path, true);
   }, [files, refreshInk]);
 
   // ---- boot: session, tree, restore tabs ----
@@ -64,6 +69,10 @@ export default function App() {
     (async () => {
       try {
         const s = await api.session();
+        if (!s.anchorCache.enabled && !sessionStorage.getItem(`anchor-cache-notice:${s.rootPath}`)) {
+          setCacheNotice({ file: s.anchorCache.ignoreFile, line: s.anchorCache.ignoreLine });
+          sessionStorage.setItem(`anchor-cache-notice:${s.rootPath}`, "shown");
+        }
         const [t, ui] = await Promise.all([api.tree(), api.uiState()]);
         setTree(t);
         const all = flattenTree(t);
@@ -83,7 +92,7 @@ export default function App() {
         const ok = want.filter((p) => loadedFiles[p]);
         setFiles(loadedFiles);
         const loadedInk: Record<string, InkSnapshot> = {};
-        for (const p of ok) try { loadedInk[p] = await api.ink(p); } catch { setNotice(`Ink for ${p} could not be loaded. Its sidecar is preserved.`); }
+        for (const p of ok) try { loadedInk[p] = await api.ink(p, true); } catch { setNotice(`Ink for ${p} could not be loaded. Its sidecar is preserved.`); }
         setInkFiles(loadedInk);
         setTabs(ok);
         setActive(ui.active && ok.includes(ui.active) ? ui.active : (ok[0] ?? null));
@@ -166,10 +175,10 @@ export default function App() {
   const openVersion = active ? (panes.current.get(active)?.session.base.version ?? files[active]?.version ?? null) : null;
   const trustedText = active && currentInk?.document.noteVersion === openVersion && status[active] !== "dirty" && status[active] !== "conflict"
     && activeText === (panes.current.get(active)?.session.base.text ?? files[active]?.text) ? activeText : null;
-  const activeItems = useMemo(() => (currentInk?.document.items ?? []).map(item => ({ ...item,
+  const activeItems = useMemo(() => (active ? mappedInk[active] ?? currentInk?.document.items ?? [] : []).map(item => ({ ...item,
     attachment: active && status[active] === "missing" ? { status: "orphaned" as const, reason: "note-missing" as const }
-      : resolveStoredAttachment(activeText, item, currentInk?.document.noteVersion ?? null, trustedText === null ? null : openVersion),
-  })), [currentInk, active, activeText, status, openVersion, trustedText]);
+      : item.attachment,
+  })), [currentInk, mappedInk, active, status]);
   useEffect(() => {
     if (activeItems.some(i => i.attachment.status === "orphaned")) setRightTab("activity");
   }, [active, currentInk]);
@@ -257,6 +266,18 @@ export default function App() {
         <Tree tree={tree} active={active} onOpen={(p) => void openNote(p)} />
       </aside>
       <main className="editor-col">
+        {cacheNotice && <div className="notice" role="alert">
+          Anchor snapshots are disabled. Add this exact line to <code>{cacheNotice.file}</code>: <code>{cacheNotice.line}</code>
+          <button disabled={cacheBusy} onClick={async () => {
+            setCacheBusy(true);
+            try {
+              const result = await api.enableAnchorCache();
+              if (result.enabled) { setCacheNotice(null); setNotice("Anchor snapshots enabled. Existing ignore rules were preserved."); }
+            } catch { setNotice("Cache setup failed or ignore coverage could not be verified. Persistence remains disabled; review the ignore file."); }
+            finally { setCacheBusy(false); }
+          }}>Add /.cache/ to root .gitignore</button>
+          <button className="ghost" onClick={() => setCacheNotice(null)}>Dismiss</button>
+        </div>}
         {notice && (
           <div className="notice" role="alert">
             {notice} <button className="ghost" onClick={() => setNotice(null)}>Dismiss</button>
@@ -265,7 +286,8 @@ export default function App() {
         {tabs.map((p) =>
           files[p] ? (
             <EditorPane key={p} file={files[p]} visible={p === active} resolver={resolver} onOpenWiki={onOpenWiki} onStatus={onStatus} onDoc={onDoc} subscribe={subscribe} register={register}
-              inkItems={p === active ? activeItems : inkFiles[p]?.document.items} trustedText={p === active ? trustedText : null} />
+              inkItems={inkFiles[p]?.document.items} trustedText={p === active ? trustedText : null}
+              inkVersion={inkFiles[p]?.version} onInk={onInk} onInkSaved={onInkSaved} onInkError={setNotice} />
           ) : null,
         )}
         {tabs.length === 0 && (

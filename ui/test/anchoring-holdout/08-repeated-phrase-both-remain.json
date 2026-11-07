@@ -1,0 +1,10 @@
+{
+  "before": "# Auth plan\n\n## Cache\n\nTODO: decide later.\n\n## Queue\n\nTODO: decide later.\n\n## Search\n\nIndex nightly.",
+  "from": 54,
+  "to": 73,
+  "after": "# Auth plan\n\nContext: both items depend on the traffic estimate.\n\n## Cache\n\nTODO: decide later.\n\n## Queue\n\nTODO: decide later.\n\n## Search\n\nIndex nightly.",
+  "expected": {
+    "from": 107,
+    "to": 126
+  }
+}

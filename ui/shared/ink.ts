@@ -10,9 +10,10 @@ export interface InkItem {
   attachment: Attachment;
 }
 export interface InkDocument {
-  v: 1;
+  v: 2;
   note: string;
   noteVersion: string | null;
+  lastSeenTextHash: string | null;
   items: InkItem[];
 }
 
@@ -31,7 +32,8 @@ function keys(value: unknown, expected: string[]): boolean {
 
 export function validateDocument(value: unknown, note: string): asserts value is InkDocument {
   const d = value as InkDocument;
-  if (!keys(d, ["v", "note", "noteVersion", "items"]) || d.v !== 1 || d.note !== note ||
+  if (!keys(d, ["v", "note", "noteVersion", "lastSeenTextHash", "items"]) || d.v !== 2 || d.note !== note ||
+      !(d.lastSeenTextHash === null || (typeof d.lastSeenTextHash === "string" && /^[a-f0-9]{64}$/.test(d.lastSeenTextHash))) ||
       !(d.noteVersion === null || (typeof d.noteVersion === "string" && /^[a-f0-9]{64}$/.test(d.noteVersion))) ||
       !Array.isArray(d.items) || d.items.length > 1000) throw new Error("Invalid or unsupported ink document.");
   const ids = new Set<string>();

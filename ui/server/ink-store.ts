@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile, realpath, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { captureAnchor, resolveAnchor } from "../shared/anchors.ts";
-import { resolveStoredAttachment, serializeInk, validateDocument, type InkDocument } from "../shared/ink.ts";
+import { resolveStoredAttachment, serializeInk, validateDocument, type InkDocument, type InkItem } from "../shared/ink.ts";
 import { decode, versionOf } from "./codec.ts";
 import { isNotePath, normalizeRel } from "./paths.ts";
 import { resolveRoot } from "./root.ts";
 import { MAX_NOTE_BYTES } from "./store.ts";
+import { AnchorCache, textHash } from "./anchor-cache.ts";
+import { mapInkItems } from "../shared/anchor-mapping.ts";
 
 export interface InkSnapshot { document: InkDocument; version: string | null }
 const missing = (e: unknown) => (e as NodeJS.ErrnoException).code === "ENOENT";
@@ -15,7 +17,8 @@ const MAX_INK_BYTES = 8 * 1024 * 1024;
 /** Server-only sidecars. No operation in this class writes to a Markdown file. */
 export class InkStore {
   readonly rootReal: string;
-  private constructor(root: string) { this.rootReal = root; }
+  readonly cache: AnchorCache;
+  private constructor(root: string) { this.rootReal = root; this.cache = new AnchorCache(root); }
   static async open(root?: string): Promise<InkStore> { return new InkStore(await resolveRoot({ root })); }
 
   private async notePath(input: string): Promise<string> {
@@ -70,7 +73,7 @@ export class InkStore {
     catch (e) {
       if (!missing(e)) throw e;
       const note = await this.note(rel);
-      return { document: { v: 1, note: rel, noteVersion: note?.version ?? null, items: [] }, version: null };
+      return { document: { v: 2, note: rel, noteVersion: note?.version ?? null, lastSeenTextHash: note ? textHash(note.text) : null, items: [] }, version: null };
     }
     if (bytes.length > MAX_INK_BYTES) throw new Error("Ink file too large.");
     const document: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
@@ -99,6 +102,7 @@ export class InkStore {
       if (current.version !== expectedVersion) throw new Error("Ink version conflict.");
       const note = await this.note(rel);
       if (note?.version !== (document.noteVersion ?? undefined)) throw new Error("Note version conflict; re-anchor before saving ink.");
+      if (document.lastSeenTextHash !== (note ? textHash(note.text) : null)) throw new Error("Note text hash conflict.");
       for (const item of document.items) {
         const r = item.attachment;
         if (r.status === "attached" && (!note || note.text.slice(r.from, r.to) !== item.anchor.quote)) throw new Error("Ink attachment does not match note text.");
@@ -114,6 +118,8 @@ export class InkStore {
           await new Promise(r => setTimeout(r, 10 * 2 ** attempt));
         }
       }
+      // A crash/cache failure only disables mapping: the sidecar remains valid and search is conservative.
+      if (note) await this.cache.save(rel, note.text).catch(() => false);
       return versionOf(bytes);
     } finally {
       await unlink(temp).catch(e => { if (!missing(e)) throw e; });
@@ -128,13 +134,27 @@ export class InkStore {
     if (snapshot.version !== expectedVersion) throw new Error("Ink version conflict.");
     const note = await this.note(rel);
     if (note?.version === snapshot.document.noteVersion) return snapshot;
-    const document: InkDocument = { ...snapshot.document, noteVersion: note?.version ?? null,
-      items: snapshot.document.items.map(item => {
+    const previous = await this.cache.load(rel, snapshot.document.lastSeenTextHash);
+    const document: InkDocument = { ...snapshot.document, noteVersion: note?.version ?? null, lastSeenTextHash: note ? textHash(note.text) : null,
+      items: note && previous !== null ? mapInkItems(previous, note.text, snapshot.document.items) : snapshot.document.items.map(item => {
         const attachment = note ? resolveAnchor(note.text, item.anchor) : { status: "orphaned" as const, reason: "note-missing" as const };
         return { ...item, attachment, anchor: note && attachment.status === "attached" ? captureAnchor(note.text, attachment.from, attachment.to) : item.anchor };
       }) };
     const version = await this.write(rel, document, expectedVersion);
     return { document, version };
+  }
+
+  /** Persist the editor's shared mapping only after the matching note save succeeds. */
+  async checkpoint(input: string, expectedVersion: string | null, noteVersion: string, updates: Pick<InkItem, "id" | "anchor" | "attachment">[]): Promise<InkSnapshot> {
+    const rel = await this.notePath(input), snapshot = await this.read(rel), note = await this.note(rel);
+    if (snapshot.version !== expectedVersion || !note || note.version !== noteVersion) throw new Error("Ink or note version conflict.");
+    if (!Array.isArray(updates) || updates.length !== snapshot.document.items.length || new Set(updates.map(i => i.id)).size !== updates.length) throw new Error("Invalid mapping checkpoint.");
+    const document: InkDocument = { ...snapshot.document, noteVersion, lastSeenTextHash: textHash(note.text), items: snapshot.document.items.map(item => {
+      const update = updates.find(i => i.id === item.id);
+      if (!update) throw new Error("Invalid mapping checkpoint.");
+      return { ...item, anchor: update.anchor, attachment: update.attachment };
+    }) };
+    return { document, version: await this.write(rel, document, expectedVersion) };
   }
 
   /** A human-picked range becomes the new selector; old selectors remain as history. */
@@ -149,7 +169,7 @@ export class InkStore {
     const selected = snapshot.document.items.find(i => i.id === id);
     if (!selected) throw new Error("Ink item not found.");
     if (resolveAnchor(note.text, selected.anchor).status !== "orphaned") throw new Error("Ink item is already attached.");
-    const updated = { ...snapshot.document, noteVersion: note.version, items: snapshot.document.items.map(item => {
+    const updated = { ...snapshot.document, noteVersion: note.version, lastSeenTextHash: textHash(note.text), items: snapshot.document.items.map(item => {
       if (item.id === id) {
         const old = [item.originalAnchor, ...(item.anchorHistory ?? []), item.anchor];
         const history = old.filter((a, i) => old.findIndex(b => JSON.stringify(a) === JSON.stringify(b)) === i);
