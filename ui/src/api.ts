@@ -1,0 +1,114 @@
+// Thin client for the local Aitiarch server. All state lives in files on disk; nothing here is cached
+// beyond the current page.
+export type EolLabel = "LF" | "CRLF" | "CR" | "mixed" | "none";
+
+export interface NoteFile {
+  path: string;
+  text: string;
+  version: string;
+  eol: EolLabel;
+  bom: boolean;
+  size: number;
+}
+
+export interface TreeNode {
+  name: string;
+  path: string;
+  type: "dir" | "file";
+  children?: TreeNode[];
+}
+
+export interface UiState {
+  v: 1;
+  tabs: string[];
+  active: string | null;
+}
+
+export type SaveResult =
+  | { ok: true; version: string; changed: boolean }
+  | { ok: false; reason: "conflict" | "missing"; current: NoteFile | null }
+  | { ok: false; reason: "network"; message: string };
+
+export class ApiError extends Error {
+  status: number;
+  code: string;
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+async function call(method: "GET" | "PUT", url: string, body?: unknown, keepalive = false): Promise<{ status: number; data: any }> {
+  const res = await fetch(url, {
+    method,
+    credentials: "same-origin",
+    keepalive,
+    headers: method === "GET" ? {} : { "Content-Type": "application/json", "X-Aitiarch": "1" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let data: any = null;
+  try {
+    data = await res.json();
+  } catch {
+    /* empty body */
+  }
+  return { status: res.status, data };
+}
+
+async function ok<T>(method: "GET" | "PUT", url: string, body?: unknown): Promise<T> {
+  const { status, data } = await call(method, url, body);
+  if (status >= 200 && status < 300) return data as T;
+  throw new ApiError(status, data?.error ?? "error", data?.message ?? `Request failed (${status})`);
+}
+
+export const api = {
+  session: () => ok<{ rootName: string; rootPath: string }>("GET", "/api/session"),
+  tree: () => ok<TreeNode>("GET", "/api/tree"),
+  file: (path: string) => ok<NoteFile>("GET", `/api/file?path=${encodeURIComponent(path)}`),
+  /** Like file() but resolves null when the note no longer exists. */
+  async load(path: string): Promise<NoteFile | null> {
+    try {
+      return await api.file(path);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      throw e;
+    }
+  },
+  uiState: () => ok<UiState>("GET", "/api/ui-state"),
+  putUiState: (s: UiState) => ok<UiState>("PUT", "/api/ui-state", s),
+  async save(path: string, base: string, text: string, keepalive = false): Promise<SaveResult> {
+    try {
+      const { status, data } = await call("PUT", "/api/file", { path, base, text }, keepalive);
+      if (status === 200) return { ok: true, version: data.version, changed: data.changed };
+      if (status === 409) return { ok: false, reason: data.reason === "missing" ? "missing" : "conflict", current: data.current ?? null };
+      return { ok: false, reason: "network", message: data?.message ?? `Server returned ${status}` };
+    } catch (e) {
+      return { ok: false, reason: "network", message: String(e) };
+    }
+  },
+};
+
+export type ServerEvent =
+  | { type: "changed"; path: string; version: string }
+  | { type: "removed"; path: string }
+  | { type: "tree" }
+  | { type: "open" }
+  | { type: "closed" };
+
+/** Subscribe to server-sent events. EventSource reconnects by itself; 'open' fires on every (re)connect so callers can resync. */
+export function connectEvents(onEvent: (e: ServerEvent) => void): () => void {
+  const es = new EventSource("/api/events");
+  es.onopen = () => onEvent({ type: "open" });
+  es.onerror = () => onEvent({ type: "closed" });
+  for (const t of ["changed", "removed", "tree"] as const) {
+    es.addEventListener(t, (m) => {
+      try {
+        onEvent(JSON.parse((m as MessageEvent).data));
+      } catch {
+        /* ignore malformed frame */
+      }
+    });
+  }
+  return () => es.close();
+}
