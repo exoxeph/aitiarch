@@ -29,9 +29,9 @@ for(const kind of ['no-completed','truncated','empty','mismatch','unknown-event'
 });
 
 // Real loopback HTTP responses; no account, credentials or captured output.
-async function localStream(data:any[],run:(response:Response)=>Promise<void>,contentType='text/event-stream',body?:string){
+async function localStream(data:any[],run:(response:Response)=>Promise<void>,contentType:string|null='text/event-stream',body?:string){
   const raw=body??await response(data).text();
-  const server=createServer((_req,res)=>res.writeHead(200,{'Content-Type':contentType}).end(raw));
+  const server=createServer((_req,res)=>res.writeHead(200,contentType===null?{}:{'Content-Type':contentType}).end(raw));
   await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
   try{await run(await fetch('http://127.0.0.1:'+(server.address() as any).port));}
   finally{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}
@@ -50,6 +50,33 @@ it('accepts only reviewed metadata shapes and rebuilds the answer exclusively fr
     expect(result.text).toBe(text);expect(counts).toMatchObject({'response.metadata':1,reasoning_items:1});
     expect(JSON.stringify({result,counts,fields})).not.toMatch(/PRIVATE_|private-id/);
   });
+});
+it('accepts absent Content-Type only with an SSE first line and records absent',async()=>{
+  const raw='\n\n'+await response(events()).text();
+  await localStream([],async r=>{
+    expect(r.headers.has('content-type')).toBe(false);
+    await expect(readPlanStream(r,{},[])).resolves.toMatchObject({text,contentType:'absent'});
+  },null,raw);
+});
+it('checks an absent-header first line across byte boundaries',async()=>{
+  const r=response(events(),'',true);r.headers.delete('content-type');
+  await expect(readPlanStream(r,{},[])).resolves.toMatchObject({text,contentType:'absent'});
+});
+for(const [name,body] of [['json','{"error":"PRIVATE_BODY_SENTINEL"}'],['html','<html>PRIVATE_BODY_SENTINEL</html>'],['comment',': PRIVATE_BODY_SENTINEL\n\n'],['leading-space',' event: response.created\n\n']])it(`rejects absent header with non-SSE first line: ${name}`,async()=>{
+  await localStream([],async r=>{
+    let error:any;try{await readPlanStream(r,{},[]);}catch(e){error=e;}
+    expect(error).toMatchObject({code:'invalid_response',streamRejection:{condition:'sse_prefix',observedContentType:'absent'}});
+    expect(JSON.stringify(error)).not.toContain('PRIVATE_BODY_SENTINEL');
+  },null,body);
+});
+for(const [name,mutate,want] of [
+  ['tool',(e:any[])=>{e[2].item.type='function_call';},{condition:'item_type',itemType:'function_call'}],
+  ['unknown-event',(e:any[])=>{e[1].type='response.future';},{condition:'event_type',event:'response.future'}],
+  ['unknown-field',(e:any[])=>{e[1].unexpected=true;},{condition:'unexpected_field',field:'unexpected'}],
+  ['no-completed',(e:any[])=>{e.pop();},{condition:'missing_completed'}],
+] as const)it(`keeps strict frame checks without a header: ${name}`,async()=>{
+  const e:any[]=events();mutate(e);
+  await localStream(e,async r=>{await expect(readPlanStream(r,{},[])).rejects.toMatchObject({streamRejection:{...want,observedContentType:'absent'}});},null);
 });
 for(const header of ['text/event-stream','TEXT/EVENT-STREAM',' text/event-stream ',
   'text/event-stream; charset=utf-8','Text/Event-Stream ; Charset = UTF-8'])it(`accepts the precise SSE media type: ${header}`,async()=>{

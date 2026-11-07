@@ -74,7 +74,7 @@ async function fixture(options:{enabled?:boolean;hourlyCap?:number;timeoutMs?:nu
       if(mode==='unsafe-content-type')return res.writeHead(200,{'Content-Type':'application/json; note="synthetic"'}).end(JSON.stringify({error:{message:tokens[0]}}));
       if(mode==='hang'){req.on('close',()=>res.destroy());return;}
       if(mode.startsWith('error:')){const [_,status,error]=mode.split(':');if(status==='503')res.setHeader('Retry-After',mode.split(':')[3]??'0');return json({error:{code:error,message:tokens[0]}},Number(status));}
-      res.writeHead(200,{'Content-Type':'text/event-stream'});
+      res.writeHead(200,mode==='absent-stream'?{'Set-Cookie':'private_cookie_sentinel=not_for_storage'}:{'Content-Type':'text/event-stream'});
       let sequence=0;const event=(value:any)=>res.write('data: '+JSON.stringify({...value,sequence_number:sequence++})+'\n\n');
       if(mode.startsWith('stream-error:')){event({type:'response.failed',response:{status:'failed',error:{code:mode.slice(13),message:tokens[0]}}});return res.end();}
       if(mode==='unknown')event({type:'response.unreviewed',text:tokens[0]});
@@ -100,6 +100,19 @@ async function fixture(options:{enabled?:boolean;hourlyCap?:number;timeoutMs?:nu
 it('disabled by default and startup/availability make no network requests',async()=>{
   const f=await fixture({enabled:false});await expect(f.provider.checkAvailability()).resolves.toMatchObject({available:false});expect(f.requests).toEqual([]);
   await expect(f.provider.beginSignIn()).rejects.toMatchObject({code:'unsupported_cli'});expect(f.requests).toEqual([]);
+});
+it('accepts headerless SSE, records absent, and never stores or forwards response cookies',async()=>{
+  const f=await fixture();await f.login();f.setMode('absent-stream');
+  await expect(f.provider.invoke(request)).resolves.toMatchObject({answer:'Synthetic answer.'});
+  await expect(f.provider.invoke(request)).resolves.toMatchObject({answer:'Synthetic answer.'});
+  const calls=f.requests.filter(r=>r.route==='/responses');expect(calls).toHaveLength(2);
+  for(const call of calls){expect(call.headers.cookie).toBeUndefined();expect(call.headers['set-cookie']).toBeUndefined();}
+  const usage=await readFile(path.join(f.root,'usage.jsonl'),'utf8');
+  expect(usage.trim().split('\n').map(line=>JSON.parse(line).contentType)).toEqual(['absent','absent']);
+  for(const file of await readdir(f.root)){
+    const saved=await readFile(path.join(f.root,file),'utf8');
+    expect(saved).not.toContain('private_cookie_sentinel');expect(saved).not.toContain('not_for_storage');
+  }
 });
 it('sign-in rejects a missing direct-use scope before saving any credential tokens',async()=>{
   const f=await fixture();f.setMode('missing-direct-scope');

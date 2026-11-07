@@ -7,7 +7,7 @@ const names=new Set(['response.created','response.in_progress','response.output_
 const identifier=(s:unknown)=>typeof s==='string'&&/^[a-zA-Z_][a-zA-Z0-9_.]{0,79}$/.test(s)?s:'unknown';
 const object=(v:any)=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const valueType=(v:unknown)=>v===null?'null':Array.isArray(v)?'array':typeof v;
-export type StreamCondition='content_type'|'body_missing'|'sse_line'|'json_syntax'|'event_object'|'event_after_completed'
+export type StreamCondition='content_type'|'body_missing'|'sse_prefix'|'sse_line'|'json_syntax'|'event_object'|'event_after_completed'
   |'event_type'|'event_name_mismatch'|'unexpected_field'|'field_type'|'sequence'|'server_failed'|'delta_shape'
   |'delta_item'|'text_limit'|'text_mismatch'|'item_type'|'item_shape'|'part_type'|'final_status'|'final_empty'
   |'final_snapshot'|'model'|'final_constraints'|'usage'|'stream_limit'|'utf8'|'stream_read'|'truncated'|'missing_completed';
@@ -20,9 +20,11 @@ export class StreamError extends ProviderError {
   }
 }
 export async function readPlanStream(response:Response,counts:Record<string,number>,fields:unknown[]){
+  const contentType=response.headers.get('content-type');
+  const headerDiagnostic=contentType===null?{observedContentType:'absent'}:{};
   let currentEvent:string|undefined;
   const fail=(condition:StreamCondition,detail:Partial<Omit<StreamRejection,'condition'>>={}):never=>{
-    const rejection:StreamRejection={condition,...(currentEvent?{event:currentEvent}:{}),...detail};
+    const rejection:StreamRejection={condition,...headerDiagnostic,...(currentEvent?{event:currentEvent}:{}),...detail};
     // The error carries only fixed conditions, sanitized identifiers and type names.
     throw new StreamError(rejection);
   };
@@ -31,18 +33,27 @@ export async function readPlanStream(response:Response,counts:Record<string,numb
     const extra=Object.keys(value).find(k=>!allowed.includes(k));
     if(extra!==undefined)fail('unexpected_field',{field:identifier(extra),fieldType:valueType(value[extra])});
   };
-  const contentType=response.headers.get('content-type');
   const [mediaType,...parameters]=(contentType??'').split(';').map(part=>part.trim().toLowerCase());
-  if(mediaType!=='text/event-stream'||parameters.length>1
-    ||parameters.length===1&&!/^charset *= *utf-8$/.test(parameters[0])){
+  if(contentType!==null&&(mediaType!=='text/event-stream'||parameters.length>1
+    ||parameters.length===1&&!/^charset *= *utf-8$/.test(parameters[0]))){
     // Only the bounded, explicitly approved header alphabet may enter metrics.
-    // Never inspect the body to infer or override its declared media type.
+    // Never use the body to override a present, invalid media type.
     const observedContentType=contentType!==null&&/^[A-Za-z0-9/.+_;= -]{1,80}$/.test(contentType)?contentType:'unknown';
     fail('content_type',{observedContentType});
   }
   if(!response.body)fail('body_missing');
   const reader=response.body!.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});
   let buffer='',text='',bytes=0,finished=false,sequence=-1,item:string|undefined,model='';
+  let prefixChecked=contentType!==null;
+  const checkPrefix=(eof=false)=>{
+    if(prefixChecked)return;
+    const lines=buffer.split('\n');
+    if(!eof)lines.pop(); // A first line may span multiple network chunks.
+    const first=lines.find(line=>line.length>0);
+    if(first===undefined){if(eof)fail('sse_prefix');return;}
+    if(!first.startsWith('event:')&&!first.startsWith('data:'))fail('sse_prefix');
+    prefixChecked=true;
+  };
   let usage:{input:number;cached:number;output:number;reasoning:number}|undefined;
   const inspectItem=(value:any)=>{
     if(!object(value))fail('item_shape');
@@ -91,7 +102,7 @@ export async function readPlanStream(response:Response,counts:Record<string,numb
       return; // Never inspect, retain or display its contents.
     }
     if(name==='response.failed'){
-      const error=new StreamError({condition:'server_failed',event:name});
+      const error=new StreamError({condition:'server_failed',...headerDiagnostic,event:name});
       // Only the caller's fixed documented-code map may promote this identifier
       // into diagnostics. The message and the rest of the error are discarded.
       Object.assign(error,{planCode:e.response?.error?.code});throw error;
@@ -128,10 +139,11 @@ export async function readPlanStream(response:Response,counts:Record<string,numb
     const decode=(value?:Uint8Array,stream=false)=>{try{return decoder.decode(value,{stream});}catch{return fail('utf8');}};
     for(;;){const next=await reader.read();if(next.done)break;bytes+=next.value.byteLength;if(bytes>2000000)fail('stream_limit');
       buffer=(buffer+decode(next.value,true)).replace(/\r\n/g,'\n');
+      checkPrefix();
       let end;while((end=buffer.indexOf('\n\n'))!==-1){currentEvent=undefined;event(buffer.slice(0,end));buffer=buffer.slice(end+2);}}
-    buffer+=decode();if(buffer.trim())fail('truncated');if(!finished||!usage)fail('missing_completed');return {text,model,usage:usage!};
+    buffer+=decode();checkPrefix(true);if(buffer.trim())fail('truncated');if(!finished||!usage)fail('missing_completed');return {text,model,usage:usage!,contentType:contentType===null?'absent':'text/event-stream'};
   }catch(error){
     if(error instanceof StreamError){fields.push(error.streamRejection);throw error;}
-    const failure=new StreamError({condition:'stream_read',...(currentEvent?{event:currentEvent}:{})});fields.push(failure.streamRejection);throw failure;
+    const failure=new StreamError({condition:'stream_read',...headerDiagnostic,...(currentEvent?{event:currentEvent}:{})});fields.push(failure.streamRejection);throw failure;
   }finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
 }

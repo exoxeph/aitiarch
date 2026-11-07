@@ -225,7 +225,7 @@ export class ChatGPTPlan implements Provider {
         if(!Number.isFinite(retry)||retry>5000)throw new ProviderError('provider_error','ChatGPT is temporarily unavailable. Retry later.');await delay(retry,undefined,{signal});
       }
       rule='stream';const {readPlanStream}=await import('./plan-stream.ts');const completed=await readPlanStream(response!,counts,fields);
-      await this.vault.append('usage.jsonl',{at:new Date().toISOString(),provider:'chatgpt-plan',...completed.usage});
+      await this.vault.append('usage.jsonl',{at:new Date().toISOString(),provider:'chatgpt-plan',contentType:completed.contentType,...completed.usage});
       rule='response_schema';const raw=JSON.parse(completed.text);
       if(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.keys(raw).sort().join(',')!=='answer,claims'||!Array.isArray(raw.claims)||raw.claims.some((c:any)=>!c||typeof c!=='object'||Array.isArray(c)||Object.keys(c).sort().join(',')!=='quote,sourceId'))throw new ProviderError('invalid_response');
       const parsed=validateProviderResponse(raw);
