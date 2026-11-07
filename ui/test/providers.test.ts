@@ -144,3 +144,55 @@ it('preserves multibyte response text across stdout chunks', async () => {
   const { cli } = fixture('claude', 'unicode'); const result = await cli.invoke(request());
   expect(result.answer).toBe('雪'.repeat(40000));
 });
+for (const [provider, scenario, flag] of [
+  ['claude', 'missing-tools', '--tools'], ['claude', 'missing-turns', '--max-turns'],
+  ['claude', 'missing-persistence', '--no-session-persistence'], ['claude', 'missing-safe', '--safe-mode'],
+  ['claude', 'missing-mcp', '--strict-mcp-config'], ['claude', 'missing-settings', '--setting-sources'],
+  ['claude', 'missing-skills', '--disable-slash-commands'], ['claude', 'missing-output', '--output-format'],
+  ['claude', 'missing-print', '--print'],
+  ['codex', 'missing-sandbox', '--sandbox'], ['codex', 'missing-ephemeral', '--ephemeral'],
+  ['codex', 'missing-config', '--ignore-user-config'], ['codex', 'missing-output', '--json'],
+  ['codex', 'missing-override', '--config'], ['codex', 'missing-git', '--skip-git-repo-check'],
+] as const) {
+  it(`${provider} startup disables a CLI lacking ${flag}, without sending the request`, async () => {
+    const { cli, record } = fixture(provider, scenario);
+    expect(await cli.checkAvailability()).toMatchObject({ available: false, code: 'unsupported_cli',
+      message: expect.stringContaining(flag) });
+    await expect(cli.invoke(request())).rejects.toMatchObject({ code: 'unsupported_cli' });
+    expect(existsSync(record)).toBe(false);
+  });
+}
+for (const provider of ['claude', 'codex'] as const) {
+  it(`${provider} starts and caches metadata-only capability checks`, async () => {
+    const { cli, record } = fixture(provider);
+    await started(record + '.metadata');
+    await cli.checkAvailability(); await cli.checkAvailability();
+    const probes = readFileSync(record + '.metadata', 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    expect(probes).toEqual([['--version'], provider === 'claude' ? ['--help'] : ['exec', '--help']]);
+    expect(existsSync(record)).toBe(false);
+  });
+}
+it('rejects a tools flag whose description no longer promises to disable tools', async () => {
+  const { cli, record } = fixture('claude', 'ambiguous-tools');
+  expect(await cli.checkAvailability()).toMatchObject({ available: false, code: 'unsupported_cli',
+    message: expect.stringContaining('--tools') });
+  expect(existsSync(record)).toBe(false);
+});
+it('Codex read-only alone never passes a no-tools check', async () => {
+  const { cli, record } = fixture('codex', 'readonly-only');
+  expect(await cli.checkAvailability()).toMatchObject({ available: false, code: 'unsupported_cli',
+    message: expect.stringContaining('no-tools') });
+  expect(existsSync(record)).toBe(false);
+});
+it('metadata errors disable the provider and never send context', async () => {
+  const { cli, record } = fixture('claude', 'metadata-error');
+  expect(await cli.checkAvailability()).toMatchObject({ available: false, code: 'unsupported_cli',
+    message: expect.stringContaining('metadata check failed') });
+  await expect(cli.invoke(request())).rejects.toMatchObject({ code: 'unsupported_cli' });
+  expect(existsSync(record)).toBe(false);
+});
+it('metadata probes close stdin without sending any prompt', async () => {
+  const { cli, record } = fixture('claude', 'metadata-eof');
+  expect(await cli.checkAvailability()).toEqual({ available: true });
+  expect(existsSync(record)).toBe(false);
+}, 10000);

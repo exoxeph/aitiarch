@@ -3,6 +3,8 @@ import { constants } from 'node:fs';
 import { spawn, execFile } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { probeCapabilities } from './capabilities.ts';
+import type { Availability } from './capabilities.ts';
 
 export type ProviderName = 'claude' | 'codex';
 export interface Request {
@@ -27,7 +29,7 @@ const messages: Record<ErrorCode, string> = {
 };
 export class ProviderError extends Error {
   readonly code: ErrorCode;
-  constructor(code: ErrorCode) { super(messages[code]); this.name = 'ProviderError'; this.code = code; }
+  constructor(code: ErrorCode, detail?: string) { super(detail ?? messages[code]); this.name = 'ProviderError'; this.code = code; }
 }
 export interface Result {
   id: string; provider: ProviderName; model: string | null; answer: string;
@@ -35,7 +37,7 @@ export interface Result {
 }
 export interface InvokeOptions { signal?: AbortSignal; timeoutMs?: number }
 export interface Provider {
-  checkAvailability(): Promise<{ available: true } | { available: false; code: ErrorCode }>;
+  checkAvailability(): Promise<Availability>;
   invoke(request: Request, options?: InvokeOptions): Promise<Result>;
 }
 export interface Configuration {
@@ -132,22 +134,26 @@ function parseResult(provider: ProviderName, id: string, stdout: string): Result
 export function createProvider(configuration: Configuration): Provider {
   // Copy caller-owned configuration so concurrent mutations cannot change commands.
   const config = { ...configuration, prefixArgs: [...(configuration.prefixArgs ?? [])] };
-  async function checkAvailability(): ReturnType<Provider['checkAvailability']> {
-    if (config.contract !== 'fake') return { available: false, code: 'unsupported_cli' };
+  async function startup(): Promise<Availability> {
     // Explicit absolute executable only. Windows .cmd shell wrappers need a separate
     // verified launcher; never silently switch to shell:true for paths or prompts.
-    if (!path.isAbsolute(config.command) || /\.(?:cmd|bat)$/i.test(config.command))
-      return { available: false, code: 'unsupported_cli' };
-    try { await access(config.command, constants.X_OK); return { available: true }; }
-    catch { return { available: false, code: 'missing_cli' }; }
+    if (!path.isAbsolute(config.command) || /\.(?:cmd|bat|ps1)$/i.test(config.command))
+      return { available: false, code: 'unsupported_cli', message: 'Provider disabled: use an absolute native executable or an explicitly configured Node entrypoint.' };
+    try { await access(config.command, constants.X_OK); }
+    catch { return { available: false, code: 'missing_cli', message: messages.missing_cli }; }
+    return probeCapabilities(config, environment());
   }
+  // Eager, metadata-only adapter startup. Cache the result for this instance;
+  // construct a new adapter after updating/replacing the CLI. No prompt is sent.
+  const ready = startup().catch((): Availability => ({ available: false, code: 'unsupported_cli', message: 'Provider disabled: capability startup failed.' }));
+  const checkAvailability = () => ready;
   return { checkAvailability, async invoke(request, options = {}) {
-    if (options.signal?.aborted) throw new ProviderError('cancelled');
     // Freeze and redact synchronously, before any asynchronous boundary.
     const packet = prepareRequest(request);
     const input = JSON.stringify(packet), requestId = packet.data.id;
     const availability = await checkAvailability();
-    if (!availability.available) throw new ProviderError(availability.code);
+    if (options.signal?.aborted) throw new ProviderError('cancelled');
+    if (!availability.available) throw new ProviderError(availability.code, availability.message);
     const cwd = await mkdtemp(path.join(os.tmpdir(), 'aitiarch-headless-'));
     try {
       if (options.signal?.aborted) throw new ProviderError('cancelled');

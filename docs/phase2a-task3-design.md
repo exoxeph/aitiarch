@@ -75,8 +75,10 @@ and transcripts are data; the instruction template explicitly says so.
 For Codex, read-only is insufficient evidence of disabled tools. Until an installed
 version has a verified no-tools contract, the production adapter fails closed;
 fake-CLI contract tests do not certify a real executable.
-Installed CLI help confirms these capabilities locally; exact argument arrays
-get executable-contract tests before enabling an adapter. Read-only alone does
+Installed CLI help must confirm these capabilities; the 2026-11-07 check found
+unresolved single-turn/no-tools guarantees and both real providers stay disabled.
+See [the versioned isolation check and canary plan](phase2a-cli-isolation.md).
+Exact argument arrays get executable-contract tests before enabling an adapter. Read-only alone does
 not mean tools are disabled: tool/MCP/hook isolation must be verified, and an
 unsupported CLI version fails with an actionable message. Never enable full
 auto or bypass flags to make an adapter work. No request goes in shell command
