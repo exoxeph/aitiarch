@@ -6,7 +6,13 @@ Status: blank evaluation instrument, not a completed experiment or permission fo
 
 The human and assistant write the real 20 together. The human approves expected outcomes and rationale before outputs are generated; do not invent or backfill cases to fit results. Use synthetic or explicitly supplied, publication-safe excerpts only. Keep private originals outside the repository; no transcripts, tokens or real notebook copying.
 
-Record mode, enabled kinds, timing/minimum/cooldown settings, note budget, provider availability and context size. Evaluate the local eligibility decision separately from model abstention. A silent case should ideally make no call; measure avoidable calls even when the model abstains. Provider/validation errors are failures, not successful model abstentions. A local skip on a comment-expected case is a false negative.
+Aim for roughly **eight silent and twelve comment-expected** cases, spreading comments across all four kinds. Include a few borderline cases where reasonable people disagree about speaking, and at least a few drawn from the user's explicitly supplied, publication-safe notes. Do not access or copy the real notebook. Freeze disagreements and human adjudication before scoring.
+
+Modes are **When you ask / Contradictions only / Thinks with you**, default When you ask; manual actions work in every mode. Use automatic-enabled modes for intervention recall; test When you ask separately for zero automatic calls.
+
+**Arithmetic conflict for human review:** the requested “one miss moves recall by about 12 points” does not match twelve expected-comment cases: 1/12 is about 8.3 percentage points (1/8 is 12.5). Thresholds are a sanity check, not proof; do not silently change the composition or denominator to fit that estimate.
+
+Record mode, enabled kinds, finished-block condition, timing/minimum/cooldown settings, note budget, provider availability and sent context size. Score the local eligibility gate and model separately, including model abstention. A silent case should ideally make no call; measure avoidable calls even when the model abstains. Provider/validation errors are failures, not successful model abstentions. A local skip on a comment-expected case is a false negative.
 
 Use fake providers to verify plumbing first. Any live evaluation needs separate explicit approval. Freeze a development set and a held-out subset before tuning; report both separately and do not tune against held-out results. Preserve original expectations when recording disagreements; human adjudication is explicit.
 
@@ -74,7 +80,7 @@ Notes / adjudication / reviewer:
 
 - Before: “Pocket Queue is a repair-request demo. The first screen lists waiting repairs.”
 - Just written: “The page heading will read Repairs, and the empty list will say that no repairs are waiting.”
-- Mode: All kinds, all toggles enabled.
+- Mode: Thinks with you, all toggles enabled.
 - Expected: **silent**, preferably no call.
 - Ideal comment: none.
 - Why: routine copy consistent with the existing plan; no demonstrated conflict, unresolved consequential dependency or meaningful intervention.
@@ -93,7 +99,7 @@ Notes / adjudication / reviewer:
 
 - Before: “Two volunteers edit the same shared repair list. We have not decided what happens when both change one repair at the same time.”
 - Just written: “Each volunteer will save the entire list after an edit, replacing the server copy so the next volunteer sees the latest work.”
-- Mode: All kinds, missing assumption enabled.
+- Mode: Thinks with you, missing assumption enabled.
 - Expected: **missing_assumption**, locally eligible.
 - Ideal comment: “Does this assume the volunteers never save overlapping edits? The note leaves simultaneous changes unresolved; how should they be handled?”
 - Supporting quotes: “We have not decided what happens when both change one repair at the same time”; “Each volunteer will save the entire list after an edit, replacing the server copy”.

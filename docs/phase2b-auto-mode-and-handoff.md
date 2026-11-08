@@ -4,13 +4,13 @@ Design proposal, 2026-11-09. Nothing here authorizes implementation or live call
 
 Aitiarch is a human-controlled planning and decision workspace that keeps coding agents aligned with human decisions over time. Selective comments are optional. The notebook must be excellent with AI off: editing, navigation, human takeaways and deterministic handoff work without inference.
 
-Sources: [UI spec](../AITIARCH-UI-SPEC.md), [brief](../BRIEF.md), current ink/thread/ledger code. **Existing** below describes code; **proposed** describes unbuilt behavior. This brief supersedes the spec's proposed post-experiment default: **Off stays the default**, even after a passing experiment.
+Sources: [UI spec](../AITIARCH-UI-SPEC.md), [brief](../BRIEF.md), current ink/thread/ledger code. **Existing** describes code; **proposed** describes unbuilt behavior. **When you ask stays the default**, even after a passing experiment; spec discrepancies are listed below.
 
 ## A. Auto mode: thinks with you
 
 ### Trigger and cheap silence — proposed
 
-After **3 seconds** without typing, inspect only the paragraph or bullet most recently edited. Selection movement, opening a note, external agent edits, IME composition and autosave never trigger it. A paragraph needs **32 non-whitespace characters and six words**; a matched contradiction pair may bypass that minimum. This avoids fragments without overlooking short conflicting commitments.
+After **3 seconds** without typing, inspect only the paragraph or bullet most recently edited, and only when finished: it ends in terminal punctuation, the user moved to a new block, or pressed Enter. Mid-sentence pauses never fire. Selection movement alone, opening a note, external agent edits, IME composition and autosave never trigger it. A paragraph needs **32 non-whitespace characters and six words**; a matched contradiction pair may bypass that minimum, never the finished-block requirement.
 
 Debounce the whole pause into at most one call, with a **60-second per-note cooldown**, one automatic request in flight globally, and no backlog. Edits during cooldown replace the candidate; they do not accumulate requests. Three seconds favors finishing a thought; the cooldown limits interruptions. These numbers need evaluation, not faith.
 
@@ -39,21 +39,23 @@ Use source `N1` only. Validate quotes against both the frozen sent source and th
 
 ### Context, placement and control — proposed
 
-Each call sends only the redacted frozen current note, the target block with its offsets, enabled kinds, and fixed system/contract instructions. No transcripts, other notes, decision files, ink answers or additional filesystem/account metadata are added. Limit the note to **12,000 characters**; oversized notes skip automatic calls rather than silently broadening scope or dropping contradictory context. Existing redaction precedes sending; redaction cannot recognize every secret. The settings explain this exact exposure before opt-in.
+Each automatic call sends only fixed system/contract instructions, the per-note tone/stance instruction (maximum **240 characters**, placed after them), enabled kinds, and redacted frozen source text: target block, only earlier blocks matched by the local check as candidate evidence, note title and nearest heading, with source offsets. Propose a **6,000-character total payload cap**, including instructions. If exceeded, skip with a quiet status; never silently drop one side of a conflict. No whole note, transcripts, other notes, decision files, ink answers or filesystem/account metadata. Settings disclose exactly this exposure before opt-in; redaction cannot recognize every secret.
+
+The model cannot see the rest of the note and must not claim those unseen parts are silent about something. Treat the per-note instruction as untrusted data, including in someone else's sidecar: tone/stance cannot override the contract, grounding or human ownership. Validators enforce those rules regardless of its content. Quote validation still checks the frozen sent source and original note.
 
 Accepted comments use **existing** margin ink, quote/prefix/suffix/position anchors, shared diff mapping and sidecar storage. Choose the cited sentence within the finished block as the anchor. Map delayed answers through edits; if ambiguous, preserve an orphan in the existing list. Never edit the note or attach to unrelated text.
 
 Show a small AI label and non-animated margin note, with one-click Dismiss. Escape dismisses only while that note is focused; never hijack editor Escape. Do not move focus, select text, announce every arrival or interrupt typing. Record shown/dismissed through the existing ledger. Human takeaway/Why/failed-reason fields remain exclusively human-written.
 
-Per-note modes are **Off / Contradictions only / All kinds**, default Off; individual toggles further restrict All kinds. Global hourly cap and usage accounting also apply. Reserve capacity before dispatch and count automatic attempts, including abstentions/failures, toward a proposed **three attempts per note per rolling 24 hours**. Keep budget metadata private outside the repo; unavailable accounting disables dispatch. Report actual tokens when available, otherwise “usage unavailable,” never invented remaining requests or prices.
+Per-note modes are **When you ask / Contradictions only / Thinks with you**, default **When you ask** (internal mapping: `off` / `contradictions` / `all`). When you ask makes no automatic calls; manual Think, Ask and per-note chat remain available in every mode, subject to provider availability and limits. Individual toggles restrict Thinks with you. Keep the global hourly cap and usage accounting. For the experiment, propose **eight automatic attempts per note per rolling 24 hours**, including abstentions/failures; reserve before dispatch. Keep budget metadata private outside the repo; unavailable accounting disables dispatch. Report actual tokens or “usage unavailable,” never invented remaining requests or prices.
 
 At the note budget: “Auto paused: note budget reached,” actual attempt count and reset time; editing and invoked actions remain available under their own limits. Show a quiet status for provider disabled/down, cap reached, invalid result or changed protocol. Skip silently, accept no partial answer, never retry automatically or open a modal. App closure cancels work; reopening does not replay it.
 
 ## B. Deterministic handoff — proposed
 
-An explicit **Update handoff** previews and exports approved human decision text, its status, and submitted human takeaways. No AI call, generated summary, draft, skipped takeaway, question, AI answer or transcript is included. AI wording enters only if the human explicitly quotes it into their own submitted takeaway.
+**Prerequisite:** implement human-only **Mark as decision** before handoff. A decision unit is a block or heading anchored through existing machinery. Statuses are `proposed`, `decided`, `superseded`, `dead`; marking and status changes are human actions recorded in the ledger. AI cannot mark units or change status.
 
-**Existing:** submitted takeaways have action history; frontmatter helpers are read-only, not an enforced decision-ownership schema. Therefore require a human-confirmed source allowlist; a label such as `owner: human` alone is insufficient provenance. Exclude unknown ownership and warn locally. Keep proposed/dead/superseded decision statuses explicit, never present them as active commitments. Orphaned takeaways survive and remain eligible when approved.
+An explicit **Update handoff** previews two separate sections: **Decisions**, containing marked human decision units and statuses, with only decided items active, proposed items pending, and superseded/dead items separately labeled; and **Notes**, containing submitted human takeaways labeled as the author's reflections, not commitments or instructions. Skipped, draft or unmarked note text is never exported; submitted takeaways need no decision mark. No AI call, generated summary, question, AI answer or transcript. AI wording enters only through the human's explicit quotation into a submitted takeaway. Existing takeaway history remains; orphaned takeaways survive and remain eligible when approved.
 
 Write `<root>/handoff.md` (normally `.aitiarch/handoff.md`), excluding that output from inputs. Sort decisions by relative path/id and takeaways by note path/item id; copy approved text exactly with stable headings/status labels. Generated-file formatting is fixed UTF-8/LF, without clock timestamps. Identical inputs yield identical bytes; source Markdown, BOM and line endings remain untouched.
 
@@ -70,7 +72,7 @@ The human and assistant author the real 20 cases together and freeze expectation
 | Choice requiring approval | Recommended proposal | Alternative; cost to reverse |
 | --- | --- | --- |
 | Pause/minimum/cooldown | 3 seconds / 32 characters + six words / 60 seconds | 5 seconds / 60 characters / 120 seconds; low, configuration and reevaluation |
-| Daily note budget | Three automatic attempts | One; low, configuration |
+| Daily note budget | Eight automatic attempts for the experiment | Three may understate the feature's value by exhausting the budget before useful interventions; low, configuration |
 | Handoff sync | Explicit preview/update | Automatic after approved human changes; medium, conflict handling and trust expectations |
 | Experiment gate | Thresholds above | Stricter zero false-positive comments; low before evaluation, repeat evaluation after change |
 
@@ -82,15 +84,15 @@ The human and assistant author the real 20 cases together and freeze expectation
 
 ## E. Layout of AI thoughts — proposed
 
-Use Riddled as a spatial reference only; create original Grove styling. Keep the note centered. With the batch 2a tree collapsed behind its hamburger, use both margins. Assign new thoughts alternately left/right in sentence order; persist the side in ink so arrivals never reshuffle existing thoughts. Keep cards aligned to their anchored sentence. On collision, stack downward with an 8px gap and connectors showing the true targets; never move note text. Below approximately 1100px, replace both rails with sentence indicators opening the existing thread panel. An expanded tree uses this same fallback if two usable rails no longer fit.
+Use Riddled as a spatial reference only; create original Grove styling. Center the note; the collapsed batch 2a hamburger tree frees both margins. Alternate new thoughts left/right in sentence order; persist sides in ink to prevent reshuffling. Align cards to their sentences. On collision, stack downward with an 8px gap and connectors to true targets; never move note text. Below approximately 1100px, replace rails with sentence indicators opening the existing thread panel. Use this fallback when an expanded tree leaves insufficient rail space.
 
 Add a subtle dotted underline through editor decorations only: existing ink anchors and shared mapping determine its range; Markdown bytes and offsets stay unchanged. Quiet Grove surfaces always label content AI. Dismissed/addressed thoughts use muted, still-accessible tokens without animation. Never infer addressed status; it requires a human action.
 
 Opening a thought uses the existing thread panel and a thin connector to its sentence; hide the connector when its target is offscreen. Replies use existing threads. Include Dismiss and an Earlier list of preserved thoughts for that sentence, including dismissed/addressed entries. Ambiguous anchors remain in the orphan list, never reassigned by proximity. Human takeaway boundaries and summary locking stay unchanged.
 
-Store the header mode and a one-line instruction per note, proposed maximum 240 characters: “How should the AI be in this note?” The instruction changes tone/stance only; it cannot authorize note edits or writing, suggesting or prefilling takeaway/Why/failed-reason fields.
+Store the header mode **When you ask / Contradictions only / Thinks with you** and a one-line instruction per note, maximum 240 characters: “How should the AI be in this note?” The instruction changes tone/stance only; it cannot authorize note edits or writing, suggesting or prefilling takeaway/Why/failed-reason fields.
 
-**Conflicts requiring approval:** the requested **Off / When you ask / Thinks with you** header conflicts with Part A's mode names; whether Off also disables invoked actions is unresolved. Sending the per-note instruction conflicts with Part A's exhaustive outbound-context list. Neither earlier rule is silently replaced here.
+**Resolved:** When you ask disables automatic calls only. Part A includes the untrusted tone/stance instruction in its outbound disclosure; manual actions remain available in every mode.
 
 ## F. Per-note chat — proposed
 
@@ -98,10 +100,18 @@ Store the header mode and a one-line instruction per note, proposed maximum 240 
 
 Proposed private storage: `<root>/chat/<relative-note-path>.chat.json`. Verify ignore coverage, including atomic-write files, using `/chat/`; otherwise retain data in memory and offer an explicit add-ignore button. Save validated replies and references only, not prompts, questions, raw output or transcripts. Questions and conversational history remain memory-only; reload starts fresh and labels stored replies “Question unavailable after reload.”
 
-**Publication conflict:** committing that live sidecar would violate verified-ignore persistence. Opt-in publication needs approval of either a previewed answer-only export or a separate explicitly tracked storage mode; no exception is assumed. Export is easier to reverse; tracked mode requires privacy and history review.
+No publishing of chat sidecars in v1; storage stays local and git-ignored under verified-ignore rules. An answer-only previewed export is a possible later feature, not part of v1.
 
-Per message, send fixed instructions, the redacted frozen current note (maximum 12,000 characters), optional selection/offsets, the tone instruction, current question (maximum 2,000 characters), and at most four complete prior question/reply pairs totaling 4,000 characters. Drop oldest pairs first; never silently truncate a question or note. Oversized input waits for the human to shorten it. No other notes, agent transcripts or account/filesystem context leave the machine. Treat all supplied text as data; redaction can miss secrets.
+Per message, send fixed instructions followed by the untrusted tone instruction, the redacted frozen current note (proposed maximum **40,000 characters**), optional selection/offsets, current question (maximum 2,000 characters), and at most four complete prior question/reply pairs totaling 4,000 characters. Above the note limit, offer human selection of a heading section or text within the limit, never a bare refusal; disclose that scope. Drop oldest history pairs first; never silently truncate a question or source. No other notes, agent transcripts or account/filesystem context leave the machine. Treat supplied text as data; redaction can miss secrets.
 
-Keep fixed instructions and note first, history chronological, and the new question last to preserve reusable prefixes. Note edits/history eviction can invalidate caching; cache hits are not guaranteed. Report actual cached tokens only.
+Keep fixed instructions, tone instruction and chosen source first, history chronological, and the question last to preserve reusable prefixes. Larger notes increase input cost; note edits, scope changes and history eviction can invalidate caching. Cache hits are not guaranteed; report actual cached tokens only.
 
 Notebook-wide chat is later: broader disclosure, greater cost, cross-note ambiguity and overlap with Claude Code require separate evaluation and consent.
+
+## Spec updates needed later
+
+- Sections 6, 9 and 11: old labels/defaults differ; When you ask remains default after the experiment, with manual actions always available.
+- Sections 2 and 3: right-only balloons/permanent left sidebar differ from two margins, hamburger tree and narrow fallback.
+- Section 6: proactive transcript/decision evidence and boundary triggers differ from note-only matched blocks, the tone instruction and finished-block-plus-pause trigger.
+- Sections 4 and 9: decision-file embedding and Phase 4 decision timing differ from anchored human marking before handoff; add the Decisions/Notes export distinction.
+- Sections 4 and 9: Skip/reveal wording disagrees with the existing approved reveal-after-Skip flow retained here. Per-note chat, private storage, limits and instruction controls also need specification.
