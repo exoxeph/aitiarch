@@ -18,6 +18,9 @@ type Boot = { state: "loading" } | { state: "error"; message: string } | { state
 export default function App() {
   const [boot, setBoot] = useState<Boot>({ state: "loading" });
   const [tree, setTree] = useState<TreeNode | null>(null);
+  const [treeCollapsed,setTreeCollapsed]=useState(false);
+  const [treePersistence,setTreePersistence]=useState(false);
+  const [treeNotice,setTreeNotice]=useState(false);
   const [files, setFiles] = useState<Record<string, NoteFile>>({});
   const [inkFiles, setInkFiles] = useState<Record<string, InkSnapshot>>({});
   const [mappedInk, setMappedInk] = useState<Record<string, InkItem[]>>({});
@@ -112,7 +115,8 @@ export default function App() {
           setCacheNotice({ file: s.anchorCache.ignoreFile, line: s.anchorCache.ignoreLine });
           sessionStorage.setItem(`anchor-cache-notice:${s.rootPath}`, "shown");
         }
-        const [t, ui] = await Promise.all([api.tree(), api.uiState()]);
+        const [t, ui, persistence] = await Promise.all([api.tree(), api.uiState(),api.uiStatePersistence().catch(()=>({enabled:false}))]);
+        setTreeCollapsed(ui.treeCollapsed??false);setTreePersistence(persistence.enabled);
         setTree(t);
         const all = flattenTree(t);
         let want = ui.tabs.filter((p) => all.includes(p));
@@ -154,9 +158,9 @@ export default function App() {
   // ---- persist open tabs (a small file in the notebook folder) ----
   useEffect(() => {
     if (!loaded.current) return;
-    const t = setTimeout(() => void api.putUiState({ v: 1, tabs, active }).catch(() => {}), 300);
+    const t = setTimeout(() => void api.putUiState({ v: 1, tabs, active, ...(treePersistence?{treeCollapsed}:{}) }).catch(() => {if(treePersistence){setTreePersistence(false);setTreeNotice(true);}}), 300);
     return () => clearTimeout(t);
-  }, [tabs, active]);
+  }, [tabs, active, treeCollapsed,treePersistence]);
 
   const closeTab = useCallback(
     async (path: string) => {
@@ -310,19 +314,24 @@ export default function App() {
 
   const activeFile = active ? files[active] : undefined;
   return (
-    <div className="app">
+    <div className={`app${treeCollapsed?' tree-collapsed':''}`}>
       <header className="topbar">
+        <button className="ghost tree-toggle" aria-label={treeCollapsed?'Expand file tree':'Collapse file tree'} aria-controls="note-tree" aria-expanded={!treeCollapsed} onClick={()=>{setTreeCollapsed(v=>!v);if(!treePersistence)setTreeNotice(true);}} title={treeCollapsed?'Expand file tree':'Collapse file tree'}>☰</button>
         <Tabs tabs={tabs} active={active} status={status} onSelect={setActive} onClose={(p) => void closeTab(p)} />
         <span className="spacer" />
         <button className="ghost" onClick={() => setOverlay("palette")} title="Command palette (Ctrl+P)">
           Commands
         </button>
       </header>
-      <aside className="sidebar" aria-label="Notes">
+      <aside id="note-tree" className="sidebar" aria-label="Notes" hidden={treeCollapsed}>
         <div className="side-title" title={boot.rootPath}>{boot.rootName}</div>
         <Tree tree={tree} active={active} onOpen={(p) => void openNote(p)} />
       </aside>
       <main className="editor-col">
+        {treeNotice&&<div className="notice" role="note">File tree preference stays in memory until ignore coverage for <code>/ui-state.json*</code> is verified.
+          <button onClick={async()=>{try{const s=await api.enableThreadDrafts();setTreePersistence(s.enabled);setTreeNotice(!s.enabled);}catch{setNotice('Could not verify UI state ignore coverage. The file tree preference remains in memory.');}}}>Add /ui-state.json* to root .gitignore</button>
+          <button onClick={()=>setTreeNotice(false)}>Dismiss tree preference notice</button>
+        </div>}
         <ChatGPTSettings/>
         <UsagePanel/>
         {cacheNotice && <div className="notice" role="alert">

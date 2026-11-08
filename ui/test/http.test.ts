@@ -119,6 +119,13 @@ describe("file API", () => {
     expect(JSON.parse(r.body)).toEqual({ v: 1, tabs: ["notebook.md"], active: "notebook.md" });
     expect(JSON.parse(readFileSync(path.join(root, "ui-state.json"), "utf8")).tabs).toEqual(["notebook.md"]);
   });
+  it('tab API round-trips only boolean tree preferences and preserves them for older clients',async()=>{
+    execFileSync('git',['init','-q'],{cwd:tmp,stdio:'pipe'});writeFileSync(path.join(root,'.gitignore'),'/ui-state.json*\n');
+    expect((await call('PUT','/api/ui-state',{headers:writeHeaders(),body:{tabs:['notebook.md'],active:'notebook.md',treeCollapsed:true}})).status).toBe(200);
+    expect(JSON.parse((await call('GET','/api/ui-state',{headers:authed()})).body).treeCollapsed).toBe(true);
+    await call('PUT','/api/ui-state',{headers:writeHeaders(),body:{tabs:[],active:null,treeCollapsed:'false'}});
+    expect(JSON.parse((await call('GET','/api/ui-state',{headers:authed()})).body).treeCollapsed).toBe(true);
+  });
 });
 
 describe("polling fallback", () => {

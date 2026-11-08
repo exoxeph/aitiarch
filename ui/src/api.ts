@@ -22,6 +22,7 @@ export interface UiState {
   v: 1;
   tabs: string[];
   active: string | null;
+  treeCollapsed?: boolean;
 }
 import type { InkDocument, InkItem } from "../shared/ink.ts";
 import type { Invocation } from "../shared/invocation.ts";
@@ -73,6 +74,7 @@ export const api = {
   threadDraft:(path:string,id:string)=>ok<{enabled:boolean;ignoreLine:string;ignoreFile:string;draft:{text:string;revision:string}|null}>('GET',`/api/thread-drafts?path=${encodeURIComponent(path)}&id=${encodeURIComponent(id)}`),
   saveThreadDraft:(path:string,id:string,text:string,revision:string|null)=>ok<{revision:string}>('PUT','/api/thread-drafts/save',{path,id,text,revision}),
   enableThreadDrafts:()=>ok<{enabled:boolean}>('PUT','/api/thread-drafts/enable',{action:'add-ignore-line'}),
+  uiStatePersistence:()=>ok<{enabled:boolean}>('GET','/api/thread-drafts/status'),
   assistance: () => ok<{ available: boolean; provider?: string; message?: string; warnings?: string[] }>("GET", "/api/assistance"),
   planStatus:()=>ok<{enabled:boolean;connected?:boolean;model?:string|null;hourlyCap?:number;welcome?:boolean}>('GET','/api/chatgpt-plan'),
   planAction:<T,>(action:string,body:unknown={})=>ok<T>('PUT','/api/chatgpt-plan/'+action,body),
