@@ -1,6 +1,9 @@
 import { EditorState, type TransactionSpec } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import { failedMarkAt, findFailedMarks, indentLines, markFailed, restoreFailed, setHeading, toggleCodeBlock, toggleInline, toggleList, validateReason } from "../src/editor/format.ts";
+import {keymap,type EditorView} from '@codemirror/view';
+import {formattingKeys} from '../src/editor/toolbar.ts';
+import {decode,encode} from '../server/codec.ts';
 
 const mk = (doc: string, anchor: number, head = anchor) => EditorState.create({ doc, selection: { anchor, head } });
 const run = (st: EditorState, spec: TransactionSpec | null) => (spec ? st.update(spec).state : st);
@@ -10,6 +13,14 @@ const sel = (doc: string, s: string) => {
 };
 
 describe("inline formatting", () => {
+  it.each([['Mod-b','**'],['Mod-i','*'],['Mod-Shift-x','~~']])('shortcut %s applies and removes only markers with byte-exact CRLF/BOM/mixed endings',(key,marker)=>{
+    const bytes=Buffer.from('\uFEFF# Original\r\n\r\nKeep word here.\r\nTail\nUntouched\r');const decoded=decode(bytes),from=decoded.text.indexOf('word');
+    let state=EditorState.create({doc:decoded.text,selection:{anchor:from,head:from+4},extensions:[formattingKeys]});
+    const host={get state(){return state;},dispatch(spec:TransactionSpec){state=state.update(spec).state;}} as EditorView;
+    const binding=state.facet(keymap).flat().find(b=>b.key===key);expect(binding).toBeDefined();
+    expect(binding!.run!(host)).toBe(true);expect(state.doc.toString()).toContain(marker+'word'+marker);expect(state.doc.toString()).not.toContain('{failed:');
+    expect(binding!.run!(host)).toBe(true);expect(encode(state.doc.toString(),decoded)).toEqual(bytes);
+  });
   it("bold wraps then unwraps (selection kept on the word)", () => {
     let st = sel("say hello there", "hello");
     st = run(st, toggleInline(st, "**"));

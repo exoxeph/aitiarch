@@ -12,6 +12,11 @@ function invoke(view: EditorView, action: "think" | "ask") {
   return true;
 }
 export const invokedKeys = keymap.of([{ key: "Mod-Enter", run: view => invoke(view, "think") }]);
+export const formattingKeys = keymap.of([
+  ...([['Mod-b', '**'], ['Mod-i', '*'], ['Mod-Shift-x', '~~']] as const).map(([key, marker]) => ({
+    key, run: (view: EditorView) => { const spec = toggleInline(view.state, marker); if (spec) view.dispatch(spec); return true; },
+  })),
+]);
 
 function create(view: EditorView): TooltipView {
   const dom = document.createElement("div");
@@ -90,7 +95,7 @@ function create(view: EditorView): TooltipView {
     const mark = failedMarkAt(view.state, sel.from, sel.to);
     const s = mark
       ? button("Restore", "Remove the strike-through and its reason", () => apply(restoreFailed(view.state, sel.from)), "failed-btn")
-      : button("S", multiLine ? "Select text on one line to mark it failed" : "Mark as failed (strike-through with a reason)", () => {
+      : button("Failed\u2026", multiLine ? "Select text on one line to mark it failed" : "Mark as failed (strike-through with a reason)", () => {
           reasonMode = true;
           render();
         }, "failed-btn", multiLine);
@@ -109,6 +114,7 @@ function create(view: EditorView): TooltipView {
       row(
         button("B", "Bold (Ctrl+B)", () => apply(toggleInline(view.state, "**")), "b"),
         button("I", "Italic (Ctrl+I)", () => apply(toggleInline(view.state, "*")), "i"),
+        button("S", "Strikethrough (Ctrl+Shift+X)", () => apply(toggleInline(view.state, "~~")), "failed-btn"),
         s,
         button("<>", "Inline code", () => apply(toggleInline(view.state, "`"))),
         button("{ }", "Code block", () => apply(toggleCodeBlock(view.state))),

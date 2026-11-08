@@ -8,11 +8,10 @@ import type { InkItem } from "../../shared/ink.ts";
 import { MarginRail, type PlacedMargin } from "../ink/MarginRail.tsx";
 import { api, ApiError, type InkSnapshot, type NoteFile, type ServerEvent } from "../api.ts";
 import { conflictDecorations, conflictHandlers, conflictsField } from "./conflicts.ts";
-import { toggleInline } from "./format.ts";
 import { livePreview, previewHandlers, wikiResolver } from "./livepreview.ts";
 import { externalChange, NoteSession, type SyncStatus } from "./session.ts";
 import { addInk, removeInk, inkField, setInk } from "./ink.ts";
-import { invocationHandlers, invokedKeys, selectionToolbar } from "./toolbar.ts";
+import { invocationHandlers, invokedKeys, formattingKeys, selectionToolbar } from "./toolbar.ts";
 import { useInvocations } from "./useInvocations.tsx";
 
 export interface PaneHandle {
@@ -100,9 +99,8 @@ export function EditorPane(props: Props) {
           EditorView.lineWrapping,
           markdown({ extensions: [Strikethrough, TaskList], addKeymap: false }), // no auto-inserted list markers: the editor never writes text you didn't type
           invokedKeys,
+          formattingKeys,
           keymap.of([
-            { key: "Mod-b", run: (v) => (act(v, toggleInline(v.state, "**")), true) },
-            { key: "Mod-i", run: (v) => (act(v, toggleInline(v.state, "*")), true) },
             ...defaultKeymap,
             ...historyKeymap,
           ]),
@@ -141,9 +139,6 @@ export function EditorPane(props: Props) {
     sessionRef.current = session;
     live.current.register(path, { view, session });
 
-    function act(v: EditorView, spec: ReturnType<typeof toggleInline>) {
-      if (spec) v.dispatch(spec);
-    }
     let raf = 0;
     let marginRaf = 0;
     function queueMargin() {
