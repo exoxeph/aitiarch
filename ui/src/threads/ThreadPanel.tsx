@@ -10,7 +10,8 @@ export const failureLabels:Record<ThreadFailure,string>={
  protocol:'Provider format changed or stream incomplete. No partial answer was accepted.',timeout:'Request timed out. No automatic retry.',
  cancelled:'Request cancelled. No partial answer was accepted.',provider_error:'Provider request failed. No automatic retry.',persistence:'Saving failed. Retry saving only; no new provider call.'};
 const providerLabel=(name:string)=>name==='chatgpt-plan'?'ChatGPT plan':'Claude';
-export function TakeawayBox({value,onChange,onSubmit,onSkip,busy}:{value:string;onChange:(value:string)=>void;onSubmit:()=>void;onSkip:()=>void;busy:boolean}){
+export function TakeawayBox({value,onChange,onSubmit,onSkip,busy,skippedAt,onReopen}:{value:string;onChange:(value:string)=>void;onSubmit:()=>void;onSkip:()=>void;busy:boolean;skippedAt?:string|null;onReopen?:()=>void}){
+ if(skippedAt){const date=new Date(skippedAt);return <div className="skipped-takeaway">Skipped on {Number.isNaN(date.getTime())?'Unknown time':new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(date)} - <button disabled={busy} onClick={onReopen}>Reopen takeaway</button></div>;}
  return <section className="human-takeaway"><label>Your takeaway (you write this)<textarea aria-label="Your takeaway" value={value} onChange={e=>onChange(e.target.value)} maxLength={100000} rows={4}/></label>
   <div className="attach-actions"><button disabled={busy||!value.trim()} onClick={onSubmit}>Submit my takeaway</button><button disabled={busy} onClick={onSkip}>Skip takeaway</button></div></section>;
 }
@@ -104,10 +105,9 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{
   {saveFailures.filter(id=>[...t.followups,...(t.summary.reply?[t.summary.reply]:[])].some(r=>r.id===id&&r.generation.status==='pending')).map(id=><p key={id} role="alert">{failureLabels.persistence}<button onClick={async()=>{try{update(await api.threadCall<InkSnapshot>('retry-save',{path,id:item.id,replyId:id}));setSaveFailures(all=>all.filter(x=>x!==id));}catch(e){fail(e);}}}>Retry saving reply (no new call)</button></p>)}
   {draftNotice&&<div className="notice" role="note">Drafts stay in memory until ignore coverage is verified. Add <code>/ui-state.json*</code> to the root .gitignore.
    <button onClick={async()=>{try{const s=await api.enableThreadDrafts();draft.enabled=s.enabled;setDraftNotice(!s.enabled);if(s.enabled&&draft.dirty)persist(draft.text);}catch(e){fail(e);}}}>Add /ui-state.json* to root .gitignore</button><button onClick={()=>setDraftNotice(false)}>Dismiss draft notice</button></div>}
-  <TakeawayBox value={text} busy={busy} onChange={value=>{draft.text=value;draft.dirty=true;setText(value);persist(value);}} onSubmit={()=>void act({type:'submit',text})} onSkip={()=>void act({type:'skip'})}/>
+  <TakeawayBox skippedAt={t.takeaway.state==='skipped'?t.takeaway.updatedAt:undefined} onReopen={()=>void act({type:'reopen'})} value={text} busy={busy} onChange={value=>{draft.text=value;draft.dirty=true;setText(value);persist(value);}} onSubmit={()=>void act({type:'submit',text})} onSkip={()=>void act({type:'skip'})}/>
   {t.takeaway.state==='submitted'&&<section><strong>Your submitted takeaway</strong><p className="human-text">{t.takeaway.text}</p><button disabled={busy||item.attachment.status!=='attached'} onClick={()=>void insert(item).catch(fail)}>Preview insertion</button></section>}
-  {t.takeaway.state==='skipped'&&<p>Takeaway explicitly skipped · {t.takeaway.updatedAt}</p>}
-  {t.takeaway.state!=='untouched'&&<button disabled={busy} onClick={()=>void act({type:'reopen'})}>Reopen takeaway</button>}
+  {t.takeaway.state==='submitted'&&<button disabled={busy} onClick={()=>void act({type:'reopen'})}>Reopen takeaway</button>}
   <section aria-label="Closing summary"><h4>AI closing summary</h4>{!revealed?<p>Hidden until you submit your takeaway or explicitly Skip takeaway.</p>:t.summary.reply?<ReplyView reply={t.summary.reply}/>:<button disabled={busy||item.attachment.status!=='attached'} onClick={()=>void prepare('summary')}>Request closing summary</button>}</section>
   <label>Follow-up question<input aria-label="Follow-up question" value={question} disabled={!!review||busy} maxLength={8000} onChange={e=>setQuestion(e.target.value)}/></label>
   <button disabled={busy||!question.trim()||item.attachment.status!=='attached'} onClick={()=>void prepare('followup')}>Review follow-up</button>

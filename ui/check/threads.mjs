@@ -50,7 +50,8 @@ try{
  await page.waitForFunction(()=>window.__aitiarch['fixture.md'].session.status==='saved');
  assert.equal((await readFile(path.join(root,'fixture.md'),'utf8')),'\uFEFFExternal edit.\r\n\r\n'+note.replace(/\n/g,'\r\n'));
  await page.getByRole('button',{name:'Reopen takeaway',exact:true}).click();await page.getByRole('button',{name:'Skip takeaway',exact:true}).click();await page.getByText('Synthetic hidden summary.',{exact:true}).waitFor();
- await page.getByRole('button',{name:'Dismiss thread',exact:true}).click();await page.getByRole('button',{name:'Restore thread',exact:true}).click();await page.getByLabel('Your takeaway',{exact:true}).waitFor();
+ await page.getByText(/^Skipped on /).waitFor();assert.equal(await page.getByLabel('Your takeaway',{exact:true}).count(),0);
+ await page.getByRole('button',{name:'Dismiss thread',exact:true}).click();await page.getByRole('button',{name:'Restore thread',exact:true}).click();await page.getByText(/^Skipped on /).waitFor();await page.getByRole('button',{name:'Reopen takeaway',exact:true}).click();await page.getByLabel('Your takeaway',{exact:true}).waitFor();assert.equal(await page.getByLabel('Your takeaway',{exact:true}).inputValue(),'Human takeaway only.');
  await page.getByRole('button',{name:'Delete thread…',exact:true}).click();await page.getByRole('button',{name:'Keep thread',exact:true}).click();
  await page.getByLabel('Your takeaway',{exact:true}).scrollIntoViewIfNeeded();await page.screenshot({path:path.join(screens,'thread-wide.png'),fullPage:true});
  // Fresh Think and Ask through the real toolbar, with fake delayed answers.
@@ -63,6 +64,7 @@ try{
  await page.evaluate(()=>{const {view}=window.__aitiarch['fixture.md'],q='A removable selected sentence.',from=view.state.doc.toString().indexOf(q);view.dispatch({changes:{from,to:from+q.length,insert:''}});});
  pending.shift()();await page.getByRole('region',{name:'Orphaned ink'}).getByText('Synthetic accepted answer 2.',{exact:true}).waitFor();
  await page.waitForFunction(()=>window.__aitiarch['fixture.md'].session.status==='saved');
+ for(let n=0;;n++){const saved=JSON.parse(await readFile(path.join(root,'ink/fixture.ink.json'),'utf8'));if(saved.items.at(-1).attachment.status==='orphaned')break;if(n>=100)throw new Error('Orphan sidecar did not finish saving');await new Promise(r=>setTimeout(r,30));}
  const parsed=JSON.parse(await readFile(path.join(root,'ink/fixture.ink.json'),'utf8'));assert(!JSON.stringify(parsed).includes('Memory-only test question.'));assert.equal(parsed.items.at(-1).attachment.status,'orphaned');
  // Re-attach the orphan to an explicit current selection; only sidecar metadata changes.
  await select('A unique selected sentence.');const candidates=page.getByRole('button',{name:/^Attach here\?/});if(await candidates.count())await candidates.first().click();else await page.getByRole('button',{name:'Re-attach to selected text',exact:true}).click();await page.getByRole('button',{name:'Save re-attachment',exact:true}).click();
@@ -79,7 +81,7 @@ try{
  await page.getByRole('button',{name:'Skip takeaway',exact:true}).click();await page.getByRole('button',{name:'Request closing summary',exact:true}).click();
  assert.equal(await page.getByRole('checkbox').count(),0,'confirmed provider transition is not repeated');await page.getByRole('button',{name:'Send thread request',exact:true}).click();
  while(!pending.length)await new Promise(r=>setTimeout(r,20));pending.shift()();await panel.getByText('Synthetic accepted answer 4.',{exact:true}).waitFor();
- assert.equal(await page.getByLabel('Your takeaway',{exact:true}).inputValue(),'','AI replies never fill the human box');
+ assert.equal(await page.getByLabel('Your takeaway',{exact:true}).count(),0);await page.getByRole('button',{name:'Reopen takeaway',exact:true}).click();assert.equal(await page.getByLabel('Your takeaway',{exact:true}).inputValue(),'','AI replies never fill the human box');
  // A failed write retains only the validated reply and offers a save-only retry.
  await page.getByLabel('Follow-up question').fill('Synthetic save retry check.');await page.getByRole('button',{name:'Review follow-up',exact:true}).click();await page.getByRole('button',{name:'Send thread request',exact:true}).click();while(!pending.length)await new Promise(r=>setTimeout(r,20));
  const lockFile=path.join(root,'ink/fixture.ink.json.lock');for(let n=0;;n++){try{await writeFile(lockFile,'Synthetic lock',{flag:'wx'});break;}catch(e){if(e.code!=='EEXIST'||n>=100)throw e;await new Promise(r=>setTimeout(r,20));}}
@@ -92,4 +94,4 @@ try{
  assert(!JSON.parse(await readFile(path.join(root,'ink/fixture.ink.json'),'utf8')).items.some(i=>i.id==='seed'));
  assert.equal(errors.length,0,'browser errors');console.log(JSON.stringify({pass:true,calls:calls.length,provider:'fake only',screenshots:screens,checks:['empty box','summary hidden','memory drafts','explicit ignore','external edit during draft','submit','preview insert','BOM/CRLF','undo','Skip reveals','dismiss/restore','delete confirm','Think','Ask','orphan re-attach/history','provider-change confirm once','follow-up','closing summary','save-only retry','14 provider failure states','reload placeholder','draft reload','narrow layout']}));
 }catch(e){console.error(JSON.stringify({checkFailure:true,screenshots:screens}));if(browser){for(const context of browser.contexts())for(const page of context.pages()){console.error(await page.locator('[role="alert"]').allTextContents());await page.screenshot({path:path.join(screens,'failure.png'),fullPage:true});}}throw e;
-}finally{await browser?.close();watcher.stop();await app.close();await rm(root,{recursive:true,force:true});}
+}finally{await browser?.close();watcher.stop();await app.close();await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
