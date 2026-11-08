@@ -285,3 +285,44 @@ button, a, summary, input, select, textarea { transition: color var(--motion-col
 .attach-preview { border-radius: var(--radius-human); padding: var(--space-4); }
 @media (min-width: 1100px) { .rightpanel:has(.thread-panel:not(:empty)) { width: var(--thread-width); } }
 @media (max-width: 720px) { .rightpanel { width: auto; margin: 0 var(--gutter) var(--gutter); border-top: 1px solid var(--rule); } }
+
+/* Grove utilities: quiet chrome, readable tables, and explicit notices. */
+a { color: var(--link); text-underline-offset: 3px; }
+button { font-size: var(--text-control); }
+summary { cursor: pointer; }
+.notice, .invocation-review { margin: var(--space-3); padding: var(--space-4); border: 1px solid var(--control-border); border-radius: var(--radius-card); background: var(--paper-2); line-height: 1.6; font-size: var(--text-control); }
+.notice button, .invocation-review button, .invocation-job button, .attach-preview button, .cm-conflict-actions button { padding: var(--space-2) var(--space-3); border: 1px solid var(--control-border); border-radius: var(--radius-small); background: var(--paper); color: var(--ink-text); cursor: pointer; }
+.notice button:hover:not(:disabled), .invocation-review button:hover:not(:disabled), .attach-preview button:hover:not(:disabled) { background: var(--accent-soft); }
+.notice button:disabled { cursor: default; opacity: .5; }
+.notice code { overflow-wrap: anywhere; }
+.notice .ghost { background: transparent; border-color: transparent; }
+.notice input, .notice select, .invocation-review input, .cm-sel-toolbar input { font: inherit; color: var(--ink-text); background: var(--paper); border: 1px solid var(--control-border); border-radius: var(--radius-small); padding: var(--space-2); max-width: 100%; }
+[aria-label="ChatGPT plan connection"] { max-height: 45vh; overflow: auto; }
+[aria-label="ChatGPT plan connection"] > label { display: inline-flex; align-items: center; gap: var(--space-2); margin: var(--space-2); flex-wrap: wrap; }
+[aria-label="ChatGPT hourly cap"] { width: 80px; }
+[aria-label="ChatGPT plan notice"] { border: 1px solid var(--accent); background: var(--paper); padding: var(--space-4); border-radius: var(--radius-card); }
+.usage-panel { padding: var(--space-3) var(--space-4); background: var(--paper-2); border-color: var(--rule); font-size: var(--text-control); max-height: 45vh; flex-shrink: 0; }
+.usage-panel summary { color: var(--accent); font-weight: 600; }
+.usage-panel[open] { padding-bottom: var(--space-4); }
+.usage-panel p { line-height: 1.6; max-width: 85ch; color: var(--muted); }
+.usage-panel table { width: 100%; background: var(--paper); border: 1px solid var(--rule); font-variant-numeric: tabular-nums; }
+.usage-panel th, .usage-panel td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--rule); white-space: nowrap; }
+.usage-panel thead th { color: var(--muted); font-weight: 600; }
+.usage-panel tbody th { font-weight: 600; }
+.usage-panel td { text-align: right; }
+.props { padding: var(--space-5) var(--space-4); line-height: 1.6; }
+.props h2 { font-size: var(--text-meta); }
+.prop { margin-bottom: var(--space-4); }
+.prop dt { font-size: var(--text-meta); }
+.overlay { background: var(--scrim); }
+.overlay-box { border-radius: var(--radius-human); border-color: var(--control-border); }
+.overlay-box input:focus-visible { outline: 2px solid var(--focus); outline-offset: -4px; }
+.overlay-box li { padding: var(--space-2) var(--space-3); border-radius: var(--radius-small); }
+.overlay-box li.on { background: var(--accent-soft); }
+.extra-answers { padding: var(--space-2) 0; color: var(--ink-text); }
+.extra-answers > summary { color: var(--ai-ink); font-size: var(--text-control); }
+.cm-sel-toolbar button[title="Think on this (Ctrl+Enter)"] { background: var(--accent); color: var(--on-accent); }
+.cm-sel-toolbar button[title="Think on this (Ctrl+Enter)"]:hover { background: var(--accent); }
+/* CodeMirror injects its own .cm-content padding after app CSS. Keep the page inset. */
+.cm-editor .cm-content { padding-left: var(--page-inset); padding-right: var(--page-inset); }
+@media (max-width: 1099px) and (min-width: 721px) { .cm-editor .cm-content { padding-left: var(--space-5); padding-right: var(--space-5); } }

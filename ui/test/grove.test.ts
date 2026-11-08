@@ -16,4 +16,8 @@ describe('Grove visual contract',()=>{
   const s=styles();expect(s).toContain('border: 2px solid var(--accent)');expect(s).toContain('background: var(--human-surface)');
   expect(s).toContain('.thread-reply');expect(s).toContain('[aria-label="Closing summary"]');expect(s).toContain('.skipped-takeaway');
  });
+ it('styles usage/settings controls and keeps CodeMirror gutters above its injected base rules',()=>{
+  const s=styles();expect(s).toContain('.usage-panel[open]');expect(s).toContain('[aria-label="ChatGPT plan connection"]');
+  expect(s).toContain('.cm-editor .cm-content');
+ });
 });
