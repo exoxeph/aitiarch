@@ -1,34 +1,4 @@
-:root {
-  --paper: #faf6ee;
-  --paper-2: #f3ede0;
-  --ink-text: #1d1a16;
-  --muted: #7a7266;
-  --rule: #e2d9c7;
-  --accent: #8a4b1f;
-  --link: #1f5f8a;
-  --danger: #a3361f;
-  --ok: #3c7a3c;
-  --code-bg: #efe8d8;
-  --font-body: "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
-  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
-  color-scheme: light;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #1c1a17;
-    --paper-2: #24211d;
-    --ink-text: #ece5d8;
-    --muted: #9b9283;
-    --rule: #3a352e;
-    --accent: #e0a46b;
-    --link: #7fb6dd;
-    --danger: #e27d65;
-    --ok: #7fbf7f;
-    --code-bg: #2c2822;
-    color-scheme: dark;
-  }
-}
+@import "./tokens.css";
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--paper); color: var(--ink-text); font-family: var(--font-ui); font-size: 14px; }
@@ -92,8 +62,8 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .empty { margin: 20vh auto; text-align: center; }
 
 /* overlays */
-.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .25); display: flex; justify-content: center; align-items: flex-start; padding-top: 14vh; z-index: 50; }
-.overlay-box { width: min(560px, 92vw); background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; box-shadow: 0 12px 40px rgba(0, 0, 0, .3); overflow: hidden; }
+.overlay { position: fixed; inset: 0; background: var(--scrim); display: flex; justify-content: center; align-items: flex-start; padding-top: 14vh; z-index: 50; }
+.overlay-box { width: min(560px, 92vw); background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow-floating); overflow: hidden; }
 .overlay-box input { width: 100%; border: 0; border-bottom: 1px solid var(--rule); padding: 12px 14px; font: inherit; background: transparent; color: inherit; outline: none; }
 .overlay-box ul { list-style: none; margin: 0; padding: 4px; max-height: 50vh; overflow: auto; }
 .overlay-box li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
@@ -104,7 +74,7 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .ink-surface { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; position: relative; }
 .surface-hidden { display: none; }
 .margin-rail { position: absolute; top: 0; bottom: 0; right: 0; width: 220px; pointer-events: none; overflow: hidden; }
-.margin-card { position: absolute; left: 4px; right: 8px; min-height: 80px; padding: 9px 10px; border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 5px; background: var(--paper-2); box-shadow: 0 2px 8px #0002; font-size: 12px; line-height: 1.4; pointer-events: auto; overflow-wrap: anywhere; }
+.margin-card { position: absolute; left: 4px; right: 8px; min-height: 80px; padding: 9px 10px; border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 5px; background: var(--paper-2); box-shadow: var(--shadow-small); font-size: 12px; line-height: 1.4; pointer-events: auto; overflow-wrap: anywhere; }
 .margin-label, .cm-ink-label { display: block; margin-bottom: 5px; font: 600 10px var(--font-ui); text-transform: uppercase; letter-spacing: .06em; color: var(--accent); }
 .cm-ink-block { margin: 10px 4px 14px; padding: 11px 14px; border-left: 3px solid var(--accent); background: var(--paper-2); font: 13px/1.5 var(--font-ui); white-space: pre-wrap; overflow-wrap: anywhere; }
 .cm-ink-body { color: var(--ink-text); }
@@ -118,7 +88,7 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .orphan-choices { display: grid; gap: 5px; }
 .orphan-card button, .attach-preview button { margin-top: 6px; padding: 5px 7px; border: 1px solid var(--rule); background: var(--paper-2); border-radius: 4px; cursor: pointer; text-align: left; font-size: 12px; }
 .orphan-card button:hover, .attach-preview button:hover { border-color: var(--accent); }
-.attach-preview { position: sticky; bottom: 0; margin: 12px; padding: 12px; border: 2px solid var(--accent); background: var(--paper); box-shadow: 0 -5px 16px #0002; }
+.attach-preview { position: sticky; bottom: 0; margin: 12px; padding: 12px; border: 2px solid var(--accent); background: var(--paper); box-shadow: var(--shadow-up); }
 .attach-actions { display: flex; gap: 6px; }
 @media (min-width: 1100px) { .ink-surface:has(.margin-card) .cm-content { margin-right: 218px; max-width: 720px; } }
 @media (max-width: 1099px) {
@@ -177,7 +147,7 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .cm-conflict-range { background: color-mix(in srgb, var(--danger) 10%, transparent); }
 
 /* floating selection toolbar */
-.cm-tooltip.cm-sel-toolbar { font-family: var(--font-ui); font-size: 13px; background: var(--paper); color: var(--ink-text); border: 1px solid var(--rule); border-radius: 8px; box-shadow: 0 6px 24px rgba(0, 0, 0, .25); padding: 4px; display: flex; flex-direction: column; gap: 2px; min-width: min(250px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; z-index: 100; isolation: isolate; }
+.cm-tooltip.cm-sel-toolbar { font-family: var(--font-ui); font-size: 13px; background: var(--paper); color: var(--ink-text); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow-floating); padding: 4px; display: flex; flex-direction: column; gap: 2px; min-width: min(250px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; z-index: 100; isolation: isolate; }
 .cm-sel-row { display: flex; gap: 2px; flex-wrap: wrap; }
 .cm-sel-toolbar button { border: 0; background: none; border-radius: 4px; padding: 3px 8px; cursor: pointer; min-width: 26px; }
 .cm-sel-toolbar button:hover:not(:disabled) { background: var(--rule); }
@@ -185,7 +155,7 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .cm-sel-toolbar .b { font-weight: 800; }
 .cm-sel-toolbar .i { font-style: italic; }
 .cm-sel-toolbar .failed-btn { text-decoration: line-through; }
-.cm-sel-toolbar button.primary { background: var(--accent); color: #fff; font-weight: 600; }
+.cm-sel-toolbar button.primary { background: var(--accent); color: var(--on-accent); font-weight: 600; }
 .cm-sel-toolbar button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, black); }
 .cm-bullet { color: var(--muted); display: inline-block; width: 1em; }
 .cm-sel-toolbar input { width: 100%; font: inherit; padding: 5px 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: inherit; }

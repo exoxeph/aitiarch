@@ -1,0 +1,91 @@
+/* Grove, original Aitiarch design. Installed system fonts only; no network assets. */
+:root {
+  color-scheme: light;
+  --canvas: #e5ebe6;
+  --paper: #fafbf7;
+  --paper-2: #edf2ec;
+  --ink-text: #263c32;
+  --muted: #52685a;
+  --rule: #c4d1c6;
+  --control-border: #718677;
+  --accent: #2e6654;
+  --on-accent: #fafbf7;
+  --accent-soft: #deeadf;
+  --link: #375877;
+  --ai-ink: #375877;
+  --ai-surface: #edf3f6;
+  --human-surface: #edf4e9;
+  --focus: #276b53;
+  --toolbar: #fafbf7;
+  --danger: #9c352b;
+  --ok: var(--accent);
+  --code-bg: var(--accent-soft);
+  --scrim: #11251e66;
+  --shadow-page: 0 4px 20px #18372a0a;
+  --shadow-floating: 0 8px 28px #11251e29;
+  --shadow-small: 0 2px 8px #11251e14;
+  --shadow-up: 0 -5px 16px #11251e14;
+  --font-body: Cambria, Georgia, "Times New Roman", serif;
+  --font-ui: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --text-meta: 12px;
+  --text-control: 13px;
+  --text-ai: 15px;
+  --text-heading: 16px;
+  --text-body: 18px;
+  --text-panel-title: 21px;
+  --text-title: 40px;
+  --leading-body: 1.75;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-9: 36px;
+  --space-12: 48px;
+  --gutter: 18px;
+  --page-inset: 36px;
+  --tree-width: 218px;
+  --thread-width: 344px;
+  --radius-small: 6px;
+  --radius-card: 10px;
+  --radius-human: 12px;
+  --radius-page: 15px;
+  --motion-color: 140ms;
+  --motion-panel: 180ms;
+  --ease: ease-out;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --canvas: #111d19;
+    --paper: #1c2b24;
+    --paper-2: #16231d;
+    --ink-text: #e5eee4;
+    --muted: #acbfae;
+    --rule: #3e5948;
+    --control-border: #86a58e;
+    --accent: #a9d6ba;
+    --on-accent: #16231d;
+    --accent-soft: #2e4b3b;
+    --link: #b6d2e7;
+    --ai-ink: #b6d2e7;
+    --ai-surface: #253b40;
+    --human-surface: #233b2b;
+    --focus: #b5e8c7;
+    --toolbar: #2a3e31;
+    --danger: #ffb4a5;
+    --scrim: #00000080;
+    --shadow-page: 0 4px 20px #0000001a;
+    --shadow-floating: 0 8px 28px #00000066;
+    --shadow-small: 0 2px 8px #00000033;
+    --shadow-up: 0 -5px 16px #00000033;
+  }
+}
+@media (max-width: 720px) {
+  :root { --page-inset: 22px; --text-body: 17px; --text-title: 34px; --gutter: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion-color: 0s; --motion-panel: 0s; }
+}

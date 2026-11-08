@@ -1,0 +1,11 @@
+import {readFileSync} from 'node:fs';
+import {describe,it,expect} from 'vitest';
+const css=()=>readFileSync(new URL('../src/tokens.css',import.meta.url),'utf8');
+const styles=()=>readFileSync(new URL('../src/styles.css',import.meta.url),'utf8');
+describe('Grove visual contract',()=>{
+ it('centralizes the approved light and dark palettes and system typography',()=>{
+  const t=css();for(const hex of ['#e5ebe6','#fafbf7','#263c32','#2e6654','#111d19','#1c2b24','#e5eee4','#a9d6ba'])expect(t).toContain(hex);
+  expect(t).toContain('prefers-color-scheme: dark');expect(t).toContain('Cambria');expect(t).toContain('--radius-page: 15px');
+  expect(styles()).not.toMatch(/#[\da-f]{3,8}\b/gi);
+ });
+});
