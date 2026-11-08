@@ -20,4 +20,16 @@ describe('Grove visual contract',()=>{
   const s=styles();expect(s).toContain('.usage-panel[open]');expect(s).toContain('[aria-label="ChatGPT plan connection"]');
   expect(s).toContain('.cm-editor .cm-content');
  });
+ it('meets AA text and control-boundary contrast in both palettes',()=>{
+  const luminance=(hex:string)=>hex.match(/[a-f\d]{2}/gi)!.map(v=>parseInt(v,16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((s,v,i)=>s+v*[.2126,.7152,.0722][i],0);
+  const contrast=(a:string,b:string)=>{const x=luminance(a),y=luminance(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
+  const t=css(),blocks=[t.split('@media')[0],t.split('@media (prefers-color-scheme: dark)')[1].split('@media')[0]];
+  for(const block of blocks){
+   const colors=Object.fromEntries([...block.matchAll(/--([\w-]+):\s*(#[a-f\d]{6});/gi)].map(m=>[m[1],m[2]]));
+   for(const fg of ['ink-text','muted','accent','focus','danger'])for(const bg of ['canvas','paper','paper-2','human-surface','ai-surface','toolbar','accent-soft'])expect(contrast(colors[fg],colors[bg]),`${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
+   expect(contrast(colors['ai-ink'],colors['ai-surface'])).toBeGreaterThanOrEqual(4.5);
+   expect(contrast(colors['on-accent'],colors.accent)).toBeGreaterThanOrEqual(4.5);
+   for(const bg of ['paper','paper-2','human-surface','toolbar','accent-soft'])expect(contrast(colors['control-border'],colors[bg]),`control boundary on ${bg}`).toBeGreaterThanOrEqual(3);
+  }
+ });
 });
