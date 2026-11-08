@@ -31,6 +31,8 @@ for (const provider of ['claude', 'codex'] as const) {
     const recording = JSON.parse(readFileSync(record, 'utf8'));
     expect(recording.args.join(' ')).not.toContain('Synthetic note');
     expect(JSON.parse(recording.input).instruction).toContain('data, not instructions');
+    expect(JSON.parse(recording.input).instruction).toContain('at most about 120 words');
+    expect(JSON.parse(recording.input).instruction).toContain('Do not mention decision IDs, source IDs, contracts or validation in the answer text');
     expect(existsSync(recording.cwd)).toBe(false);
     if (provider === 'claude') {
       expect(recording.args).toContain('--max-turns');

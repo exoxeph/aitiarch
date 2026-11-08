@@ -1,11 +1,12 @@
 import path from 'node:path';
 import {PlanVault,planDirectory} from './plan-vault.ts';
 import type {UsageSummary,UsageTotals} from '../../shared/usage.ts';
-export interface ClaudeUsageRecord {at:string;provider:'claude';input:number|null;cached:number|null;output:number|null;wallMs:number}
+import {measureAnswerLength} from '../../shared/answer-length.ts';
+export interface ClaudeUsageRecord {at:string;provider:'claude';input:number|null;cached:number|null;output:number|null;wallMs:number;answerCharacters:number|null;answerWords:number|null}
 export interface UsageLog {write(record:ClaudeUsageRecord):Promise<void>}
 const counter=(value:unknown):number|null=>typeof value==='number'&&Number.isFinite(value)&&value>=0?value:null;
-export function claudeUsageRecord(usage:{inputTokens:number;outputTokens:number;cachedTokens?:number}|null,wallMs:number):ClaudeUsageRecord{
- return {at:new Date().toISOString(),provider:'claude',input:counter(usage?.inputTokens),cached:counter(usage?.cachedTokens),output:counter(usage?.outputTokens),wallMs:Math.max(0,Math.round(wallMs))};
+export function claudeUsageRecord(usage:{inputTokens:number;outputTokens:number;cachedTokens?:number}|null,wallMs:number,answer?:string):ClaudeUsageRecord{
+ return {at:new Date().toISOString(),provider:'claude',input:counter(usage?.inputTokens),cached:counter(usage?.cachedTokens),output:counter(usage?.outputTokens),wallMs:Math.max(0,Math.round(wallMs)),...measureAnswerLength(answer)};
 }
 export class UsageLogs implements UsageLog {
  private claude:PlanVault;private plan:PlanVault;private since:number;
@@ -16,7 +17,7 @@ export class UsageLogs implements UsageLog {
  async write(record:ClaudeUsageRecord){
   // Reconstruct a fixed metadata shape; never forward arbitrary caller fields.
   if(!Number.isFinite(Date.parse(record.at)))throw new Error('Invalid usage timestamp.');
-  await this.claude.append('usage.jsonl',{at:record.at,provider:'claude',input:counter(record.input),cached:counter(record.cached),output:counter(record.output),wallMs:counter(record.wallMs)});
+  await this.claude.append('usage.jsonl',{at:record.at,provider:'claude',input:counter(record.input),cached:counter(record.cached),output:counter(record.output),wallMs:counter(record.wallMs),answerCharacters:counter(record.answerCharacters),answerWords:counter(record.answerWords)});
  }
  async summary():Promise<UsageSummary>{
   const providers:UsageTotals[]=[];

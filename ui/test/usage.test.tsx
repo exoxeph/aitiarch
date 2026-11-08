@@ -21,6 +21,7 @@ it('logs successful fake Claude usage privately, without text, and never logs a 
  await expect(provider('verified-empty-result').invoke(request)).rejects.toMatchObject({code:'invalid_response'});
  const text=await readFile(path.join(root,'claude','usage.jsonl'),'utf8'),rows=text.trim().split('\n').map(line=>JSON.parse(line));
  expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({provider:'claude',input:12,output:8});expect(rows[0].wallMs).toBeGreaterThan(0);
+ expect(rows[0]).toMatchObject({answerCharacters:'Answer for usage-test'.length,answerWords:3});
  expect(text).not.toMatch(/PRIVATE_QUESTION|Answer for|selection|claims|prompt|session_id|uuid/);
 });
 it('combines only numeric usage, counts this session separately, reads the normal cap, and marks unreported counters',async()=>{

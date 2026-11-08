@@ -203,9 +203,10 @@ it('does full PKCE dynamic registration, stable host identity and strict inferen
   const result=await f.provider.invoke(request);expect(result).toMatchObject({provider:'chatgpt-plan',answer:'Synthetic answer.'});
   const sent=f.requests.find(r=>r.route==='/responses')!;
   expect(sent.body).toMatchObject({store:false,stream:true,model:'synthetic-model'});expect(sent.body).not.toHaveProperty('tools');expect(sent.body.instructions).toContain('"quote"');
+  expect(sent.body.instructions).toContain('at most about 120 words');expect(sent.body.instructions).toContain('Do not mention decision IDs, source IDs, contracts or validation in the answer text');
   const persisted=JSON.parse(await readFile(path.join(f.root,'credentials.json'),'utf8'));
   expect(persisted.client_id).toBe(f.clientId);expect(persisted.ext_agent_host_id).toMatch(/^urn:uuid:/);
-  const metrics=await readFile(path.join(f.root,'usage.jsonl'),'utf8');expect(JSON.parse(metrics)).toMatchObject({input:20,cached:4,output:10,reasoning:3});
+  const metrics=await readFile(path.join(f.root,'usage.jsonl'),'utf8');expect(JSON.parse(metrics)).toMatchObject({input:20,cached:4,output:10,reasoning:3,answerCharacters:'Synthetic answer.'.length,answerWords:2});
   for(const token of f.tokens)expect(metrics.includes(token)).toBe(false);
 });
 it('serializes refresh rotation across two instances and retains one host',async()=>{

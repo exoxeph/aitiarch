@@ -6,6 +6,7 @@ import { PlanVault } from './plan-vault.ts';
 import { ProviderError, prepareRequest, validateProviderResponse, redact, type Provider, type Request, type InvokeOptions, type Result } from './index.ts';
 import { validateProductResult, ProductValidationError } from '../product-validation.ts';
 import { textHash } from '../anchor-cache.ts';
+import {measureAnswerLength} from '../../shared/answer-length.ts';
 
 export const planScopes='openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
 const issuer='https://auth.openai.com',resource='https://api.openai.com/v1';
@@ -225,7 +226,9 @@ export class ChatGPTPlan implements Provider {
         if(!Number.isFinite(retry)||retry>5000)throw new ProviderError('provider_error','ChatGPT is temporarily unavailable. Retry later.');await delay(retry,undefined,{signal});
       }
       rule='stream';const {readPlanStream}=await import('./plan-stream.ts');const completed=await readPlanStream(response!,counts,fields);
-      await this.vault.append('usage.jsonl',{at:new Date().toISOString(),provider:'chatgpt-plan',contentType:completed.contentType,...completed.usage});
+      let length=measureAnswerLength(undefined);
+      try{length=measureAnswerLength(JSON.parse(completed.text)?.answer);}catch{/* Invalid JSON remains a validation failure below. */}
+      await this.vault.append('usage.jsonl',{at:new Date().toISOString(),provider:'chatgpt-plan',contentType:completed.contentType,...completed.usage,...length});
       rule='response_schema';const raw=JSON.parse(completed.text);
       if(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.keys(raw).sort().join(',')!=='answer,claims'||!Array.isArray(raw.claims)||raw.claims.some((c:any)=>!c||typeof c!=='object'||Array.isArray(c)||Object.keys(c).sort().join(',')!=='quote,sourceId'))throw new ProviderError('invalid_response');
       const parsed=validateProviderResponse(raw);
