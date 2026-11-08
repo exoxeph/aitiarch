@@ -8,4 +8,8 @@ describe('Grove visual contract',()=>{
   expect(t).toContain('prefers-color-scheme: dark');expect(t).toContain('Cambria');expect(t).toContain('--radius-page: 15px');
   expect(styles()).not.toMatch(/#[\da-f]{3,8}\b/gi);
  });
+ it('separates the notebook page and gives the toolbar a themed surface',()=>{
+  const s=styles();expect(s).toContain('margin: var(--gutter)');expect(s).toContain('border-radius: var(--radius-page)');
+  expect(s).toContain('background: var(--toolbar)');expect(s).toContain('prefers-reduced-motion');expect(s).toContain(':focus-visible');
+ });
 });
