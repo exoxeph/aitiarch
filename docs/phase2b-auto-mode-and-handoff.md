@@ -79,3 +79,29 @@ The human and assistant author the real 20 cases together and freeze expectation
 - Differentiation from Obsidian + decision files + hooks + Plannotator is a hypothesis, not a verified feature comparison: can one place for human reasoning, selective grounded interventions and provenance-preserving handoff reduce maintenance enough to matter? Test against that baseline before claiming superiority.
 - First-minute value may be invisible. Proposed onboarding opens a disposable synthetic plan, demonstrates excellent AI-off editing and a human decision-to-handoff preview first, then offers an explicitly approved contradiction demonstration. No automatic calls, fake activity or forced setup questions.
 - Unresolved: reliable ownership confirmation, long-note false negatives, prompt injection in note data, redaction misses, noisy candidate selection, accessibility during arrivals, stale exports and agents ignoring references. Treat note content as untrusted data; preserve provider isolation. Budget consumption without useful comments must remain visible.
+
+## E. Layout of AI thoughts — proposed
+
+Use Riddled as a spatial reference only; create original Grove styling. Keep the note centered. With the batch 2a tree collapsed behind its hamburger, use both margins. Assign new thoughts alternately left/right in sentence order; persist the side in ink so arrivals never reshuffle existing thoughts. Keep cards aligned to their anchored sentence. On collision, stack downward with an 8px gap and connectors showing the true targets; never move note text. Below approximately 1100px, replace both rails with sentence indicators opening the existing thread panel. An expanded tree uses this same fallback if two usable rails no longer fit.
+
+Add a subtle dotted underline through editor decorations only: existing ink anchors and shared mapping determine its range; Markdown bytes and offsets stay unchanged. Quiet Grove surfaces always label content AI. Dismissed/addressed thoughts use muted, still-accessible tokens without animation. Never infer addressed status; it requires a human action.
+
+Opening a thought uses the existing thread panel and a thin connector to its sentence; hide the connector when its target is offscreen. Replies use existing threads. Include Dismiss and an Earlier list of preserved thoughts for that sentence, including dismissed/addressed entries. Ambiguous anchors remain in the orphan list, never reassigned by proximity. Human takeaway boundaries and summary locking stay unchanged.
+
+Store the header mode and a one-line instruction per note, proposed maximum 240 characters: “How should the AI be in this note?” The instruction changes tone/stance only; it cannot authorize note edits or writing, suggesting or prefilling takeaway/Why/failed-reason fields.
+
+**Conflicts requiring approval:** the requested **Off / When you ask / Thinks with you** header conflicts with Part A's mode names; whether Off also disables invoked actions is unresolved. Sending the per-note instruction conflicts with Part A's exhaustive outbound-context list. Neither earlier rule is silently replaced here.
+
+## F. Per-note chat — proposed
+
+“Ask about this note…” opens a side panel scoped to this note, with optional selection. Reuse the provider path, strict verbatim-quote claims contract, hourly cap and usage panel. Chat never edits Markdown. **Pin as thought** asks the human to choose a sentence, then saves the validated answer as AI-labeled ink using existing anchoring/re-attachment checks. No action copies AI text into a takeaway.
+
+Proposed private storage: `<root>/chat/<relative-note-path>.chat.json`. Verify ignore coverage, including atomic-write files, using `/chat/`; otherwise retain data in memory and offer an explicit add-ignore button. Save validated replies and references only, not prompts, questions, raw output or transcripts. Questions and conversational history remain memory-only; reload starts fresh and labels stored replies “Question unavailable after reload.”
+
+**Publication conflict:** committing that live sidecar would violate verified-ignore persistence. Opt-in publication needs approval of either a previewed answer-only export or a separate explicitly tracked storage mode; no exception is assumed. Export is easier to reverse; tracked mode requires privacy and history review.
+
+Per message, send fixed instructions, the redacted frozen current note (maximum 12,000 characters), optional selection/offsets, the tone instruction, current question (maximum 2,000 characters), and at most four complete prior question/reply pairs totaling 4,000 characters. Drop oldest pairs first; never silently truncate a question or note. Oversized input waits for the human to shorten it. No other notes, agent transcripts or account/filesystem context leave the machine. Treat all supplied text as data; redaction can miss secrets.
+
+Keep fixed instructions and note first, history chronological, and the new question last to preserve reusable prefixes. Note edits/history eviction can invalidate caching; cache hits are not guaranteed. Report actual cached tokens only.
+
+Notebook-wide chat is later: broader disclosure, greater cost, cross-note ambiguity and overlap with Claude Code require separate evaluation and consent.
