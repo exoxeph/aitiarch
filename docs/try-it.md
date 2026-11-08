@@ -24,10 +24,10 @@ Set-Location 'G:\Aitiarch\ui'
 npm run build
 if ($LASTEXITCODE -ne 0) { throw 'Build failed; do not start.' }
 $claudeExe = (Get-Command claude.exe -CommandType Application -ErrorAction Stop).Source
-npm start -- --root "$root" --claude "$claudeExe" --port 0
+node server/main.ts --root "$root" --claude "$claudeExe" --port 0
 ```
 
-`--root` points directly to the trial's `.aitiarch`, not its parent. `--port 0` asks Windows for a free port. Startup prints `AITIARCH_READY` with a `url` and opens that URL in your browser. If it does not open, copy the printed URL and run this in a second PowerShell window:
+Start with Node directly because npm can swallow forwarded flags in PowerShell. `--root` points directly to the trial's `.aitiarch`, not its parent. `--port 0` asks Windows for a free port. Startup prints `AITIARCH_READY` with a `url` and opens that URL in your browser. If it does not open, copy the printed URL and run this in a second PowerShell window:
 
 ```powershell
 $trialUrl = Read-Host 'Paste the url from AITIARCH_READY (http://127.0.0.1:PORT/)'
@@ -52,7 +52,7 @@ For a later trial, stop the Claude server first, then run:
 ```powershell
 Set-Location 'G:\Aitiarch\ui'
 $root = Join-Path (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'aitiarch-trial') '.aitiarch'
-npm start -- --root "$root" --chatgpt-plan --port 0
+node server/main.ts --root "$root" --chatgpt-plan --port 0
 ```
 
 Do not combine `--claude` and `--chatgpt-plan`. Provider selection is per server, not a toolbar dropdown. ChatGPT-plan remains disabled unless its explicit flag is supplied. Use the printed URL as above. The connection panel shows the plan-allowance notice and **Manage usage** link to [ChatGPT Settings → Usage](https://chatgpt.com/settings/usage). On Plus, this shares the five-hour allowance with other ChatGPT-plan use, including Codex and ChatGPT.
