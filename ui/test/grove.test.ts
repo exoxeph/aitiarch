@@ -12,4 +12,8 @@ describe('Grove visual contract',()=>{
   const s=styles();expect(s).toContain('margin: var(--gutter)');expect(s).toContain('border-radius: var(--radius-page)');
   expect(s).toContain('background: var(--toolbar)');expect(s).toContain('prefers-reduced-motion');expect(s).toContain(':focus-visible');
  });
+ it('gives human writing a stronger boundary than AI and styles the existing locked state',()=>{
+  const s=styles();expect(s).toContain('border: 2px solid var(--accent)');expect(s).toContain('background: var(--human-surface)');
+  expect(s).toContain('.thread-reply');expect(s).toContain('[aria-label="Closing summary"]');expect(s).toContain('.skipped-takeaway');
+ });
 });
