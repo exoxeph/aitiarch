@@ -147,6 +147,8 @@ function build(state: EditorState): DecorationSet {
   };
   const out: Range<Decoration>[] = [];
   const code: Array<[number, number]> = [];
+  const failedMarks = findFailedMarks(text);
+  const strikes = new Set<number>();
   const fmEnd = frontmatterEnd(text);
   const lineDeco = (from: number, to: number, cls: string) => {
     for (let n = doc.lineAt(from).number; n <= doc.lineAt(Math.min(to, doc.length)).number; n++) {
@@ -162,8 +164,10 @@ function build(state: EditorState): DecorationSet {
       let m: RegExpExecArray | null;
       if ((m = /^ATXHeading(\d)$/.exec(n.name))) {
         lineDeco(n.from, n.to, `cm-h${m[1]}`);
-        const mark = n.node.getChild("HeaderMark");
-        if (mark && !isActive(n.from, n.to)) out.push(hide.range(mark.from, Math.min(mark.to + 1, doc.lineAt(mark.from).to)));
+        if (!isActive(n.from, n.to)) for (const mark of n.node.getChildren('HeaderMark')) {
+          const end = mark.from === n.from ? Math.min(mark.to + 1, doc.lineAt(mark.from).to) : mark.to;
+          out.push(hide.range(mark.from, end));
+        }
         return;
       }
       if ((m = /^SetextHeading(\d)$/.exec(n.name))) {
@@ -171,6 +175,13 @@ function build(state: EditorState): DecorationSet {
         return;
       }
       switch (n.name) {
+        case 'Strikethrough': {
+          strikes.add(n.from);
+          const annotation = failedMarks.find(m => m.from === n.from && m.textTo + 2 === n.to);
+          out.push(Decoration.mark({class:'cm-failed'}).range(n.from,n.to));
+          if (!selected(n.from,annotation?.to??n.to)) for (const mark of n.node.getChildren('StrikethroughMark')) out.push(hide.range(mark.from,mark.to));
+          return;
+        }
         case "StrongEmphasis":
         case "Emphasis": {
           out.push(Decoration.mark({ class: n.name === "StrongEmphasis" ? "cm-strong" : "cm-em" }).range(n.from, n.to));
@@ -266,11 +277,9 @@ function build(state: EditorState): DecorationSet {
     }
   }
 
-  for (const mk of findFailedMarks(text)) {
-    if (mk.from < fmEnd || inCode(mk.from)) continue;
-    out.push(Decoration.mark({ class: "cm-failed" }).range(mk.textFrom, mk.textTo));
+  for (const mk of failedMarks) {
+    if (!strikes.has(mk.from) || mk.from < fmEnd || inCode(mk.from)) continue;
     const act = selected(mk.from, mk.to);
-    if (!act) out.push(hide.range(mk.from, mk.textFrom), hide.range(mk.textTo, mk.textTo + 2));
     const noReason = !mk.hasBrace || mk.reason === "";
     if (mk.hasBrace) {
       const braceFrom = mk.textTo + 2;

@@ -33,6 +33,13 @@ it('does not interpret marks inside code or frontmatter as rich text',()=>{
  const text='---\ntitle: **raw**\n---\n\n`~~code~~`\n\n```\n**raw**\n```\n\nEnd';const s=make(text,text.length);
  expect(decorations(s).filter(r=>r.spec.class==='cm-strong'||r.spec.class==='cm-failed')).toEqual([]);
 });
+it('renders multiline strikes and ignores escaped strike syntax',()=>{
+ const doc='Away\n\n~~two\nlines~~ and \\~~literal\\~~\n\nEnd';const s=make(doc,0);
+ expect(hidden(s)).toContainEqual([doc.indexOf('~~'),doc.indexOf('~~')+2]);expect(decorations(s).filter(r=>r.spec.class==='cm-failed')).toHaveLength(1);
+});
+it('hides both optional heading markers away from the active line',()=>{
+ const doc='Away\n\n## Heading ##\n';const s=make(doc,0);expect(hidden(s)).toContainEqual([doc.lastIndexOf('##'),doc.lastIndexOf('##')+2]);
+});
 it('rendering and cursor changes leave source text, anchor offsets and ink byte-equivalent',()=>{
  const doc='# Heading\n\nBefore **bold** and ~~strike~~ after.\n';const from=doc.indexOf('bold'),anchor=captureAnchor(doc,from,from+4);
  const item={id:'fixture',kind:'answer' as const,body:'Fake answer',anchor,originalAnchor:anchor,attachment:{status:'attached' as const,from,to:from+4}};
