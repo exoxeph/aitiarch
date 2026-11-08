@@ -131,7 +131,7 @@ function create(view: EditorView): TooltipView {
 
 function toTooltip(state: EditorState): Tooltip | null {
   const r = state.selection.main;
-  return r.empty ? null : { pos: r.from, above: true, strictSide: true, arrow: false, create };
+  return r.empty ? null : { pos: r.from, above: true, strictSide: false, arrow: false, create };
 }
 
 export const selectionToolbar = StateField.define<Tooltip | null>({
