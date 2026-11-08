@@ -26,6 +26,7 @@ export interface AppOptions {
   allowOrigins?: string[];
   provider?: Provider;
   plan?: ChatGPTPlan;
+  usage?: {summary():Promise<import('../shared/usage.ts').UsageSummary>};
 }
 
 export const CSP = [
@@ -161,6 +162,7 @@ export function createApp(opts: AppOptions) {
     }
 
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await store.tree());
+    if(url.pathname==='/api/usage'&&req.method==='GET')return json(res,200,opts.usage?await opts.usage.summary():{since:new Date().toISOString(),hourlyCap:2,providers:[]});
 
     if(url.pathname==='/api/threads'&&req.method==='GET'){
       const active=new Set([...(await assistance).activeIds(),...(await runtimeReady).activeIds()]);

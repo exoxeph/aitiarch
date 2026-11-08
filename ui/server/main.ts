@@ -47,9 +47,11 @@ const watcher = new NoteWatcher(store!);
 await watcher.start();
 const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
 const plan = args.chatgptPlan ? new ChatGPTPlan({enabled:true,notebookRoot:store!.rootReal}) : undefined;
-const provider = plan ?? (args.claude ? createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205" }) : undefined);
+const {UsageLogs}=await import('./providers/usage.ts');
+const usage=new UsageLogs({notebookRoot:store!.rootReal});
+const provider = plan ?? (args.claude ? createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205",usageLog:usage }) : undefined);
 if (provider) for (const warning of (await provider.checkAvailability()).warnings ?? []) console.warn(warning);
-const app = createApp({ store: store!, watcher, distDir, allowOrigins: args.origins, provider, plan });
+const app = createApp({ store: store!, watcher, distDir, allowOrigins: args.origins, provider, plan,usage });
 
 // Deterministic port per notebook folder, so the same project always opens at the same address.
 const h = parseInt(createHash("sha1").update(store!.rootReal.toLowerCase()).digest("hex").slice(0, 6), 16);

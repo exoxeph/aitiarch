@@ -9,6 +9,7 @@ import type { Availability } from './capabilities.ts';
 import { claudeArguments, inspectClaudeCanary } from './claude-canary.ts';
 import { failureMetadata, privateFailureLog, type FailureLog, type FailureMetadata } from './failure-metrics.ts';
 import { parseAnswerJson } from './answer-json.ts';
+import {claudeUsageRecord,type UsageLog} from './usage.ts';
 import { ProductValidationError, validateResponseSchema, type ValidationRecord } from '../product-validation.ts';
 
 export type CLIProviderName = 'claude' | 'codex';
@@ -40,7 +41,7 @@ export class ProviderError extends Error {
 }
 export interface Result {
   id: string; provider: ProviderName; model: string | null; answer: string;
-  claims: unknown[]; usage: { inputTokens: number; outputTokens: number } | null;
+  claims: unknown[]; usage: { inputTokens: number; outputTokens: number; cachedTokens?:number } | null;
 }
 export interface InvokeOptions { signal?: AbortSignal; timeoutMs?: number; retry503?:boolean }
 export interface Provider {
@@ -55,6 +56,7 @@ export interface Configuration {
   contract: 'fake' | 'unverified' | 'claude-canary-2.1.205';
   failureLog?: FailureLog;
   cleanupLog?: CleanupLog;
+  usageLog?: UsageLog;
   // Optional in-memory diagnostic observer; never receives output or prompt text.
   onMetadata?: (record:FailureMetadata)=>void;
 }
@@ -129,7 +131,8 @@ function parseResult(provider: ProviderName, id: string, stdout: string, stream 
       if (envelope.is_error || envelope.subtype !== 'success') throw new Error();
       response = parseAnswerJson(envelope.result); model = typeof envelope.model === 'string' ? envelope.model : null;
       if (Number.isFinite(envelope.usage?.input_tokens) && Number.isFinite(envelope.usage?.output_tokens))
-        usage = { inputTokens: envelope.usage.input_tokens, outputTokens: envelope.usage.output_tokens };
+        usage = { inputTokens: envelope.usage.input_tokens, outputTokens: envelope.usage.output_tokens,
+          ...(Number.isFinite(envelope.usage.cache_read_input_tokens)?{cachedTokens:envelope.usage.cache_read_input_tokens}:{}) };
     } else {
       let messages = 0, completed = 0;
       for (const line of stdout.trim().split(/\r?\n/)) {
@@ -223,7 +226,12 @@ export function createProvider(configuration: Configuration): Provider {
       });
       fileCount=(await readdir(cwd)).length;
       if (fileCount !== 0) throw new ProviderError('invalid_response');
-      return parseResult(config.provider, requestId, output, stream);
+      const result=parseResult(config.provider, requestId, output, stream);
+      if(config.provider==='claude'&&config.usageLog){
+        try{await config.usageLog.write(claudeUsageRecord(result.usage,performance.now()-start));}
+        catch{/* Private telemetry failure must not discard a validated answer. */}
+      }
+      return result;
     } catch(error) {
       if(error instanceof ProviderError)productValidation=error.validation;
       if(cwd&&fileCount===undefined){try{fileCount=(await readdir(cwd)).length;}catch{/* Unknown file count stays unavailable. */}}

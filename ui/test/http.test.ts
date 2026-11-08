@@ -46,7 +46,7 @@ beforeAll(async () => {
   const store = await Store.open(root);
   watcher = new NoteWatcher(store, 50, 10);
   await watcher.start();
-  app = createApp({ store, watcher, distDir: path.join(tmp, "no-dist") });
+  app = createApp({ store, watcher, distDir: path.join(tmp, "no-dist"),usage:{summary:async()=>({since:new Date(0).toISOString(),hourlyCap:5,providers:[]})} });
   port = await app.listen(0);
   const s = await call("GET", "/api/session");
   cookie = String(s.headers["set-cookie"]?.[0] ?? "").split(";")[0];
@@ -73,6 +73,10 @@ describe("network exposure", () => {
 });
 
 describe("auth", () => {
+  it('private usage totals require a session and expose only the summary',async()=>{
+    expect((await call('GET','/api/usage')).status).toBe(401);
+    const result=await call('GET','/api/usage',{headers:authed()});expect(result.status).toBe(200);expect(JSON.parse(result.body)).toEqual({since:new Date(0).toISOString(),hourlyCap:5,providers:[]});
+  });
   it("API needs the session cookie", async () => {
     expect((await call("GET", "/api/tree")).status).toBe(401);
     expect((await call("GET", "/api/tree", { headers: { cookie: "aitiarch=deadbeef" } })).status).toBe(401);

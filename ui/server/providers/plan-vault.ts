@@ -48,7 +48,7 @@ export class PlanVault {
   async read(name='credentials.json'):Promise<any>{try{return JSON.parse(await readFile(await this.file(name),'utf8'));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return {};throw e;}}
   // Authentication preflight and status must not create a directory, lock, or file.
   async peek(name='credentials.json'):Promise<any>{
-    if(!['credentials.json','cap.json'].includes(name))throw new Error('Invalid private file.');
+    if(!['credentials.json','cap.json','usage.jsonl'].includes(name))throw new Error('Invalid private file.');
     await this.check();const file=path.join(this.directory,name);
     try{
       const s=await lstat(file);if(s.isSymbolicLink()||!s.isFile()||s.nlink!==1)throw new Error('Unsafe private file.');
@@ -58,10 +58,13 @@ export class PlanVault {
         this.readVerified=true;
       }
       if(process.platform!=='win32'&&(s.mode&0o077)!==0)throw new Error('Private permissions are too broad.');
-      return JSON.parse(await readFile(file,'utf8'));
+      const text=await readFile(file,'utf8');
+      if(name==='usage.jsonl')return text.split(/\r?\n/).filter(Boolean).flatMap(line=>{try{return [JSON.parse(line)];}catch{return [];}});
+      return JSON.parse(text);
     }catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return {};throw e;}
   }
   async discardCredentials(){await this.check();await rm(path.join(this.directory,'credentials.json'),{force:true});}
+  async usageRecords():Promise<Record<string,unknown>[]>{const rows=await this.peek('usage.jsonl');return Array.isArray(rows)?rows:[];}
   async write(value:unknown,name='credentials.json'){
     const target=await this.file(name),temporary=path.join(this.directory,'.write-'+randomBytes(8).toString('hex'));
     try{await writeFile(temporary,JSON.stringify(value)+'\n',{flag:'wx',mode:0o600});await rename(temporary,target);}

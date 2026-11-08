@@ -13,13 +13,14 @@ await writeFile(path.join(root,'fixture.md'),note);
 const ink=await InkStore.open(root),snapshot=await ink.read('fixture.md'),from=note.indexOf('Paragraph 5.'),anchor=captureAnchor(note,from,from+12);
 for(let n=0;n<5;n++)snapshot.document.items.push({id:'answer-'+n,kind:'answer',body:'Synthetic extra answer '+n,anchor,originalAnchor:anchor,attachment:{status:'attached',...anchor.position}});await ink.write('fixture.md',snapshot.document,null);
 const store=await Store.open(root),watcher=new NoteWatcher(store);await watcher.start();
-const app=createApp({store,watcher,distDir:path.join(here,'../dist'),provider:{name:'claude',checkAvailability:async()=>({available:true}),invoke:async()=>{throw new Error('This check never invokes a provider.');}}});
+const app=createApp({store,watcher,distDir:path.join(here,'../dist'),usage:{summary:async()=>({since:new Date(0).toISOString(),hourlyCap:2,providers:[{provider:'claude',calls:3,callsThisSession:1,input:12,cached:4,output:8,reasoning:0,wallMs:20,unreportedCalls:0},{provider:'chatgpt-plan',calls:1,callsThisSession:0,input:20,cached:0,output:8,reasoning:2,wallMs:30,unreportedCalls:0}]})},provider:{name:'claude',checkAvailability:async()=>({available:true}),invoke:async()=>{throw new Error('This check never invokes a provider.');}}});
 let browser;
 try{
  const port=await app.listen(0);browser=await chromium.launch({channel:'msedge',headless:true});
  for(const theme of ['light','dark'])for(const width of [1440,375]){
   const page=await browser.newPage({viewport:{width,height:900},colorScheme:theme});const errors=[];page.on('pageerror',e=>errors.push(e.name));
   await page.goto(`http://127.0.0.1:${port}/?debug=1`);await page.waitForSelector('.cm-editor');
+  await page.getByText('My AI calls and tokens',{exact:true}).click();await page.getByRole('cell',{name:'12',exact:true}).waitFor();await page.screenshot({path:path.join(screenshots,`usage-${theme}-${width}.png`)});await page.getByText('My AI calls and tokens',{exact:true}).click();
   const more=page.locator('.cm-ink-group summary');await more.waitFor();assert.equal(await more.textContent(),'Show 3 more');assert.equal(await page.locator('.cm-ink-block:visible').count(),2);await more.click();assert.equal(await page.locator('.cm-ink-block:visible').count(),5);await more.click();
   for(const phrase of ['Paragraph 5.','Synthetic trial']){
    await page.evaluate(phrase=>{const {view}=window.__aitiarch['fixture.md'],from=view.state.doc.toString().indexOf(phrase);view.dispatch({selection:{anchor:from,head:from+phrase.length},scrollIntoView:true});view.focus();},phrase);

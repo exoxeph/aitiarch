@@ -135,16 +135,18 @@ if (Test-Path -LiteralPath $usageLog) {
 }
 ```
 
-**Current Claude limitation:** there is no persistent successful-call usage log or own-call/token panel wired into the product. Its adapter returns usage in memory, but successful-call totals are not saved for later inspection. `%USERPROFILE%\AppData\Local\Aitiarch\metrics\provider-failures.jsonl` contains metadata for failures, including numeric usage only when the CLI reported it. It is not a complete usage ledger. To see just those failure counters locally:
+For **Claude**, successful validated CLI results are logged privately at `%LOCALAPPDATA%\Aitiarch\claude\usage.jsonl`: timestamp, provider, reported input/cached/output counters and wall time only. Missing counters are `null`, not estimates. The CLI's input counter is kept as reported; cached reads are recorded separately. These are provider completions, not a guarantee that a later sidecar save succeeded. Failures remain in the separate private failure-metrics log.
+
+Open **My AI calls and tokens** above the editor for both providers' logged totals, calls since this server started, and the ChatGPT hourly cap. The panel reads private usage files only; it does not contact a provider. In ChatGPT mode, the existing connection settings let you change the cap.
 
 ```powershell
-$failureLog = Join-Path $env:USERPROFILE 'AppData\Local\Aitiarch\metrics\provider-failures.jsonl'
-if (Test-Path -LiteralPath $failureLog) {
-    Get-Content -LiteralPath $failureLog -Tail 20 |
+$usageLog = Join-Path $env:LOCALAPPDATA 'Aitiarch\claude\usage.jsonl'
+if (Test-Path -LiteralPath $usageLog) {
+    Get-Content -LiteralPath $usageLog -Tail 20 |
         ForEach-Object { $_ | ConvertFrom-Json } |
-        Select-Object wallMs, usage
+        Select-Object at, provider, input, cached, output, wallMs
 } else {
-    'No Claude failure metrics log yet.'
+    'No successful Claude usage log yet.'
 }
 ```
 

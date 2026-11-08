@@ -9,6 +9,7 @@ import { indentLines, restoreFailed, setHeading, toggleCodeBlock, toggleInline, 
 import type { SyncStatus } from "./editor/session.ts";
 import { makeWikiResolver } from "./frontmatter.ts";
 import { ChatGPTSettings } from "./ChatGPTSettings.tsx";
+import { UsagePanel } from './UsagePanel.tsx';
 import {ThreadPanel} from './threads/ThreadPanel.tsx';
 import {previewTakeawayInsertion} from '../shared/takeaway-insertion.ts';
 
@@ -323,6 +324,7 @@ export default function App() {
       </aside>
       <main className="editor-col">
         <ChatGPTSettings/>
+        <UsagePanel/>
         {cacheNotice && <div className="notice" role="alert">
           Anchor snapshots are disabled. Add this exact line to <code>{cacheNotice.file}</code>: <code>{cacheNotice.line}</code>
           <button disabled={cacheBusy} onClick={async () => {
