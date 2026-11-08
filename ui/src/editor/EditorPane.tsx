@@ -1,5 +1,6 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
+import { Strikethrough, TaskList } from '@lezer/markdown';
 import { Compartment, EditorState } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
@@ -97,7 +98,7 @@ export function EditorPane(props: Props) {
           history(),
           drawSelection(),
           EditorView.lineWrapping,
-          markdown({ addKeymap: false }), // no auto-inserted list markers: the editor never writes text you didn't type
+          markdown({ extensions: [Strikethrough, TaskList], addKeymap: false }), // no auto-inserted list markers: the editor never writes text you didn't type
           invokedKeys,
           keymap.of([
             { key: "Mod-b", run: (v) => (act(v, toggleInline(v.state, "**")), true) },

@@ -1,5 +1,5 @@
 // Live preview: decorations only. The document text is never altered; markup is hidden (replace
-// decorations) except on the line(s) holding the cursor, where the real markdown source shows.
+// decorations). Inline source reveals in the selected span; block source on the active line.
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import DOMPurify from "dompurify";
 import { EditorState, Facet, StateField, type Range } from "@codemirror/state";
@@ -46,6 +46,19 @@ class Bullet extends WidgetType {
     s.className = "cm-bullet";
     s.textContent = "•";
     return s;
+  }
+}
+
+class TaskBox extends WidgetType {
+  constructor(readonly checked: boolean) { super(); }
+  eq(other: TaskBox) { return this.checked === other.checked; }
+  toDOM() {
+    const el = document.createElement('span');
+    el.className = 'cm-task-box';
+    el.textContent = this.checked ? '\u2611' : '\u2610';
+    el.setAttribute('role', 'img');
+    el.setAttribute('aria-label', this.checked ? 'Completed task' : 'Incomplete task');
+    return el;
   }
 }
 
@@ -126,6 +139,8 @@ function build(state: EditorState): DecorationSet {
   const text = doc.toString();
   const tree = ensureSyntaxTree(state, doc.length, 40) ?? syntaxTree(state);
   const active = activeLines(state);
+  const selected = (from: number, to: number) => state.selection.ranges.some(r =>
+    r.empty ? r.head >= from && r.head <= to : r.from < to && r.to > from);
   const isActive = (from: number, to: number) => {
     for (let n = doc.lineAt(from).number; n <= doc.lineAt(Math.min(to, doc.length)).number; n++) if (active.has(n)) return true;
     return false;
@@ -159,7 +174,7 @@ function build(state: EditorState): DecorationSet {
         case "StrongEmphasis":
         case "Emphasis": {
           out.push(Decoration.mark({ class: n.name === "StrongEmphasis" ? "cm-strong" : "cm-em" }).range(n.from, n.to));
-          if (!isActive(n.from, n.to)) {
+          if (!selected(n.from, n.to)) {
             for (let c = n.node.firstChild; c; c = c.nextSibling) if (c.name === "EmphasisMark") out.push(hide.range(c.from, c.to));
           }
           return;
@@ -167,7 +182,7 @@ function build(state: EditorState): DecorationSet {
         case "InlineCode": {
           code.push([n.from, n.to]);
           out.push(Decoration.mark({ class: "cm-code-inline" }).range(n.from, n.to));
-          if (!isActive(n.from, n.to)) {
+          if (!selected(n.from, n.to)) {
             for (let c = n.node.firstChild; c; c = c.nextSibling) if (c.name === "CodeMark") out.push(hide.range(c.from, c.to));
           }
           return;
@@ -197,8 +212,12 @@ function build(state: EditorState): DecorationSet {
           out.push(Decoration.mark({ class: "cm-quote-mark" }).range(n.from, n.to));
           return;
         case "ListMark":
-          if (/^[-*+]$/.test(state.sliceDoc(n.from, n.to)) && !isActive(n.from, n.to)) out.push(Decoration.replace({ widget: new Bullet() }).range(n.from, n.to));
+          if (n.node.parent?.getChild('Task') && !isActive(n.from, n.to)) out.push(hide.range(n.from, n.to + 1));
+          else if (/^[-*+]$/.test(state.sliceDoc(n.from, n.to)) && !isActive(n.from, n.to)) out.push(Decoration.replace({ widget: new Bullet() }).range(n.from, n.to));
           else out.push(Decoration.mark({ class: "cm-list-mark" }).range(n.from, n.to));
+          return;
+        case "TaskMarker":
+          if (!isActive(n.from, n.to)) out.push(Decoration.replace({ widget: new TaskBox(/x/i.test(state.sliceDoc(n.from, n.to))) }).range(n.from, n.to));
           return;
         case "HorizontalRule":
           lineDeco(n.from, n.to, "cm-hr");
@@ -214,7 +233,7 @@ function build(state: EditorState): DecorationSet {
             const [textFrom, textTo] = [marks[0][1], marks[1][0]];
             if (textTo > textFrom) {
               out.push(Decoration.mark({ class: "cm-link", attributes: { "data-href": url, title: "Ctrl+click to open" } }).range(textFrom, textTo));
-              if (!isActive(n.from, n.to)) {
+              if (!selected(n.from, n.to)) {
                 out.push(hide.range(marks[0][0], marks[0][1]));
                 if (n.to > textTo) out.push(hide.range(textTo, n.to));
               }
@@ -241,7 +260,7 @@ function build(state: EditorState): DecorationSet {
         attributes: { "data-wiki": target, title: found ? `${found} — Ctrl+click to open` : "No note with this name yet" },
       }).range(from, to),
     );
-    if (!isActive(from, to)) {
+    if (!selected(from, to)) {
       out.push(hide.range(from, from + 2), hide.range(to - 2, to));
       if (m[3]) out.push(hide.range(from + 2, from + 2 + m[1].length + (m[2]?.length ?? 0) + 1));
     }
@@ -250,7 +269,7 @@ function build(state: EditorState): DecorationSet {
   for (const mk of findFailedMarks(text)) {
     if (mk.from < fmEnd || inCode(mk.from)) continue;
     out.push(Decoration.mark({ class: "cm-failed" }).range(mk.textFrom, mk.textTo));
-    const act = isActive(mk.from, mk.to);
+    const act = selected(mk.from, mk.to);
     if (!act) out.push(hide.range(mk.from, mk.textFrom), hide.range(mk.textTo, mk.textTo + 2));
     const noReason = !mk.hasBrace || mk.reason === "";
     if (mk.hasBrace) {
