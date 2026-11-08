@@ -5,6 +5,13 @@ import { inkField, setInk } from "../src/editor/ink.ts";
 import { externalChange } from "../src/editor/session.ts";
 import type { InkItem } from "../shared/ink.ts";
 
+it('groups repeated answers by the exact selection, preserving every item and separate selections on the same line',()=>{
+ const text='First selection. Second selection.',a=captureAnchor(text,0,16),b=captureAnchor(text,17,text.length);
+ const items:InkItem[]=Array.from({length:6},(_,n)=>{const anchor=n===5?b:a;return {id:String(n),kind:'answer',body:'Synthetic',anchor,originalAnchor:anchor,attachment:{status:'attached',...anchor.position}};});
+ const state=EditorState.create({doc:text,extensions:[inkField]}).update({effects:setInk.of({items,trustedText:text})}).state;
+ expect(state.field(inkField).items).toHaveLength(6);expect(state.field(inkField).marks.size).toBe(2);
+});
+
 it("shares mapped items between inline marks, margin and orphan consumers", () => {
   const text = "Intro.\n\nA verified release checkpoint.\n\nEnd.";
   const from = text.indexOf("A verified"), to = text.indexOf("\n\nEnd");

@@ -32,14 +32,26 @@ class InkWidget extends WidgetType {
   ignoreEvent() { return true; }
 }
 
+class InkGroupWidget extends WidgetType {
+  constructor(readonly answers: InkWidget[]) { super(); }
+  eq(other: InkGroupWidget) { return this.answers.length === other.answers.length && this.answers.every((a,n)=>a.eq(other.answers[n])); }
+  toDOM() {
+    const group=document.createElement('div');group.className='cm-ink-group';
+    for(const answer of this.answers.slice(0,2))group.append(answer.toDOM());
+    if(this.answers.length>2){const more=document.createElement('details'),label=document.createElement('summary');label.textContent=`Show ${this.answers.length-2} more`;more.append(label,...this.answers.slice(2).map(answer=>answer.toDOM()));group.append(more);}
+    return group;
+  }
+  ignoreEvent() { return true; }
+}
 function decorations(state: EditorState, payload: InkPayload): DecorationSet {
-  const ranges = payload.items.filter(i => i.kind === "answer" && !i.generation?.dismissed && !i.thread?.dismissed).flatMap(i => {
-    const r = i.attachment;
-    if (r.status !== "attached") return [];
-    const line = state.doc.lineAt(r.to);
-    return [Decoration.widget({ widget: new InkWidget(i.id, !i.generation||i.generation.status==='complete'?i.body:i.generation.status==='pending'?'Waiting for a validated AI answer…':'Request failed or interrupted. Open thread for details.', i.generation?.status === "complete"), side: 1, block: true }).range(line.to)];
-  });
-  return Decoration.set(ranges, true);
+  const groups=new Map<string,{position:number;answers:InkWidget[]}>();
+  for(const i of payload.items){
+    if(i.kind!=='answer'||i.generation?.dismissed||i.thread?.dismissed||i.attachment.status!=='attached')continue;
+    const r=i.attachment,key=`${r.from}:${r.to}`;
+    let group=groups.get(key);if(!group){group={position:state.doc.lineAt(r.to).to,answers:[]};groups.set(key,group);}
+    group.answers.push(new InkWidget(i.id,!i.generation||i.generation.status==='complete'?i.body:i.generation.status==='pending'?'Waiting for a validated AI answer?':'Request failed or interrupted. Open thread for details.',i.generation?.status==='complete'));
+  }
+  return Decoration.set([...groups.values()].map(group=>Decoration.widget({widget:group.answers.length===1?group.answers[0]:new InkGroupWidget(group.answers),side:1,block:true}).range(group.position)),true);
 }
 
 export const inkField = StateField.define<InkPayload & { marks: DecorationSet }>({

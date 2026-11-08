@@ -22,6 +22,10 @@ export function ReplyView({reply}:{reply:ThreadReply}){
  </article>;
 }
 interface MemoryDraft {text:string;revision:string|null;loaded:boolean;dirty:boolean;enabled:boolean;sequence:number;queue:Promise<unknown>}
+export function ReplyStack({replies,question,cancel}:{replies:ThreadReply[];question:(id:string)=>string;cancel:(id:string)=>void}){
+ const render=(r:ThreadReply)=><section key={r.id}><p className="question-placeholder">{question(r.id)}</p><ReplyView reply={r}/>{r.generation.status==='pending'&&<button onClick={()=>cancel(r.id)}>Cancel reply</button>}</section>;
+ return <>{replies.slice(0,2).map(render)}{replies.length>2&&<details className="extra-answers"><summary>Show {replies.length-2} more</summary>{replies.slice(2).map(render)}</details>}</>;
+}
 // Survives hiding the panel or closing a note tab, but never a page reload.
 const humanDraftMemory=new Map<string,MemoryDraft>();
 interface Props {path:string;items:InkItem[];version:string|null;saved:(s:InkSnapshot)=>void;insert:(item:InkItem)=>Promise<void>;openId:string|null;onOpen:(id:string)=>void;visible?:boolean}
@@ -99,8 +103,7 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{
  return <article className="thread-card" data-thread-id={item.id} ref={card}>
   <h3>Selection thread</h3><blockquote>{item.anchor.quote}</blockquote>
   <p className="small">{threadStatus(item)}{item.attachment.status==='orphaned'?' · Re-attach using the orphan list above. Your takeaway is preserved.':''}</p>
-  <p className="question-placeholder">{recalledQuestion(path,item.id)??questionPlaceholder}</p><ReplyView reply={initial}/>
-  {t.followups.map(r=><section key={r.id}><p className="question-placeholder">{recalledQuestion(path,r.id)??questionPlaceholder}</p><ReplyView reply={r}/>{r.generation.status==='pending'&&<button onClick={()=>void api.threadCall('cancel',{path,id:item.id,replyId:r.id})}>Cancel reply</button>}</section>)}
+  <ReplyStack replies={[initial,...t.followups]} question={id=>recalledQuestion(path,id)??questionPlaceholder} cancel={replyId=>void api.threadCall('cancel',{path,id:item.id,replyId})}/>
   {notice&&<p role="alert">{notice}</p>}
   {saveFailures.filter(id=>[...t.followups,...(t.summary.reply?[t.summary.reply]:[])].some(r=>r.id===id&&r.generation.status==='pending')).map(id=><p key={id} role="alert">{failureLabels.persistence}<button onClick={async()=>{try{update(await api.threadCall<InkSnapshot>('retry-save',{path,id:item.id,replyId:id}));setSaveFailures(all=>all.filter(x=>x!==id));}catch(e){fail(e);}}}>Retry saving reply (no new call)</button></p>)}
   {draftNotice&&<div className="notice" role="note">Drafts stay in memory until ignore coverage is verified. Add <code>/ui-state.json*</code> to the root .gitignore.

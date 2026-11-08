@@ -58,7 +58,7 @@ try{
  const select=async(q)=>page.evaluate(q=>{const {view}=window.__aitiarch['fixture.md'],from=view.state.doc.toString().indexOf(q);view.dispatch({selection:{anchor:from,head:from+q.length},scrollIntoView:true});view.focus();},q);
  await select('A unique selected sentence.');await page.keyboard.press('Control+Enter');await page.getByRole('button',{name:'Send to Claude',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('[data-request-status="pending"]'));pending.shift()();
- await page.getByText('Synthetic accepted answer 1.',{exact:true}).first().waitFor();
+ await page.getByText('Synthetic accepted answer 1.',{exact:true}).first().waitFor({state:'attached'});
  await select('A removable selected sentence.');await page.getByRole('button',{name:'Ask...',exact:true}).click();await page.getByLabel('Question for Claude').fill('Memory-only test question.');await page.getByRole('button',{name:'Review request',exact:true}).click();await page.getByRole('button',{name:'Send to Claude',exact:true}).click();
  while(!pending.length)await new Promise(r=>setTimeout(r,20));
  await page.evaluate(()=>{const {view}=window.__aitiarch['fixture.md'],q='A removable selected sentence.',from=view.state.doc.toString().indexOf(q);view.dispatch({changes:{from,to:from+q.length,insert:''}});});
@@ -77,7 +77,7 @@ try{
  await panel.locator('nav button').nth(8).click();await page.getByLabel('Follow-up question').fill('Synthetic follow-up question.');await page.getByRole('button',{name:'Review follow-up',exact:true}).click();
  await page.getByRole('region',{name:'Review thread request'}).waitFor();assert(await page.getByRole('button',{name:'Send thread request',exact:true}).isDisabled());
  await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Send thread request',exact:true}).click();while(!pending.length)await new Promise(r=>setTimeout(r,20));pending.shift()();
- await panel.getByText('Synthetic accepted answer 3.',{exact:true}).waitFor();
+ await panel.locator('.extra-answers:not([open]) summary').click();await panel.getByText('Synthetic accepted answer 3.',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Skip takeaway',exact:true}).click();await page.getByRole('button',{name:'Request closing summary',exact:true}).click();
  assert.equal(await page.getByRole('checkbox').count(),0,'confirmed provider transition is not repeated');await page.getByRole('button',{name:'Send thread request',exact:true}).click();
  while(!pending.length)await new Promise(r=>setTimeout(r,20));pending.shift()();await panel.getByText('Synthetic accepted answer 4.',{exact:true}).waitFor();
@@ -85,7 +85,7 @@ try{
  // A failed write retains only the validated reply and offers a save-only retry.
  await page.getByLabel('Follow-up question').fill('Synthetic save retry check.');await page.getByRole('button',{name:'Review follow-up',exact:true}).click();await page.getByRole('button',{name:'Send thread request',exact:true}).click();while(!pending.length)await new Promise(r=>setTimeout(r,20));
  const lockFile=path.join(root,'ink/fixture.ink.json.lock');for(let n=0;;n++){try{await writeFile(lockFile,'Synthetic lock',{flag:'wx'});break;}catch(e){if(e.code!=='EEXIST'||n>=100)throw e;await new Promise(r=>setTimeout(r,20));}}
- pending.shift()();await page.getByRole('button',{name:'Retry saving reply (no new call)',exact:true}).waitFor();await rm(lockFile);await page.getByRole('button',{name:'Retry saving reply (no new call)',exact:true}).click();await panel.getByText('Synthetic accepted answer 5.',{exact:true}).waitFor();assert.equal(calls.length,5);
+ pending.shift()();await page.getByRole('button',{name:'Retry saving reply (no new call)',exact:true}).waitFor();await rm(lockFile);await page.getByRole('button',{name:'Retry saving reply (no new call)',exact:true}).click();if(await panel.locator('.extra-answers:not([open]) summary').count())await panel.locator('.extra-answers:not([open]) summary').click();await panel.getByText('Synthetic accepted answer 5.',{exact:true}).waitFor();assert.equal(calls.length,5);
  await page.reload();await page.waitForSelector('.cm-editor');await page.getByRole('button',{name:/^Activity/}).click();await panel.locator('nav button').first().click();
  await page.getByText('Question text was kept in memory only and is unavailable after reload.',{exact:true}).first().waitFor();await page.waitForFunction(()=>document.querySelector('textarea[aria-label="Your takeaway"]')?.value==='Human takeaway only.');
  await page.setViewportSize({width:620,height:900});await page.getByLabel('Your takeaway',{exact:true}).scrollIntoViewIfNeeded();await page.screenshot({path:path.join(screens,'thread-narrow.png'),fullPage:true});
