@@ -40,8 +40,10 @@ export class InsertionStore {
   const note=await this.store.read(input.path);if(note.version!==input.noteVersion)throw new Error('The note changed. Review a new preview.');
   const s=await this.ink.read(input.path),mapped=await this.ink.reanchor(input.path,s.version),item=mapped.document.items.find(i=>i.id===input.id);if(!item)throw new Error('Thought not found.');
   const base=previewThoughtInsertion(note,item,input.noteVersion);let preview:BringPreview=base,svg:string|undefined;
-  if(item.diagram){if(!input.layout||!['light','dark'].includes(input.theme??''))throw new Error('Review the diagram before inserting.');svg=diagramSvg(item.diagram,input.layout,input.theme!);const assetName='ai-diagram-'+hash(svg)+'.svg',relative=path.posix.relative(path.posix.dirname(input.path),'assets/'+assetName),alt=('AI diagram: '+item.diagram.title).replace(/[\\\[\]]/g,'\\$&');
-   preview={...base,changes:{...base.changes,insert:'\n\n!['+alt+']('+relative+')'+(base.changes.from===note.text.length?'\n':'')},assetName};
+  if(item.diagram){if(!input.layout||!['light','dark'].includes(input.theme??''))throw new Error('Review the diagram before inserting.');svg=diagramSvg(item.diagram,input.layout,input.theme!,undefined,true);const assetName='ai-diagram-'+hash(svg)+'.svg',relative=path.posix.relative(path.posix.dirname(input.path),'assets/'+assetName),alt=('AI diagram: '+item.diagram.title).replace(/[\\\[\]]/g,'\\$&');
+   // One AI callout: the explanation stays and the diagram goes inside it, below the text, in the note's own line ending.
+   const nl=note.text.includes('\r\n')?'\r\n':'\n',tail=base.changes.from===note.text.length?nl:'';
+   preview={...base,changes:{...base.changes,insert:base.changes.insert.slice(0,base.changes.insert.length-tail.length)+nl+'> !['+alt+']('+relative+')'+tail},assetName};
   }else if(input.layout!==undefined)throw new Error('The thought diagram changed. Review a new preview.');
   return {preview,svg,note};
  }

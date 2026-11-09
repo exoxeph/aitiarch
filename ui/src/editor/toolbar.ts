@@ -5,8 +5,11 @@ import {placeToolbar} from './toolbar-placement.ts';
 import { failedMarkAt, markFailed, restoreFailed, setHeading, toggleInline, toggleList } from "./format.ts";
 
 export type SelectedSource = { text: string; from: number; to: number };
-export const invocationHandlers = Facet.define<{ invoke: (action: "think" | "ask", source: SelectedSource) => void }, { invoke: (action: "think" | "ask", source: SelectedSource) => void } | null>({ combine: values => values[0] ?? null });
-function invoke(view: EditorView, action: "think" | "ask") {
+export type InvokeAction = "think" | "ask" | "visualize";
+export const invocationHandlers = Facet.define<{ invoke: (action: InvokeAction, source: SelectedSource) => void }, { invoke: (action: InvokeAction, source: SelectedSource) => void } | null>({ combine: values => values[0] ?? null });
+/** Start Think, Ask or Visualize on the current selection (toolbar, shortcut and command palette all use this). */
+export function invokeSelection(view: EditorView, action: InvokeAction) { return invoke(view, action); }
+function invoke(view: EditorView, action: InvokeAction) {
   const handler = view.state.facet(invocationHandlers), range = view.state.selection.main;
   if (!handler || range.empty) return false;
   handler.invoke(action, { text: view.state.doc.toString(), from: range.from, to: range.to });
@@ -138,6 +141,7 @@ function create(view: EditorView): TooltipView {
       ...(view.state.facet(invocationHandlers) ? [row(
         button("Think on this", "Think on this (Ctrl+Enter)", () => { invoke(view, "think"); },'primary'),
         button("Ask...", "Ask about the frozen selection", () => { invoke(view, "ask"); },'primary'),
+        button("Visualize", "Ask for a diagram of the frozen selection", () => { invoke(view, "visualize"); },'primary'),
       )] : []),
     );
     controls().forEach((item, i) => item.tabIndex = i === 0 ? 0 : -1);

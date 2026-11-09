@@ -1,6 +1,8 @@
 .ai-diagram { margin-block: 12px; font: 13px/1.4 var(--font-ui); color: var(--ink-text); }
 .diagram-stage { overflow: auto; background: var(--paper); border: 1px solid var(--control-border); border-radius: 6px; max-height: 220px; }
-.thought-blob .diagram-stage svg { display: block; width: 100%; height: auto; }
+/* Blob diagrams are drawn at natural size (text stays 12px or more) and scroll instead of shrinking; ink-like, little chrome. */
+.thought-blob .diagram-stage { max-height: 320px; border: 0; border-radius: 0; background: transparent; }
+.thought-blob .diagram-stage svg { display: block; width: auto; max-width: none; height: auto; }
 .diagram-caption { color: var(--muted); margin: 8px 0; font-size: 12px; }
 .diagram-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .diagram-tools button { background: var(--paper); color: var(--ink-text); border: 1px solid var(--control-border); border-radius: 4px; padding: 4px 6px; font-size: 12px; }

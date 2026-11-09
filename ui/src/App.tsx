@@ -20,6 +20,7 @@ import {previewThoughtInsertion} from '../shared/thoughts.ts';
 import {isolateHistory} from '@codemirror/commands';
 import {previewTakeawayInsertion} from '../shared/takeaway-insertion.ts';
 import {SLASH_ITEMS,slashInsert} from './editor/slash.ts';
+import {invokeSelection} from './editor/toolbar.ts';
 
 type Boot = { state: "loading" } | { state: "error"; message: string } | { state: "ready"; rootName: string; rootPath: string };
 
@@ -337,6 +338,7 @@ export default function App() {
         const r=h.view.state.selection.main,insert=slashInsert(item,r.from,r.to);
         h.view.dispatch({changes:insert.changes,selection:{anchor:insert.caret},userEvent:'input.palette',scrollIntoView:true});h.view.focus();
       })})),
+      {id:'visualize',label:'AI: Visualize selection as a diagram',group:'AI',run:withView(h=>{if(!invokeSelection(h.view,'visualize'))setNotice('Select some text first, then choose Visualize.');})},
       {id:'tree',label:treeCollapsed?'Expand file tree':'Collapse file tree',group:'Workspace',run:()=>{setTreeCollapsed(v=>!v);if(!treePersistence)setTreeNotice(true);}},
       ...(['system','light','dark'] as const).map(value=>({id:`theme:${value}`,label:`Theme: ${value[0].toUpperCase()+value.slice(1)}`,group:'Appearance',run:()=>chooseTheme(value)})),
       { id: "open", label: "Open note…", hint: "Ctrl+O", run: () => setOverlay("switcher") },

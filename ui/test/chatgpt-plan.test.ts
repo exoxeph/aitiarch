@@ -338,5 +338,5 @@ it('can enforce exactly one HTTP attempt for a separately approved live check',a
 });
 
 it.each(['diagram-valid','diagram-invalid'])('preserves strict answer contract with optional %s through the fake plan server',async mode=>{
- const f=await fixture();await f.login();f.setMode(mode);const result=await f.provider.invoke(request),value=validateProductResult(result,request.id,request,s=>s,s=>s,'chatgpt-plan');expect(value.body).toBe('Synthetic answer.');expect(value.diagram).toEqual(mode==='diagram-valid'?cicd:undefined);expect(value.diagramIssue).toBe(mode==='diagram-invalid'?'node_count':undefined);
+ const f=await fixture();await f.login();f.setMode(mode);const result=await f.provider.invoke(request),value=validateProductResult(result,request.id,request,s=>s,s=>s,'chatgpt-plan');expect(value.body).toBe('Synthetic answer.');expect(value.diagram).toEqual(mode==='diagram-valid'?cicd:undefined);expect(value.diagramIssue).toBe(mode==='diagram-invalid'?'no_nodes':undefined);
 });

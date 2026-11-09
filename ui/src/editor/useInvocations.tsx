@@ -4,7 +4,8 @@ import { captureAnchor } from '../../shared/anchors.ts';
 import type { Invocation } from '../../shared/invocation.ts';
 import { api, ApiError, type InkSnapshot } from '../api.ts';
 import type { NoteSession } from './session.ts';
-import type { SelectedSource } from './toolbar.ts';
+import type { InvokeAction, SelectedSource } from './toolbar.ts';
+import { VISUALIZE_QUESTION } from '../../shared/diagram.ts';
 import { addInk, removeInk, setInk } from './ink.ts';
 import {rememberQuestion} from '../threads/questions.ts';
 
@@ -63,14 +64,17 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
     } catch (e) { if (mounted.current) setDraft({ input, error: e instanceof Error ? e.message : 'Context preview failed.' }); }
     finally { if (mounted.current) setBusy(false); }
   };
-  const begin = (action: 'think' | 'ask', source: SelectedSource) => {
+  const begin = (requested: InvokeAction, source: SelectedSource) => {
     if (draft || !view.current) return;
-    const input: Invocation = { id: crypto.randomUUID(), path, action, question: '', ...source };
+    // Visualize is an ordinary Ask with a fixed question, so nothing new is stored: the wording itself tells the prompt
+    // builder that a diagram was explicitly requested.
+    const visualize = requested === 'visualize', action = visualize ? 'ask' : requested;
+    const input: Invocation = { id: crypto.randomUUID(), path, action, question: visualize ? VISUALIZE_QUESTION : '', ...source };
     const anchor = captureAnchor(input.text, input.from, input.to);
     view.current.dispatch({ effects: addInk.of({ id: input.id, kind: 'answer', body: 'Review request…', anchor, originalAnchor: anchor,
       attachment: { status: 'attached', from: input.from, to: input.to } }) });
     setDraft({ input });
-    if (action === 'think') void review(input);
+    if (action === 'think' || visualize) void review(input);
   };
   const cancelPreview = () => { if (draft && view.current) view.current.dispatch({ effects: removeInk.of(draft.input.id) }); setDraft(null); };
   const send = async () => {
@@ -90,7 +94,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   };
   const panel = <div className="invocation-panel">
     {draft && <section aria-label={`Review ${providerLabel} request`} className="invocation-review">
-      <strong>{draft.input.action === 'think' ? 'Think on this' : `Ask ${providerLabel}`}</strong>
+      <strong>{draft.input.action === 'think' ? 'Think on this' : draft.input.question === VISUALIZE_QUESTION ? 'Visualize' : `Ask ${providerLabel}`}</strong>
       <div className="small muted">Selection frozen at click. Editing the note will not change this request.</div>
       <blockquote>{draft.input.text.slice(draft.input.from, draft.input.to)}</blockquote>
       {draft.input.action === 'ask' && !draft.packet && <label>Question for {providerLabel}<input aria-label={`Question for ${providerLabel}`} maxLength={8000}

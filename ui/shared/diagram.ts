@@ -10,7 +10,7 @@ const id=(v:unknown):v is string=>typeof v==='string'&&/^[a-zA-Z][a-zA-Z0-9_-]{0
 const text=(v:unknown,max:number):v is string=>typeof v==='string'&&!!v.trim()&&v.length<=max&&!/[<>\u0000-\u001f\u007f]/.test(v)&&!/(?:[a-z][a-z0-9+.-]*:\/\/|www\.|(?:javascript|data|mailto|file):|\[[^\]]*\]\s*\()/i.test(v);
 export const DIAGRAM_ISSUE_TEXT = {
   too_large: 'too large', shape: 'unexpected fields', version: 'wrong version', type: 'unknown type', title: 'bad title', caption: 'bad caption',
-  node_count: 'too many nodes', edge_count: 'too many connections', focus_count: 'too many steps', node: 'a node is malformed', node_label: 'a node label is too long or unsafe',
+  no_nodes: 'it has no nodes to draw', node_count: 'too many nodes', edge_count: 'too many connections', focus_count: 'too many steps', node: 'a node is malformed', node_label: 'a node label is too long or unsafe',
   node_detail: 'a node detail is too long or unsafe', node_kind: 'unknown node kind', edge: 'a connection is malformed', edge_label: 'a connection label is too long or unsafe',
   focus: 'bad step list', group: 'bad grouping', comparison: 'a comparison cannot have connections or more than 5 items', tree: 'the tree is not a tree', id: 'duplicate or invalid ids',
 } as const;
@@ -19,6 +19,8 @@ export type DiagramIssueCode = keyof typeof DIAGRAM_ISSUE_TEXT;
 export type DiagramIssue = 'invalid' | DiagramIssueCode;
 export const isDiagramIssue = (v: unknown): v is DiagramIssue => v === 'invalid' || (typeof v === 'string' && Object.hasOwn(DIAGRAM_ISSUE_TEXT, v));
 export const diagramIssueText = (v: string | undefined): string => (v && v !== 'invalid' && isDiagramIssue(v) ? DIAGRAM_ISSUE_TEXT[v as DiagramIssueCode] : 'invalid format');
+/** The one short sentence shown wherever a diagram could not be drawn; issue is a stored reason code or 'layout'. */
+export const unavailableText = (issue?: string): string => `Diagram unavailable: ${issue === 'layout' ? 'it could not be laid out' : diagramIssueText(issue)}. The text answer is preserved.`;
 export type DiagramCheck = { ok: true; diagram: Diagram } | { ok: false; code: DiagramIssueCode; path: string };
 /** Strict check. The reason is a fixed code and a JSON path, never model text. */
 export function checkDiagram(value: unknown): DiagramCheck {
@@ -31,7 +33,8 @@ export function checkDiagram(value: unknown): DiagramCheck {
   if (!['flow', 'layers', 'sequence', 'comparison', 'tree'].includes(d.type)) return no('type', 'type');
   if (!text(d.title, 80)) return no('title', 'title');
   if (!text(d.caption, 160)) return no('caption', 'caption');
-  if (!Array.isArray(d.nodes) || !d.nodes.length || d.nodes.length > 15) return no('node_count', 'nodes');
+  if (!Array.isArray(d.nodes) || d.nodes.length > 15) return no('node_count', 'nodes');
+  if (!d.nodes.length) return no('no_nodes', 'nodes');
   if (!Array.isArray(d.edges) || d.edges.length > 25) return no('edge_count', 'edges');
   if (!Array.isArray(d.focus) || d.focus.length > 25) return no('focus_count', 'focus');
   const ids = new Set<string>(), nodes = new Set<string>();

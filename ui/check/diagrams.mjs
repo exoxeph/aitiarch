@@ -19,7 +19,7 @@ try{
  // Render each reference through the production thought blob and larger view.
  for(const [name,index] of [['cicd',0],['rag',1],['request-lifecycle',2]]){
   await seedReference(index);await page.reload();
-  const blob=page.locator('.margin-card[data-ink-id="diagram-'+index+'"]');await blob.locator('svg').waitFor();
+  const blob=page.locator('.margin-card[data-ink-id="diagram-'+index+'"]');await blob.locator('svg').waitFor();const eff=await blob.locator('svg').evaluate(svg=>{const vb=svg.viewBox.baseVal,scale=svg.getBoundingClientRect().width/vb.width;const sizes=[...svg.querySelectorAll('text')].map(t=>parseFloat(t.getAttribute('font-size')||'14')*scale);return{scale:Math.round(scale*100)/100,min:Math.round(Math.min(...sizes)*10)/10,width:Math.round(vb.width),texts:sizes.length};});assert(eff.min>=12,'blob diagram text is too small: '+JSON.stringify(eff));timings.push({name:'blob-text-'+index,...eff});
   const start=performance.now();await blob.getByRole('button',{name:'See it larger',exact:true}).click();const dialog=page.getByRole('dialog',{name:/Larger AI diagram:/});await dialog.locator('svg').waitFor();timings.push({name,largerViewMs:performance.now()-start,...await blob.locator('.ai-diagram').evaluate(el=>({layoutWaitMs:Number(el.dataset.layoutWaitMs),renderMs:Number(el.dataset.renderMs),layoutMs:performance.getEntriesByName('aitiarch-diagram-layout').at(-1)?.duration}))});
   assert.equal(await dialog.locator('svg text').evaluateAll(els=>els.every(el=>Number(el.getAttribute('font-size'))>=12)),true);
   await dialog.getByRole('button',{name:'Next diagram step',exact:true}).click();assert.equal(await dialog.getByText(/Step 1 of/).count(),1);

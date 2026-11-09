@@ -1,4 +1,4 @@
-import type {Diagram} from '../../shared/diagram.ts';
+import {unavailableText,type Diagram} from '../../shared/diagram.ts';
 import { StateEffect, StateField, type EditorState } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 import { resolveAnchor } from "../../shared/anchors.ts";
@@ -37,7 +37,7 @@ class InkWidget extends WidgetType {
     open.addEventListener('click',()=>el.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:this.id,thought:true}})));el.append(open);
     const bring=document.createElement('button');bring.type='button';bring.textContent='Bring to notebook';bring.disabled=!this.complete;bring.addEventListener('click',()=>el.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:this.id}})));el.append(bring);
     const slot=document.createElement('div');slot.className='thought-diagram-slot';el.append(slot);
-    if(this.diagram&&this.complete){slot.textContent='Loading diagram...';let disposed=false,cleanup:(()=>void)|undefined;widgetCleanup.set(el,()=>{disposed=true;cleanup?.();});void import('../diagrams/view.ts').then(m=>{if(!disposed&&el.isConnected)cleanup=m.mountDiagram(slot,this.diagram!);}).catch(()=>{if(!disposed)slot.textContent='Diagram unavailable. The text answer is preserved.';});}else if(this.diagramIssue)slot.textContent='Diagram unavailable. The text answer is preserved.';
+    if(this.diagram&&this.complete){slot.textContent='Loading diagram...';let disposed=false,cleanup:(()=>void)|undefined;widgetCleanup.set(el,()=>{disposed=true;cleanup?.();});void import('../diagrams/view.ts').then(m=>{if(!disposed&&el.isConnected)cleanup=m.mountDiagram(slot,this.diagram!);}).catch(()=>{if(!disposed)slot.textContent=unavailableText('layout');});}else if(this.diagramIssue){const note=document.createElement('span');note.textContent=unavailableText(this.diagramIssue);note.dataset.diagramIssue=this.diagramIssue;const again=document.createElement('button');again.type='button';again.className='diagram-retry';again.textContent='Try diagram again';again.addEventListener('click',()=>again.dispatchEvent(new CustomEvent('visualize-again',{bubbles:true,detail:{id:this.id}})));slot.replaceChildren(note,again);}
     return el;
   }
   destroy(dom:HTMLElement){widgetCleanup.get(dom)?.();widgetCleanup.delete(dom);}

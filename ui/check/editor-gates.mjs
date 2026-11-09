@@ -267,7 +267,7 @@ await session('toolbar-b',small,async({page,theme,root,bytes})=>{
  await page.keyboard.press('Control+z');assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes);
  await put(page,from,to);await page.keyboard.press('Alt+F10');assert.equal(await page.evaluate(()=>document.activeElement?.closest('.cm-sel-toolbar')!==null),true,'keyboard cannot enter toolbar');
  await page.keyboard.press('ArrowRight');assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'Numbers');
- await page.keyboard.press('End');assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'Ask...');await page.keyboard.press('Home');assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')),'Text style');
+ await page.keyboard.press('End');assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'Visualize');await page.keyboard.press('Home');assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')),'Text style');
  await page.keyboard.press('Escape');assert.equal(await page.evaluate(`${V}.hasFocus`),true);
  await toolbar.getByTitle('Link',{exact:true}).click();assert.equal(await doc(page),d.slice(0,from)+'['+d.slice(from,to)+']()'+d.slice(to));await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
  await put(page,from,to);await toolbar.getByRole('button',{name:'Ask...',exact:true}).click();
