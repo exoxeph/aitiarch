@@ -7,6 +7,8 @@ import {tableModel,tablePreview,closeTableSource} from '../src/editor/tables.ts'
 import {inkField,setInk} from '../src/editor/ink.ts';
 import {captureAnchor} from '../shared/anchors.ts';
 import {EditorView,type DecorationSet} from '@codemirror/view';
+import {history,undo} from '@codemirror/commands';
+import {decode,encode} from '../server/codec.ts';
 const text='Away\n\n| Name | Status |\n| :---: | ---: |\n| **bold *nested*** | ~~old~~ and `code` |\n| a \\| b | <script>raw</script> |\n\nEnd';
 const make=(doc=text)=>EditorState.create({doc,extensions:[markdown({extensions:[Table,Strikethrough]}),tablePreview,inkField]});
 function table(s:EditorState){const tree=ensureSyntaxTree(s,s.doc.length,5000)!;let node=tree.topNode.firstChild;while(node&&node.name!=='Table')node=node.nextSibling;return node!;}
@@ -36,8 +38,41 @@ it('Escape can render a standalone table even when there is no line outside it',
  s=s.update({effects:closeTableSource.of({from:n.from,to:n.to})}).state;expect(widgets(s)).toBe(1);
  s=s.update({selection:{anchor:3}}).state;expect(widgets(s)).toBe(0);
 });
-it('keeps inline ink visible by leaving its containing table in source without moving the anchor',()=>{
+it('keeps a table containing inline ink in source after Escape and caret movement',()=>{
  let s=make();expect(widgets(s)).toBe(1);const from=text.indexOf('nested'),anchor=captureAnchor(text,from,from+6);
  const item={id:'fixture',kind:'answer' as const,body:'Fake only',anchor,originalAnchor:anchor,attachment:{status:'attached' as const,from,to:from+6}};
- s=s.update({effects:setInk.of({items:[item],trustedText:text})}).state;expect(widgets(s)).toBe(0);expect(s.field(inkField).items[0].attachment).toEqual(item.attachment);expect(s.doc.toString()).toBe(text);
+ s=s.update({effects:setInk.of({items:[item],trustedText:text})}).state;
+ const originalInk=JSON.stringify(s.field(inkField).items),n=table(s);
+ for(const pos of [from,0,text.length]){
+  s=s.update({selection:{anchor:pos},effects:closeTableSource.of({from:n.from,to:n.to})}).state;
+  expect(widgets(s)).toBe(0);expect(JSON.stringify(s.field(inkField).items)).toBe(originalInk);expect(s.doc.toString()).toBe(text);
+ }
+});
+
+// Exercise the real editor decorations, history and disk codec together. Browser gates also
+// check these invariants through the normal editor -> session -> compare-and-write path.
+const byteTable=Buffer.from('\uFEFFAway\r\n\r\n| Name | Status | Detail |\r\n| :---:  | ---: |  :--- |\r\n| **bold *nested*** | `code` | ~~strike~~ |\r\n\r\nEnd\r\n');
+function editTableSource(){
+ const original=decode(byteTable);
+ let state=EditorState.create({doc:original.text,extensions:[markdown({extensions:[Table,Strikethrough]}),tablePreview,inkField,history()]});
+ expect(widgets(state)).toBe(1);
+ const pos=original.text.indexOf('nested');
+ state=state.update({selection:{anchor:pos}}).state;expect(widgets(state)).toBe(0);
+ state=state.update({changes:{from:pos,insert:'X'},userEvent:'input.type'}).state;
+ return {original,state,bytes:encode(state.doc.toString(),original)};
+}
+it('preserves :---:, ---: and :--- alignment-row bytes after editing a table cell in source',()=>{
+ const {bytes}=editTableSource();
+ expect(bytes.toString('utf8').split('\r\n')[3]).toBe('| :---:  | ---: |  :--- |');
+});
+it('changes only the edited bytes in a BOM+CRLF table with nested inline formatting',()=>{
+ const {bytes}=editTableSource(),offset=byteTable.indexOf(Buffer.from('nested'));
+ const expected=Buffer.concat([byteTable.subarray(0,offset),Buffer.from('X'),byteTable.subarray(offset)]);
+ expect(bytes).toEqual(expected);
+});
+it('undo restores the exact original BOM+CRLF table bytes after a source-cell edit',()=>{
+ const edited=editTableSource();let state=edited.state;
+ expect(edited.bytes).not.toEqual(byteTable);
+ expect(undo({state,dispatch:tr=>{state=tr.state;}})).toBe(true);
+ expect(encode(state.doc.toString(),edited.original)).toEqual(byteTable);
 });

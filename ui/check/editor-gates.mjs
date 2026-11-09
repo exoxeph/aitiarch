@@ -236,18 +236,31 @@ await session('theme-memory',small,async({page,theme,root})=>{
  await page.getByRole('button',{name:'Add /ui-state.json* to root .gitignore',exact:true}).first().click();await page.waitForTimeout(600);assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).theme,'dark');
  report[`theme-memory-${theme}`]={memoryBeforeConsent:true,persistAfterExplicitConsent:true};
 },false);
-await session('tables','\uFEFFAway\r\n\r\n| Name | Status |\r\n| :---: | ---: |\r\n| **bold *nested*** | `code` and ~~old~~ |\r\n| a \\| b | <script>raw</script> |\r\n\r\nAfter table.\r\n',async({page,theme,root,bytes})=>{
+await session('tables','\uFEFFAway\r\n\r\n| Name | Status | Detail |\r\n| :---:  | ---: |  :--- |\r\n| **bold *nested*** | `code` | ~~strike~~ |\r\n| a \\| b | <script>raw</script> | untouched |\r\n\r\nAfter table.\r\n',async({page,theme,root,bytes})=>{
  const d=await doc(page),start=d.indexOf('| Name'),end=d.indexOf('\n\nAfter'),pos=d.indexOf('nested');await put(page,0);
  const widget=page.locator('.cm-table-widget');await widget.waitFor();assert.equal(await widget.locator('strong em').textContent(),'nested');assert.equal(await widget.locator('code').textContent(),'code');assert.equal(await widget.locator('script').count(),0);assert.equal(await widget.getByText('a | b',{exact:true}).count(),1);
  const geometry=async()=>page.evaluate(()=>{const v=window.__aitiarch['n.md'].view,p=v.state.doc.toString().indexOf('After table.');const r=v.coordsAtPos(p);return [r.left,r.top,v.contentHeight];});const before=await geometry();
  await widget.locator('td').first().click();assert.equal(await widget.count(),0);assert.deepEqual(await geometry(),before,'table/source geometry changed');assert.equal(await doc(page),d);
- await put(page,pos);await page.keyboard.type('X');assert.equal(await doc(page),d.slice(0,pos)+'X'+d.slice(pos));await page.keyboard.press('Control+z');await page.keyboard.press('Control+y');assert.notEqual(await doc(page),d);await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
+ await put(page,pos);await page.keyboard.type('X');assert.equal(await doc(page),d.slice(0,pos)+'X'+d.slice(pos));
+ const edited=await disk(page,root),byteOffset=bytes.indexOf(Buffer.from('nested'));
+ assert(byteOffset>=0,'source-cell-byte-diff: fixture must contain nested');
+ const expectedEdited=Buffer.concat([bytes.subarray(0,byteOffset),Buffer.from('X'),bytes.subarray(byteOffset)]);
+ assert.deepEqual(edited,expectedEdited,'source-cell-byte-diff: only the typed X byte may change');
+ const delimiter=Buffer.from('| :---:  | ---: |  :--- |\r\n'),delimiterOffset=bytes.indexOf(delimiter);
+ assert(delimiterOffset>=0,'alignment-row-byte-exact: fixture must contain every alignment form');
+ assert.deepEqual(edited.subarray(delimiterOffset,delimiterOffset+delimiter.length),delimiter,'alignment-row-byte-exact');
+ const byteDiff={beforeBytes:bytes.length,afterBytes:edited.length,offset:byteOffset,deletedHex:'',insertedHex:'58',
+  beforeHex:bytes.subarray(byteOffset-4,byteOffset+10).toString('hex'),afterHex:edited.subarray(byteOffset-4,byteOffset+11).toString('hex'),allOtherBytesIdentical:true};
+ await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes,'source-cell-undo-byte-exact');
+ await page.keyboard.press('Control+y');assert.deepEqual(await disk(page,root),expectedEdited,'source-cell-redo-byte-exact');
+ await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes,'source-cell-undo-byte-exact after saved redo');
  await page.keyboard.press('Escape');await widget.waitFor();await page.screenshot({path:path.join(output,`gate-table-${theme}.png`)});await widget.focus();await page.keyboard.press('Enter');assert.equal(await widget.count(),0);
  await put(page,start,end);const copied=await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view,dt=new DataTransfer();v.contentDOM.dispatchEvent(new ClipboardEvent('copy',{clipboardData:dt,bubbles:true,cancelable:true}));return dt.getData('text/plain');});assert.equal(copied,d.slice(start,end));
  await put(page,start);const cdp=await page.context().newCDPSession(page);await cdp.send('Input.imeSetComposition',{text:'\u3042',selectionStart:1,selectionEnd:1});await cdp.send('Input.insertText',{text:'\u3042'});await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
  await put(page,0);await page.setViewportSize({width:700,height:1000});await settle(page);const narrow=await geometry();await put(page,pos);assert.deepEqual(await geometry(),narrow,'narrow table/source geometry changed');await put(page,0);await page.screenshot({path:path.join(output,`gate-table-narrow-${theme}.png`)});
  await writeFile(path.join(root,'n.md'),Buffer.from(d.replace('After table.','After outside edit.').replaceAll('\n','\r\n').replace(/^/,'\uFEFF')));await page.waitForFunction(()=>window.__aitiarch['n.md'].view.state.doc.toString().includes('After outside edit.'));assert.equal(await doc(page),d.replace('After table.','After outside edit.'));await writeFile(path.join(root,'n.md'),bytes);await page.waitForFunction(expected=>window.__aitiarch['n.md'].view.state.doc.toString()===expected,d);
- assert.deepEqual(await disk(page,root),bytes);report[`tables-${theme}`]={nestedFormatting:true,safeDom:true,noShift:true,byteExact:true,copyMarkdown:true,imeUndoRedo:true,externalRefresh:true};
+ assert.deepEqual(await disk(page,root),bytes);report[`tables-${theme}`]={nestedFormatting:true,safeDom:true,noShift:true,byteExact:true,copyMarkdown:true,imeUndoRedo:true,externalRefresh:true,
+  checks:{'alignment-row-byte-exact':true,'source-cell-byte-diff':true,'source-cell-undo-byte-exact':true,'source-cell-redo-byte-exact':true},byteDiff};
 });
 await session('wide-table','\uFEFFAway\r\n\r\n| Column one | Column two | Column three | Column four |\r\n| --- | --- | --- | --- |\r\n| VeryLongUniqueUnbrokenValueOne | VeryLongUniqueUnbrokenValueTwo | VeryLongUniqueUnbrokenValueThree | VeryLongUniqueUnbrokenValueFour |\r\n\r\nEnd\r\n',async({page,theme,root,bytes})=>{
  await put(page,0);await page.setViewportSize({width:700,height:1000});await page.locator('.cm-table-widget').waitFor();const sizes=await page.locator('.cm-table-scroll').evaluate(e=>({width:e.clientWidth,content:e.scrollWidth,overflow:getComputedStyle(e).overflowX,page:document.documentElement.scrollWidth,viewport:innerWidth}));assert(sizes.content>sizes.width);assert.equal(sizes.overflow,'auto');assert(sizes.page<=sizes.viewport);await page.screenshot({path:path.join(output,`gate-wide-table-${theme}.png`)});assert.deepEqual(await disk(page,root),bytes);report[`wide-table-${theme}`]=sizes;
