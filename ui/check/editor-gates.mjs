@@ -267,6 +267,7 @@ await session('toolbar-b',small,async({page,theme,root,bytes})=>{
  await page.keyboard.press('Control+z');assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes);
  await put(page,from,to);await page.keyboard.press('Alt+F10');assert.equal(await page.evaluate(()=>document.activeElement?.closest('.cm-sel-toolbar')!==null),true,'keyboard cannot enter toolbar');
  await page.keyboard.press('ArrowRight');assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'Numbers');
+ await page.keyboard.press('End');assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'Ask...');await page.keyboard.press('Home');assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')),'Text style');
  await page.keyboard.press('Escape');assert.equal(await page.evaluate(`${V}.hasFocus`),true);
  await toolbar.getByTitle('Link',{exact:true}).click();assert.equal(await doc(page),d.slice(0,from)+'['+d.slice(from,to)+']()'+d.slice(to));await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
  await put(page,from,to);await toolbar.getByRole('button',{name:'Ask...',exact:true}).click();
@@ -276,6 +277,30 @@ await session('toolbar-b',small,async({page,theme,root,bytes})=>{
  await page.getByRole('button',{name:'Cancel preview'}).click();await page.evaluate(()=>window.__aitiarch['n.md'].view.focus());await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
  await put(page,from,to);await page.locator('.editor-col').screenshot({path:path.join(output,`gate-toolbar-b-${theme}.png`)});
  await put(page,from);assert.equal(await toolbar.isHidden(),true,'empty selection toolbar shown');
+ // Real pointer selection: margin placement on a wide viewport, dock on narrow.
+ for(const width of [2100,360]){
+  await page.setViewportSize({width,height:1000});await settle(page);
+  const point=async pos=>page.evaluate(p=>{const v=window.__aitiarch['n.md'].view,r=v.coordsAtPos(p);return{x:r.left+1,y:(r.top+r.bottom)/2};},pos);
+  const away=await point(d.indexOf('The end'));await page.mouse.click(away.x,away.y);await settle(page);
+  const a=await point(from),b=await point(to);await page.mouse.click(a.x,a.y);await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y,{steps:12});await page.mouse.up();await settle(page);
+  assert.equal(await toolbar.isVisible(),true);const placement=await toolbar.getAttribute('data-placement');assert.equal(placement,width===2100?'right':'below');
+  if(width===2100){
+   await page.locator('.pane').evaluate(e=>{e.style.height='360px';e.style.flex='none';e.scrollTop=40;});await settle(page);
+   assert.equal(await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view,r=v.coordsAtPos(v.state.selection.main.from),t=document.querySelector('.cm-sel-toolbar').getBoundingClientRect();return Math.abs(r.top-t.top)<2;}),true,'margin panel did not follow pane scrolling');
+   await page.locator('.pane').evaluate(e=>{e.style.height='';e.style.flex='';e.scrollTop=0;});await settle(page);
+  }
+  assert.equal(await toolbar.locator('button:not([title]),button:not([aria-label])').count(),0);
+  await page.screenshot({path:path.join(output,`gate-toolbar-${width}-${theme}.png`)});
+  if(width===2100){
+   await page.locator('.cm-content').evaluate(e=>{e.style.marginLeft='auto';e.style.marginRight='0';});await settle(page);
+   const away=await point(d.indexOf('The end'));await page.mouse.click(away.x,away.y);await settle(page);
+   const x=await point(from),y=await point(to);await page.mouse.click(x.x,x.y);await page.mouse.move(x.x,x.y);await page.mouse.down();await page.mouse.move(y.x,y.y,{steps:12});await page.mouse.up();await settle(page);
+   assert.equal(await toolbar.getAttribute('data-placement'),'left','left margin fallback');
+   await page.screenshot({path:path.join(output,`gate-toolbar-left-${theme}.png`)});
+   await page.locator('.cm-content').evaluate(e=>{e.style.marginLeft='';e.style.marginRight='';});
+  }
+  assert.deepEqual(await disk(page,root),bytes);
+ }
  report[`toolbar-b-${theme}`]={compact:true,keyboard:true,frozenSelection:true,byteExact:true};
 });
 await session('callouts','\uFEFFAway\r\n\r\n> [!note] Launch constraint\r\n> Keep it small.\r\n\r\n> [!tip] Test early\r\n> Use fixtures.\r\n\r\n> [!warning] No private data\r\n> Stay local.\r\n\r\nEnd\r\n',async({page,theme,root,bytes})=>{

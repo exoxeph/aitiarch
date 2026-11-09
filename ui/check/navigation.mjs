@@ -90,6 +90,11 @@ try{for(const theme of ['light','dark']){
  await click('A wrapping paragraph',85);await page.keyboard.press('End');await settle();R.wrap={edges,end:await select()};check('wrapped End',(await select()).head===edges.to);
  await click('A wrapping paragraph',85);const row=await position('A wrapping paragraph',85),left=await page.evaluate(()=>{const v=window.__aitiarch['plan.md'].view,r=v.contentDOM.getBoundingClientRect();return r.left+8;});
  await page.mouse.click(left,row.y);await settle();s=await select();R.wrap.margin=s;check('wrapped margin selects visual line',s.from===edges.from&&s.to===edges.to);
+ // Repeat a real word double-click while the narrow toolbar appears/disappears.
+ for(let i=0;i<3;i++){
+  await click('Last paragraph',4);const hit=await position('when the writing',1);
+  await page.mouse.dblclick(hit.x,hit.y);await settle();check(`narrow repeated word ${i}`,(await select()).text==='when');
+ }
  await page.screenshot({path:path.join(output,`navigation-narrow-${theme}.png`)});
  await page.evaluate(()=>window.__aitiarch['plan.md'].session.flush());await writeFile(path.join(output,'navigation.json'),JSON.stringify(report,null,2));assert.deepEqual(await readFile(path.join(root,'plan.md')),Buffer.from(text));
  await page.close();

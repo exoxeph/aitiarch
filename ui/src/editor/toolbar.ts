@@ -159,7 +159,10 @@ function create(view: EditorView): TooltipView {
 const panels=new WeakMap<EditorView,HTMLElement>();
 const compactPanel=ViewPlugin.fromClass(class {
  readonly panel:TooltipView;
+ readonly pane:Element|null;
+ readonly onScroll=()=>this.place();
  constructor(readonly view:EditorView){
+  this.pane=view.dom.closest(".pane");this.pane?.addEventListener("scroll",this.onScroll,{passive:true});
   this.panel=create(view);this.panel.dom.hidden=true;panels.set(view,this.panel.dom);
   const surface=view.dom.closest('.ink-surface')??view.dom;
   surface.insertBefore(this.panel.dom,surface.querySelector('.margin-rail'));this.place();
@@ -178,7 +181,7 @@ const compactPanel=ViewPlugin.fromClass(class {
   Object.assign(dom.style,p.side==='below'?{position:'relative',left:'',top:'',margin:'8px auto'}:{position:'fixed',left:`${p.left}px`,top:`${p.top}px`,margin:'0'});
   if(wasHidden)this.place();
  }});}
- destroy(){this.panel.dom.remove();panels.delete(this.view);}
+ destroy(){this.pane?.removeEventListener("scroll",this.onScroll);this.panel.dom.remove();panels.delete(this.view);}
 });
 
 /**
