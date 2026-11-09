@@ -8,7 +8,7 @@ import { frontmatterEnd } from "../frontmatter.ts";
 import { findFailedMarks } from "./format.ts";
 import { FenceHeader, fenceLabel } from "./codeblocks.ts";
 import { toggleTaskAt } from "./tasks.ts";
-import { autolinkHides, hidesFor, quoteMarkGroups, touchesLines, touchesSpan } from "./reveal.ts";
+import { autolinkHides, calloutHeader, hidesFor, quoteMarkGroups, touchesLines, touchesSpan } from "./reveal.ts";
 
 export interface PreviewHandlers {
   openWiki(target: string): void;
@@ -225,9 +225,15 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
             code.push([n.from, n.to]);
             lineDeco(n.from, n.to, "cm-codeblock");
             return false;
-          case "Blockquote":
+          case "Blockquote": {
             lineDeco(n.from, n.to, "cm-quote");
+            const first = doc.lineAt(n.from), header = calloutHeader(first.text);
+            if (header) {
+              lineDeco(n.from, n.to, `cm-callout cm-callout-${header.kind}`);
+              if (first.from >= rFrom) out.push(Decoration.mark({class:`cm-callout-marker${lineIsActive(first.from, first.to) ? '' : ' cm-callout-off'}`,attributes:{'data-label':header.kind}}).range(first.from+header.from, first.from+header.to));
+            }
             return;
+          }
           case "QuoteMark":
             quoteMarks.push({ from: n.from, to: n.to });
             return;

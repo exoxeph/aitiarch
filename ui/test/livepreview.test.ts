@@ -11,6 +11,20 @@ const make=(doc:string,anchor=0,head=anchor)=>EditorState.create({doc,selection:
 function decorations(s:EditorState){const rows:{from:number;to:number;spec:any}[]=[];const set:DecorationSet=buildInline(s,[[0,s.doc.length]],ensureSyntaxTree(s,s.doc.length,5000)!);set.between(0,s.doc.length,(from,to,v)=>{rows.push({from,to,spec:v.spec});});return rows;}
 const hidden=(s:EditorState)=>decorations(s).filter(r=>r.to>r.from&&!r.spec.class&&!r.spec.widget).map(r=>[r.from,r.to]);
 
+it.each(['note','tip','warning'])('renders %s callouts without changing source or offsets and reveals only the active header',kind=>{
+ const doc=`Away\n\n> [!${kind}] Launch constraint\n> Keep it small.\n\nEnd`;
+ let s=make(doc,0);const from=doc.indexOf('[!');
+ expect(decorations(s).filter(r=>r.spec.class?.includes(`cm-callout-${kind}`))).toHaveLength(2);
+ expect(decorations(s).find(r=>r.from===from)?.spec.class).toContain('cm-callout-off');
+ s=s.update({selection:{anchor:doc.indexOf('Launch')}}).state;
+ expect(decorations(s).find(r=>r.from===from)?.spec.class).not.toContain('cm-callout-off');
+ expect(s.doc.toString()).toBe(doc);
+});
+it('ignores unknown callouts and callout-like text inside fences',()=>{
+ const s=make('Away\n\n> [!unknown] Plain\n\n```\n> [!note] Code\n```');
+ expect(decorations(s).filter(r=>r.spec.class?.includes('cm-callout'))).toEqual([]);
+});
+
 it.each([['**bold**','bold'],['*italic*','italic'],['~~strike~~','strike'],['`code`','code'],['[link](https://example.test)','link']])('hides inactive inline %s even on the cursor line, reveals only its span',(markup,word)=>{
  const doc='Start '+markup+' then **other**.\nEnd';let s=make(doc,0);expect(hidden(s).some(([a,b])=>a===6&&b>6)).toBe(true);
  const pos=doc.indexOf(word)+1;s=s.update({selection:{anchor:pos}}).state;expect(hidden(s).some(([a,b])=>a===6&&b>6)).toBe(false);

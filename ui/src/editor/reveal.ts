@@ -7,6 +7,12 @@ export interface SelRange {
   to: number;
 }
 
+/** Supported callout headers only; offsets are into the unchanged source line. */
+export function calloutHeader(line: string): {from:number;to:number;kind:'note'|'tip'|'warning'} | null {
+  const m = /^\s*>[ \t]+(\[!(note|tip|warning)\])(?=\s|$)/i.exec(line);
+  return m ? {from:m[0].length-m[1].length,to:m[0].length,kind:m[2].toLowerCase() as 'note'|'tip'|'warning'} : null;
+}
+
 export interface NodeLike {
   name: string;
   from: number;

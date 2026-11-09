@@ -147,6 +147,12 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 /* floating selection toolbar */
 .cm-tooltip.cm-sel-toolbar { font-family: var(--font-ui); font-size: 13px; background: var(--paper); color: var(--ink-text); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow-floating); padding: 4px; display: flex; flex-direction: column; gap: 2px; min-width: min(250px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; z-index: 100; isolation: isolate; }
 .cm-sel-row { display: flex; gap: 2px; flex-wrap: wrap; }
+.cm-line.cm-callout { background: var(--paper-2); border-inline-start-color: var(--control-border); }
+.cm-line.cm-callout-tip { background: var(--human-surface); }
+.cm-line.cm-callout-warning { border-inline-start-color: var(--danger); }
+.cm-callout-marker { position: relative; display: inline-block; font-family: var(--font-mono); font-size: .85em; }
+.cm-callout-off { color: transparent; }
+.cm-callout-off::after { content: attr(data-label); position: absolute; inset-inline-start: 0; color: var(--ink-text); font-family: var(--font-ui); font-weight: 600; text-transform: capitalize; pointer-events: none; }
 .cm-sel-toolbar-a > .cm-sel-row { flex-wrap: nowrap; align-items: center; }
 .cm-sel-toolbar-a > .cm-sel-row > * { flex-shrink: 0; }
 .cm-sel-toolbar-a select { font: inherit; background: var(--toolbar); color: var(--ink-text); border: 1px solid var(--control-border); border-radius: var(--radius-small); padding: 5px 4px; max-width: 105px; }

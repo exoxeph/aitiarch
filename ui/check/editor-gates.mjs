@@ -202,6 +202,19 @@ await session('toolbar-b',small,async({page,theme,root,bytes})=>{
  await put(page,from);assert.equal(await toolbar.count(),0,'empty selection toolbar shown');
  report[`toolbar-b-${theme}`]={oneRow:true,keyboard:true,frozenSelection:true,byteExact:true};
 });
+await session('callouts','\uFEFFAway\r\n\r\n> [!note] Launch constraint\r\n> Keep it small.\r\n\r\n> [!tip] Test early\r\n> Use fixtures.\r\n\r\n> [!warning] No private data\r\n> Stay local.\r\n\r\nEnd\r\n',async({page,theme,root,bytes})=>{
+ const d=await doc(page);await put(page,0);
+ const geometry=async p=>page.evaluate(p=>{const v=window.__aitiarch['n.md'].view,r=v.coordsAtPos(p);return [r.left,r.top,v.contentHeight];},p);
+ for(const word of ['Launch','Test early','No private']){
+  const pos=d.indexOf(word);await put(page,0);const before=await geometry(pos);await put(page,pos);assert.deepEqual(await geometry(pos),before,'callout shifts at caret');
+ }
+ const start=d.indexOf('> [!note]'),end=d.indexOf('Keep it small.')+14;
+ await put(page,start,end);const copied=await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view,dt=new DataTransfer();v.contentDOM.dispatchEvent(new ClipboardEvent('copy',{clipboardData:dt,bubbles:true,cancelable:true}));return dt.getData('text/plain');});assert.equal(copied,d.slice(start,end));
+ await put(page,start);const cdp=await page.context().newCDPSession(page);await cdp.send('Input.imeSetComposition',{text:'\u3042',selectionStart:1,selectionEnd:1});await cdp.send('Input.insertText',{text:'\u3042'});await page.keyboard.press('Control+z');assert.equal(await doc(page),d);await page.keyboard.press('Control+y');assert.notEqual(await doc(page),d);await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
+ await put(page,0);await page.locator('.editor-col').screenshot({path:path.join(output,`gate-callouts-${theme}.png`)});
+ await page.setViewportSize({width:700,height:1000});await settle(page);await page.locator('.editor-col').screenshot({path:path.join(output,`gate-callouts-narrow-${theme}.png`)});
+ report[`callouts-${theme}`]={noShift:true,byteExact:true,copyMarkdown:true,imeUndoRedo:true};
+});
 // ---- 3. cost at about 5,000 and 50,000 lines (real app, ink and anchors on)
 for(const n of [380,3850]){
  await session(`big-${n}`,big(n),async({page,theme})=>{
