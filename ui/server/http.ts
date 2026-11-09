@@ -1,3 +1,4 @@
+import {InsertionStore} from './insertion-store.ts';
 import { UiStateStore } from './ui-state-store.ts';
 import {ThreadStore} from './thread-store.ts';
 import {ThreadRuntime,type ThreadRequest} from './thread-runtime.ts';
@@ -118,6 +119,7 @@ export function createApp(opts: AppOptions) {
   };
 
   const uiStateStore = new UiStateStore(store.rootReal);
+  const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
     name:'claude',checkAvailability:async()=>({available:false,code:'unsupported_cli',message:'Provider disabled. Enable it explicitly at server startup.'}),invoke:async()=>{throw new ProviderError('unsupported_cli');}
@@ -167,6 +169,10 @@ export function createApp(opts: AppOptions) {
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await store.tree());
     if(url.pathname==='/api/usage'&&req.method==='GET')return json(res,200,opts.usage?await opts.usage.summary():{since:new Date().toISOString(),hourlyCap:2,providers:[]});
 
+    if(url.pathname==='/api/insertions'&&req.method==='GET')return json(res,200,await (await insertionsReady).reconcile(url.searchParams.get('path')??''));
+    if(url.pathname==='/api/diagram-asset'&&req.method==='GET'){
+      try{const bytes=await (await insertionsReady).asset(url.searchParams.get('name')??'');res.writeHead(200,{'Content-Type':'image/svg+xml','Content-Security-Policy':"default-src 'none'; sandbox",'X-Content-Type-Options':'nosniff','Cache-Control':'private, max-age=31536000, immutable'});return res.end(bytes);}catch{return json(res,404,{error:'not_found'});}
+    }
     if(url.pathname==='/api/threads'&&req.method==='GET'){
       const active=new Set([...(await assistance).activeIds(),...(await runtimeReady).activeIds()]);
       return json(res,200,await (await threadsReady).reconcileInterrupted(url.searchParams.get('path')??'',active));
@@ -183,6 +189,10 @@ export function createApp(opts: AppOptions) {
         }
         if(typeof b.path!=='string'||!validId(b.id))throw new Error('Invalid thread target.');
         if(url.pathname==='/api/thread-drafts/save')return json(res,200,await threads.saveDraft(b.path,b.id,b.text,b.revision));
+        if(url.pathname==='/api/threads/bring-preview')return json(res,200,await (await insertionsReady).preview(b));
+        if(url.pathname==='/api/threads/bring-prepare')return json(res,200,await (await insertionsReady).prepare(b));
+        if(url.pathname==='/api/threads/bring-complete')return json(res,200,await (await insertionsReady).complete(b.path,b.operationId));
+        if(url.pathname==='/api/threads/bring-cancel')return json(res,200,await (await insertionsReady).cancel(b.path,b.operationId));
         if(url.pathname==='/api/threads/brought'){if(typeof b.noteVersion!=='string')throw new Error('Missing note version.');await threads.brought(b.path,b.id,b.noteVersion);return json(res,200,{});}
         if(url.pathname==='/api/threads/action')return json(res,200,await threads.act(b.path,b.id,b.version,b.action));
         if(url.pathname==='/api/threads/notice'){

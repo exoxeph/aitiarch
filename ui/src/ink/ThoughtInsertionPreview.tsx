@@ -8,7 +8,7 @@ export function ThoughtInsertionPreview({text,insert,cancel}:{text:string;insert
   if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}
   else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}
  }}>
-  <h2>Bring AI text to notebook</h2><p>AI-authored text, inserted only by you. This is not a takeaway or a decision. One Undo removes the insertion.</p>
-  <pre>{text}</pre><button autoFocus onClick={insert}>Insert labeled AI block</button><button onClick={cancel}>Cancel AI insertion</button>
+  <h2>Bring AI content to notebook</h2><p>AI-authored text, inserted only by you. This is not a takeaway or a decision. One Undo removes the insertion.</p>
+  <pre>{text}</pre><button autoFocus onClick={insert}>{text.includes('![AI diagram:')?'Insert AI diagram image':'Insert labeled AI block'}</button><button onClick={cancel}>Cancel AI insertion</button>
  </dialog>;
 }

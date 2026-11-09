@@ -1,3 +1,5 @@
+import type {BringPreview,RepairStatus} from '../server/insertion-store.ts';
+import type {DiagramLayout} from '../shared/diagram-svg.ts';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, connectEvents, type InkSnapshot, type NoteFile, type ServerEvent, type TreeNode } from "./api.ts";
 import type { InkItem } from "../shared/ink.ts";
@@ -37,7 +39,9 @@ export default function App() {
   const onInkSaved = useCallback((path: string, snapshot: InkSnapshot) => setInkFiles(m => ({ ...m, [path]: snapshot })), []);
   const [attachDraft, setAttachDraft] = useState<null | { path: string; id: string; from: number; to: number; noteVersion: string; noteText: string; inkVersion: string | null; quote: string; target: string }>(null);
   const [thoughtChat,setThoughtChat]=useState<string|null>(null);
-  const [bringPreview,setBringPreview]=useState<null|{path:string;id:string;noteText:string;preview:ReturnType<typeof previewThoughtInsertion>}>(null);
+  const [bringPreview,setBringPreview]=useState<null|{path:string;id:string;noteText:string;preview:BringPreview;render?:{layout:DiagramLayout;theme:'light'|'dark'}}>(null);
+  const [insertionRepair,setInsertionRepair]=useState<RepairStatus|null>(null);
+  const [repairError,setRepairError]=useState(false);
   const [threadId,setThreadId]=useState<string|null>(null);
   const [insertPreview,setInsertPreview]=useState<null|{path:string;id:string;noteText:string;inkVersion:string|null;preview:ReturnType<typeof previewTakeawayInsertion>}>(null);
   const [tabs, setTabs] = useState<string[]>([]);
@@ -265,7 +269,7 @@ export default function App() {
       setAttachDraft(null);
     } catch (e) { setAttachDraft(null); setNotice(e instanceof ApiError && e.status === 409 ? "The note or ink changed since selection. Review it and try again." : "Re-attachment could not be saved."); }
   };
-  useEffect(()=>{setThoughtChat(null);setBringPreview(null);},[active]);
+  useEffect(()=>{setThoughtChat(null);setBringPreview(null);setInsertionRepair(null);setRepairError(false);if(!active)return;let stopped=false;void api.insertionStatus(active).then(s=>{if(!stopped)setInsertionRepair(s);}).catch(()=>{if(!stopped)setRepairError(true);});return()=>{stopped=true;};},[active]);
   useEffect(()=>{
     const bring=async(event:Event)=>{
       const id=(event as CustomEvent<{id:string}>).detail.id;if(!active)return;
@@ -275,23 +279,27 @@ export default function App() {
         const latest=ink.document.items.find(i=>i.id===id),mapped=h.view.state.field(inkField).items.find(i=>i.id===id);
         if(!latest||!mapped||disk.text!==h.view.state.doc.toString()||disk.version!==h.session.base.version)throw new Error('The note changed. Review a new preview.');
         const item={...latest,anchor:mapped.anchor,attachment:mapped.attachment};
-        setBringPreview({path:active,id,noteText:disk.text,preview:previewThoughtInsertion(disk,item,disk.version)});
+        let render:{layout:DiagramLayout;theme:'light'|'dark'}|undefined;if(item.diagram){const m=await import('./diagrams/view.ts');render={layout:await m.cachedLayout(item.diagram),theme:m.diagramTheme()};}
+        const preview=await api.threadCall<BringPreview>('bring-preview',{path:active,id,noteVersion:disk.version,...render});
+        setBringPreview({path:active,id,noteText:disk.text,preview,render});
       }catch(e){setNotice(e instanceof Error?e.message:'Could not preview AI insertion.');}
     };window.addEventListener('bring-thought',bring);return()=>window.removeEventListener('bring-thought',bring);
   },[active]);
   const bringThought=async()=>{
     const p=bringPreview;if(!p)return;setBringPreview(null);
-    let inserted=false;
+    let inserted=false,operationId:string|undefined;
     try{const h=panes.current.get(p.path);if(!h||h.session.status!=='saved'||h.view.state.doc.toString()!==p.noteText)throw new Error('The note changed. Review a new preview.');
       const [disk,ink]=await Promise.all([api.file(p.path),api.threads(p.path)]),latest=ink.document.items.find(i=>i.id===p.id),mapped=h.view.state.field(inkField).items.find(i=>i.id===p.id);
       if(!latest||!mapped)throw new Error('The thought changed. Review a new preview.');
-      const checked=previewThoughtInsertion(disk,{...latest,anchor:mapped.anchor,attachment:mapped.attachment},p.preview.noteVersion);
+      const checked=await api.threadCall<BringPreview>('bring-preview',{path:p.path,id:p.id,noteVersion:p.preview.noteVersion,...p.render});
       if(JSON.stringify(checked)!==JSON.stringify(p.preview))throw new Error('The thought changed. Review a new preview.');
       if(h.session.status!=='saved'||h.session.base.version!==disk.version||h.view.state.doc.toString()!==p.noteText)throw new Error('The note changed. Review a new preview.');
-      h.view.dispatch({changes:checked.changes,annotations:isolateHistory.of('full')});inserted=true;
+      const prepared=await api.threadCall<{operationId:string}>('bring-prepare',{path:p.path,id:p.id,noteVersion:p.preview.noteVersion,...p.render,preview:p.preview});operationId=prepared.operationId;
+      if(h.session.status!=='saved'||h.session.base.version!==disk.version||h.view.state.doc.toString()!==p.noteText)throw new Error('The note changed. Review a new preview.');
+      h.view.dispatch({changes:checked.changes,annotations:isolateHistory.of('full')});inserted=true;setInsertionRepair({pending:1,unverified:0});
       await h.session.flush();if(h.session.status!=='saved')throw new Error('Insertion has a save conflict. Resolve it in the editor.');
-      await api.threadCall('brought',{path:p.path,id:p.id,noteVersion:h.session.base.version});h.view.focus();
-    }catch(e){setNotice((inserted?'The insertion is preserved in the editor. ':'')+(e instanceof Error?e.message:'AI insertion failed.'));}
+      setInsertionRepair(await api.threadCall<RepairStatus>('bring-complete',{path:p.path,id:p.id,operationId}));h.view.focus();
+    }catch(e){if(operationId&&!inserted)await api.threadCall('bring-cancel',{path:p.path,id:p.id,operationId}).catch(()=>{});setNotice((inserted?'The insertion is preserved in the editor. ':'')+(e instanceof Error?e.message:'AI insertion failed.'));}
   };
   const prepareInsert=async(item:InkItem)=>{
     if(!active)return;const h=panes.current.get(active);if(!h)throw new Error('Open the note first.');
@@ -395,6 +403,7 @@ export default function App() {
           }}>Add /.cache/ to root .gitignore</button>
           <button className="ghost" onClick={() => setCacheNotice(null)}>Dismiss</button>
         </div>}
+        {(insertionRepair?.pending||repairError)?<div className="notice" role="status" aria-label="AI insertion recording pending">AI insertion recording pending. The note is preserved; no insertion will be repeated. {insertionRepair?.unverified?'The saved insertion could not be verified.':''}<button onClick={()=>{if(active)void api.insertionStatus(active).then(s=>{setInsertionRepair(s);setRepairError(false);}).catch(()=>setRepairError(true));}}>Retry recording (no AI call)</button></div>:null}
         {notice && (
           <div className="notice" role="alert">
             {notice} <button className="ghost" onClick={() => setNotice(null)}>Dismiss</button>
