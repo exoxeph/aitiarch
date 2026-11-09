@@ -63,9 +63,10 @@ export class ThreadStore {
  }
  private reply(i:InkItem,id:string){const r=[...(i.thread?.followups??[]),...(i.thread?.summary.reply?[i.thread.summary.reply]:[])].find(r=>r.id===id);if(!r||r.generation.status!=='pending')throw new Error('Pending reply not found.');return r;}
  async completeReply(note:string,id:string,replyId:string,result:Result,sources:{note:string;decisions:{id:string;text:string}[]}){
-  if(!exactKeys(result,['id','provider','model','answer','claims','usage'])||!Array.isArray(result.claims)||result.claims.some(c=>!exactKeys(c,['sourceId','quote'])))throw new Error('Invalid provider response schema.');
+  if(!exactKeys(result,['id','provider','model','answer','claims','usage',...(result.diagram===undefined?[]:['diagram'])])||!Array.isArray(result.claims)||result.claims.some(c=>!exactKeys(c,['sourceId','quote'])))throw new Error('Invalid provider response schema.');
   const s=await this.ink.read(note);return this.change(note,id,s.version,i=>{const r=this.reply(i,replyId);
    const value=validateProductResult(result,replyId,sources,redact,textHash,r.generation.provider);
+   if(value.diagram)r.diagram=value.diagram;if(value.diagramIssue)r.diagramIssue=value.diagramIssue;
    r.body=value.body;r.generation={...r.generation,status:'complete',model:value.model,evidence:value.evidence};
   });
  }

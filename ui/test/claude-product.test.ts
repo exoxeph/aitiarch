@@ -48,7 +48,7 @@ it.each(['think','ask'] as const)('specifies the exact quote contract for %s',ac
   expect(prompt).toContain('The field is named exactly "quote"');
   expect(prompt).toContain('character for character from the named source');
   expect(prompt).toContain('No other fields are allowed in a claim.');
-  expect(prompt).toContain('one JSON object with exactly answer (string) and claims (array)');
+  expect(prompt).toContain('one JSON object with answer (string), claims (array), and optionally diagram');
 });
 it('accepts the exact quote key and rejects the field-names-only regression shape without renaming',()=>{
   const shape=JSON.parse(readFileSync(new URL('./fixtures/claim-field-names.json',import.meta.url),'utf8'));

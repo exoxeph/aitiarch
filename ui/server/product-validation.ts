@@ -1,3 +1,4 @@
+import {readDiagram} from '../shared/diagram.ts';
 import type { Generation } from '../shared/ink.ts';
 import type { Result } from './providers/index.ts';
 
@@ -66,5 +67,6 @@ export function validateProductResult(result:Result,expectedId:string,sources:So
     requireRule('claim_quote_exact',text!.includes(c.quote));
     return {sourceId:c.sourceId,sourceHash:hash(text!),quote:c.quote};
   });
-  return {body,model,evidence,passedRules};
+  const diagram=result.diagram===undefined?undefined:readDiagram(result.diagram);
+  return {body,model,evidence,passedRules,diagram:diagram??undefined,diagramIssue:result.diagram!==undefined&&!diagram?'invalid' as const:undefined};
 }

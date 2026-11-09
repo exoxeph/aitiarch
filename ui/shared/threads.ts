@@ -1,8 +1,9 @@
+import {readDiagram,type Diagram} from './diagram.ts';
 import type {Generation,InkItem} from './ink.ts';
 export type ThreadProvider='claude'|'chatgpt-plan';
 export const failureCodes=['unavailable','disabled','hourly_cap','usage_limit','validation','interrupted','protocol','timeout','cancelled','provider_error','persistence'] as const;
 export type ThreadFailure=typeof failureCodes[number];
-export interface ThreadReply {body:string;generation:Generation;id:string;parentId:string;failure?:{code:ThreadFailure}}
+export interface ThreadReply {diagram?:Diagram;diagramIssue?:"invalid";body:string;generation:Generation;id:string;parentId:string;failure?:{code:ThreadFailure}}
 export interface ThreadRecord {
  schemaVersion:1;dismissed:boolean;
  providerConfirmations:{at:string;from:ThreadProvider;to:ThreadProvider}[];
@@ -32,7 +33,8 @@ export function validateThread(t:ThreadRecord,rootId:string){
  const ids=new Set([rootId]);
  const replies=[...t.followups,...(t.summary.reply?[t.summary.reply]:[])];
  for(const r of replies){
-  if(!exactKeys(r,['body','generation','id','parentId',...(r.failure===undefined?[]:['failure'])])||!validId(r.id)||ids.has(r.id)||!validId(r.parentId)||typeof r.body!=='string'||r.body.length>100000)bad();
+  if(!exactKeys(r,['body','generation','id','parentId',...(r.failure===undefined?[]:['failure']),...(r.diagram===undefined?[]:['diagram']),...(r.diagramIssue===undefined?[]:['diagramIssue'])])||!validId(r.id)||ids.has(r.id)||!validId(r.parentId)||typeof r.body!=='string'||r.body.length>100000)bad();
+  if((r.diagram!==undefined&&!readDiagram(r.diagram))||(r.diagramIssue!==undefined&&r.diagramIssue!=="invalid"))bad();
   validateGeneration(r.generation,r.id);ids.add(r.id);
   if(r.failure!==undefined&&(!exactKeys(r.failure,['code'])||!failureCodes.includes(r.failure.code)||!['error','cancelled'].includes(r.generation.status)))bad();
   if(r.generation.status==='complete'){if(!r.body.trim()||r.failure)bad();}else if(r.body!==''||r.generation.evidence.length)bad();

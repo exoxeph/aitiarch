@@ -1,3 +1,4 @@
+import type {Diagram} from '../shared/diagram.ts';
 import { randomUUID } from 'node:crypto';
 import { mapInkItems } from '../shared/anchor-mapping.ts';
 import { freezeInvocation, type Invocation } from '../shared/invocation.ts';
@@ -79,13 +80,14 @@ export class Assistance {
     let finish!: () => void;
     const job: Job = { path, controller, status: 'queued', done: new Promise(resolve => { finish = resolve; }), run: async () => {
       let body = '', status: Generation['status'] = 'complete', model: string | null = null, evidence: Generation['evidence'] = [];
+      let diagram:Diagram|undefined,diagramIssue:'invalid'|undefined;
       let resultReceived=false,result:Awaited<ReturnType<Provider['invoke']>>|undefined;
       const record=async(row:ValidationRecord)=>{try{await this.validationLog.write(row);}catch{/* Metrics never change acceptance or persistence. */}};
       try {
         if (controller.signal.aborted) throw new ProviderError('cancelled');
         result = await this.provider.invoke(request, { signal: controller.signal });resultReceived=true;
         if (controller.signal.aborted) throw new ProviderError('cancelled');
-        ({body,model,evidence}=validateProductResult(result,frozen.id,packet.data,redact,textHash,this.provider.name??'claude'));
+        ({body,model,evidence,diagram,diagramIssue}=validateProductResult(result,frozen.id,packet.data,redact,textHash,this.provider.name??'claude'));
       } catch (e) {
         if(e instanceof ProductValidationError)await record(e.record);
         else if(e instanceof ProviderError&&e.validation)await record(e.validation);
@@ -97,7 +99,7 @@ export class Assistance {
       const persist = async () => {
         try {
           await this.mutate(path, frozen.text, items => items.map(i => i.id === frozen.id ? { ...i, body,
-            generation: { ...i.generation!, status, model, evidence } } : i));
+            ...(diagram?{diagram}:{}),...(diagramIssue?{diagramIssue}:{}), generation: { ...i.generation!, status, model, evidence } } : i));
         }catch(error){await record({rule:'ink_persist',counts:validationCounts(result)});throw error;}
         job.status = status; job.retry = undefined;
       };

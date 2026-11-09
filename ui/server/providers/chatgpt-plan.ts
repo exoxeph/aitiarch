@@ -230,9 +230,9 @@ export class ChatGPTPlan implements Provider {
       try{length=measureAnswerLength(JSON.parse(completed.text)?.answer);}catch{/* Invalid JSON remains a validation failure below. */}
       await this.vault.append('usage.jsonl',{at:new Date().toISOString(),provider:'chatgpt-plan',contentType:completed.contentType,...completed.usage,...length});
       rule='response_schema';const raw=JSON.parse(completed.text);
-      if(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.keys(raw).sort().join(',')!=='answer,claims'||!Array.isArray(raw.claims)||raw.claims.some((c:any)=>!c||typeof c!=='object'||Array.isArray(c)||Object.keys(c).sort().join(',')!=='quote,sourceId'))throw new ProviderError('invalid_response');
+      if(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.keys(raw).sort().join(',')!==(raw.diagram===undefined?'answer,claims':'answer,claims,diagram')||!Array.isArray(raw.claims)||raw.claims.some((c:any)=>!c||typeof c!=='object'||Array.isArray(c)||Object.keys(c).sort().join(',')!=='quote,sourceId'))throw new ProviderError('invalid_response');
       const parsed=validateProviderResponse(raw);
-      const result:Result={id:request.id,provider:'chatgpt-plan',model:completed.model,answer:parsed.answer,claims:parsed.claims,usage:{inputTokens:completed.usage.input,outputTokens:completed.usage.output}};
+      const result:Result={id:request.id,provider:'chatgpt-plan',model:completed.model,answer:parsed.answer,claims:parsed.claims,...(parsed.diagram===undefined?{}:{diagram:parsed.diagram}),usage:{inputTokens:completed.usage.input,outputTokens:completed.usage.output}};
       rule='product';validateProductResult(result,request.id,packet.data,redact,textHash,'chatgpt-plan');
       return result;
     }catch(e){

@@ -1,3 +1,4 @@
+import {diagramInstruction} from '../../shared/diagram.ts';
 import { access, mkdtemp, readdir } from 'node:fs/promises';
 import { cleanupProviderTemp, type CleanupLog } from './temp-cleanup.ts';
 import { constants } from 'node:fs';
@@ -41,7 +42,7 @@ export class ProviderError extends Error {
 }
 export interface Result {
   id: string; provider: ProviderName; model: string | null; answer: string;
-  claims: unknown[]; usage: { inputTokens: number; outputTokens: number; cachedTokens?:number } | null;
+  claims: unknown[]; diagram?:unknown; usage: { inputTokens: number; outputTokens: number; cachedTokens?:number } | null;
 }
 export interface InvokeOptions { signal?: AbortSignal; timeoutMs?: number; retry503?:boolean }
 export interface Provider {
@@ -68,7 +69,7 @@ Keep what the note says separate from a hypothesis, not stated in the note; labe
 Do not mention decision IDs, source IDs, contracts or validation in the answer text.
 For human-owned decisions, ask with 2-3 options and reversal costs, then wait.
 Never write, suggest, pre-fill or edit the user's takeaway, why or failed-reason. Never repeat transcript excerpts.
-Return one JSON object with exactly answer (string) and claims (array); do not invent evidence.
+Return one JSON object with answer (string), claims (array), and optionally diagram; do not invent evidence.
 The note source ID is N1; decision IDs are supplied with each decision.
 Each claim is an object with sourceId and quote, for example: {"sourceId":"N1","quote":"<verbatim substring of source N1, at most 240 characters>"}.
 The field is named exactly "quote"; copy its value character for character from the named source, at most 240 characters.
@@ -98,7 +99,7 @@ export function prepareRequest(request: Request): { instruction: string; data: R
     };
     return { id: turn.id, user: clip(turn.user), assistant: clip(turn.assistant) };
   });
-  return { instruction:instruction+(request.action==='think'?'\nReturn only one JSON object. No code fences or text before or after the JSON.':''), omittedTurns: Math.max(0, request.turns.length - 4), clippedMessages,
+  return { instruction:instruction+'\n'+diagramInstruction+(request.action==='think'?'\nReturn only one JSON object. No code fences or text before or after the JSON.':''), omittedTurns: Math.max(0, request.turns.length - 4), clippedMessages,
     data: { id: request.id, action: request.action, question: redact(request.question),
       selection: redact(request.selection), note: redact(request.note),
       decisions: request.decisions.map(d => ({ id: d.id, text: redact(d.text) })), turns } };
@@ -122,7 +123,7 @@ function environment(): NodeJS.ProcessEnv {
 export function validateProviderResponse(response:unknown) {
   const safe=JSON.parse(redact(JSON.stringify(response)));
   validateResponseSchema(safe);
-  return safe as {answer:string;claims:unknown[]};
+  return safe as {answer:string;claims:unknown[];diagram?:unknown};
 }
 function parseResult(provider: ProviderName, id: string, stdout: string, stream = false): Result {
   try {
@@ -151,7 +152,7 @@ function parseResult(provider: ProviderName, id: string, stdout: string, stream 
       if (messages !== 1 || completed !== 1) throw new Error();
     }
     const safe = validateProviderResponse(response);
-    return { id, provider, model, answer: safe.answer, claims: safe.claims, usage };
+    return { id, provider, model, answer: safe.answer, claims: safe.claims, ...(safe.diagram===undefined?{}:{diagram:safe.diagram}), usage };
   } catch(error) {
     const failure=new ProviderError('invalid_response');
     if(error instanceof ProductValidationError)failure.validation=error.record;
