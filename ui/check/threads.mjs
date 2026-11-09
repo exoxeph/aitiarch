@@ -16,7 +16,9 @@ for(const provider of ['claude','chatgpt-plan'])for(const code of ['disabled','u
  const id=provider+'-'+code,failed=structuredClone(item);failed.id=id;failed.generation={...failed.generation,requestId:id,provider};failed.thread=newThread(failed);failed.thread.followups=[{id:id+'-reply',parentId:id,body:'',generation:{...failed.generation,requestId:id+'-reply',status:'error'},failure:{code}}];seed.document.items.push(failed);
 }
 await ink.write('fixture.md',seed.document,null);
-const calls=[],pending=[],store=await Store.open(root),watcher=new NoteWatcher(store,50,10);await watcher.start();
+const calls=[],pending=[];
+async function waitPending(){for(let n=0;!pending.length;n++){if(n>=500)throw new Error('Fake provider did not receive the reviewed request');await new Promise(r=>setTimeout(r,20));}}
+const store=await Store.open(root),watcher=new NoteWatcher(store,50,10);await watcher.start();
 const app=createApp({store,watcher,distDir:path.join(here,'../dist'),provider:{name:'claude',checkAvailability:async()=>({available:true}),invoke:r=>new Promise(resolve=>{calls.push(r);pending.push(()=>resolve({id:r.id,provider:'claude',model:null,answer:'Synthetic accepted answer '+calls.length+'.',claims:[],usage:null}));})}});
 let browser;
 try{
@@ -60,7 +62,7 @@ try{
  await page.waitForFunction(()=>document.querySelector('[data-request-status="pending"]'));pending.shift()();
  await page.getByText('Synthetic accepted answer 1.',{exact:true}).first().waitFor({state:'attached'});
  await select('A removable selected sentence.');await page.getByRole('button',{name:'Ask...',exact:true}).click();await page.getByLabel('Question for Claude').fill('Memory-only test question.');await page.getByRole('button',{name:'Review request',exact:true}).click();await page.getByRole('button',{name:'Send to Claude',exact:true}).click();
- while(!pending.length)await new Promise(r=>setTimeout(r,20));
+ await waitPending();
  await page.evaluate(()=>{const {view}=window.__aitiarch['fixture.md'],q='A removable selected sentence.',from=view.state.doc.toString().indexOf(q);view.dispatch({changes:{from,to:from+q.length,insert:''}});});
  pending.shift()();await page.getByRole('region',{name:'Orphaned ink'}).getByText('Synthetic accepted answer 2.',{exact:true}).waitFor();
  await page.waitForFunction(()=>window.__aitiarch['fixture.md'].session.status==='saved');
@@ -76,14 +78,14 @@ try{
  // A thread from the other provider requires one explicit directed confirmation.
  await panel.locator('nav button').nth(8).click();await page.getByLabel('Follow-up question').fill('Synthetic follow-up question.');await page.getByRole('button',{name:'Review follow-up',exact:true}).click();
  await page.getByRole('region',{name:'Review thread request'}).waitFor();assert(await page.getByRole('button',{name:'Send thread request',exact:true}).isDisabled());
- await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Send thread request',exact:true}).click();while(!pending.length)await new Promise(r=>setTimeout(r,20));pending.shift()();
+ await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Send thread request',exact:true}).click();await waitPending();pending.shift()();
  await panel.locator('.extra-answers:not([open]) summary').click();await panel.getByText('Synthetic accepted answer 3.',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Skip takeaway',exact:true}).click();await page.getByRole('button',{name:'Request closing summary',exact:true}).click();
  assert.equal(await page.getByRole('checkbox').count(),0,'confirmed provider transition is not repeated');await page.getByRole('button',{name:'Send thread request',exact:true}).click();
- while(!pending.length)await new Promise(r=>setTimeout(r,20));pending.shift()();await panel.getByText('Synthetic accepted answer 4.',{exact:true}).waitFor();
+ await waitPending();pending.shift()();await panel.getByText('Synthetic accepted answer 4.',{exact:true}).waitFor();
  assert.equal(await page.getByLabel('Your takeaway',{exact:true}).count(),0);await page.getByRole('button',{name:'Reopen takeaway',exact:true}).click();assert.equal(await page.getByLabel('Your takeaway',{exact:true}).inputValue(),'','AI replies never fill the human box');
  // A failed write retains only the validated reply and offers a save-only retry.
- await page.getByLabel('Follow-up question').fill('Synthetic save retry check.');await page.getByRole('button',{name:'Review follow-up',exact:true}).click();await page.getByRole('button',{name:'Send thread request',exact:true}).click();while(!pending.length)await new Promise(r=>setTimeout(r,20));
+ await page.getByLabel('Follow-up question').fill('Synthetic save retry check.');await page.getByRole('button',{name:'Review follow-up',exact:true}).click();await page.getByRole('button',{name:'Send thread request',exact:true}).click();await waitPending();
  const lockFile=path.join(root,'ink/fixture.ink.json.lock');for(let n=0;;n++){try{await writeFile(lockFile,'Synthetic lock',{flag:'wx'});break;}catch(e){if(e.code!=='EEXIST'||n>=100)throw e;await new Promise(r=>setTimeout(r,20));}}
  pending.shift()();await page.getByRole('button',{name:'Retry saving reply (no new call)',exact:true}).waitFor();await rm(lockFile);await page.getByRole('button',{name:'Retry saving reply (no new call)',exact:true}).click();if(await panel.locator('.extra-answers:not([open]) summary').count())await panel.locator('.extra-answers:not([open]) summary').click();await panel.getByText('Synthetic accepted answer 5.',{exact:true}).waitFor();assert.equal(calls.length,5);
  await page.reload();await page.waitForSelector('.cm-editor');await page.getByRole('button',{name:/^Activity/}).click();await panel.locator('nav button').first().click();
@@ -94,4 +96,4 @@ try{
  assert(!JSON.parse(await readFile(path.join(root,'ink/fixture.ink.json'),'utf8')).items.some(i=>i.id==='seed'));
  assert.equal(errors.length,0,'browser errors');console.log(JSON.stringify({pass:true,calls:calls.length,provider:'fake only',screenshots:screens,checks:['empty box','summary hidden','memory drafts','explicit ignore','external edit during draft','submit','preview insert','BOM/CRLF','undo','Skip reveals','dismiss/restore','delete confirm','Think','Ask','orphan re-attach/history','provider-change confirm once','follow-up','closing summary','save-only retry','14 provider failure states','reload placeholder','draft reload','narrow layout']}));
 }catch(e){console.error(JSON.stringify({checkFailure:true,screenshots:screens}));if(browser){for(const context of browser.contexts())for(const page of context.pages()){console.error(await page.locator('[role="alert"]').allTextContents());await page.screenshot({path:path.join(screens,'failure.png'),fullPage:true});}}throw e;
-}finally{await browser?.close();watcher.stop();await app.close();await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:200});}
+}finally{for(const complete of pending.splice(0))complete();await browser?.close();watcher.stop();await app.close();await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:200});}

@@ -51,11 +51,11 @@ try {
     try { browser = await chromium.launch({ channel, headless: true }); break; } catch { /* try next */ }
   }
   if (!browser) throw new Error("Edge or Chrome is required.");
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: 2000, height: 900 }, deviceScaleFactor: 1 });
   await page.goto(url + "?debug");
-  await page.locator(".cm-ink-block").first().waitFor({ timeout: 10000 });
-  if (await page.locator(".cm-ink-block").count() !== 1) throw new Error("Expected one inline answer.");
-  await page.waitForFunction(() => document.querySelectorAll(".margin-card").length === 2);
+  await page.locator(".thought-blob").first().waitFor({ timeout: 10000 });
+  if (await page.locator(".cm-ink-block").count() !== 0) throw new Error("Wide answers must use margins, never inline widgets.");
+  await page.waitForFunction(() => document.querySelectorAll(".margin-card").length === 3);
   if (await page.locator(".orphan-card").count() !== 2) throw new Error("Expected two retained orphans.");
   if (await page.getByRole("button", { name: /Attach here/i }).count() < 2) throw new Error("Candidate choices are missing.");
   if (!readFileSync(note).equals(unchanged)) throw new Error("Opening ink changed Markdown bytes.");
@@ -70,14 +70,14 @@ try {
   await page.setViewportSize({ width: 780, height: 820 });
   await page.screenshot({ path: path.join(out, "ink-layout-narrow.png"), fullPage: true });
   await page.setViewportSize({ width: 620, height: 820 });
-  if (await page.locator(".margin-card").count() !== 2 || await page.locator(".orphan-card").count() !== 2) throw new Error("Mobile layout lost ink.");
+  if (await page.locator(".cm-ink-block").count() !== 3 || await page.locator(".orphan-card").count() !== 2) throw new Error("Mobile layout lost ink.");
   await page.screenshot({ path: path.join(out, "ink-layout-mobile.png"), fullPage: true });
   const external = await ink.read("notebook.md");
   external.document.items.find(i => i.id === "margin-1").body = "Margin updated outside the browser.";
   await ink.write("notebook.md", external.document, external.version);
   await page.getByText("Margin updated outside the browser.").waitFor({ timeout: 5000 });
   await page.reload();
-  await page.locator(".cm-ink-block").first().waitFor({ timeout: 10000 });
+  await page.locator(".thought-blob").first().waitFor({ timeout: 10000 });
   if (await page.locator(".orphan-card").count() !== 2) throw new Error("Orphans vanished after reload.");
   if (!readFileSync(note).equals(unchanged)) throw new Error("Reload changed Markdown bytes.");
   const firstChoice = page.getByRole("button", { name: /Attach here\? 1/i });
@@ -88,7 +88,7 @@ try {
   const chosen = afterCandidate.document.items.find(i => i.id === "orphan-candidates");
   if (chosen.attachment.status !== "attached" || chosen.anchor.quote !== repeat || !chosen.anchorHistory?.length) throw new Error("Candidate re-attachment was not stored with its new anchor and history.");
   await page.reload();
-  await page.locator(".cm-ink-block").first().waitFor();
+  await page.locator(".thought-blob").first().waitFor();
   if (await page.locator(".orphan-card").count() !== 1) throw new Error("Re-attached ink did not survive reload.");
   const selectedEnd = original.indexOf("End of the focused section.");
   await page.evaluate(pos => {
@@ -107,7 +107,7 @@ try {
   const manuallyChosen = afterManual.document.items.find(i => i.id === "orphan-manual");
   if (manuallyChosen.attachment.status !== "attached" || manuallyChosen.anchor.quote !== "End of the focused section." || !manuallyChosen.anchorHistory?.length) throw new Error("Selection re-attachment was not stored.");
   await page.reload();
-  await page.locator(".cm-ink-block").first().waitFor();
+  await page.locator(".thought-blob").first().waitFor();
   await page.waitForTimeout(250);
   if (await page.locator(".orphan-card").count() !== 0) {
     const names = await page.locator(".orphan-card").allTextContents();
@@ -123,8 +123,8 @@ try {
   const cursor = await page.evaluate(() => window.__aitiarch?.["notebook.md"].view.state.selection.main.head);
   if (cursor !== selectedEnd + " typed".length) throw new Error("Ink changed the typing cursor.");
   // Re-attaching the candidate orphan adds a third margin card.
-  await page.waitForFunction(() => document.querySelectorAll(".margin-card").length === 3);
-  console.log("TASK 2 LAYOUT PASS: initially inline 1/margin 2/orphans 2; after re-attachment inline 2/margin 3/orphans 0; candidates, narrow/mobile view, scroll, live sidecar refresh, reload, typing/cursor, byte-exact note except typed bytes");
+  await page.waitForFunction(() => document.querySelectorAll(".thought-blob").length === 5);
+  console.log("TASK 2 LAYOUT PASS: initially wide inline 0/margin 3/orphans 2; after re-attachment narrow thoughts 5/orphans 0; candidates, narrow/mobile view, scroll, live sidecar refresh, reload, typing/cursor, byte-exact note except typed bytes");
   console.log(path.join(out, "ink-layout-wide.png"));
   console.log(path.join(out, "ink-layout-narrow.png"));
   console.log(path.join(out, "ink-layout-mobile.png"));

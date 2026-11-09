@@ -90,7 +90,7 @@ try {
   await page.screenshot({ path: path.join(out, "mapping-wide.png"), fullPage: true });
   await page.setViewportSize({ width: 650, height: 850 });
   await page.locator('.pane').evaluate(el => { el.scrollTop = el.scrollHeight; });
-  await page.locator('.cm-ink-block').scrollIntoViewIfNeeded();
+  await page.locator('.cm-ink-block').first().scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(out, "mapping-narrow.png"), fullPage: true });
   assert.equal(await page.locator('.orphan-card').count(), 1);
   assert.deepEqual(errors, []);
