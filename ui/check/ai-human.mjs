@@ -2,7 +2,7 @@
 // Run: BATCH2A_OUTPUT=<dir outside the repo> node check/ai-human.mjs   (after `vite build`)
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,7 +29,7 @@ try {
     const anchor = captureAnchor(original, from, from + len);
     return { id, kind, body, anchor, originalAnchor: anchor, attachment: { status: "attached", from, to: from + len } };
   };
-  s.document.items.push(item("answer", "answer", "A fixture AI answer shown inline.", original.indexOf(alpha), alpha.length));
+  s.document.items.push(item("answer", "answer", "A fixture AI answer shown as a thought.", original.indexOf(alpha), alpha.length));
   s.document.items.push(item("margin-1", "margin", "A fixture AI margin note.", original.indexOf(beta), beta.length));
   await ink.write("notebook.md", s.document, s.version);
   proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"] });
@@ -42,41 +42,38 @@ try {
   browser = await chromium.launch({ channel: "msedge", headless: true });
   const report = {};
   for (const theme of ["light", "dark"]) {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: theme });
+    const page = await browser.newPage({ viewport: { width: 2200, height: 900 }, colorScheme: theme });
     await page.goto(url + "?debug");
-    await page.locator(".cm-ink-block").first().waitFor({ timeout: 10000 });
-    await page.locator(".margin-card").first().waitFor({ timeout: 10000 });
-    const facts = await page.evaluate(() => {
-      const lin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
-      const rgb = (s) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
-      const L = (a) => 0.2126 * lin(a[0]) + 0.7152 * lin(a[1]) + 0.0722 * lin(a[2]);
-      const ratio = (a, b) => { const x = L(a), y = L(b); return Math.round(((Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)) * 100) / 100; };
-      const probe = (el, labelSel) => {
-        const cs = getComputedStyle(el), label = el.querySelector(labelSel), lcs = getComputedStyle(label);
-        return {
-          labelText: label.textContent.trim(),
-          border: [cs.borderTopWidth, cs.borderRightWidth, cs.borderBottomWidth, cs.borderLeftWidth],
-          font: cs.fontFamily.split(",")[0].trim(),
-          marginLeft: parseFloat(cs.marginLeft),
-          bodyContrast: ratio(rgb(cs.color), rgb(cs.backgroundColor)),
-          labelContrast: ratio(rgb(lcs.color), rgb(lcs.backgroundColor)),
-        };
-      };
-      const writing = getComputedStyle(document.querySelector(".cm-content")).fontFamily.split(",")[0].trim();
-      return { writingFont: writing, inline: probe(document.querySelector(".cm-ink-block"), ".cm-ink-label"), margin: probe(document.querySelector(".margin-card"), ".margin-label") };
-    });
-    report[theme] = facts;
-    for (const [name, f] of [["inline", facts.inline], ["margin", facts.margin]]) {
-      assert(/^AI\b/.test(f.labelText), `${theme} ${name}: label must start with "AI" (got ${f.labelText})`);
-      assert.deepEqual(new Set(f.border), new Set(["1px"]), `${theme} ${name}: outline must be 1px on every side, no side stripe (${f.border})`);
-      assert.notEqual(f.font, facts.writingFont, `${theme} ${name}: AI type must differ from the writing type`);
-      assert(f.bodyContrast >= 4.5, `${theme} ${name}: body contrast ${f.bodyContrast}`);
-      assert(f.labelContrast >= 4.5, `${theme} ${name}: label contrast ${f.labelContrast}`);
+    for (const [layout, width, selector] of [["margin",2200,".margin-card.thought-blob"],["narrow",900,".cm-ink-block.thought-blob"]]) {
+      await page.setViewportSize({width,height:900});
+      await page.locator(selector).first().waitFor({timeout:10000});
+      const facts = await page.locator(selector).evaluateAll(elements => {
+        const lin=c=>(c/=255)<=.03928?c/12.92:((c+.055)/1.055)**2.4;
+        const rgb=s=>(s.match(/[\d.]+/g)||[]).slice(0,3).map(Number);
+        const L=a=>.2126*lin(a[0])+.7152*lin(a[1])+.0722*lin(a[2]);
+        const ratio=(a,b)=>(Math.max(L(a),L(b))+.05)/(Math.min(L(a),L(b))+.05);
+        return elements.map(el=>{const cs=getComputedStyle(el),label=el.querySelector('.cm-ink-label'),lcs=getComputedStyle(label);
+          return {labelText:label.textContent.trim(),border:[cs.borderTopWidth,cs.borderRightWidth,cs.borderBottomWidth,cs.borderLeftWidth],shadow:cs.boxShadow,
+            labelFilled:lcs.backgroundColor!=='rgba(0, 0, 0, 0)',labelWeight:Number(lcs.fontWeight),
+            bodyContrast:ratio(rgb(cs.color),rgb(cs.backgroundColor)),labelContrast:ratio(rgb(lcs.color),rgb(lcs.backgroundColor))};});
+      });
+      assert.equal(facts.length,2,`${theme} ${layout}: both anchored AI thoughts are visible`);
+      for(const f of facts){
+        assert(/^AI\b/.test(f.labelText),`${theme} ${layout}: explicit AI label`);
+        assert(f.labelFilled&&f.labelWeight>=600,`${theme} ${layout}: filled AI label distinguishes authorship without color`);
+        assert.deepEqual(new Set(f.border),new Set(['0px']),`${theme} ${layout}: quiet blob, no heavy box or side stripe`);
+        assert.equal(f.shadow,'none');
+        assert(f.bodyContrast>=4.5,`${theme} ${layout}: body contrast ${f.bodyContrast}`);
+        assert(f.labelContrast>=4.5,`${theme} ${layout}: label contrast ${f.labelContrast}`);
+      }
+      report[`${theme}-${layout}`]=facts;
+      assert.equal(await page.evaluate(()=>window.__aitiarch['notebook.md'].view.state.doc.toString()),original,'AI rendering never changes Markdown');
+      await page.screenshot({path:path.join(output,`a2-${theme}-${layout}.png`)});
+      await page.addStyleTag({content:'html { filter: grayscale(1); }'});
+      await page.screenshot({path:path.join(output,`a2-${theme}-${layout}-grayscale.png`)});
+      await page.addStyleTag({content:'html { filter: none; }'});
     }
-    assert(facts.inline.marginLeft >= 24, `${theme}: inline AI block must be inset (${facts.inline.marginLeft})`);
-    await page.screenshot({ path: path.join(output, `a2-${theme}.png`) });
-    await page.addStyleTag({ content: "html { filter: grayscale(1); }" });
-    await page.screenshot({ path: path.join(output, `a2-${theme}-grayscale.png`) });
+    assert.equal(readFileSync(path.join(root,'notebook.md'),'utf8'),original);
     await page.close();
   }
   console.log(JSON.stringify({ passed: true, report }, null, 1));

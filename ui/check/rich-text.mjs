@@ -51,7 +51,7 @@ try{
    await page.setViewportSize({width:620,height:900});await page.screenshot({path:path.join(output,`narrow-tree-${theme}.png`),fullPage:true});await page.getByRole('button',{name:'Collapse file tree',exact:true}).click();await page.waitForTimeout(500);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(output,`narrow-editor-${theme}.png`),fullPage:true});await page.getByRole('button',{name:'Expand file tree',exact:true}).click();await page.waitForTimeout(500);
    // No implicit .gitignore changes: an unignored preference stays in memory until an explicit click.
    await writeFile(path.join(root,'.gitignore'),'');await rm(path.join(root,'ui-state.json'),{force:true});await page.setViewportSize({width:1440,height:1000});await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);
-   await page.getByRole('button',{name:'Collapse file tree',exact:true}).click();await page.getByText('File tree preference stays in memory',{exact:false}).waitFor();await page.waitForTimeout(500);
+   await page.getByRole('button',{name:'Collapse file tree',exact:true}).click();await page.getByText('File tree and theme preferences stay in memory',{exact:false}).waitFor();await page.waitForTimeout(500);
    assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).treeCollapsed,undefined);assert.equal(await readFile(path.join(root,'.gitignore'),'utf8'),'');
    await page.screenshot({path:path.join(output,`tree-memory-notice-${theme}.png`),fullPage:true});
    await page.getByRole('button',{name:'Dismiss tree preference notice',exact:true}).click();assert.equal(await readFile(path.join(root,'.gitignore'),'utf8'),'');

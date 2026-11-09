@@ -29,6 +29,8 @@ async function session(name,content,fn,ignore=true){
   }
  }finally{await browser.close();await app.close?.();await watcher.stop?.();await rm(root,{recursive:true,force:true});}
 }
+// Await the persisted response, not an assumed debounce/network duration.
+const uiStateSaved=(page,theme,requireSuccess=true)=>page.waitForResponse(r=>new URL(r.url()).pathname==='/api/ui-state'&&r.request().method()==='PUT'&&(!requireSuccess||r.ok())&&r.request().postDataJSON()?.theme===theme);
 const V=`window.__aitiarch['n.md'].view`;
 const settle=p=>p.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
 const doc=p=>p.evaluate(`${V}.state.doc.toString()`);
@@ -320,8 +322,10 @@ await session('palette',small,async({page,theme,root,bytes})=>{
  const d=await doc(page),pos=d.indexOf('Intro');await put(page,pos);
  await page.keyboard.press('Control+k');const palette=page.getByRole('dialog',{name:'Command palette'});await palette.waitFor();
  const search=palette.getByRole('textbox');await search.fill('Insert: Quote');await search.press('Enter');await page.waitForFunction(expected=>window.__aitiarch['n.md'].view.state.doc.toString()===expected,d.slice(0,pos)+'> '+d.slice(pos));await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
- await page.keyboard.press('Control+k');await palette.waitFor();await search.fill('Theme: Dark');await search.press('Enter');await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
- await page.waitForTimeout(600);assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).theme,'dark');await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['n.md']&&document.documentElement.dataset.theme==='dark');
+ // Always exercise an actual light-to-dark change, even when restored preferences were dark.
+ await page.getByLabel('Theme',{exact:true}).selectOption('light');await page.waitForFunction(()=>document.documentElement.dataset.theme==='light');
+ await page.keyboard.press('Control+k');await palette.waitFor();await search.fill('Theme: Dark');const savedDark=uiStateSaved(page,'dark');await search.press('Enter');await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
+ await savedDark;assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).theme,'dark');await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['n.md']&&document.documentElement.dataset.theme==='dark');
  const toggle=page.getByLabel('Theme',{exact:true});await toggle.selectOption('light');await page.waitForFunction(()=>getComputedStyle(document.documentElement).colorScheme==='light');await toggle.selectOption('system');
  const collapsed=await page.locator('.app').evaluate(e=>e.classList.contains('tree-collapsed'));await page.keyboard.press('Control+k');await palette.waitFor();await search.fill('file tree');await search.press('Enter');await page.waitForFunction(previous=>document.querySelector('.app').classList.contains('tree-collapsed')!==previous,collapsed);
  await page.keyboard.press('Control+k');await palette.waitFor();await search.fill('Jump to note: n.md');await search.press('Enter');assert.equal(await doc(page),d);
@@ -330,11 +334,12 @@ await session('palette',small,async({page,theme,root,bytes})=>{
  assert.deepEqual(await disk(page,root),bytes);report[`palette-${theme}`]={insertUndo:true,themeReload:true,themeOverridesSystem:true,tree:true,jump:true,byteExact:true};
 });
 await session('theme-memory',small,async({page,theme,root})=>{
- await writeFile(path.join(root,'.gitignore'),'/.cache/\n');await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['n.md']);
- await page.waitForTimeout(400);const previous=JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8'));
- await page.getByLabel('Theme',{exact:true}).selectOption('dark');await page.getByText('File tree and theme preferences stay in memory',{exact:false}).waitFor();await page.waitForTimeout(600);
+ await writeFile(path.join(root,'.gitignore'),'/.cache/\n');const bootSaved=uiStateSaved(page,undefined,false);await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['n.md']);
+ await bootSaved;const previous=JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8'));
+ // Unignored existing theme data may correctly refuse the write; wait for that response too.
+ const memorySaved=uiStateSaved(page,undefined,false);await page.getByLabel('Theme',{exact:true}).selectOption('dark');await page.getByText('File tree and theme preferences stay in memory',{exact:false}).waitFor();await memorySaved;
  const saved=JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8'));assert.equal(saved.theme,previous.theme);assert.equal((await readFile(path.join(root,'.gitignore'),'utf8')).includes('/ui-state'),false);
- await page.getByRole('button',{name:'Add /ui-state.json* to root .gitignore',exact:true}).first().click();await page.waitForTimeout(600);assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).theme,'dark');
+ const consentSaved=uiStateSaved(page,'dark');await page.getByRole('button',{name:'Add /ui-state.json* to root .gitignore',exact:true}).first().click();await consentSaved;assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).theme,'dark');
  report[`theme-memory-${theme}`]={memoryBeforeConsent:true,persistAfterExplicitConsent:true};
 },false);
 await session('tables','\uFEFFAway\r\n\r\n| Name | Status | Detail |\r\n| :---:  | ---: |  :--- |\r\n| **bold *nested*** | `code` | ~~strike~~ |\r\n| a \\| b | <script>raw</script> | untouched |\r\n\r\nAfter table.\r\n',async({page,theme,root,bytes})=>{
