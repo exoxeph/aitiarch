@@ -1,7 +1,7 @@
 import { lstat, open, readFile, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-export interface LedgerEvent { id: string; inkId: string; requestId: string; note: string; event: 'shown' | 'dismissed'; at: string }
+export interface LedgerEvent { id: string; inkId: string; requestId: string; note: string; event: 'shown' | 'dismissed' | 'inserted'; at: string; authorship?: 'ai'; insertedBy?: 'human' }
 interface Ledger { v: 1; events: LedgerEvent[] }
 export class LedgerStore {
   private tail: Promise<unknown> = Promise.resolve();
@@ -17,7 +17,7 @@ export class LedgerStore {
     catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { v: 1, events: [] }; throw e; }
     const d = JSON.parse(text);
     if (d.v !== 1 || !Array.isArray(d.events) || Object.keys(d).sort().join() !== 'events,v' || d.events.some((e: LedgerEvent) =>
-      Object.keys(e).sort().join() !== 'at,event,id,inkId,note,requestId' || !['shown', 'dismissed'].includes(e.event) ||
+      Object.keys(e).sort().join() !== (e.event==='inserted'?'at,authorship,event,id,inkId,insertedBy,note,requestId':'at,event,id,inkId,note,requestId') || !['shown', 'dismissed', 'inserted'].includes(e.event) || (e.event==='inserted'&&(e.authorship!=='ai'||e.insertedBy!=='human')) ||
       ![e.id, e.inkId, e.requestId, e.note, e.at].every(v => typeof v === 'string'))) throw new Error('Invalid ledger; original preserved.');
     return d;
   }

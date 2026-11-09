@@ -1,3 +1,4 @@
+import {Store} from './store.ts';
 import {randomUUID} from 'node:crypto';
 import {InkStore,type InkSnapshot} from './ink-store.ts';import {UiStateStore} from './ui-state-store.ts';import {LedgerStore} from './ledger-store.ts';
 import type {InkItem} from '../shared/ink.ts';
@@ -8,6 +9,11 @@ interface ReplyInput {id:string;parentId:string;provider:ThreadProvider;action:'
 export class ThreadStore {
  private ink:InkStore;private drafts:UiStateStore;readonly ledger:LedgerStore;
  constructor(ink:InkStore,drafts:UiStateStore,ledger?:LedgerStore){this.ink=ink;this.drafts=drafts;this.ledger=ledger??new LedgerStore(ink.rootReal);}
+ async brought(note:string,id:string,noteVersion:string){
+  const s=await this.ink.read(note),i=s.document.items.find(i=>i.id===id);
+  if((await (await Store.open(this.ink.rootReal)).read(note)).version!==noteVersion||!i?.generation||i.generation.status!=='complete')throw new Error('The note changed or no validated answer exists.');
+  await this.ledger.append({id:randomUUID(),inkId:id,requestId:randomUUID(),note,event:'inserted',at:new Date().toISOString(),authorship:'ai',insertedBy:'human'});
+ }
  async read(note:string){const s=await this.ink.read(note);return {...s,document:{...s.document,items:s.document.items.map(i=>({...i,thread:i.thread??newThread(i)}))}};}
  private async change(note:string,id:string,version:string|null,fn:(i:InkItem)=>void){
   let s=await this.ink.read(note);if(s.version!==version)throw new Error('Ink version conflict.');s=await this.ink.reanchor(note,version);

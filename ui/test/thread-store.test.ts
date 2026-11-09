@@ -107,3 +107,12 @@ it('can reply to a completed closing summary and requires confirmation when retu
  await f.threads.completeReply('fixture.md','t1','r1',result('r1','chatgpt-plan'),sources);
  expect(await f.threads.providerNotice('fixture.md','t1','claude')).toMatchObject({required:true,from:'chatgpt-plan',to:'claude'});
 });
+
+it('records explicit bring provenance as AI-authored human-inserted without owned-field mutation',async()=>{
+ const f=await fixture(),before=(await f.get()).document.items[0];
+ await f.threads.brought('fixture.md','t1',(await f.get()).document.noteVersion!);
+ const ledger=JSON.parse(await readFile(path.join(f.root,'ledger.json'),'utf8'));
+ expect(ledger.events[0]).toMatchObject({event:'inserted',authorship:'ai',insertedBy:'human',inkId:'t1'});
+ expect((await f.get()).document.items[0]).toEqual(before);expect(JSON.stringify(ledger)).not.toContain(before.body);
+ await expect(f.threads.brought('fixture.md','t1','stale')).rejects.toThrow();
+});

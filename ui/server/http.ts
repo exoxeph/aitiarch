@@ -183,6 +183,7 @@ export function createApp(opts: AppOptions) {
         }
         if(typeof b.path!=='string'||!validId(b.id))throw new Error('Invalid thread target.');
         if(url.pathname==='/api/thread-drafts/save')return json(res,200,await threads.saveDraft(b.path,b.id,b.text,b.revision));
+        if(url.pathname==='/api/threads/brought'){if(typeof b.noteVersion!=='string')throw new Error('Missing note version.');await threads.brought(b.path,b.id,b.noteVersion);return json(res,200,{});}
         if(url.pathname==='/api/threads/action')return json(res,200,await threads.act(b.path,b.id,b.version,b.action));
         if(url.pathname==='/api/threads/notice'){
           const a=await (await assistance).availability();return json(res,200,await threads.providerNotice(b.path,b.id,a.provider==='chatgpt-plan'?'chatgpt-plan':'claude'));
