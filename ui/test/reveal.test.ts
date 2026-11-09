@@ -6,6 +6,8 @@ import { TaskList, Strikethrough, Autolink } from "@lezer/markdown";
 import { describe, it, expect } from "vitest";
 import { buildInline, lineRanges, livePreview } from "../src/editor/livepreview.ts";
 import { taskMarkerAt, taskToggleChange } from "../src/editor/tasks.ts";
+import { slashMatch, slashInsert, slashSource, SLASH_ITEMS } from "../src/editor/slash.ts";
+import { CompletionContext } from "@codemirror/autocomplete";
 import { fenceLabel } from "../src/editor/codeblocks.ts";
 import { touchesSpan, touchesLines, hidesFor, quoteMarkGroups, autolinkHides } from "../src/editor/reveal.ts";
 
@@ -207,5 +209,37 @@ describe("code blocks (D1)", () => {
   });
   it("fenceLabel names known languages, keeps unknown ones, and defaults to text", () => {
     expect([fenceLabel("js"), fenceLabel("TS"), fenceLabel("py"), fenceLabel("bash"), fenceLabel("rust"), fenceLabel("")]).toEqual(["JavaScript", "TypeScript", "Python", "Shell", "rust", "text"]);
+  });
+});
+describe("slash menu (C)", () => {
+  const cases: [string, number, { offset: number; query: string } | null][] = [
+    ["/", 1, { offset: 0, query: "" }], ["/he", 3, { offset: 0, query: "he" }], ["  /h", 4, { offset: 2, query: "h" }], ["/to-do", 6, { offset: 0, query: "to-do" }],
+    ["text /h", 7, null], ["see https://x", 13, null], ["/he llo", 7, null], ["a/b", 3, null], ["", 0, null], ["/h", 1, { offset: 0, query: "" }],
+  ];
+  it.each(cases)("slashMatch %j at %i", (line, col, want) => expect(slashMatch(line, col)).toEqual(want));
+  it("every item inserts plain Markdown in place of /query, and the undo returns the original bytes", () => {
+    for (const item of SLASH_ITEMS) {
+      const doc = "Before\n/query\nAfter\n";
+      const from = doc.indexOf("/query"), to = from + 6;
+      const { changes, caret } = slashInsert(item, from, to);
+      const s = EditorState.create({ doc }).update({ changes, selection: { anchor: caret } }).state;
+      expect(s.doc.toString()).toBe(doc.slice(0, from) + item.insert + doc.slice(to));
+      expect(caret).toBe(from + (item.caret ?? item.insert.length));
+      const inverse = EditorState.create({ doc }).update({ changes }).changes.invert(EditorState.create({ doc }).doc);
+      expect(inverse.apply(s.doc).toString()).toBe(doc);
+    }
+  });
+  it("offers all items at a line start, but not in code, frontmatter or mid-line", () => {
+    const at = (doc: string, needle: string) => {
+      const s = make(doc, 0);
+      const pos = doc.indexOf(needle) + needle.length;
+      const r = slashSource(new CompletionContext(s, pos, false)) as any;
+      return r && r.options.map((o: any) => o.label);
+    };
+    expect(at("Intro\n\n/", "\n/")).toEqual(SLASH_ITEMS.map((i) => i.label));
+    expect(at("```\n/\n```\n", "\n/")).toBeNull();
+    expect(at("---\ntitle: x\n/\n---\n\nBody", "\n/")).toBeNull();
+    expect(at("some text /", "text /")).toBeNull();
+    expect(at("    code\n\n/", "\n\n/")).not.toBeNull();
   });
 });

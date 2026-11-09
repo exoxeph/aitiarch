@@ -380,3 +380,11 @@ summary { cursor: pointer; }
 .cm-task-off { cursor: pointer; }
 .cm-task-off::before { content: "\2610"; position: absolute; left: 0; color: var(--accent); font-family: var(--font-ui); }
 .cm-task-off.cm-task-done::before { content: "\2611"; }
+
+/* Slash menu (slice C): the CodeMirror autocomplete list in Grove colours. */
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete { background: var(--paper); border: 1px solid var(--control-border); border-radius: var(--radius-card); box-shadow: var(--shadow-floating); overflow: hidden; z-index: 100; }
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul { font-family: var(--font-ui); font-size: 14px; max-height: 280px; min-width: 240px; padding: 4px; }
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li { display: flex; justify-content: space-between; gap: 24px; padding: 6px 10px; border-radius: var(--radius-small); color: var(--ink-text); line-height: 1.3; }
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--accent); color: var(--on-accent); }
+.cm-completionDetail { margin-left: 0; font-style: normal; font-family: var(--font-mono); font-size: 12px; opacity: .85; order: 2; }
+.cm-completionMatchedText { text-decoration: underline; text-underline-offset: 2px; }

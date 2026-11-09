@@ -13,6 +13,7 @@ import { externalChange, NoteSession, type SyncStatus } from "./session.ts";
 import { addInk, removeInk, inkField, setInk } from "./ink.ts";
 import { codeHighlight, codeLanguages } from "./codeblocks.ts";
 import { toggleTaskAtCaret } from "./tasks.ts";
+import { slashMenu } from "./slash.ts";
 import { invocationHandlers, invokedKeys, formattingKeys, selectionToolbar } from "./toolbar.ts";
 import { useInvocations } from "./useInvocations.tsx";
 
@@ -115,6 +116,7 @@ export function EditorPane(props: Props) {
           resolverSlot.current.of(wikiResolver.of(props.resolver)),
           livePreview,
           codeHighlight,
+          slashMenu,
           invocationHandlers.of({ invoke: (action, source) => invokeRef.current(action, source) }),
           selectionToolbar,
           EditorView.contentAttributes.of({ "aria-label": `Editing ${path}`, spellcheck: "true" }),

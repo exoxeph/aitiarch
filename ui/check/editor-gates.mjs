@@ -131,6 +131,31 @@ await session('d1',d1,async({page,theme,root,bytes})=>{
  // Probe (recorded, not asserted): undo straight after a save lands. Typed edit, key toggle and click toggle.
  for(const [label,act] of [['typing',async()=>{await put(page,d.indexOf('Lists')+5);await page.keyboard.type('Z');}],['keyToggle',async()=>{await put(page,d.indexOf('open task')+2);await page.keyboard.press('Control+Alt+Enter');}],['clickToggle',async()=>{await put(page,d.length);await page.locator('.cm-task-off').first().click();}]]){await act();await disk(page,root);await page.keyboard.press('Control+z');await page.waitForTimeout(700);(R.undoAfterSaveProbe??={})[label]=(await doc(page))===d;await put(page,d.length);await disk(page,root);await page.waitForTimeout(300);}
 });
+// ---- 2c. C: slash menu, driven by real key presses
+const slashNote='\uFEFF# Slash gate\r\n\r\nA paragraph.\r\n';
+await session('slash',slashNote,async({page,theme,root,bytes})=>{
+ const R={};report[`slash-${theme}`]=R;const d=await doc(page);const menu=()=>page.locator('.cm-tooltip-autocomplete');
+ const labels=()=>page.locator('.cm-tooltip-autocomplete li').allTextContents();
+ await put(page,d.length);await page.keyboard.press('Enter');await page.keyboard.type('/');await menu().waitFor({timeout:3000});
+ R.allItems=await labels();assert.equal(R.allItems.length,9);
+ await page.keyboard.type('head');R.filtered=await labels();assert.deepEqual(R.filtered.map(s=>s.replace(/#+$/,'')),['Heading 1','Heading 2','Heading 3']);
+ await page.locator('.cm-tooltip-autocomplete').screenshot({path:path.join(output,`gate-slash-${theme}.png`)});
+ R.selectedContrast=await page.evaluate(()=>{const lin=c=>{c/=255;return c<=.03928?c/12.92:((c+.055)/1.055)**2.4};const rgb=s=>(s.match(/[\d.]+/g)||[]).slice(0,3).map(Number);const L=a=>.2126*lin(a[0])+.7152*lin(a[1])+.0722*lin(a[2]);const li=document.querySelector('.cm-tooltip-autocomplete li[aria-selected]');const cs=getComputedStyle(li);const p=L(rgb(cs.color)),q=L(rgb(cs.backgroundColor));return Math.round((Math.max(p,q)+.05)/(Math.min(p,q)+.05)*100)/100;});assert(R.selectedContrast>=4.5,`selected item contrast ${R.selectedContrast}`);
+ await page.waitForTimeout(200);await page.keyboard.press('ArrowDown');await page.waitForTimeout(100);await page.keyboard.press('Enter');await settle(page);
+ assert.equal(await doc(page),d+'\n## ','Heading 2 not inserted as plain Markdown');assert.equal(await menu().count(),0,'menu stayed open after choosing');
+ await page.keyboard.press('Control+z');assert.equal(await doc(page),d+'\n/head','undo did not return to the typed text');
+ await page.keyboard.press('Escape');assert.equal(await menu().count(),0,'Escape did not close the menu');
+ // code block puts the caret between the fences
+ await put(page,(await doc(page)).length);await page.keyboard.press('Control+z');await page.keyboard.press('Control+z');
+ await put(page,(await doc(page)).length);await page.keyboard.type('\n/code');await menu().waitFor();await page.waitForTimeout(250);await page.keyboard.press('Enter');await settle(page);
+ const afterCode=await doc(page);assert(afterCode.endsWith('```\n\n```'));R.codeCaretLine=await page.evaluate(`(()=>{const v=${V};return v.state.doc.lineAt(v.state.selection.main.head).number-v.state.doc.lines})()`);assert.equal(R.codeCaretLine,-1,'caret not on the blank line between the fences');
+ // not triggered mid-line or in a URL
+ await page.keyboard.press('Control+z');await page.keyboard.press('Control+z');await put(page,(await doc(page)).length);
+ await page.keyboard.type(' see https://example.test/a/b');await page.waitForTimeout(300);R.noMenuMidLine=(await menu().count())===0;assert(R.noMenuMidLine,'menu opened mid-line');
+ // back to the original bytes
+ for(let k=0;k<12&&(await doc(page))!==d;k++){await page.keyboard.press('Control+z');}
+ assert.equal(await doc(page),d,'could not undo back to the original');assert.deepEqual(await disk(page,root),bytes,'slash menu session changed bytes');
+});
 // ---- 3. cost at about 5,000 and 50,000 lines (real app, ink and anchors on)
 for(const n of [380,3850]){
  await session(`big-${n}`,big(n),async({page,theme})=>{
