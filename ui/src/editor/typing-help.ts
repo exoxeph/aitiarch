@@ -2,11 +2,15 @@ import {Prec,StateEffect,StateField,type EditorState,type Transaction} from '@co
 import {EditorView,keymap} from '@codemirror/view';
 import {syntaxTree} from '@codemirror/language';
 import {insertNewlineAndIndent,isolateHistory,undo} from '@codemirror/commands';
+import {wordsIn} from './smart-dictionary.ts';
 
-export interface TypingOptions {enabled:boolean;doubleSpace:boolean}
+export interface TypingOptions {enabled:boolean;doubleSpace:boolean;smart?:boolean;dictionary?:(word:string)=>string|null;vocabulary?:ReadonlySet<string>;neverCorrect?:readonly string[];onReject?:(word:string)=>void}
 export interface Correction {from:number;to:number;insert:string}
-// Authored exact substitutions only. No dictionary service, fuzzy matching or learned corrections.
+// Common code vocabulary that is also close to an English word. Other project terms come from the notebook.
+const technicalWords=new Set(['async','await','pnpm','vitest']);
+// Authored exact substitutions remain the fast path, including ambiguous short typos.
 export const misspellings:Readonly<Record<string,string>>=Object.freeze({
+ helo:'hello',wht:'what',itt:'it',waht:'what',dont:"don't",wich:'which',
  accomodate:'accommodate',accomodation:'accommodation',acheive:'achieve',acheived:'achieved',acheivement:'achievement',
  acknowlege:'acknowledge',acquireing:'acquiring',accross:'across',adress:'address',adn:'and',
  aggresive:'aggressive',agressive:'aggressive',alot:'a lot',amature:'amateur',apparant:'apparent',
@@ -59,8 +63,13 @@ export function typingCorrection(text:string,pos:number,options:TypingOptions):C
  }
  const before=text.slice(0,pos-1),match=/[A-Za-z]+(?:['’][A-Za-z]+)?$/.exec(before);if(!match)return null;
  const word=match[0],from=before.length-word.length,token=/\S+$/.exec(before)?.[0]??'';
- if(/[\d_./@#]/.test(token)||/[a-z][A-Z]/.test(word)||word===word.toUpperCase())return null;
- const lower=word.toLowerCase();let replacement=Object.hasOwn(misspellings,lower)?misspellings[lower]:word;
+ if(/[\d_./@#]/.test(token)||/[A-Z]/.test(word.slice(1))||word===word.toUpperCase()||technicalWords.has(word.toLowerCase()))return null;
+ const lower=word.toLowerCase();if(options.neverCorrect?.includes(lower))return null;
+ // Exact substitutions keep their existing precedence. Notebook vocabulary protects dictionary guesses.
+ const exact=Object.hasOwn(misspellings,lower),dictionaryAllowed=!exact&&options.smart!==false&&options.dictionary&&!options.vocabulary?.has(lower);
+ const candidate=exact?misspellings[lower]:dictionaryAllowed?options.dictionary!(lower):null;
+ const elsewhere=!exact&&candidate?wordsIn(text.slice(0,from)+' '+text.slice(pos-1)).has(lower):false;
+ let replacement=(!elsewhere&&candidate)||word;
  if(/^[A-Z]/.test(word))replacement=replacement[0].toUpperCase()+replacement.slice(1);
  if(/^i(?:['’](?:m|ll))?$/i.test(word))replacement='I'+word.slice(1);
  const prefix=text.slice(0,from),abbreviation=/\b(?:e\.g|i\.e|vs|etc)\.[ \t]+$/i.test(prefix);
@@ -74,21 +83,25 @@ export function correctionForState(state:EditorState,pos:number,options:TypingOp
  for(let node=syntaxTree(state).resolveInner(Math.min(correction.from+1,state.doc.length),1);node;node=node.parent!)if(protectedNodes.has(node.name))return null;
  return correction;
 }
-const corrected=StateEffect.define<number>();
-const immediate=StateField.define<number|null>({create:()=>null,update(value,tr){if(tr.docChanged||tr.selection)value=null;for(const e of tr.effects)if(e.is(corrected))value=e.value;return value;}});
+const corrected=StateEffect.define<{head:number;word:string|null}>();
+const immediate=StateField.define<{head:number;word:string|null}|null>({create:()=>null,update(value,tr){if(tr.docChanged||tr.selection)value=null;for(const e of tr.effects)if(e.is(corrected))value=e.value;return value;}});
 interface Host {state:EditorState;dispatch(tr:Transaction):void}
 export function applyTypingCorrection(host:Host,pos:number,options:TypingOptions){
  const change=correctionForState(host.state,pos,options);if(!change)return false;
  const head=host.state.selection.main.head+change.insert.length-(change.to-change.from);
- host.dispatch(host.state.update({changes:change,effects:corrected.of(head),annotations:isolateHistory.of('full'),userEvent:'input.correct'}));return true;
+ const original=host.state.doc.sliceString(change.from,change.to),word=/^[A-Za-z]+(?:['’][A-Za-z]+)?$/.test(original)?original.toLowerCase():null;
+ host.dispatch(host.state.update({changes:change,effects:corrected.of({head,word}),annotations:isolateHistory.of('full'),userEvent:'input.correct'}));return true;
 }
 export function typingHelp(options:()=>TypingOptions){
+ const revert=(view:EditorView)=>{const last=view.state.field(immediate);if(view.composing||view.state.readOnly||!last||last.head!==view.state.selection.main.head)return false;
+  if(!undo(view))return false;if(last.word)options().onReject?.(last.word);return true;};
  return [immediate,EditorView.inputHandler.of((view,from,to,text,insert)=>{
   if(view.composing||view.compositionStarted||view.state.readOnly||from!==to||view.state.selection.ranges.length!==1||text.length!==1||!/[ \t\n.,!?;:)\]}\"]/.test(text))return false;
   const tr=insert();if(!tr.isUserEvent('input.type')||tr.isUserEvent('input.type.compose')||!correctionForState(tr.state,tr.state.selection.main.head,options()))return false;
   view.dispatch(tr);applyTypingCorrection(view,view.state.selection.main.head,options());return true;
  }),Prec.highest(keymap.of([
-  {key:'Backspace',run:view=>!view.composing&&!view.state.readOnly&&view.state.field(immediate)===view.state.selection.main.head&&undo(view)},
+  {key:'Backspace',run:revert},
+  {key:'Mod-z',run:revert},
   {key:'Enter',run:view=>{
    if(view.composing||view.compositionStarted||view.state.readOnly||view.state.selection.ranges.length!==1||!view.state.selection.main.empty)return false;
    // Reuse the normal newline/indent command; never append a period on Enter.

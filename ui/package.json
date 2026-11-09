@@ -40,8 +40,10 @@
     "@lezer/highlight": "1.2.5",
     "@lezer/markdown": "1.8.1",
     "codemirror": "6.0.2",
+    "dictionary-en": "4.0.0",
     "dompurify": "3.4.17",
     "mermaid": "12.3.0",
+    "nspell": "2.1.5",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

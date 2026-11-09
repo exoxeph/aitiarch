@@ -39,6 +39,14 @@ it('Backspace immediately after a correction undoes only that correction',()=>{
  applyTypingCorrection(view,6,opts);const backspace=state.facet(keymap).flat().find(k=>k.key==='Backspace')!;
  expect(backspace.run!(view)).toBe(true);expect(state.doc.toString()).toBe('A teh ');
 });
+it.each(['Backspace','Mod-z'])('%s rejects the corrected word into the personal dictionary',key=>{
+ const rejected:string[]=[],settings={...opts,onReject:(word:string)=>rejected.push(word)};
+ let state=EditorState.create({doc:'A Helo ',selection:{anchor:7},extensions:[markdown(),history(),typingHelp(()=>settings)]});
+ const view={get state(){return state;},composing:false,dispatch(tr:any){state=tr.state;}} as unknown as EditorView;
+ applyTypingCorrection(view,7,settings);expect(state.doc.toString()).toBe('A Hello ');
+ expect(state.facet(keymap).flat().find(k=>k.key===key)!.run!(view)).toBe(true);
+ expect(state.doc.toString()).toBe('A Helo ');expect(rejected).toEqual(['helo']);
+});
 it.each(['input.paste','input.drop','input.type.compose','input.palette','input.ai',''])('does not handle %s',event=>{
  const state=EditorState.create({doc:'A teh',selection:{anchor:5},extensions:[markdown(),typingHelp(()=>opts)]});
  const view={state,composing:false,compositionStarted:false,dispatch(){throw Error('Must not dispatch');}} as unknown as EditorView;

@@ -21,6 +21,8 @@ import {wordNavigation} from './navigation.ts';
 import { invocationHandlers, invokedKeys, formattingKeys, selectionToolbar } from "./toolbar.ts";
 import { useInvocations } from "./useInvocations.tsx";
 import {typingHelp,type TypingOptions} from './typing-help.ts';
+let dictionaryReady:Promise<(word:string)=>string|null>|undefined;
+const loadDictionary=()=>dictionaryReady??=import('./load-dictionary.ts').then(module=>module.ready);
 
 export interface PaneHandle {
   view: EditorView;
@@ -56,6 +58,8 @@ export function EditorPane(props: Props) {
   const inkVersionRef = useRef(props.inkVersion ?? null);
   const knownIds = useRef(new Set((props.inkItems ?? []).map(i => i.id)));
   const sessionRef = useRef<NoteSession | null>(null);
+  const dictionaryRef=useRef<((word:string)=>string|null)|undefined>(undefined);
+  useEffect(()=>{const el=host.current;if(!el)return;const warm=()=>{if(live.current.typingOptions?.smart===false||dictionaryRef.current)return;void loadDictionary().then(correct=>{dictionaryRef.current=correct;el.dataset.smartReady='true';}).catch(()=>{});};el.addEventListener('keydown',warm);return()=>el.removeEventListener('keydown',warm);},[]);
   const invoked = useInvocations(props.file.path, viewRef, sessionRef, snapshot => {
     inkVersionRef.current = snapshot.version;
     knownIds.current = new Set(snapshot.document.items.map(i => i.id));
@@ -122,7 +126,7 @@ export function EditorPane(props: Props) {
           wordNavigation,
           markdown({ extensions: [Strikethrough, TaskList, Autolink, Table], codeLanguages, addKeymap: false }), // no auto-inserted list markers: the editor never writes text you didn't type
           codeEditing,
-          typingHelp(()=>live.current.typingOptions??{enabled:true,doubleSpace:true}),
+          typingHelp(()=>{const options=live.current.typingOptions??{enabled:true,doubleSpace:true};return {...options,dictionary:options.vocabulary?dictionaryRef.current:undefined};}),
           invokedKeys,
           formattingKeys,
           keymap.of([
