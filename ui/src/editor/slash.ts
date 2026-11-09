@@ -1,8 +1,8 @@
 // Slash menu: type "/" at the start of a line to insert a block as plain Markdown. Nothing is inserted until you pick an
 // item (Enter, Tab or click); the insertion is one ordinary transaction, so Ctrl+Z restores the exact bytes.
-import { acceptCompletion, autocompletion, completionStatus, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { acceptCompletion, autocompletion, closeCompletion, completionStatus, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { syntaxTree } from "@codemirror/language";
-import { Prec, type ChangeSpec, type EditorState } from "@codemirror/state";
+import { Prec, StateEffect, StateField, type ChangeSpec, type EditorState } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import { frontmatterEnd } from "../frontmatter.ts";
 
@@ -79,7 +79,18 @@ export function slashPick(query: string): SlashItem | null {
  * Typing "/code" and pressing Enter faster than the menu can open used to insert a newline instead. If no menu is open,
  * Enter on a "/query" line picks the best match itself. When the menu is open its own Enter handling is used.
  */
+const dismissed = StateEffect.define<boolean>();
+const dismissedField = StateField.define<boolean>({
+  create: () => false,
+  update(value, tr) {
+    if (tr.docChanged) value = false;
+    for (const effect of tr.effects) if (effect.is(dismissed)) value = effect.value;
+    return value;
+  },
+});
+
 function enterWithoutMenu(view: import("@codemirror/view").EditorView): boolean {
+  if (view.state.field(dismissedField)) return false;
   if (completionStatus(view.state) === "active") return false; // "pending" means the menu is still being built, so we answer
   const sel = view.state.selection.main;
   if (!sel.empty) return false;
@@ -95,10 +106,18 @@ function enterWithoutMenu(view: import("@codemirror/view").EditorView): boolean 
 
 // Timings are set explicitly: no artificial wait before Enter/Tab can accept, and the menu opens almost at once.
 export const slashMenu = [
-  autocompletion({ override: [slashSource], icons: false, closeOnBlur: true, interactionDelay: 0, activateOnTypingDelay: 10 }),
+  dismissedField,
   Prec.highest(keymap.of([
+    { key: "Escape", run: view => {
+      const sel = view.state.selection.main, line = view.state.doc.lineAt(sel.head);
+      if (!completionStatus(view.state) && !slashMatch(line.text, sel.head - line.from)) return false;
+      closeCompletion(view);
+      view.dispatch({ effects: dismissed.of(true) });
+      return true;
+    } },
     { key: "Enter", run: enterWithoutMenu },
     // Tab accepts too, but only while a slash menu is showing or pending, so it never traps focus elsewhere.
     { key: "Tab", run: (view) => (completionStatus(view.state) === "active" ? acceptCompletion(view) : enterWithoutMenu(view)) },
   ])),
+  autocompletion({ override: [slashSource], icons: false, closeOnBlur: true, interactionDelay: 0, activateOnTypingDelay: 10 }),
 ];

@@ -167,6 +167,20 @@ await session('slash',slashNote,async({page,theme,root,bytes})=>{
  for(let k=0;k<10;k++){await put(page,(await doc(page)).length);await page.keyboard.type('\n/todo');await page.keyboard.press('Tab');await settle(page);assert.equal(await doc(page),d+'\n- [ ] ','Tab did not accept');await page.evaluate(([t])=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,to:v.state.doc.length,insert:t}});},[d]);await page.keyboard.press('Escape');}
  await page.keyboard.press('Escape');assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes,'fast slash typing changed bytes');
 });
+// No-match/path queries and Escape must never turn Enter into an implicit block command.
+await session('slash-fallback',slashNote,async({page,theme,root,bytes})=>{
+ const R={};report[`slash-fallback-${theme}`]=R;const d=await doc(page);
+ for(const [label,query,escape] of [['no-match','/zzzzzz',false],['path','/usr/bin',false],['after-Escape','/code',true]]){
+  await put(page,d.length);await page.keyboard.type(query);
+  if(escape){await page.locator('.cm-tooltip-autocomplete').waitFor();await page.keyboard.press('Escape');}
+  await page.keyboard.press('Enter');await settle(page);
+  assert.equal(await doc(page),d+query+'\n',`${label}: Enter must insert only a newline`);
+  assert.equal(await page.locator('.cm-tooltip-autocomplete').count(),0,`${label}: menu stayed open`);
+  R[label]=true;
+  for(let n=0;n<6&&(await doc(page))!==d;n++)await page.keyboard.press('Control+z');
+  assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes);
+ }
+});
 // ---- 3. cost at about 5,000 and 50,000 lines (real app, ink and anchors on)
 for(const n of [380,3850]){
  await session(`big-${n}`,big(n),async({page,theme})=>{
