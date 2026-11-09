@@ -143,13 +143,6 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .cm-mermaid-pending { color: var(--muted); }
 
 /* conflict marker */
-.cm-conflict { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--danger); border-radius: 6px; background: var(--paper-2); font-family: var(--font-ui); font-size: 13px; line-height: 1.45; }
-.cm-conflict-actions { display: flex; gap: 8px; margin-top: 8px; }
-.cm-conflict-actions button { border: 1px solid var(--rule); background: var(--paper); border-radius: 4px; padding: 3px 10px; cursor: pointer; }
-.cm-conflict-actions button:hover { border-color: var(--accent); }
-.cm-conflict-cap { margin-top: 8px; color: var(--muted); font-size: 12px; }
-.cm-conflict-both { margin: 2px 0 0; white-space: pre-wrap; font-family: var(--font-body); font-size: 15px; padding: 8px; background: var(--paper); border-left: 3px solid var(--danger); }
-.cm-conflict-range { background: color-mix(in srgb, var(--danger) 10%, transparent); }
 
 /* floating selection toolbar */
 .cm-tooltip.cm-sel-toolbar { font-family: var(--font-ui); font-size: 13px; background: var(--paper); color: var(--ink-text); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow-floating); padding: 4px; display: flex; flex-direction: column; gap: 2px; min-width: min(250px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; z-index: 100; isolation: isolate; }
@@ -356,3 +349,20 @@ summary { cursor: pointer; }
 .cm-ink-block, .margin-card { border: 1px solid var(--control-border); color: var(--ai-ink); font-family: var(--font-ui); }
 .cm-ink-block { margin: var(--space-4) 28px var(--space-6); }
 .cm-ink-block button, .margin-card button { font-family: var(--font-ui); }
+
+/* Conflict marker (A2): two named blocks, always both visible, no red. "Yours" is solid with a filled label; "On disk" is
+   dashed with an outlined label, so they differ in shape and words as well as tint. Changed words are bold and underlined. */
+.cm-conflict { margin: 10px 0 6px; padding: 14px 16px 16px; border: 1px solid var(--control-border); border-radius: var(--radius-card); background: var(--paper); font-family: var(--font-ui); font-size: 14px; line-height: 1.45; }
+.cm-conflict-msg { font-weight: 600; margin-bottom: 10px; }
+.cm-conflict-block { margin: 0 0 10px; padding: 10px 12px 12px; border: 1px solid var(--control-border); border-radius: 8px; }
+.cm-conflict-yours { background: var(--human-surface); }
+.cm-conflict-disk { background: var(--canvas); border-style: dashed; }
+.cm-conflict-label { display: inline-block; margin-bottom: 8px; padding: 4px 9px; border-radius: 999px; font: 700 var(--text-meta)/1 var(--font-ui); }
+.cm-conflict-yours .cm-conflict-label { background: var(--accent); color: var(--on-accent); }
+.cm-conflict-disk .cm-conflict-label { color: var(--ink-text); border: 1.5px solid var(--ink-text); }
+.cm-conflict-text { margin: 0; font: 16px/1.65 var(--font-body); color: var(--ink-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cm-conflict-text mark { background: none; color: inherit; font-weight: 700; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.cm-conflict-actions { display: flex; gap: 8px; margin-top: 4px; }
+.cm-conflict-actions button { padding: var(--space-2) var(--space-3); border: 1px solid var(--control-border); border-radius: var(--radius-small); background: var(--paper); color: var(--ink-text); cursor: pointer; }
+.cm-conflict-actions button:hover { border-color: var(--accent); }
+.cm-conflict-range { background: var(--human-surface); }
