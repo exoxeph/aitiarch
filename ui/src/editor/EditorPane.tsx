@@ -11,6 +11,8 @@ import { conflictDecorations, conflictHandlers, conflictsField } from "./conflic
 import { livePreview, previewHandlers, wikiResolver } from "./livepreview.ts";
 import { externalChange, NoteSession, type SyncStatus } from "./session.ts";
 import { addInk, removeInk, inkField, setInk } from "./ink.ts";
+import { codeHighlight, codeLanguages } from "./codeblocks.ts";
+import { toggleTaskAtCaret } from "./tasks.ts";
 import { invocationHandlers, invokedKeys, formattingKeys, selectionToolbar } from "./toolbar.ts";
 import { useInvocations } from "./useInvocations.tsx";
 
@@ -97,10 +99,11 @@ export function EditorPane(props: Props) {
           history(),
           drawSelection(),
           EditorView.lineWrapping,
-          markdown({ extensions: [Strikethrough, TaskList, Autolink], addKeymap: false }), // no auto-inserted list markers: the editor never writes text you didn't type
+          markdown({ extensions: [Strikethrough, TaskList, Autolink], codeLanguages, addKeymap: false }), // no auto-inserted list markers: the editor never writes text you didn't type
           invokedKeys,
           formattingKeys,
           keymap.of([
+            { key: "Mod-Alt-Enter", run: toggleTaskAtCaret },
             ...defaultKeymap,
             ...historyKeymap,
           ]),
@@ -111,6 +114,7 @@ export function EditorPane(props: Props) {
           previewHandlers.of({ openWiki: (t) => live.current.onOpenWiki(t) }),
           resolverSlot.current.of(wikiResolver.of(props.resolver)),
           livePreview,
+          codeHighlight,
           invocationHandlers.of({ invoke: (action, source) => invokeRef.current(action, source) }),
           selectionToolbar,
           EditorView.contentAttributes.of({ "aria-label": `Editing ${path}`, spellcheck: "true" }),

@@ -80,3 +80,20 @@ without). The failure is at the "re-attach the orphan" step: the page shows "The
 Review it and try again." and the wait for the orphan list to empty times out at `check/threads.mjs:71`. It looks like a
 race between the pending ink sidecar save and building the re-attach preview. The cause is not clear and not small, so it
 is left alone; the unit suite and every other browser check pass. Worth a look before relying on that flow.
+## Lists, checkboxes and code blocks (D1)
+
+- Bullets, checkboxes and code fences keep their source characters. Away from the line the characters turn transparent
+  and a glyph is drawn in the same place, so text does not move when the caret enters or leaves (measured 0 px
+  horizontally and 0 px in height for bullet, open task, done task and code lines).
+- Click a checkbox, or press Ctrl+Alt+Enter on its line, to toggle it. The change replaces one character (space or x)
+  and Ctrl+Z restores the exact bytes. A capital `[X]` becomes `[ ]` and then `[x]` if toggled twice; undo restores it.
+- With the caret on a task line the source `- [ ]` is shown instead of the box (that is how you edit it).
+- The box glyph sits over the first characters of the source, so task text starts about 5 characters in, and an open task
+  and a done task differ by a few pixels because `x` and a space have different widths.
+- Language packs load lazily, one chunk each, the first time a note has a fence in that language: JSON, Python, YAML,
+  SQL and shell. JavaScript, TypeScript and CSS are already in the main bundle because the Markdown package needs them.
+  Unknown languages stay plain monospace. All token colours are Grove tokens and pass 4.5:1 on the code background.
+- Screen readers read the checkbox as its source text (`- [ ]`); there is no checkbox role yet.
+- An automated rapid sequence (toggle, save, undo and another save within a few milliseconds, then an immediate check)
+  once saw the toggled text come back. With a 700 ms pause, and with typing, key toggle and click toggle probed
+  separately, undo after a save always held. Not investigated; the suspect is the file watcher's echo of our own save.

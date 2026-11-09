@@ -6,6 +6,8 @@ import { EditorState, Facet, StateField, type Range, type Text } from "@codemirr
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { frontmatterEnd } from "../frontmatter.ts";
 import { findFailedMarks } from "./format.ts";
+import { FenceHeader, fenceLabel } from "./codeblocks.ts";
+import { toggleTaskAt } from "./tasks.ts";
 import { autolinkHides, hidesFor, quoteMarkGroups, touchesLines, touchesSpan } from "./reveal.ts";
 
 export interface PreviewHandlers {
@@ -35,31 +37,6 @@ class Chip extends WidgetType {
     s.textContent = this.label;
     s.title = this.title;
     return s;
-  }
-}
-
-class Bullet extends WidgetType {
-  eq() {
-    return true;
-  }
-  toDOM() {
-    const s = document.createElement("span");
-    s.className = "cm-bullet";
-    s.textContent = "â€¢";
-    return s;
-  }
-}
-
-class TaskBox extends WidgetType {
-  constructor(readonly checked: boolean) { super(); }
-  eq(other: TaskBox) { return this.checked === other.checked; }
-  toDOM() {
-    const el = document.createElement('span');
-    el.className = 'cm-task-box';
-    el.textContent = this.checked ? '\u2611' : '\u2610';
-    el.setAttribute('role', 'img');
-    el.setAttribute('aria-label', this.checked ? 'Completed task' : 'Incomplete task');
-    return el;
   }
 }
 
@@ -232,7 +209,16 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
             const lang = info ? state.sliceDoc(info.from, info.to).trim().toLowerCase() : "";
             if (lang === "mermaid" && !lineIsActive(n.from, n.to) && n.to > n.from) return false; // the block layer draws it
             lineDeco(n.from, n.to, "cm-codeblock");
-            if (n.from >= rFrom) out.push(Decoration.line({ class: "cm-fence" }).range(doc.lineAt(n.from).from));
+            // Fences keep their characters (so nothing shifts or moves vertically) but are transparent while the caret is
+            // elsewhere; the opening fence carries the language label and the Copy button instead.
+            const shown = lineIsActive(n.from, n.to) ? "cm-fence-on" : "cm-fence-off";
+            const first = doc.lineAt(n.from);
+            if (first.from >= rFrom) {
+              out.push(Decoration.line({ class: `cm-fence cm-fence-open ${shown}` }).range(first.from));
+              out.push(Decoration.widget({ widget: new FenceHeader(fenceLabel(lang)), side: -1 }).range(first.from));
+            }
+            const last = doc.lineAt(Math.min(n.to, doc.length));
+            if (last.number > first.number && /^\s*(```|~~~)\s*$/.test(last.text) && last.to <= rTo) out.push(Decoration.line({ class: `cm-fence cm-fence-close ${shown}` }).range(last.from));
             return false;
           }
           case "CodeBlock":
@@ -245,14 +231,17 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
           case "QuoteMark":
             quoteMarks.push({ from: n.from, to: n.to });
             return;
-          case "ListMark":
-            if (n.node.parent?.getChild("Task") && !lineIsActive(n.from, n.to)) out.push(hide.range(n.from, n.to + 1));
-            else if (/^[-*+]$/.test(state.sliceDoc(n.from, n.to)) && !lineIsActive(n.from, n.to)) out.push(Decoration.replace({ widget: new Bullet() }).range(n.from, n.to));
+          case "ListMark": {
+            // Bullets and checkboxes are drawn over the original characters (transparent text + a pseudo-element), never
+            // replaced, so the text does not move when the caret enters or leaves the line.
+            const marker = n.node.parent?.getChild("Task")?.getChild("TaskMarker");
+            if (marker && !lineIsActive(n.from, n.to)) {
+              const done = /x/i.test(state.sliceDoc(marker.from, marker.to));
+              out.push(Decoration.mark({ class: `cm-task-off${done ? " cm-task-done" : ""}`, attributes: { "data-task-pos": String(marker.from) } }).range(n.from, marker.to));
+            } else if (!marker && /^[-*+]$/.test(state.sliceDoc(n.from, n.to)) && !lineIsActive(n.from, n.to)) out.push(Decoration.mark({ class: "cm-bullet-off" }).range(n.from, n.to));
             else out.push(Decoration.mark({ class: "cm-list-mark" }).range(n.from, n.to));
             return;
-          case "TaskMarker":
-            if (!lineIsActive(n.from, n.to)) out.push(Decoration.replace({ widget: new TaskBox(/x/i.test(state.sliceDoc(n.from, n.to))) }).range(n.from, n.to));
-            return;
+          }
           case "HorizontalRule":
             lineDeco(n.from, n.to, lineIsActive(n.from, n.to) ? "cm-hr" : "cm-hr cm-hr-off");
             return;
@@ -394,6 +383,12 @@ const blockField = StateField.define<DecorationSet>({
 const SAFE_HREF = /^(https?:|mailto:)/i;
 
 const clicks = EditorView.domEventHandlers({
+  mousedown(e, view) {
+    const el = (e.target as HTMLElement | null)?.closest?.(".cm-task-off") as HTMLElement | null;
+    if (!el || e.button !== 0) return false;
+    e.preventDefault();
+    return toggleTaskAt(view, Number(el.getAttribute("data-task-pos")));
+  },
   click(e, view) {
     if (!(e.ctrlKey || e.metaKey)) return false;
     const el = (e.target as HTMLElement | null)?.closest?.("[data-wiki],[data-href]") as HTMLElement | null;

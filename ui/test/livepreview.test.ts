@@ -24,9 +24,9 @@ it('reveals intersecting spans for a selection, including nested emphasis',()=>{
 it('hides heading, bullet and checkbox syntax except on the active line',()=>{
  const doc='Away\n\n# Heading\n\n- [ ] Task\n- [x] Done\n';let s=make(doc,0);
  expect(decorations(s).some(r=>r.from===doc.indexOf('#')&&r.spec.class==='cm-gm cm-gm-off')).toBe(true);
- expect(decorations(s).filter(r=>r.spec.widget?.constructor.name==='TaskBox')).toHaveLength(2);
+ expect(decorations(s).filter(r=>r.spec.class?.startsWith('cm-task-off'))).toHaveLength(2);
  const task=doc.indexOf('Task');s=s.update({selection:{anchor:task}}).state;
- expect(decorations(s).filter(r=>r.spec.widget?.constructor.name==='TaskBox')).toHaveLength(1);
+ expect(decorations(s).filter(r=>r.spec.class?.startsWith('cm-task-off'))).toHaveLength(1);
  expect(hidden(s).some(([a,b])=>a<=task&&b>doc.indexOf('- [ ]'))).toBe(false);
 });
 it('does not interpret marks inside code or frontmatter as rich text',()=>{

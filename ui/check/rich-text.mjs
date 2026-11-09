@@ -24,7 +24,7 @@ try{
   await page.goto(base+'/?debug=1');await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);
   const select=async(a,b=a)=>page.evaluate(([a,b])=>{const v=window.__aitiarch['fixture.md'].view;v.dispatch({selection:{anchor:a,head:b},scrollIntoView:true});v.focus();},[a,b]);
   const text=()=>page.evaluate(()=>window.__aitiarch['fixture.md'].view.state.doc.toString());
-  await select(note.length);assert.equal(await page.locator('.cm-strong').innerText(),'bold');assert.equal(await page.locator('.cm-failed').innerText(),'strike');assert.equal(await page.locator('.cm-task-box').count(),2);
+  await select(note.length);assert.equal(await page.locator('.cm-strong').innerText(),'bold');assert.equal(await page.locator('.cm-failed').innerText(),'strike');assert.equal(await page.locator('.cm-task-off').count(),2);
   const sidecar=await readFile(path.join(root,'ink/fixture.ink.json'),'utf8');
   // Real keyboard movement enters source coordinates; replacements never delete markers.
   const start=note.indexOf('**bold**');await select(start-1);await page.keyboard.press('ArrowRight');assert.equal(await page.evaluate(()=>window.__aitiarch['fixture.md'].view.state.selection.main.head),start);assert((await page.locator('.cm-content').innerText()).includes('**bold**'));

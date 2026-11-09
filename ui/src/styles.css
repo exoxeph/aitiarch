@@ -155,7 +155,6 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .cm-sel-toolbar .failed-btn { text-decoration: line-through; }
 .cm-sel-toolbar button.primary { background: var(--accent); color: var(--on-accent); font-weight: 600; }
 .cm-sel-toolbar button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, black); }
-.cm-bullet { color: var(--muted); display: inline-block; width: 1em; }
 .cm-sel-toolbar input { width: 100%; font: inherit; padding: 5px 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: inherit; }
 .cm-sel-error { color: var(--danger); font-size: 12px; padding: 2px 6px; min-height: 0; }
 /* Invoked context is kept separate from the Markdown editor document. */
@@ -325,7 +324,6 @@ summary { cursor: pointer; }
 .cm-editor .cm-content { padding-left: var(--page-inset); padding-right: var(--page-inset); }
 .sidebar[hidden] { display: none; }
 .tree-toggle { flex-shrink: 0; min-width: var(--space-9); font-size: var(--text-heading); }
-.cm-task-box { color: var(--accent); font-family: var(--font-ui); }
 @media (max-width: 720px) {
   .app:not(.tree-collapsed) { grid-template-rows: 44px minmax(0, 140px) minmax(0, 1fr) auto 30px; grid-template-areas: "top" "side" "main" "right" "status"; }
   .sidebar:not([hidden]) { display: block; border-right: 0; border-bottom: 1px solid var(--rule); }
@@ -366,3 +364,19 @@ summary { cursor: pointer; }
 .cm-conflict-actions button { padding: var(--space-2) var(--space-3); border: 1px solid var(--control-border); border-radius: var(--radius-small); background: var(--paper); color: var(--ink-text); cursor: pointer; }
 .cm-conflict-actions button:hover { border-color: var(--accent); }
 .cm-conflict-range { background: var(--human-surface); }
+
+/* Code blocks and lists (slice D1). Fences, bullets and checkboxes keep their source characters, so nothing shifts when the
+   caret enters or leaves them: the characters turn transparent and a pseudo-element draws the glyph in the same place. */
+:root { --code-keyword: var(--accent); --code-string: var(--link); --code-number: var(--ai-ink); --code-comment: var(--muted); --code-type: var(--ai-ink); --code-function: var(--ink-text); }
+.cm-fence.cm-fence-off { color: transparent; }
+.cm-fence.cm-fence-on { color: var(--muted); }
+.cm-fence-head { position: absolute; right: 8px; top: 3px; display: inline-flex; align-items: center; gap: 8px; font: 12px/1.4 var(--font-ui); color: var(--muted); user-select: none; }
+.cm-fence-copy { font: inherit; border: 1px solid var(--control-border); background: var(--paper); color: var(--ink-text); border-radius: var(--radius-small); padding: 1px 8px; cursor: pointer; }
+.cm-fence-copy:hover { border-color: var(--accent); }
+.cm-fence-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cm-bullet-off, .cm-task-off { position: relative; color: transparent; }
+.cm-bullet-off *, .cm-task-off * { color: transparent !important; } /* syntax-highlight spans inside would otherwise paint over it */
+.cm-bullet-off::before { content: "\2022"; position: absolute; left: 0; color: var(--muted); }
+.cm-task-off { cursor: pointer; }
+.cm-task-off::before { content: "\2610"; position: absolute; left: 0; color: var(--accent); font-family: var(--font-ui); }
+.cm-task-off.cm-task-done::before { content: "\2611"; }

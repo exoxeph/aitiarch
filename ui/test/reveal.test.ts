@@ -5,6 +5,8 @@ import { markdown } from "@codemirror/lang-markdown";
 import { TaskList, Strikethrough, Autolink } from "@lezer/markdown";
 import { describe, it, expect } from "vitest";
 import { buildInline, lineRanges, livePreview } from "../src/editor/livepreview.ts";
+import { taskMarkerAt, taskToggleChange } from "../src/editor/tasks.ts";
+import { fenceLabel } from "../src/editor/codeblocks.ts";
 import { touchesSpan, touchesLines, hidesFor, quoteMarkGroups, autolinkHides } from "../src/editor/reveal.ts";
 
 const make = (doc: string, anchor = 0, head = anchor) =>
@@ -151,5 +153,59 @@ describe("decorations never edit", () => {
     }
     s = s.update({ selection: EditorSelection.single(0, s.doc.length) }).state;
     expect(s.doc.toString()).toBe(want);
+  });
+});
+
+describe("tasks (D1)", () => {
+  const cases: [string, number | null, boolean | null][] = [
+    ["- [ ] a", 2, false], ["- [x] a", 2, true], ["- [X] a", 2, true], ["  * [ ] nested", 4, false], ["1. [x] numbered", 3, true], ["10) [ ] n", 4, false],
+    ["- [] nope", null, null], ["- [y] nope", null, null], ["-[ ] nope", null, null], ["text [ ] nope", null, null], ["- [ ]no space", null, null],
+  ];
+  it.each(cases)("taskMarkerAt %j", (line, offset, checked) => {
+    const m = taskMarkerAt(line);
+    if (offset === null) expect(m).toBeNull();
+    else expect(m).toEqual({ offset, checked });
+  });
+  it("toggle changes exactly one character and toggling twice returns the original bytes", () => {
+    for (const line of ["- [ ] a", "- [x] b", "  * [X] c", "1. [ ] d"]) {
+      const doc = `before\n${line}\nafter\n`;
+      const from = 7;
+      const ch = taskToggleChange(line, from) as { from: number; to: number; insert: string };
+      expect(ch.to - ch.from).toBe(1);
+      let s = EditorState.create({ doc }).update({ changes: ch }).state;
+      expect(s.doc.length).toBe(doc.length);
+      const l2 = s.doc.lineAt(from);
+      s = s.update({ changes: taskToggleChange(l2.text, l2.from) as any }).state;
+      expect(s.doc.toString()).toBe(doc.replace("[X]", "[x]")); // toggling twice turns a capital X into x; Ctrl+Z restores it exactly
+    }
+  });
+  it("away from the line, bullets and checkboxes keep their characters (no replace) and caret on the line shows source", () => {
+    const doc = "Away\n\n- bullet\n- [ ] task\n- [x] done\n";
+    let s = make(doc, 0);
+    expect(cls(s, "cm-bullet-off")).toHaveLength(1);
+    expect(cls(s, "cm-task-off")).toHaveLength(2);
+    expect(cls(s, "cm-task-done")).toHaveLength(1);
+    expect(rows(s).filter((r) => r.spec.widget && r.spec.widget.constructor.name !== "Chip")).toEqual([]);
+    expect(rows(s).filter((r) => !r.spec.class && !r.spec.widget && r.to > r.from)).toEqual([]);
+    s = s.update({ selection: { anchor: doc.indexOf("task") } }).state;
+    expect(cls(s, "cm-task-off")).toHaveLength(1);
+  });
+});
+
+describe("code blocks (D1)", () => {
+  const doc = "Away\n\n```js\nconst a = 1;\n```\n\nEnd\n";
+  it("fences keep their lines, are off away and on in the block, and the opening fence has a labelled header", () => {
+    let s = make(doc, 0);
+    expect(cls(s, "cm-fence-off")).toHaveLength(2);
+    expect(cls(s, "cm-fence-open")).toHaveLength(1);
+    expect(cls(s, "cm-fence-close")).toHaveLength(1);
+    const head = rows(s).find((r) => r.spec.widget?.constructor.name === "FenceHeader");
+    expect(head?.spec.widget.label).toBe("JavaScript");
+    s = s.update({ selection: { anchor: doc.indexOf("const") } }).state;
+    expect(cls(s, "cm-fence-on")).toHaveLength(2);
+    expect(cls(s, "cm-fence-off")).toHaveLength(0);
+  });
+  it("fenceLabel names known languages, keeps unknown ones, and defaults to text", () => {
+    expect([fenceLabel("js"), fenceLabel("TS"), fenceLabel("py"), fenceLabel("bash"), fenceLabel("rust"), fenceLabel("")]).toEqual(["JavaScript", "TypeScript", "Python", "Shell", "rust", "text"]);
   });
 });

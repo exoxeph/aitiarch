@@ -86,6 +86,51 @@ await session('wrapped',wrapped,async({page,theme})=>{
  await put(page,para+8);await page.screenshot({path:path.join(output,`gate-inline-reveal-${theme}.png`),clip:{x:0,y:200,width:760,height:420}});
 });
 
+// ---- 2b. D1: bullets, checkboxes and code blocks must not shift text; click and key toggle are byte-exact; Copy; highlighting
+const d1='\uFEFF# Lists and code\r\n\r\n- plain bullet text\r\n- [ ] open task text\r\n- [x] done task text\r\n\r\n```js\r\nconst answer = "forty-two"; // note\r\nfunction go(n) { return n + 1; }\r\n```\r\n\r\n```sh\r\necho hello\r\n```\r\n\r\nThe end.\r\n';
+await session('d1',d1,async({page,theme,root,bytes})=>{
+ const R={};report[`d1-${theme}`]=R;let d=await doc(page);
+ await page.evaluate(()=>{window.__copied=[];navigator.clipboard.writeText=async t=>{window.__copied.push(t);};});
+ const x=pos=>page.evaluate(p=>Math.round(window.__aitiarch['n.md'].view.coordsAtPos(p).left*10)/10,pos);
+ const y=pos=>page.evaluate(p=>{const v=window.__aitiarch['n.md'].view;return Math.round(v.lineBlockAt(p).height*10)/10;},pos);
+ // no shift entering/leaving: first text character of each list line and of the code
+ R.shift={};
+ for(const [label,needle,off] of [['bullet','- plain bullet text',2],['open task','- [ ] open task text',6],['done task','- [x] done task text',6],['code line','const answer',0]]){
+  const i=d.indexOf(needle)+off;await put(page,d.length);const a=await x(i),ha=await y(i);await put(page,i);const c=await x(i),hc=await y(i);
+  R.shift[label]={dx:Math.round((c-a)*10)/10,dHeight:Math.round((hc-ha)*10)/10};assert.equal(R.shift[label].dx,0,`${label} text moved`);assert.equal(R.shift[label].dHeight,0,`${label} height changed`);
+ }
+ // click toggles one character; undo restores exact bytes; disk bytes after toggle differ by that one byte only
+ await put(page,d.length);
+ const box=page.locator('.cm-task-off').first();assert.equal(await page.locator('.cm-task-off').count(),2);
+ await box.click();await settle(page);
+ const toggled=await doc(page);assert.equal(toggled,d.replace('- [ ] open','- [x] open'),'click did not toggle exactly one character');
+ const onDisk=await disk(page,root);assert.equal(onDisk.length,bytes.length);assert.equal(onDisk.toString(),bytes.toString().replace('- [ ] open','- [x] open'));
+ await page.waitForTimeout(700);await page.keyboard.press('Control+z');assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes,'toggle+undo changed bytes');await page.waitForTimeout(700);assert.equal(await doc(page),d,'document changed after undo');R.clickToggleUndoByteExact=true;
+ // keyboard toggle on the caret line, and a second toggle back
+ await put(page,d.indexOf('done task')+2);await page.keyboard.press('Control+Alt+Enter');await settle(page);assert.equal(await doc(page),d.replace('- [x] done','- [ ] done'));
+ await page.keyboard.press('Control+z');assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes);R.keyToggleUndoByteExact=true;
+ // code block: header label, Copy copies exactly the code, fences hidden away and shown inside
+ await put(page,d.length);
+ R.header=await page.evaluate(()=>[...document.querySelectorAll('.cm-fence-lang')].map(e=>e.textContent));assert.deepEqual(R.header,['JavaScript','Shell']);
+ R.fenceAway=await page.evaluate(()=>[...document.querySelectorAll('.cm-fence-open')].map(e=>getComputedStyle(e).color));assert(R.fenceAway.every(c=>/rgba\(0, 0, 0, 0\)|transparent/.test(c)),'fences not hidden away from the block');
+ await page.locator('.cm-fence-copy').first().click();R.copied=await page.evaluate(()=>window.__copied.at(-1));assert.equal(R.copied,'const answer = "forty-two"; // note\nfunction go(n) { return n + 1; }');
+ assert.equal(await doc(page),d,'Copy changed the document');
+ await put(page,d.indexOf('const answer')+3);R.fenceOn=await page.evaluate(()=>getComputedStyle(document.querySelector('.cm-fence-open')).color);assert(!/rgba\(0, 0, 0, 0\)/.test(R.fenceOn));
+ // lazy highlighting: the shell pack was requested because the note has an sh fence; the keyword gets its own colour; every token colour passes AA on the code background
+ R.shellChunkRequested=await page.evaluate(()=>performance.getEntriesByType('resource').some(r=>/\/assets\/shell-/.test(r.name)));assert(R.shellChunkRequested,'shell pack was not requested lazily');
+ await put(page,d.length);await page.waitForTimeout(400);
+ R.tokens=await page.evaluate(()=>{const lin=c=>{c/=255;return c<=.03928?c/12.92:((c+.055)/1.055)**2.4};const rgb=s=>(s.match(/[\d.]+/g)||[]).slice(0,3).map(Number);const L=a=>.2126*lin(a[0])+.7152*lin(a[1])+.0722*lin(a[2]);const ratio=(a,b)=>{const p=L(a),q=L(b);return Math.round((Math.max(p,q)+.05)/(Math.min(p,q)+.05)*100)/100};
+  const line=[...document.querySelectorAll('.cm-codeblock')].find(l=>l.textContent.includes('const answer'));const bg=rgb(getComputedStyle(line).backgroundColor);const base=getComputedStyle(line).color;
+  const spans=[...line.querySelectorAll('span')].filter(s=>getComputedStyle(s).color!==base);const colors=[...new Set(spans.map(s=>getComputedStyle(s).color))];
+  const vars={};for(const v of ['keyword','string','number','comment','type','function']){const e=document.createElement('span');e.style.color=`var(--code-${v})`;document.body.append(e);vars[v]=ratio(rgb(getComputedStyle(e).color),bg);e.remove();}
+  return{highlightedSpans:spans.length,distinctColours:colors.length,contrastByToken:vars,bg:getComputedStyle(line).backgroundColor};});
+ assert(R.tokens.highlightedSpans>0,'no highlighted tokens');for(const [k,v] of Object.entries(R.tokens.contrastByToken))assert(v>=4.5,`code token ${k} contrast ${v}`);
+ await page.locator('.editor-col').screenshot({path:path.join(output,`gate-d1-${theme}.png`)});
+ await put(page,d.indexOf('open task')+2);await page.locator('.editor-col').screenshot({path:path.join(output,`gate-d1-caret-on-task-${theme}.png`)});
+ assert.deepEqual(await disk(page,root),bytes,'D1 interactions changed bytes');
+ // Probe (recorded, not asserted): undo straight after a save lands. Typed edit, key toggle and click toggle.
+ for(const [label,act] of [['typing',async()=>{await put(page,d.indexOf('Lists')+5);await page.keyboard.type('Z');}],['keyToggle',async()=>{await put(page,d.indexOf('open task')+2);await page.keyboard.press('Control+Alt+Enter');}],['clickToggle',async()=>{await put(page,d.length);await page.locator('.cm-task-off').first().click();}]]){await act();await disk(page,root);await page.keyboard.press('Control+z');await page.waitForTimeout(700);(R.undoAfterSaveProbe??={})[label]=(await doc(page))===d;await put(page,d.length);await disk(page,root);await page.waitForTimeout(300);}
+});
 // ---- 3. cost at about 5,000 and 50,000 lines (real app, ink and anchors on)
 for(const n of [380,3850]){
  await session(`big-${n}`,big(n),async({page,theme})=>{
