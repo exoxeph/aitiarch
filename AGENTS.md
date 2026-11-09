@@ -23,6 +23,9 @@ need breaking one, stop and ask.
 7. **Stage explicit file paths only.** `git add <file> <file>`; never a directory, `git add .`, `-A` or `ui/test`
    wholesale. Run `git status --short` before every commit and check that nothing protected is staged.
 8. **No merge and no push without approval.** Work on the current feature branch with small commits.
+9. **List destructive targets before running the command.** Before any command that deletes, resets, cleans or removes
+   worktrees, list exactly which files, directories or worktrees it touches. Never run such commands against junctions,
+   `node_modules` or protected untracked files. Check resolved paths before recursive operations; do not follow links.
 
 ## Working notes
 
