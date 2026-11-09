@@ -93,13 +93,7 @@ race between the pending ink sidecar save and building the re-attach preview. Th
   SQL and shell. JavaScript, TypeScript and CSS are already in the main bundle because the Markdown package needs them.
   Unknown languages stay plain monospace. All token colours are Grove tokens and pass 4.5:1 on the code background.
 - Screen readers read the checkbox as its source text (`- [ ]`); there is no checkbox role yet.
-- An automated rapid sequence (toggle, save, undo and another save within a few milliseconds, then an immediate check)
-  once saw the toggled text come back. With a 700 ms pause, and with typing, key toggle and click toggle probed
-  separately, undo after a save always held. Not investigated; the suspect is the file watcher's echo of our own save.
-Follow-up (same day): the original commit before any of this work (`b906d2d`, checked out in a separate worktree and built
-there) fails `check/threads.mjs` at the same step, 6 of 6 runs. In the main working tree it failed 2 of 5, 2 of 5 and 3 of 4
-runs at different points of the work. So the failure is not caused by the editor changes; how often it shows seems to depend
-on the machine and timing.
+- Undo right after a save used to be overwritable by a stale read of that save; fixed after stop C (see "Fixes made after the stop at C").
 
 ## Before any push: scrub the leftover reflog object
 
