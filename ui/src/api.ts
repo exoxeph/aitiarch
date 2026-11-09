@@ -23,6 +23,7 @@ export interface UiState {
   tabs: string[];
   active: string | null;
   treeCollapsed?: boolean;
+  theme?: 'system' | 'light' | 'dark';
 }
 import type { InkDocument, InkItem } from "../shared/ink.ts";
 import type { Invocation } from "../shared/invocation.ts";

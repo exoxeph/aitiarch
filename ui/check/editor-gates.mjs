@@ -12,9 +12,9 @@ const small='\uFEFF# Gate heading\r\n\r\nIntro paragraph here.\r\n\r\n## Second 
 const wrapped='# A very long launch plan heading that wraps across several visual lines in a narrow column of text\r\n\r\n> a quoted line that is also long enough to wrap onto more than one visual line in this narrow column here\r\n\r\nStart **bold words** then ~~struck text~~ and `some code` continue with a long tail of ordinary words so that this paragraph wraps onto several lines in a narrow column.\r\n';
 const big=n=>{let s='# Big note\n';for(let i=0;i<n;i++)s+=`\n## Section ${i}\n\nParagraph with **bold** words and *italic* and \`code\` and a [link](https://x.test/${i}).\n\n- bullet one\n- bullet two\n\n> quoted line ${i}\n\nPlain filler paragraph number ${i}.\n`;return s;};
 
-async function session(name,content,fn){
+async function session(name,content,fn,ignore=true){
  if(process.env.EDITOR_GATE_ONLY && process.env.EDITOR_GATE_ONLY!==name)return;
- const root=await mkdtemp(path.join(os.tmpdir(),'aitiarch-gates-'));execFileSync('git',['init','-q'],{cwd:root,stdio:'pipe'});await writeFile(path.join(root,'.gitignore'),'/.cache/\n/ui-state.json*\n');
+ const root=await mkdtemp(path.join(os.tmpdir(),'aitiarch-gates-'));execFileSync('git',['init','-q'],{cwd:root,stdio:'pipe'});await writeFile(path.join(root,'.gitignore'),'/.cache/\n'+(ignore?'/ui-state.json*\n':''));
  const bytes=Buffer.from(content);await writeFile(path.join(root,'n.md'),bytes);
  const store=await Store.open(root),watcher=new NoteWatcher(store,50,10);await watcher.start();
  const app=createApp({store,watcher,distDir:path.join(ui,'dist'),provider:{name:'claude',checkAvailability:async()=>({available:true}),invoke:async()=>{calls++;throw Error('Provider calls forbidden');}}});
@@ -215,6 +215,27 @@ await session('callouts','\uFEFFAway\r\n\r\n> [!note] Launch constraint\r\n> Kee
  await page.setViewportSize({width:700,height:1000});await settle(page);await page.locator('.editor-col').screenshot({path:path.join(output,`gate-callouts-narrow-${theme}.png`)});
  report[`callouts-${theme}`]={noShift:true,byteExact:true,copyMarkdown:true,imeUndoRedo:true};
 });
+await session('palette',small,async({page,theme,root,bytes})=>{
+ const d=await doc(page),pos=d.indexOf('Intro');await put(page,pos);
+ await page.keyboard.press('Control+k');const palette=page.getByRole('dialog',{name:'Command palette'});await palette.waitFor();
+ const search=palette.getByRole('textbox');await search.fill('Insert: Quote');await search.press('Enter');await page.waitForFunction(expected=>window.__aitiarch['n.md'].view.state.doc.toString()===expected,d.slice(0,pos)+'> '+d.slice(pos));await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
+ await page.keyboard.press('Control+k');await palette.waitFor();await search.fill('Theme: Dark');await search.press('Enter');await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
+ await page.waitForTimeout(600);assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).theme,'dark');await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['n.md']&&document.documentElement.dataset.theme==='dark');
+ const toggle=page.getByLabel('Theme',{exact:true});await toggle.selectOption('light');await page.waitForFunction(()=>getComputedStyle(document.documentElement).colorScheme==='light');await toggle.selectOption('system');
+ const collapsed=await page.locator('.app').evaluate(e=>e.classList.contains('tree-collapsed'));await page.keyboard.press('Control+k');await palette.waitFor();await search.fill('file tree');await search.press('Enter');await page.waitForFunction(previous=>document.querySelector('.app').classList.contains('tree-collapsed')!==previous,collapsed);
+ await page.keyboard.press('Control+k');await palette.waitFor();await search.fill('Jump to note: n.md');await search.press('Enter');assert.equal(await doc(page),d);
+ await page.keyboard.press('Control+k');await palette.waitFor();for(let i=0;i<18;i++)await search.press('ArrowDown');assert.equal(await palette.locator('ul').evaluate(e=>{const a=e.querySelector('[aria-selected="true"]').getBoundingClientRect(),b=e.getBoundingClientRect();return a.top>=b.top&&a.bottom<=b.bottom;}),true,'active command scrolled out of view');
+ await search.fill('');await page.screenshot({path:path.join(output,`gate-palette-${theme}.png`)});await page.setViewportSize({width:700,height:1000});await page.screenshot({path:path.join(output,`gate-palette-narrow-${theme}.png`)});await page.keyboard.press('Escape');assert.equal(await page.evaluate(`${V}.hasFocus`),true);
+ assert.deepEqual(await disk(page,root),bytes);report[`palette-${theme}`]={insertUndo:true,themeReload:true,themeOverridesSystem:true,tree:true,jump:true,byteExact:true};
+});
+await session('theme-memory',small,async({page,theme,root})=>{
+ await writeFile(path.join(root,'.gitignore'),'/.cache/\n');await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['n.md']);
+ await page.waitForTimeout(400);const previous=JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8'));
+ await page.getByLabel('Theme',{exact:true}).selectOption('dark');await page.getByText('File tree and theme preferences stay in memory',{exact:false}).waitFor();await page.waitForTimeout(600);
+ const saved=JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8'));assert.equal(saved.theme,previous.theme);assert.equal((await readFile(path.join(root,'.gitignore'),'utf8')).includes('/ui-state'),false);
+ await page.getByRole('button',{name:'Add /ui-state.json* to root .gitignore',exact:true}).first().click();await page.waitForTimeout(600);assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).theme,'dark');
+ report[`theme-memory-${theme}`]={memoryBeforeConsent:true,persistAfterExplicitConsent:true};
+},false);
 // ---- 3. cost at about 5,000 and 50,000 lines (real app, ink and anchors on)
 for(const n of [380,3850]){
  await session(`big-${n}`,big(n),async({page,theme})=>{

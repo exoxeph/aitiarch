@@ -169,6 +169,7 @@ export interface OverlayItem {
   id: string;
   label: string;
   hint?: string;
+  group?: string;
 }
 
 export function Overlay({ title, placeholder, items, onPick, onClose }: { title: string; placeholder: string; items: OverlayItem[]; onPick: (id: string) => void; onClose: () => void }) {
@@ -184,6 +185,7 @@ export function Overlay({ title, placeholder, items, onPick, onClose }: { title:
     return order.map((l) => items.find((x) => x.label === l)!).filter(Boolean);
   }, [items, q]);
   useEffect(() => setI(0), [q]);
+  useEffect(() => {input.current?.parentElement?.querySelector('[aria-selected="true"]')?.scrollIntoView({block:'nearest'});},[i]);
   return (
     <div className="overlay" onMouseDown={onClose}>
       <div className="overlay-box" role="dialog" aria-label={title} onMouseDown={(e) => e.stopPropagation()}>
@@ -193,7 +195,7 @@ export function Overlay({ title, placeholder, items, onPick, onClose }: { title:
           placeholder={placeholder}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "ArrowDown") (e.preventDefault(), setI((x) => Math.min(shown.length - 1, x + 1)));
+            if (e.key === "ArrowDown") (e.preventDefault(), setI((x) => Math.max(0,Math.min(49,shown.length - 1, x + 1))));
             else if (e.key === "ArrowUp") (e.preventDefault(), setI((x) => Math.max(0, x - 1)));
             else if (e.key === "Enter" && shown[i]) (e.preventDefault(), onPick(shown[i].id));
             else if (e.key === "Escape") (e.preventDefault(), onClose());
@@ -202,7 +204,7 @@ export function Overlay({ title, placeholder, items, onPick, onClose }: { title:
         <ul role="listbox">
           {shown.slice(0, 50).map((it, n) => (
             <li key={it.id} role="option" aria-selected={n === i} className={n === i ? "on" : ""} onMouseEnter={() => setI(n)} onClick={() => onPick(it.id)}>
-              <span>{it.label}</span>
+              <span>{it.group&&(n===0||shown[n-1].group!==it.group)&&<small className="palette-group">{it.group}</small>}{it.label}</span>
               {it.hint && <span className="muted small">{it.hint}</span>}
             </li>
           ))}

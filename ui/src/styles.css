@@ -147,6 +147,8 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 /* floating selection toolbar */
 .cm-tooltip.cm-sel-toolbar { font-family: var(--font-ui); font-size: 13px; background: var(--paper); color: var(--ink-text); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow-floating); padding: 4px; display: flex; flex-direction: column; gap: 2px; min-width: min(250px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; z-index: 100; isolation: isolate; }
 .cm-sel-row { display: flex; gap: 2px; flex-wrap: wrap; }
+.theme-toggle { font: inherit; color: var(--ink-text); background: var(--paper); border: 1px solid var(--control-border); border-radius: var(--radius-small); padding: var(--space-1); }
+.palette-group { display: block; font: var(--text-meta) var(--font-ui); color: var(--muted); }
 .cm-line.cm-callout { background: var(--paper-2); border-inline-start-color: var(--control-border); }
 .cm-line.cm-callout-tip { background: var(--human-surface); }
 .cm-line.cm-callout-warning { border-inline-start-color: var(--danger); }

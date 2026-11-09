@@ -12,6 +12,7 @@ import { ChatGPTSettings } from "./ChatGPTSettings.tsx";
 import { UsagePanel } from './UsagePanel.tsx';
 import {ThreadPanel} from './threads/ThreadPanel.tsx';
 import {previewTakeawayInsertion} from '../shared/takeaway-insertion.ts';
+import {SLASH_ITEMS,slashInsert} from './editor/slash.ts';
 
 type Boot = { state: "loading" } | { state: "error"; message: string } | { state: "ready"; rootName: string; rootPath: string };
 
@@ -21,6 +22,9 @@ export default function App() {
   const [treeCollapsed,setTreeCollapsed]=useState(false);
   const [treePersistence,setTreePersistence]=useState(false);
   const [treeNotice,setTreeNotice]=useState(false);
+  const [theme,setTheme]=useState<'system'|'light'|'dark'>('system');
+  useEffect(()=>{document.documentElement.dataset.theme=theme;},[theme]);
+  const chooseTheme=(value:'system'|'light'|'dark')=>{setTheme(value);if(!treePersistence)setTreeNotice(true);};
   const [files, setFiles] = useState<Record<string, NoteFile>>({});
   const [inkFiles, setInkFiles] = useState<Record<string, InkSnapshot>>({});
   const [mappedInk, setMappedInk] = useState<Record<string, InkItem[]>>({});
@@ -117,6 +121,7 @@ export default function App() {
         }
         const [t, ui, persistence] = await Promise.all([api.tree(), api.uiState(),api.uiStatePersistence().catch(()=>({enabled:false}))]);
         setTreeCollapsed(ui.treeCollapsed??false);setTreePersistence(persistence.enabled);
+        if(persistence.enabled)setTheme(ui.theme??'system');
         setTree(t);
         const all = flattenTree(t);
         let want = ui.tabs.filter((p) => all.includes(p));
@@ -158,9 +163,9 @@ export default function App() {
   // ---- persist open tabs (a small file in the notebook folder) ----
   useEffect(() => {
     if (!loaded.current) return;
-    const t = setTimeout(() => void api.putUiState({ v: 1, tabs, active, ...(treePersistence?{treeCollapsed}:{}) }).catch(() => {if(treePersistence){setTreePersistence(false);setTreeNotice(true);}}), 300);
+    const t = setTimeout(() => void api.putUiState({ v: 1, tabs, active, ...(treePersistence?{treeCollapsed,theme}:{}) }).catch(() => {if(treePersistence){setTreePersistence(false);setTreeNotice(true);}}), 300);
     return () => clearTimeout(t);
-  }, [tabs, active, treeCollapsed,treePersistence]);
+  }, [tabs, active, treeCollapsed,treePersistence,theme]);
 
   const closeTab = useCallback(
     async (path: string) => {
@@ -202,10 +207,10 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
       const k = e.key.toLowerCase();
-      if (k === "p" || k === "o") {
+      if (k === "p" || k === "o" || k === "k") {
         e.preventDefault();
         e.stopPropagation();
-        setOverlay(k === "p" ? "palette" : "switcher");
+        setOverlay(k === "o" ? "switcher" : "palette");
       }
     };
     window.addEventListener("keydown", onKey, true);
@@ -283,6 +288,13 @@ export default function App() {
 
   const commands = useMemo(() => {
     const list: Array<OverlayItem & { run: () => void }> = [
+      ...paths.map(path=>({id:`note:${path}`,label:`Jump to note: ${path}`,group:'Notes',run:()=>void openNote(path)})),
+      ...SLASH_ITEMS.map((item,i)=>({id:`insert:${i}`,label:`Insert: ${item.label}`,group:'Insert blocks',run:withView(h=>{
+        const r=h.view.state.selection.main,insert=slashInsert(item,r.from,r.to);
+        h.view.dispatch({changes:insert.changes,selection:{anchor:insert.caret},userEvent:'input.palette',scrollIntoView:true});h.view.focus();
+      })})),
+      {id:'tree',label:treeCollapsed?'Expand file tree':'Collapse file tree',group:'Workspace',run:()=>{setTreeCollapsed(v=>!v);if(!treePersistence)setTreeNotice(true);}},
+      ...(['system','light','dark'] as const).map(value=>({id:`theme:${value}`,label:`Theme: ${value[0].toUpperCase()+value.slice(1)}`,group:'Appearance',run:()=>chooseTheme(value)})),
       { id: "open", label: "Open note…", hint: "Ctrl+O", run: () => setOverlay("switcher") },
       { id: "props", label: showProps ? "Hide properties panel" : "Show properties panel", run: () => setShowProps((v) => !v) },
       { id: "save", label: "Save now", run: withView((h) => void h.session.flush()) },
@@ -297,9 +309,9 @@ export default function App() {
       { id: "restore", label: "Restore failed mark at cursor", run: fmt((s) => restoreFailed(s)) },
       ...[0, 1, 2, 3, 4].map((n) => ({ id: `h${n}`, label: n ? `Format: Heading ${n}` : "Format: Plain paragraph", run: fmt((s) => setHeading(s, n)) })),
     ];
-    return list;
+    return list.map(item=>({...item,group:item.group??(['open','props','save','reload'].includes(item.id)?'Workspace':'Formatting')}));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, showProps]);
+  }, [active, showProps,paths,treeCollapsed,treePersistence,openNote]);
 
   if (boot.state === "loading") return <div className="boot">Opening notebook…</div>;
   if (boot.state === "error") {
@@ -319,7 +331,8 @@ export default function App() {
         <button className="ghost tree-toggle" aria-label={treeCollapsed?'Expand file tree':'Collapse file tree'} aria-controls="note-tree" aria-expanded={!treeCollapsed} onClick={()=>{setTreeCollapsed(v=>!v);if(!treePersistence)setTreeNotice(true);}} title={treeCollapsed?'Expand file tree':'Collapse file tree'}>☰</button>
         <Tabs tabs={tabs} active={active} status={status} onSelect={setActive} onClose={(p) => void closeTab(p)} />
         <span className="spacer" />
-        <button className="ghost" onClick={() => setOverlay("palette")} title="Command palette (Ctrl+P)">
+        <select className="theme-toggle" aria-label="Theme" value={theme} onChange={e=>chooseTheme(e.target.value as typeof theme)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
+        <button className="ghost" onClick={() => setOverlay("palette")} title="Command palette (Ctrl+K; Ctrl+P)">
           Commands
         </button>
       </header>
@@ -328,7 +341,7 @@ export default function App() {
         <Tree tree={tree} active={active} onOpen={(p) => void openNote(p)} />
       </aside>
       <main className="editor-col">
-        {treeNotice&&<div className="notice" role="note">File tree preference stays in memory until ignore coverage for <code>/ui-state.json*</code> is verified.
+        {treeNotice&&<div className="notice" role="note">File tree and theme preferences stay in memory until ignore coverage for <code>/ui-state.json*</code> is verified.
           <button onClick={async()=>{try{const s=await api.enableThreadDrafts();setTreePersistence(s.enabled);setTreeNotice(!s.enabled);}catch{setNotice('Could not verify UI state ignore coverage. The file tree preference remains in memory.');}}}>Add /ui-state.json* to root .gitignore</button>
           <button onClick={()=>setTreeNotice(false)}>Dismiss tree preference notice</button>
         </div>}

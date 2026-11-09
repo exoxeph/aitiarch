@@ -62,6 +62,7 @@ interface UiState {
   tabs: string[];
   active: string | null;
   treeCollapsed?: boolean;
+  theme?: 'system' | 'light' | 'dark';
 }
 
 export function createApp(opts: AppOptions) {
@@ -122,7 +123,7 @@ export function createApp(opts: AppOptions) {
     name:'claude',checkAvailability:async()=>({available:false,code:'unsupported_cli',message:'Provider disabled. Enable it explicitly at server startup.'}),invoke:async()=>{throw new ProviderError('unsupported_cli');}
   },path=>{for(const c of clients)c.write(`event: ink\ndata: ${JSON.stringify({type:'ink',path})}\n\n`);}));
   async function readUiState(): Promise<UiState> {
-    try { const {v,tabs,active,treeCollapsed}=await uiStateStore.read();return {v,tabs,active,...(treeCollapsed!==undefined?{treeCollapsed}:{})}; }
+    try { const {v,tabs,active,treeCollapsed,theme}=await uiStateStore.read();return {v,tabs,active,...(treeCollapsed!==undefined?{treeCollapsed}:{}),...(theme!==undefined?{theme}:{})}; }
     catch { return {v:1,tabs:[],active:null}; }
   }
   function sanitizeUiState(raw: unknown): UiState {
@@ -139,7 +140,8 @@ export function createApp(opts: AppOptions) {
       }
     }
     const active = typeof r.active === "string" && tabs.includes(r.active) ? r.active : null;
-    return { v: 1, tabs, active, ...(typeof r.treeCollapsed==='boolean'?{treeCollapsed:r.treeCollapsed}:{}) };
+    if(r.theme!==undefined&&r.theme!=='system'&&r.theme!=='light'&&r.theme!=='dark')throw new Error('Invalid theme preference.');
+    return { v: 1, tabs, active, ...(typeof r.treeCollapsed==='boolean'?{treeCollapsed:r.treeCollapsed}:{}),...(r.theme!==undefined?{theme:r.theme}:{}) };
   }
   async function writeUiState(s: UiState) { await uiStateStore.updateTabs(s); }
 
