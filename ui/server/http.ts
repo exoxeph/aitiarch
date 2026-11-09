@@ -64,7 +64,7 @@ interface UiState {
   tabs: string[];
   active: string | null;
   treeCollapsed?: boolean;
-  theme?: 'system' | 'light' | 'dark';
+  theme?: 'ember' | 'moss';
   confirmAdd?: boolean;
   typingHelp?:boolean;
   doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];
@@ -147,7 +147,7 @@ export function createApp(opts: AppOptions) {
     }
     if(r.neverCorrect!==undefined&&!validNeverCorrect(r.neverCorrect))throw new Error('Invalid typing preference.');
     const active = typeof r.active === "string" && tabs.includes(r.active) ? r.active : null;
-    if(r.theme!==undefined&&r.theme!=='system'&&r.theme!=='light'&&r.theme!=='dark')throw new Error('Invalid theme preference.');
+    if(r.theme!==undefined&&r.theme!=='ember'&&r.theme!=='moss')throw new Error('Invalid theme preference.');
     if(r.confirmAdd!==undefined&&typeof r.confirmAdd!=='boolean')throw new Error('Invalid confirm-before-adding preference.');
     for(const name of ['typingHelp','doubleSpacePeriod','smartCorrections'] as const)if(r[name]!==undefined&&typeof r[name]!=='boolean')throw new Error('Invalid typing preference.');
     return { v: 1, tabs, active, ...(typeof r.treeCollapsed==='boolean'?{treeCollapsed:r.treeCollapsed}:{}),...(r.theme!==undefined?{theme:r.theme}:{}),...(typeof r.confirmAdd==='boolean'?{confirmAdd:r.confirmAdd}:{}),...(typeof r.typingHelp==='boolean'?{typingHelp:r.typingHelp}:{}),...(r.neverCorrect!==undefined?{neverCorrect:r.neverCorrect as string[]}:{}),...(typeof r.smartCorrections==='boolean'?{smartCorrections:r.smartCorrections}:{}),...(typeof r.doubleSpacePeriod==='boolean'?{doubleSpacePeriod:r.doubleSpacePeriod}:{}) };

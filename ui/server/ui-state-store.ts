@@ -6,7 +6,7 @@ import {normalizeRel,isNotePath} from './paths.ts';
 import {exactKeys,validAt,validId} from '../shared/threads.ts';
 const exec=promisify(execFile);
 export interface ThreadDraft {note:string;inkId:string;text:string;updatedAt:string;revision:string}
-export interface SavedUiState {v:1;tabs:string[];active:string|null;treeCollapsed?:boolean;theme?:'system'|'light'|'dark';confirmAdd?:boolean;typingHelp?:boolean;doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];threadDrafts?:Record<string,ThreadDraft>}
+export interface SavedUiState {v:1;tabs:string[];active:string|null;treeCollapsed?:boolean;theme?:'ember'|'moss';confirmAdd?:boolean;typingHelp?:boolean;doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];threadDrafts?:Record<string,ThreadDraft>}
 const key=(note:string,id:string)=>createHash('sha256').update(note+'\0'+id).digest('hex');
 export class UiStateStore {
  private root:string;private file:string;
@@ -30,7 +30,7 @@ export class UiStateStore {
   const tabs:string[]=[];for(const t of Array.isArray(d.tabs)?d.tabs.slice(0,50):[]){try{const n=normalizeRel(t);if(isNotePath(n)&&!tabs.includes(n))tabs.push(n);}catch{}}
   const state:SavedUiState={v:1,tabs,active:tabs.includes(d.active)?d.active:null};
   if(typeof d.treeCollapsed==='boolean')state.treeCollapsed=d.treeCollapsed;
-  if(['system','light','dark'].includes(d.theme))state.theme=d.theme;
+  if(['ember','moss'].includes(d.theme))state.theme=d.theme;else if(['system','light','dark'].includes(d.theme))state.theme='ember'; // saved before the remodel: there is no light theme any more
   if(typeof d.confirmAdd==='boolean')state.confirmAdd=d.confirmAdd;
   if(typeof d.typingHelp==='boolean')state.typingHelp=d.typingHelp;
   if(typeof d.doubleSpacePeriod==='boolean')state.doubleSpacePeriod=d.doubleSpacePeriod;
@@ -55,7 +55,7 @@ export class UiStateStore {
   for(const name of ['typingHelp','doubleSpacePeriod','smartCorrections'] as const)if(tabs[name]!==undefined&&typeof tabs[name]!=='boolean')throw new Error('Invalid typing preference.');
   if(tabs.confirmAdd!==undefined&&typeof tabs.confirmAdd!=='boolean')throw new Error('Invalid confirm-before-adding preference.');
   if(tabs.treeCollapsed!==undefined&&typeof tabs.treeCollapsed!=='boolean')throw new Error('Invalid tree preference.');
-  if(tabs.theme!==undefined&&!['system','light','dark'].includes(tabs.theme))throw new Error('Invalid theme preference.');
+  if(tabs.theme!==undefined&&!['ember','moss'].includes(tabs.theme))throw new Error('Invalid theme preference.');
   if(tabs.neverCorrect!==undefined&&!validNeverCorrect(tabs.neverCorrect))throw new Error('Invalid typing preference.');
   return this.mutate(s=>{if(tabs.neverCorrect!==undefined)s.neverCorrect=[...new Set(tabs.neverCorrect)];s.tabs=tabs.tabs;s.active=tabs.active;if(tabs.treeCollapsed!==undefined)s.treeCollapsed=tabs.treeCollapsed;if(tabs.theme!==undefined)s.theme=tabs.theme;if(tabs.confirmAdd!==undefined)s.confirmAdd=tabs.confirmAdd;
    for(const name of ['typingHelp','doubleSpacePeriod','smartCorrections'] as const)if(tabs[name]!==undefined)s[name]=tabs[name];

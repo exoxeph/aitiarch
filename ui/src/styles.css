@@ -234,7 +234,7 @@ body { background: var(--canvas); }
 .statusbar { background: var(--canvas); border: 0; color: var(--muted); }
 .cm-scroller { font-size: var(--text-body); line-height: var(--leading-body); padding-top: var(--space-9); }
 .cm-content { max-width: 760px; padding-left: var(--page-inset); padding-right: var(--page-inset); }
-.cm-h1 { font-size: var(--text-title); font-weight: 600; letter-spacing: -.025em; }
+.cm-h1 { font-family: var(--font-title); font-size: var(--text-title); font-weight: var(--title-weight); letter-spacing: -.025em; }
 .cm-h2 { font-size: 1.4em; font-weight: 600; }
 .cm-h3 { font-size: 1.2em; }
 .cm-tooltip.cm-sel-toolbar { background: var(--toolbar); border-color: var(--control-border); border-radius: var(--radius-human); box-shadow: var(--shadow-floating); padding: var(--space-2); gap: var(--space-1); }

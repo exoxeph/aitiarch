@@ -25,7 +25,7 @@ export interface UiState {
   treeCollapsed?: boolean;
   typingHelp?:boolean;
   doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];
-  theme?: 'system' | 'light' | 'dark';
+  theme?: 'ember' | 'moss';
   confirmAdd?: boolean;
 }
 import type { InkDocument, InkItem } from "../shared/ink.ts";

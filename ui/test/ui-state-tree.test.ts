@@ -43,7 +43,7 @@ it('reads older UI state and rejects non-boolean tree preferences without changi
 it('does not rewrite a remembered preference after ignore coverage is removed',async()=>{
  const f=await fixture('/ui-state.json*\n');await f.store.updateTabs({v:1,tabs:[],active:null,treeCollapsed:true});const bytes=await readFile(path.join(f.root,'ui-state.json'));await writeFile(path.join(f.root,'.gitignore'),'');await expect(f.store.updateTabs({v:1,tabs:[],active:null})).rejects.toThrow(/ignored/i);expect(await readFile(path.join(f.root,'ui-state.json'))).toEqual(bytes);
 });
-it.each(['system','light','dark'] as const)('persists theme %s only with verified ignore and preserves it across tab writes',async theme=>{
+it.each(['ember','moss'] as const)('persists theme %s only with verified ignore and preserves it across tab writes',async theme=>{
  const f=await fixture('/ui-state.json*\n');await f.store.updateTabs({v:1,tabs:[],active:null,theme});
  expect((await new UiStateStore(f.root).read()).theme).toBe(theme);
  await f.store.updateTabs({v:1,tabs:['fixture.md'],active:'fixture.md'});expect((await f.store.read()).theme).toBe(theme);
@@ -51,11 +51,14 @@ it.each(['system','light','dark'] as const)('persists theme %s only with verifie
  await expect(f.store.updateTabs({v:1,tabs:[],active:null})).rejects.toThrow(/ignored/i);expect(await readFile(path.join(f.root,'ui-state.json'))).toEqual(bytes);
 });
 it.each(['','/ui-state.json\n'])('does not write a theme without atomic ignore coverage (%s)',async ignore=>{
- const f=await fixture(ignore);await expect(f.store.updateTabs({v:1,tabs:[],active:null,theme:'dark'})).rejects.toThrow(/ignored/i);expect(await readdir(f.root)).not.toContain('ui-state.json');
+ const f=await fixture(ignore);await expect(f.store.updateTabs({v:1,tabs:[],active:null,theme:'moss'})).rejects.toThrow(/ignored/i);expect(await readdir(f.root)).not.toContain('ui-state.json');
+});
+it('a theme saved before the remodel (system, light or dark) is read back as ember, never as light',async()=>{
+ for(const old of ['system','light','dark']){const f=await fixture('/ui-state.json*\n');await writeFile(path.join(f.root,'ui-state.json'),JSON.stringify({v:1,tabs:[],active:null,theme:old}));expect((await new UiStateStore(f.root).read()).theme).toBe('ember');}
 });
 it('rejects unknown theme values and preserves human drafts on a valid theme save',async()=>{
  const f=await fixture('/ui-state.json*\n');await f.store.saveDraft('fixture.md','thread1','Human-only draft',null);
  const bytes=await readFile(path.join(f.root,'ui-state.json'));
  await expect(f.store.updateTabs({v:1,tabs:[],active:null,theme:'automatic'} as any)).rejects.toThrow(/theme/i);expect(await readFile(path.join(f.root,'ui-state.json'))).toEqual(bytes);
- await f.store.updateTabs({v:1,tabs:[],active:null,theme:'light'});expect((await f.store.draft('fixture.md','thread1'))?.text).toBe('Human-only draft');
+ await f.store.updateTabs({v:1,tabs:[],active:null,theme:'moss'});expect((await f.store.draft('fixture.md','thread1'))?.text).toBe('Human-only draft');
 });

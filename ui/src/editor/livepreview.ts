@@ -102,12 +102,10 @@ class MermaidWidget extends WidgetType {
     el.className = "cm-mermaid cm-mermaid-pending";
     el.textContent = "Rendering diagramâ€¦";
     el.title = "Click to edit the diagram source";
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
     let revision = 0;
     const draw = () => {
       const current = ++revision;
-      const mode = document.documentElement.dataset.theme;
-      const dark = mode === "dark" || (mode !== "light" && media.matches);
+      const dark = true; // dark only
       renderMermaid(this.code, dark)
       .then((svg) => {
         if (current !== revision) return;
@@ -130,8 +128,7 @@ class MermaidWidget extends WidgetType {
     };
     const observer = new MutationObserver(draw);
     observer.observe(document.documentElement, {attributes:true,attributeFilter:['data-theme']});
-    media.addEventListener('change', draw);
-    mermaidCleanup.set(el, () => {revision++;observer.disconnect();media.removeEventListener('change',draw);});
+    mermaidCleanup.set(el, () => {revision++;observer.disconnect();});
     draw();
     el.addEventListener("mousedown", (e) => {
       e.preventDefault();

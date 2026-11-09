@@ -1,33 +1,80 @@
-/* Grove, original Aitiarch design. Installed system fonts only; no network assets. */
-:root {
-  color-scheme: light;
-  --canvas: #e5ebe6;
-  --paper: #fafbf7;
-  --paper-2: #edf2ec;
-  --ink-text: #263c32;
-  --muted: #52685a;
-  --rule: #c4d1c6;
-  --control-border: #718677;
-  --accent: #2e6654;
-  --caret: var(--accent);
-  --on-accent: #fafbf7;
-  --accent-soft: #deeadf;
-  --link: #375877;
-  --ai-ink: #375877;
-  --ai-surface: #edf3f6;
-  --human-surface: #edf4e9;
-  --focus: #276b53;
-  --toolbar: #fafbf7;
-  --danger: #9c352b;
+/* Aitiarch remodel. Two dark themes, "Ember" (default) and "Moss". There is no light theme.
+   Fonts are bundled locally (SIL OFL): Newsreader and Instrument Sans, latin subset. No network assets. */
+@font-face { font-family: "Newsreader Variable"; font-style: normal; font-weight: 200 800; font-display: swap; src: url("./fonts/newsreader-latin-wght-normal.woff2") format("woff2-variations"); }
+@font-face { font-family: "Newsreader Variable"; font-style: italic; font-weight: 200 800; font-display: swap; src: url("./fonts/newsreader-latin-wght-italic.woff2") format("woff2-variations"); }
+@font-face { font-family: "Instrument Sans Variable"; font-style: normal; font-weight: 400 700; font-display: swap; src: url("./fonts/instrument-sans-latin-wght-normal.woff2") format("woff2-variations"); }
+
+:root, :root[data-theme=ember] {
+  color-scheme: dark;
+  /* Ember Study: warm near-black, ivory, one ember accent. */
+  --canvas: #15110d;
+  --paper: #1b150f;
+  --paper-2: #221a13;
+  --ink-text: #efe6d3;
+  --muted: #ab9f88;
+  --rule: #3a2f23;
+  --control-border: #8a7a63;
+  --accent: #e39a52;
+  --accent-hi: #f0ab67;
+  --caret: #f0ab67;
+  --on-accent: #1c1006;
+  --accent-soft: #2e2216;
+  --link: #e3b98a;
+  --ai-ink: #e0d6c0;
+  --ai-surface: #241c14;
+  --human-surface: #1f1a12;
+  --focus: #f0ab67;
+  --toolbar: #261e15;
+  --danger: #f0a08c;
   --ok: var(--accent);
-  --code-bg: var(--accent-soft);
-  --scrim: #11251e66;
-  --shadow-page: 0 4px 20px #18372a0a;
-  --shadow-floating: 0 8px 28px #11251e29;
-  --shadow-small: 0 2px 8px #11251e14;
-  --shadow-up: 0 -5px 16px #11251e14;
-  --font-body: Cambria, Georgia, "Times New Roman", serif;
-  --font-ui: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --code-bg: #120e0a;
+  --selection: #6b4a2880;
+  --scrim: #0000008c;
+  --glow: #e39a5230;
+  --shadow-page: 0 4px 20px #00000040;
+  --shadow-floating: 0 10px 30px #0000005c;
+  --shadow-small: 0 2px 8px #00000040;
+  --shadow-up: 0 -5px 16px #00000040;
+  --font-title: "Newsreader Variable", Georgia, serif;
+  --title-weight: 500;
+  --radius-small: 6px;
+  --radius-card: 12px;
+  --radius-human: 12px;
+  --radius-page: 15px;
+}
+:root[data-theme=moss] {
+  /* Moss Lantern: deep moss-black, bone, one lichen accent. */
+  --canvas: #10130e;
+  --paper: #151a12;
+  --paper-2: #1b2017;
+  --ink-text: #e9e7d6;
+  --muted: #a1a68c;
+  --rule: #343c2b;
+  --control-border: #7d8868;
+  --accent: #bccc7a;
+  --accent-hi: #cddb90;
+  --caret: #cddb90;
+  --on-accent: #121806;
+  --accent-soft: #232b19;
+  --link: #cbd896;
+  --ai-ink: #d2d1be;
+  --ai-surface: #1a2015;
+  --human-surface: #1b2216;
+  --focus: #cddb90;
+  --toolbar: #1f261a;
+  --danger: #f0a08c;
+  --code-bg: #0d100b;
+  --selection: #56683a80;
+  --glow: #bccc7a28;
+  --font-title: "Instrument Sans Variable", "Segoe UI", system-ui, sans-serif;
+  --title-weight: 600;
+  --radius-card: 16px;
+  --radius-human: 16px;
+}
+
+:root {
+  --font-body: "Newsreader Variable", Georgia, "Times New Roman", serif;
+  --font-ui: "Instrument Sans Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
   --text-meta: 12px;
   --text-control: 13px;
@@ -49,70 +96,19 @@
   --page-inset: 36px;
   --tree-width: 218px;
   --thread-width: 344px;
-  --radius-small: 6px;
-  --radius-card: 10px;
-  --radius-human: 12px;
-  --radius-page: 15px;
   --motion-color: 140ms;
   --motion-panel: 180ms;
   --motion-caret: 32ms;
   --ease-caret: cubic-bezier(0, 0, 0, 1);
   --ease: ease-out;
+  scrollbar-color: var(--rule) transparent;
+  scrollbar-width: thin;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme=light]) {
-    color-scheme: dark;
-    --canvas: #111d19;
-    --paper: #1c2b24;
-    --paper-2: #16231d;
-    --ink-text: #e5eee4;
-    --muted: #acbfae;
-    --rule: #3e5948;
-    --control-border: #86a58e;
-    --accent: #a9d6ba;
-    --caret: #ffffff;
-    --on-accent: #16231d;
-    --accent-soft: #2e4b3b;
-    --link: #b6d2e7;
-    --ai-ink: #b6d2e7;
-    --ai-surface: #253b40;
-    --human-surface: #233b2b;
-    --focus: #b5e8c7;
-    --toolbar: #2a3e31;
-    --danger: #ffb4a5;
-    --scrim: #00000080;
-    --shadow-page: 0 4px 20px #0000001a;
-    --shadow-floating: 0 8px 28px #00000066;
-    --shadow-small: 0 2px 8px #00000033;
-    --shadow-up: 0 -5px 16px #00000033;
-  }
-}
-:root[data-theme=dark] {
-    color-scheme: dark;
-    --canvas: #111d19;
-    --paper: #1c2b24;
-    --paper-2: #16231d;
-    --ink-text: #e5eee4;
-    --muted: #acbfae;
-    --rule: #3e5948;
-    --control-border: #86a58e;
-    --accent: #a9d6ba;
-    --caret: #ffffff;
-    --on-accent: #16231d;
-    --accent-soft: #2e4b3b;
-    --link: #b6d2e7;
-    --ai-ink: #b6d2e7;
-    --ai-surface: #253b40;
-    --human-surface: #233b2b;
-    --focus: #b5e8c7;
-    --toolbar: #2a3e31;
-    --danger: #ffb4a5;
-    --scrim: #00000080;
-    --shadow-page: 0 4px 20px #0000001a;
-    --shadow-floating: 0 8px 28px #00000066;
-    --shadow-small: 0 2px 8px #00000033;
-    --shadow-up: 0 -5px 16px #00000033;
-}
+::selection { background: var(--selection); color: var(--ink-text); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--control-border); background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
 
 @media (max-width: 720px) {
   :root { --page-inset: 22px; --text-body: 17px; --text-title: 34px; --gutter: 8px; }

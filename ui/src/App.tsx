@@ -39,14 +39,14 @@ export default function App() {
   const [treeCollapsed,setTreeCollapsed]=useState(false);
   const [treePersistence,setTreePersistence]=useState(false);
   const [treeNotice,setTreeNotice]=useState(false);
-  const [theme,setTheme]=useState<'system'|'light'|'dark'>('system');
+  const [theme,setTheme]=useState<'ember'|'moss'>('ember');
   const [smartCorrections,setSmartCorrections]=useState(true),[neverCorrect,setNeverCorrect]=useState<string[]>([]);
   const [vocabulary,setVocabulary]=useState<ReadonlySet<string>|null>(null);
   const vocabularyNotes=useRef(new Map<string,string>());
   const rejectCorrection=useCallback((word:string)=>{setNeverCorrect(previous=>previous.includes(word)?previous:[...previous,word].slice(-10000));if(!treePersistence)setTreeNotice(true);},[treePersistence]);
   const [typingHelpOn,setTypingHelpOn]=useState(true),[doubleSpacePeriod,setDoubleSpacePeriod]=useState(true);
   useEffect(()=>{document.documentElement.dataset.theme=theme;},[theme]);
-  const chooseTheme=(value:'system'|'light'|'dark')=>{setTheme(value);if(!treePersistence)setTreeNotice(true);};
+  const chooseTheme=(value:'ember'|'moss')=>{setTheme(value);if(!treePersistence)setTreeNotice(true);};
   const [files, setFiles] = useState<Record<string, NoteFile>>({});
   const [inkFiles, setInkFiles] = useState<Record<string, InkSnapshot>>({});
   const [mappedInk, setMappedInk] = useState<Record<string, InkItem[]>>({});
@@ -149,7 +149,7 @@ export default function App() {
         }
         const [t, ui, persistence] = await Promise.all([api.tree(), api.uiState(),api.uiStatePersistence().catch(()=>({enabled:false}))]);
         setTreeCollapsed(ui.treeCollapsed??false);setConfirmAdd(ui.confirmAdd??false);setTreePersistence(persistence.enabled);
-        if(persistence.enabled){setTheme(ui.theme??'system');setTypingHelpOn(ui.typingHelp??true);setDoubleSpacePeriod(ui.doubleSpacePeriod??true);setSmartCorrections(ui.smartCorrections??true);setNeverCorrect(ui.neverCorrect??[]);}
+        if(persistence.enabled){setTheme(ui.theme??'ember');setTypingHelpOn(ui.typingHelp??true);setDoubleSpacePeriod(ui.doubleSpacePeriod??true);setSmartCorrections(ui.smartCorrections??true);setNeverCorrect(ui.neverCorrect??[]);}
         setTree(t);
         const all = flattenTree(t);
         let want = ui.tabs.filter((p) => all.includes(p));
@@ -396,7 +396,7 @@ export default function App() {
       {id:'typing-help',label:`Typing help: ${typingHelpOn?'On':'Off'}`,group:'Typing',run:()=>{setTypingHelpOn(v=>!v);if(!treePersistence)setTreeNotice(true);}},
       {id:'smart-corrections',label:`Smart corrections: ${smartCorrections?'On':'Off'}`,group:'Typing',run:()=>{setSmartCorrections(v=>!v);if(!treePersistence)setTreeNotice(true);}},
       {id:'double-space',label:`Double-space period: ${doubleSpacePeriod?'On':'Off'}`,group:'Typing',run:()=>{setDoubleSpacePeriod(v=>!v);if(!treePersistence)setTreeNotice(true);}},
-      ...(['system','light','dark'] as const).map(value=>({id:`theme:${value}`,label:`Theme: ${value[0].toUpperCase()+value.slice(1)}`,group:'Appearance',run:()=>chooseTheme(value)})),
+      ...(['ember','moss'] as const).map(value=>({id:`theme:${value}`,label:`Theme: ${value[0].toUpperCase()+value.slice(1)}`,group:'Appearance',run:()=>chooseTheme(value)})),
       { id: "open", label: "Open note…", hint: "Ctrl+O", run: () => setOverlay("switcher") },
       { id: "props", label: showProps ? "Hide properties panel" : "Show properties panel", run: () => setShowProps((v) => !v) },
       { id: "save", label: "Save now", run: withView((h) => void h.session.flush()) },
@@ -433,7 +433,7 @@ export default function App() {
         <button className="ghost tree-toggle" aria-label={treeCollapsed?'Expand file tree':'Collapse file tree'} aria-controls="note-tree" aria-expanded={!treeCollapsed} onClick={()=>{setTreeCollapsed(v=>!v);if(!treePersistence)setTreeNotice(true);}} title={treeCollapsed?'Expand file tree':'Collapse file tree'}>☰</button>
         <Tabs tabs={tabs} active={active} status={status} onSelect={setActive} onClose={(p) => void closeTab(p)} />
         <span className="spacer" />
-        <select className="theme-toggle" aria-label="Theme" value={theme} onChange={e=>chooseTheme(e.target.value as typeof theme)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
+        <select className="theme-toggle" aria-label="Theme" value={theme} onChange={e=>chooseTheme(e.target.value as typeof theme)}><option value="ember">Ember</option><option value="moss">Moss</option></select>
         <button className="ghost" onClick={() => setOverlay("palette")} title="Command palette (Ctrl+K; Ctrl+P)">
           Commands
         </button>
