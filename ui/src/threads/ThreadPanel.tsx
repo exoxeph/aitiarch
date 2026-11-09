@@ -37,8 +37,7 @@ export function ThreadPanel(props:Props){
  useEffect(()=>{let off=false;const refresh=async()=>{try{const s=await api.threads(props.path);if(!off)live.current.saved(s);}catch{}};void refresh();
   const timer=setInterval(()=>{if(live.current.items.some(i=>i.generation?.status==='pending'||i.thread?.followups.some(r=>r.generation.status==='pending')||i.thread?.summary.reply?.generation.status==='pending'))void refresh();},700);
   return ()=>{off=true;clearInterval(timer);};},[props.path]);
- return <section className="thread-panel" aria-label="Threads"><h2>Threads</h2>
-  {!generated.length&&<p className="muted small">Select note text, then Think on this or Ask…</p>}
+ return <section className="thread-panel" aria-label="AI thought">
   <nav aria-label="Thread list">{generated.map(i=><button key={i.id} aria-pressed={item?.id===i.id} onClick={()=>props.onOpen(i.id)}>{i.anchor.quote.slice(0,42)} · {threadStatus(i)}</button>)}</nav>
   {item&&<ThreadCard key={props.path+':'+item.id} {...props} item={item} memory={memory.current}/>}
  </section>;
@@ -102,7 +101,7 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{
  }catch(e){fail(e);}finally{setBusy(false);}};
  if(t.dismissed)return <article className="thread-card"><p>Thread dismissed; replies and your work are preserved.</p><button disabled={busy} onClick={()=>void act({type:'restore'})}>Restore thread</button><button onClick={()=>setConfirmDelete(true)}>Delete thread…</button>{confirmDelete&&<DeleteConfirm busy={busy} cancel={()=>setConfirmDelete(false)} remove={()=>void act({type:'delete',confirmed:true})}/ >}</article>;
  return <article className="thread-card" data-thread-id={item.id} ref={card}>
-  <h3>Selection thread</h3><blockquote>{item.anchor.quote}</blockquote>
+  <blockquote>{item.anchor.quote}</blockquote>
   <p className="small">{threadStatus(item)}{item.attachment.status==='orphaned'?' · Re-attach using the orphan list above. Your takeaway is preserved.':''}</p>
   <ReplyStack replies={[initial,...t.followups]} question={id=>recalledQuestion(path,id)??questionPlaceholder} cancel={replyId=>void api.threadCall('cancel',{path,id:item.id,replyId})}/>
   {notice&&<p role="alert">{notice}</p>}
@@ -113,12 +112,12 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{
   {t.takeaway.state==='submitted'&&<section><strong>Your submitted takeaway</strong><p className="human-text">{t.takeaway.text}</p><button disabled={busy||item.attachment.status!=='attached'} onClick={()=>void insert(item).catch(fail)}>Preview insertion</button></section>}
   {t.takeaway.state==='submitted'&&<button disabled={busy} onClick={()=>void act({type:'reopen'})}>Reopen takeaway</button>}
   <section aria-label="Closing summary"><h4>AI closing summary</h4>{!revealed?<p>Hidden until you submit your takeaway or explicitly Skip takeaway.</p>:t.summary.reply?<ReplyView reply={t.summary.reply}/>:<button disabled={busy||item.attachment.status!=='attached'} onClick={()=>void prepare('summary')}>Request closing summary</button>}</section>
-  <label>Follow-up question<input aria-label="Follow-up question" value={question} disabled={!!review||busy} maxLength={8000} onChange={e=>setQuestion(e.target.value)}/></label>
-  <button disabled={busy||!question.trim()||item.attachment.status!=='attached'} onClick={()=>void prepare('followup')}>Review follow-up</button>
+  <label>Write back…<input aria-label="Write back" placeholder="Write back…" value={question} disabled={!!review||busy} maxLength={8000} onChange={e=>setQuestion(e.target.value)}/></label>
+  <button disabled={busy||!question.trim()||item.attachment.status!=='attached'} onClick={()=>void prepare('followup')}>Review reply</button>
   {review&&<section className="thread-request" aria-label="Review thread request"><p>Send to {providerLabel(review.provider)}. Note and selection frozen by version; changes require a new review.</p>
    <details><summary>Exact redacted request</summary><pre>{JSON.stringify(review.packet,null,2)}</pre></details>
    {review.required&&<label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>Switch from {providerLabel(review.from??'claude')} to {providerLabel(review.provider)}: {review.description} Confirm this first change.</label>}
-   <button disabled={busy||!confirmed} onClick={()=>void send()}>Send thread request</button><button onClick={()=>setReview(null)}>Cancel thread request</button></section>}
+   <button disabled={busy||!confirmed} onClick={()=>void send()}>Send reply</button><button onClick={()=>setReview(null)}>Cancel write-back</button></section>}
   <div className="thread-actions"><button disabled={busy} onClick={()=>void act({type:'dismiss'})}>Dismiss thread</button><button onClick={()=>setConfirmDelete(true)}>Delete thread…</button></div>
   {confirmDelete&&<DeleteConfirm busy={busy} cancel={()=>setConfirmDelete(false)} remove={()=>void act({type:'delete',confirmed:true})}/>}
  </article>;

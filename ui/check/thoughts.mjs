@@ -22,13 +22,13 @@ try{
  assert.deepEqual(await readFile(path.join(root,'fixture.md')),bytes);
  const first=page.locator('.margin-card[data-ink-id="seed1"]');await first.hover();assert(await page.locator('.cm-thought-anchor.thought-active').count()>0);
  const button=first.getByRole('button',{name:/^Open AI thought thread:/});await button.focus();await page.keyboard.press('Enter');
- const chat=page.getByRole('dialog',{name:'AI thought conversation',exact:true});await chat.waitFor();assert.equal(await chat.getByLabel('Your takeaway',{exact:true}).inputValue(),'');
- await chat.getByLabel('Follow-up question').fill('What matters?');await chat.getByRole('button',{name:'Review follow-up',exact:true}).click();await chat.getByRole('button',{name:'Send thread request',exact:true}).click();await chat.getByText('Synthetic accepted reply.',{exact:true}).waitFor();assert.equal(calls,1);
+ const chat=page.getByRole('region',{name:'AI thought conversation',exact:true});await chat.waitFor();assert.equal(await chat.getByLabel('Your takeaway',{exact:true}).inputValue(),'');
+ await chat.getByLabel('Write back').fill('What matters?');await chat.getByRole('button',{name:'Review reply',exact:true}).click();await chat.getByRole('button',{name:'Send reply',exact:true}).click();await chat.getByText('Synthetic accepted reply.',{exact:true}).waitFor();assert.equal(calls,1);
  const chatTop=await chat.evaluate(e=>e.getBoundingClientRect().top);
  await page.evaluate(()=>window.__aitiarch['fixture.md'].view.dispatch({changes:{from:0,insert:'Temporary line.\n\n'}}));
  await page.waitForFunction(y=>Math.abs(document.querySelector('.thought-chat').getBoundingClientRect().top-y)>10,chatTop);
  await page.evaluate(()=>window.__aitiarch['fixture.md'].view.focus());await page.keyboard.press('Control+z');await page.waitForFunction(()=>window.__aitiarch['fixture.md'].session.status==='saved');
- await page.screenshot({path:path.join(out,'thoughts-chat-light.png'),fullPage:true});await chat.getByRole('button',{name:'Close thought conversation'}).click();
+ await page.screenshot({path:path.join(out,'thoughts-chat-light.png'),fullPage:true});await chat.getByRole('button',{name:'Collapse thought conversation'}).click();
  await first.getByRole('button',{name:'Bring to notebook',exact:true}).click();const preview=page.getByRole('dialog',{name:'Review AI block insertion'});await preview.waitFor();assert.equal(await preview.getByRole('button',{name:'Insert labeled AI block',exact:true}).evaluate(e=>e===document.activeElement),true);await page.keyboard.press('Shift+Tab');assert.equal(await preview.getByRole('button',{name:'Cancel AI insertion',exact:true}).evaluate(e=>e===document.activeElement),true);assert((await preview.locator('pre').textContent()).includes('> [!ai]\n> Synthetic thought seed1.'));assert.deepEqual(await readFile(path.join(root,'fixture.md')),bytes);
  // Delay confirmation's disk read; a simultaneous edit must invalidate its frozen preview.
  let release;const blocked=new Promise(r=>release=r);let reached;const reading=new Promise(r=>reached=r);

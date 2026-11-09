@@ -481,3 +481,20 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .thought-blob .thought-chat {position:static;z-index:auto;overflow:visible;padding:8px 0 0;background:none;border:0;border-top:1px solid var(--rule);border-radius:0;box-shadow:none;max-height:none;width:auto;margin-top:8px;}
 .thought-blob .thought-chat > header {justify-content:flex-end;}
 .thought-blob .thought-chat > header strong,.thought-blob .thought-chat .thread-panel > h2,.thought-blob .thought-chat .thread-panel h3,.thought-blob .thought-chat .thread-panel > section > blockquote,.thought-blob .thought-chat .thread-panel > .muted {display:none;}
+/* Thought menu, Undo toast and dismissed list (the "..." menu replaces the old right-panel thread list). */
+.thought-more {position:relative;display:inline-block;margin-left:8px;}
+.thought-more > button {border:0;background:none;color:var(--muted);font:700 16px/1 var(--font-ui);padding:2px 8px;border-radius:var(--radius-small);cursor:pointer;}
+.thought-more > button:hover,.thought-more > button[aria-expanded="true"] {background:var(--rule);color:var(--ink-text);}
+.thought-more [role=menu] {position:absolute;z-index:40;top:100%;left:0;min-width:220px;display:flex;flex-direction:column;padding:4px;background:var(--paper);border:1px solid var(--control-border);border-radius:var(--radius-card);box-shadow:var(--shadow-floating);}
+.thought-more [role=menuitem] {border:0;background:none;text-align:left;padding:7px 10px;border-radius:var(--radius-small);font:var(--text-control) var(--font-ui);color:var(--ink-text);cursor:pointer;}
+.thought-more [role=menuitem]:hover,.thought-more [role=menuitem]:focus-visible {background:var(--ai-surface);}
+.thought-toast {position:fixed;z-index:200;left:50%;bottom:28px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--paper);color:var(--ink-text);border:1px solid var(--control-border);border-radius:var(--radius-card);box-shadow:var(--shadow-floating);font:var(--text-control) var(--font-ui);}
+.thought-toast button {border:1px solid var(--control-border);background:var(--paper);color:var(--ink-text);border-radius:var(--radius-small);padding:4px 10px;cursor:pointer;}
+.thought-toast button:focus-visible,.dismissed-thoughts button:focus-visible,.thought-more button:focus-visible {outline:2px solid var(--focus);outline-offset:2px;}
+.dismissed-thoughts {position:fixed;z-index:190;top:15%;left:50%;transform:translateX(-50%);width:min(520px,calc(100vw - 32px));max-height:70vh;overflow:auto;padding:16px;background:var(--paper);color:var(--ink-text);border:1px solid var(--control-border);border-radius:var(--radius-card);box-shadow:var(--shadow-floating);font:var(--text-control) var(--font-ui);}
+.dismissed-thoughts > header {display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;}
+.dismissed-thoughts ul {list-style:none;margin:0;padding:0;display:grid;gap:10px;}
+.dismissed-thoughts li {display:grid;gap:2px;padding-bottom:10px;border-bottom:1px solid var(--rule);}
+.dismissed-quote {color:var(--muted);} .dismissed-text {font-family:var(--font-body);}
+.dismissed-thoughts li button {justify-self:start;border:1px solid var(--control-border);background:var(--paper);color:var(--ink-text);border-radius:var(--radius-small);padding:4px 10px;cursor:pointer;margin-top:4px;}
+.thought-chat[data-floating] {position:fixed;z-index:150;overflow:auto;padding:12px;background:var(--paper);border:1px solid var(--control-border);border-radius:var(--radius-card);box-shadow:var(--shadow-floating);}

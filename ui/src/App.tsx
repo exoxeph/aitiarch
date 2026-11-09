@@ -14,6 +14,7 @@ import { makeWikiResolver } from "./frontmatter.ts";
 import { ChatGPTSettings } from "./ChatGPTSettings.tsx";
 import { UsagePanel } from './UsagePanel.tsx';
 import {ThreadPanel} from './threads/ThreadPanel.tsx';
+import {DismissedThoughts} from './ink/DismissedThoughts.tsx';
 import {ThoughtInsertionPreview} from './ink/ThoughtInsertionPreview.tsx';
 import {ThoughtChat} from './ink/ThoughtChat.tsx';
 import {previewThoughtInsertion} from '../shared/thoughts.ts';
@@ -39,7 +40,7 @@ export default function App() {
   const onInk = useCallback((path: string, items: InkItem[]) => setMappedInk(m => ({ ...m, [path]: items })), []);
   const onInkSaved = useCallback((path: string, snapshot: InkSnapshot) => setInkFiles(m => ({ ...m, [path]: snapshot })), []);
   const [attachDraft, setAttachDraft] = useState<null | { path: string; id: string; from: number; to: number; noteVersion: string; noteText: string; inkVersion: string | null; quote: string; target: string }>(null);
-  const [thoughtChat,setThoughtChat]=useState<string|null>(null);
+  const [thoughtChat,setThoughtChat]=useState<string|null>(null),[toast,setToast]=useState<null|{text:string;id:string}>(null),[showDismissed,setShowDismissed]=useState(false);
   const [bringPreview,setBringPreview]=useState<null|{path:string;id:string;noteText:string;preview:BringPreview;render?:{layout:DiagramLayout;theme:'light'|'dark'}}>(null);
   const [insertionRepair,setInsertionRepair]=useState<RepairStatus|null>(null);
   const [repairError,setRepairError]=useState(false);
@@ -59,7 +60,7 @@ export default function App() {
   const panes = useRef(new Map<string, PaneHandle>());
   const listeners = useRef(new Set<(e: ServerEvent) => void>());
   const loaded = useRef(false);
-  useEffect(()=>{const open=(event:Event)=>{const detail=(event as CustomEvent<{id:string;thought?:boolean}>).detail;setThreadId(detail.id);if(detail.thought)setThoughtChat(detail.id);else{setThoughtChat(null);setRightTab('activity');setShowProps(true);}};window.addEventListener('open-thread',open);return()=>window.removeEventListener('open-thread',open);},[]);
+  useEffect(()=>{const open=(event:Event)=>{const detail=(event as CustomEvent<{id:string;thought?:boolean}>).detail;setThreadId(detail.id);setThoughtChat(detail.id);};window.addEventListener('open-thread',open);return()=>window.removeEventListener('open-thread',open);},[]);
 
   // Intersection, document visibility and the visible pane determine "shown".
   // Completion in an inactive tab alone must never produce a ledger event.
@@ -331,6 +332,10 @@ export default function App() {
       h.view.focus();
     });
 
+  // Dismiss hides a thought (nothing is deleted); Restore brings it back. Both are the existing human thread actions.
+  const thoughtAction=async(id:string,type:'dismiss'|'restore')=>{if(!active)return;try{const latest=await api.threads(active),s=await api.threadAction(active,id,latest.version,{type});onInkSaved(active,s);setToast(type==='dismiss'?{text:'Thought dismissed.',id}:null);if(type==='restore')setShowDismissed(false);}catch(e){setNotice(e instanceof Error?e.message:'That action could not be applied.');}};
+  useEffect(()=>{const dismiss=(e:Event)=>void thoughtAction((e as CustomEvent<{id:string}>).detail.id,'dismiss'),show=()=>setShowDismissed(true);window.addEventListener('dismiss-thought',dismiss);window.addEventListener('show-dismissed',show);return()=>{window.removeEventListener('dismiss-thought',dismiss);window.removeEventListener('show-dismissed',show);};});
+  useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(null),9000);return()=>clearTimeout(timer);},[toast]);
   const commands = useMemo(() => {
     const list: Array<OverlayItem & { run: () => void }> = [
       ...paths.map(path=>({id:`note:${path}`,label:`Jump to note: ${path}`,group:'Notes',run:()=>void openNote(path)})),
@@ -338,6 +343,7 @@ export default function App() {
         const r=h.view.state.selection.main,insert=slashInsert(item,r.from,r.to);
         h.view.dispatch({changes:insert.changes,selection:{anchor:insert.caret},userEvent:'input.palette',scrollIntoView:true});h.view.focus();
       })})),
+      {id:'dismissed',label:'Show dismissed thoughts',group:'AI',run:()=>setShowDismissed(true)},
       {id:'visualize',label:'AI: Visualize selection as a diagram',group:'AI',run:withView(h=>{if(!invokeSelection(h.view,'visualize'))setNotice('Select some text first, then choose Visualize.');})},
       {id:'tree',label:treeCollapsed?'Expand file tree':'Collapse file tree',group:'Workspace',run:()=>{setTreeCollapsed(v=>!v);if(!treePersistence)setTreeNotice(true);}},
       ...(['system','light','dark'] as const).map(value=>({id:`theme:${value}`,label:`Theme: ${value[0].toUpperCase()+value.slice(1)}`,group:'Appearance',run:()=>chooseTheme(value)})),
@@ -437,7 +443,6 @@ export default function App() {
               const sel = h.view.state.selection.main;
               void prepareAttach(item, sel.from, sel.to);
             }} />}
-          {active&&!thoughtChat&&<div hidden={rightTab!=='activity'}><ThreadPanel path={active} items={activeItems} version={currentInk?.version??null} saved={s=>onInkSaved(active,s)} insert={prepareInsert} openId={threadId} onOpen={setThreadId} visible={rightTab==='activity'}/></div>}
           {rightTab==='activity'&&insertPreview&&<section className="attach-preview" aria-label="Review takeaway insertion"><h2>Insert your takeaway</h2><p>This adds only your submitted text through the editor. Undo works normally.</p><pre>{insertPreview.preview.changes.insert}</pre><button onClick={()=>void applyInsert()}>Insert my takeaway</button><button onClick={()=>setInsertPreview(null)}>Cancel insertion</button></section>}
           {rightTab === "activity" && attachDraft && <section className="attach-preview" aria-label="Review re-attachment">
             <h2>Review re-attachment</h2>
@@ -447,6 +452,8 @@ export default function App() {
           </section>}
         </aside>
       )}
+      {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,'restore')}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
+      {showDismissed&&<DismissedThoughts items={activeItems} restore={id=>void thoughtAction(id,'restore')} close={()=>setShowDismissed(false)}/>}
       {active&&thoughtChat&&<ThoughtChat id={thoughtChat} close={()=>setThoughtChat(null)}><ThreadPanel path={active} items={activeItems} version={currentInk?.version??null} saved={s=>onInkSaved(active,s)} insert={async item=>{await prepareInsert(item);setShowProps(true);setRightTab('activity');}} openId={thoughtChat} onOpen={id=>{setThoughtChat(id);setThreadId(id);}} visible/></ThoughtChat>}
       {bringPreview&&<ThoughtInsertionPreview text={bringPreview.preview.changes.insert} insert={()=>void bringThought()} cancel={()=>setBringPreview(null)}/>}
       <footer className="statusbar">

@@ -44,9 +44,11 @@ try{
    if(url.pathname==='/api/chatgpt-plan')return route.fulfill({json:state==='settings'?{enabled:true,connected:false,hourlyCap:2,welcome:false}:{enabled:false,hourlyCap:2}});
    if(url.pathname==='/api/usage')return route.fulfill({json:{providers:['claude','chatgpt-plan'].map(provider=>({provider,calls:2,callsThisSession:2,input:180,cached:1400,output:210,reasoning:0,wallMs:1400,unreportedCalls:0})),hourlyCap:2}});
    return route.continue();});
-  const openNote=async name=>{await page.setViewportSize({width:1440,height:1000});state=name;await page.goto(base+'/?debug=1');await page.locator('.tree-item').filter({hasText:new RegExp('^'+name+'$')}).click();await page.waitForFunction(p=>document.querySelector('.rightpanel')?.getAttribute('data-note-path')===p&&window.__aitiarch?.[p]?.view.dom.getClientRects().length>0,name+'.md');};
+  // Thoughts open from their blob; a check opens one by id (the same event the blob's open button sends).
+ const openThought=async note=>{const id=await page.evaluate(async n=>{const s=await (await fetch('/api/threads?path='+encodeURIComponent(n))).json();return s.document.items.find(i=>i.generation)?.id;},note+'.md');await page.evaluate(id=>window.dispatchEvent(new CustomEvent('open-thread',{detail:{id,thought:true}})),id);await page.locator('.thread-card').waitFor();};
+ const openNote=async name=>{await page.setViewportSize({width:1440,height:1000});state=name;await page.goto(base+'/?debug=1');await page.locator('.tree-item').filter({hasText:new RegExp('^'+name+'$')}).click();await page.waitForFunction(p=>document.querySelector('.rightpanel')?.getAttribute('data-note-path')===p&&window.__aitiarch?.[p]?.view.dom.getClientRects().length>0,name+'.md');};
   for(const name of names){await openNote(name);await page.setViewportSize({width,height:1000});
-   if(!['empty','settings','usage'].includes(name)){await page.getByRole('button',{name:/^Activity/}).click();await page.locator('.thread-panel nav button').first().click();await page.locator('.thread-card').waitFor();}
+   if(!['empty','settings','usage'].includes(name)){await openThought(name);}
    if(['thread','takeaway-pending','orphan','provider-failure'].includes(name)){assert.equal(await page.getByLabel('Your takeaway',{exact:true}).inputValue(),'');assert.equal(await page.getByText('Synthetic AI closing summary after the human action.',{exact:true}).count(),0);}
    if(name==='usage')await page.getByText('My AI calls and tokens',{exact:true}).click();
    if(name==='settings')await page.getByRole('region',{name:'ChatGPT plan connection'}).waitFor();
@@ -76,11 +78,12 @@ try{
     const focus=await page.evaluate(()=>{const el=document.activeElement,s=getComputedStyle(el);return !el.matches(':focus-visible')||s.outlineStyle!=='none'||el.classList.contains('cm-content');});assert(focus,'keyboard focus must remain visible');
    }
    await page.waitForTimeout(100);await page.screenshot({path:path.join(screens,`${name}-${theme}-${width}.png`),fullPage:true});
-   if(!['empty','settings','usage','thread'].includes(name)){const target=name==='skipped'?page.locator('.skipped-takeaway'):page.getByLabel('Your takeaway',{exact:true});await target.scrollIntoViewIfNeeded();await page.screenshot({path:path.join(screens,`${name}-detail-${theme}-${width}.png`)});}
+   if(!['empty','settings','usage','thread'].includes(name)){await openThought(name); // the full-page screenshot above resizes the window and can collapse the open conversation
+   const target=name==='skipped'?page.locator('.skipped-takeaway'):page.getByLabel('Your takeaway',{exact:true});await target.scrollIntoViewIfNeeded();await page.screenshot({path:path.join(screens,`${name}-detail-${theme}-${width}.png`)});}
    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'horizontal page overflow');checks.push({name,theme,width,passed:true});
   }
   // Narrowest phone width also preserves toolbar and page bounds.
-  await openNote('thread');await page.getByRole('button',{name:/^Activity/}).click();await page.locator('.thread-panel nav button').first().click();await page.locator('.thread-card').waitFor();await page.setViewportSize({width:375,height:812});
+  await openNote('thread');await openThought('thread');await page.setViewportSize({width:375,height:812});
   await page.evaluate(q=>{const d=window.__aitiarch['thread.md'].view,from=d.state.doc.toString().indexOf(q);d.dispatch({selection:{anchor:from,head:from+q.length},scrollIntoView:true});d.focus();},selection);
   const phoneToolbar=page.getByRole('toolbar',{name:'Format selection'});await phoneToolbar.waitFor();await page.waitForTimeout(100);
   assert(await phoneToolbar.evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;}),'phone toolbar outside viewport');

@@ -69,6 +69,9 @@ try {
   console.log('invoked check: reload reached');
   await page.getByRole('button', { name: /^Activity/ }).click();
   await page.getByRole('region', { name: 'Orphaned ink' }).getByText('Synthetic answer 2.', { exact: true }).waitFor();
+  // The thread conversation now opens from its thought (here the orphaned one has no blob, so it opens as the floating panel).
+  await page.evaluate(async () => { const s = await (await fetch('/api/threads?path=fixture.md')).json(); const id = s.document.items.find(i => i.generation)?.id; window.dispatchEvent(new CustomEvent('open-thread', { detail: { id, thought: true } })); });
+  await page.getByRole('region', { name: 'AI thought conversation' }).waitFor();
   await page.getByRole('button', { name: 'Dismiss thread', exact: true }).first().click();
   console.log('invoked check: dismissal reached');
   await page.waitForTimeout(400);

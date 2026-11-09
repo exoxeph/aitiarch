@@ -6,7 +6,9 @@ export interface PlacedMargin {item:InkItem;top:number;target:number;side:Though
 interface Geometry {width:number;left:number;right:number}
 export function MarginRail({placed}:{placed:PlacedMargin[]}){
  const rail=useRef<HTMLElement>(null),sizes=useRef(new Map<string,number>());
- const [geometry,setGeometry]=useState<Geometry|null>(null),[active,setActive]=useState<string|null>(null);
+ const [geometry,setGeometry]=useState<Geometry|null>(null),[active,setActive]=useState<string|null>(null),[menu,setMenu]=useState<string|null>(null);
+ useLayoutEffect(()=>{if(menu)rail.current?.querySelector<HTMLElement>('.thought-more [role="menu"] button')?.focus();},[menu]);
+ const send=(el:HTMLElement,type:string,id?:string)=>{setMenu(null);el.dispatchEvent(new CustomEvent(type,{bubbles:true,detail:{id}}));};
  // Where the note column is, in rail coordinates; blobs and connectors are placed from it and recomputed on every layout pass.
  useLayoutEffect(()=>{
   const content=rail.current?.closest('.ink-surface')?.querySelector<HTMLElement>('.cm-content'),r=rail.current?.getBoundingClientRect();
@@ -37,6 +39,15 @@ export function MarginRail({placed}:{placed:PlacedMargin[]}){
     <span className="thought-text">{thoughtText(item)}</span><span className="thought-replies">{item.thread?.followups.filter(r=>r.generation.status==='complete').length??0} {item.thread?.followups.filter(r=>r.generation.status==='complete').length===1?'reply':'replies'}</span>
    </button>
    <DiagramSlot diagram={item.generation?.status==='complete'?item.diagram:undefined} invalid={item.diagramIssue} itemId={item.id}/>
+   <div className="thought-more" onKeyDown={e=>{if(menu!==item.id)return;const items=[...e.currentTarget.querySelectorAll<HTMLElement>('[role=menuitem]')],at=items.indexOf(document.activeElement as HTMLElement);
+    if(e.key==='Escape'){e.stopPropagation();setMenu(null);e.currentTarget.querySelector<HTMLElement>('button')?.focus();}
+    else if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();items[(at+(e.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();}}}>
+    <button type="button" aria-haspopup="menu" aria-expanded={menu===item.id} aria-label="More actions for this AI thought" onClick={()=>setMenu(menu===item.id?null:item.id)}>⋯</button>
+    {menu===item.id&&<div role="menu" aria-label="AI thought actions">
+     <button type="button" role="menuitem" onClick={e=>send(e.currentTarget,'dismiss-thought',item.id)}>Dismiss thought</button>
+     <button type="button" role="menuitem" onClick={e=>send(e.currentTarget,'show-dismissed')}>Show dismissed thoughts</button>
+    </div>}
+   </div>
    <button className="thought-bring" disabled={item.generation?.status!=='complete'} onClick={e=>e.currentTarget.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id}}))}>Bring to notebook</button>
   </article>;})}
  </aside>;

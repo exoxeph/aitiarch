@@ -24,10 +24,14 @@ let browser;
 try{
  browser=await chromium.launch({channel:'msedge',headless:true});const page=await browser.newPage({viewport:{width:1440,height:1000}});page.setDefaultTimeout(8000);
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.goto(`http://127.0.0.1:${await app.listen(0)}/?debug=1`);await page.waitForSelector('.cm-editor');await page.getByRole('button',{name:/^Activity/}).click();
- const panel=page.getByRole('region',{name:'Threads',exact:true});await panel.waitFor();
- const choose=async(id)=>{await panel.locator('nav button').filter({hasText:id}).click();};
- await panel.locator('nav button').first().click();
+ await page.goto(`http://127.0.0.1:${await app.listen(0)}/?debug=1`);await page.waitForSelector('.cm-editor');
+ // Thoughts open from their blob; a check opens one by id (the event the blob's open button sends).
+ const panel=page.locator('.thought-chat');
+ const collapse=async()=>{const b=page.getByRole('button',{name:'Collapse thought conversation'});if(await b.count())await b.click();}; // a floating conversation would sit over the toolbar and the right panel
+ const listItems=()=>page.evaluate(async()=>{const s=await (await fetch('/api/threads?path=fixture.md')).json();return s.document.items.filter(i=>i.generation).map(i=>({id:i.id,quote:i.anchor.quote}));});
+ const openIdx=async n=>{const list=await listItems();await page.evaluate(id=>window.dispatchEvent(new CustomEvent('open-thread',{detail:{id,thought:true}})),list[n].id);await panel.waitFor();};
+ const choose=async(text)=>{const list=await listItems(),hit=list.find(i=>i.id.includes(text)||i.quote.includes(text));await page.evaluate(id=>window.dispatchEvent(new CustomEvent('open-thread',{detail:{id,thought:true}})),hit.id);await panel.waitFor();};
+ await openIdx(0);
  await page.getByLabel('Your takeaway',{exact:true}).waitFor();assert.equal(await page.getByLabel('Your takeaway',{exact:true}).inputValue(),'');
  assert.equal(await page.getByText('Synthetic hidden summary.',{exact:true}).count(),0);
  await page.getByLabel('Your takeaway',{exact:true}).fill('Human half typed');
@@ -37,12 +41,12 @@ try{
  await page.waitForFunction(()=>window.__aitiarch['fixture.md'].view.state.doc.toString().startsWith('External edit.'));
  assert.equal(await page.getByLabel('Your takeaway',{exact:true}).inputValue(),'Human half typed');
  // Reopen another thread and return: memory-only draft survives selection changes.
- await panel.locator('nav button').nth(1).click();await panel.locator('nav button').first().click();
+ await openIdx(1);await openIdx(0);
  await page.getByRole('button',{name:'Add /ui-state.json* to root .gitignore',exact:true}).click();
  await page.waitForFunction(async()=>{const s=await (await fetch('/api/thread-drafts/status')).json();return s.enabled;});
  await page.getByLabel('Your takeaway',{exact:true}).fill('Human takeaway only.');
  await page.getByRole('button',{name:'Submit my takeaway',exact:true}).click();await page.getByText('Your submitted takeaway',{exact:true}).waitFor();
- await page.getByRole('button',{name:'Preview insertion',exact:true}).click();await page.getByRole('button',{name:'Insert my takeaway',exact:true}).click();
+ await page.getByRole('button',{name:'Preview insertion',exact:true}).click();await collapse();await page.getByRole('button',{name:'Insert my takeaway',exact:true}).click();
  await page.waitForFunction(()=>window.__aitiarch['fixture.md'].view.state.doc.toString().includes('Human takeaway only.'));
  await page.waitForFunction(()=>window.__aitiarch['fixture.md'].session.status==='saved');
  let expected='External edit.\n\n'+note;expected=expected.replace('A unique selected sentence.\n\n','A unique selected sentence.\n\nHuman takeaway only.\n\n');
@@ -51,13 +55,13 @@ try{
  await page.evaluate(()=>{window.__aitiarch['fixture.md'].view.focus();});await page.keyboard.press('Control+z');
  await page.waitForFunction(()=>window.__aitiarch['fixture.md'].session.status==='saved');
  assert.equal((await readFile(path.join(root,'fixture.md'),'utf8')),'\uFEFFExternal edit.\r\n\r\n'+note.replace(/\n/g,'\r\n'));
- await page.getByRole('button',{name:'Reopen takeaway',exact:true}).click();await page.getByRole('button',{name:'Skip takeaway',exact:true}).click();await page.getByText('Synthetic hidden summary.',{exact:true}).waitFor();
+ await openIdx(0); await page.getByRole('button',{name:'Reopen takeaway',exact:true}).click();await page.getByRole('button',{name:'Skip takeaway',exact:true}).click();await page.getByText('Synthetic hidden summary.',{exact:true}).waitFor();
  await page.getByText(/^Skipped on /).waitFor();assert.equal(await page.getByLabel('Your takeaway',{exact:true}).count(),0);
  await page.getByRole('button',{name:'Dismiss thread',exact:true}).click();await page.getByRole('button',{name:'Restore thread',exact:true}).click();await page.getByText(/^Skipped on /).waitFor();await page.getByRole('button',{name:'Reopen takeaway',exact:true}).click();await page.getByLabel('Your takeaway',{exact:true}).waitFor();assert.equal(await page.getByLabel('Your takeaway',{exact:true}).inputValue(),'Human takeaway only.');
  await page.getByRole('button',{name:'Delete thread…',exact:true}).click();await page.getByRole('button',{name:'Keep thread',exact:true}).click();
  await page.getByLabel('Your takeaway',{exact:true}).scrollIntoViewIfNeeded();await page.screenshot({path:path.join(screens,'thread-wide.png'),fullPage:true});
  // Fresh Think and Ask through the real toolbar, with fake delayed answers.
- const select=async(q)=>page.evaluate(q=>{const {view}=window.__aitiarch['fixture.md'],from=view.state.doc.toString().indexOf(q);view.dispatch({selection:{anchor:from,head:from+q.length},scrollIntoView:true});view.focus();},q);
+ const select=async(q)=>{await collapse();return page.evaluate(q=>{const {view}=window.__aitiarch['fixture.md'],from=view.state.doc.toString().indexOf(q);view.dispatch({selection:{anchor:from,head:from+q.length},scrollIntoView:true});view.focus();},q);};
  await select('A unique selected sentence.');await page.keyboard.press('Control+Enter');await page.getByRole('button',{name:'Send to Claude',exact:true}).click();
  await page.waitForFunction(()=>document.querySelector('[data-request-status="pending"]'));pending.shift()();
  await page.getByText('Synthetic accepted answer 1.',{exact:true}).first().waitFor({state:'attached'});
@@ -74,21 +78,21 @@ try{
  const attached=JSON.parse(await readFile(path.join(root,'ink/fixture.ink.json'),'utf8')).items.at(-1);assert.equal(attached.attachment.status,'attached');assert(attached.anchorHistory.length>0);
  // Failure labels for both providers, including interrupted and changed formats.
  const labels=['Provider disabled.','Provider unavailable.','Hourly cap reached.','Plan usage limit reached.','Answer rejected by validation.','Request interrupted.','Provider format changed'];
- for(let n=1;n<=14;n++){await panel.locator('nav button').nth(n).click();await panel.getByText(new RegExp(labels[(n-1)%7].replaceAll('.','\\.'))).waitFor();}
+ for(let n=1;n<=14;n++){await openIdx(n);await panel.getByText(new RegExp(labels[(n-1)%7].replaceAll('.','\\.'))).waitFor();}
  // A thread from the other provider requires one explicit directed confirmation.
- await panel.locator('nav button').nth(8).click();await page.getByLabel('Follow-up question').fill('Synthetic follow-up question.');await page.getByRole('button',{name:'Review follow-up',exact:true}).click();
- await page.getByRole('region',{name:'Review thread request'}).waitFor();assert(await page.getByRole('button',{name:'Send thread request',exact:true}).isDisabled());
- await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Send thread request',exact:true}).click();await waitPending();pending.shift()();
+ await openIdx(8);await page.getByLabel('Write back').fill('Synthetic follow-up question.');await page.getByRole('button',{name:'Review reply',exact:true}).click();
+ await page.getByRole('region',{name:'Review thread request'}).waitFor();assert(await page.getByRole('button',{name:'Send reply',exact:true}).isDisabled());
+ await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Send reply',exact:true}).click();await waitPending();pending.shift()();
  await panel.locator('.extra-answers:not([open]) summary').click();await panel.getByText('Synthetic accepted answer 3.',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Skip takeaway',exact:true}).click();await page.getByRole('button',{name:'Request closing summary',exact:true}).click();
- assert.equal(await page.getByRole('checkbox').count(),0,'confirmed provider transition is not repeated');await page.getByRole('button',{name:'Send thread request',exact:true}).click();
+ assert.equal(await page.getByRole('checkbox').count(),0,'confirmed provider transition is not repeated');await page.getByRole('button',{name:'Send reply',exact:true}).click();
  await waitPending();pending.shift()();await panel.getByText('Synthetic accepted answer 4.',{exact:true}).waitFor();
  assert.equal(await page.getByLabel('Your takeaway',{exact:true}).count(),0);await page.getByRole('button',{name:'Reopen takeaway',exact:true}).click();assert.equal(await page.getByLabel('Your takeaway',{exact:true}).inputValue(),'','AI replies never fill the human box');
  // A failed write retains only the validated reply and offers a save-only retry.
- await page.getByLabel('Follow-up question').fill('Synthetic save retry check.');await page.getByRole('button',{name:'Review follow-up',exact:true}).click();await page.getByRole('button',{name:'Send thread request',exact:true}).click();await waitPending();
+ await page.getByLabel('Write back').fill('Synthetic save retry check.');await page.getByRole('button',{name:'Review reply',exact:true}).click();await page.getByRole('button',{name:'Send reply',exact:true}).click();await waitPending();
  const lockFile=path.join(root,'ink/fixture.ink.json.lock');for(let n=0;;n++){try{await writeFile(lockFile,'Synthetic lock',{flag:'wx'});break;}catch(e){if(e.code!=='EEXIST'||n>=100)throw e;await new Promise(r=>setTimeout(r,20));}}
  pending.shift()();await page.getByRole('button',{name:'Retry saving reply (no new call)',exact:true}).waitFor();await rm(lockFile);await page.getByRole('button',{name:'Retry saving reply (no new call)',exact:true}).click();if(await panel.locator('.extra-answers:not([open]) summary').count())await panel.locator('.extra-answers:not([open]) summary').click();await panel.getByText('Synthetic accepted answer 5.',{exact:true}).waitFor();assert.equal(calls.length,5);
- await page.reload();await page.waitForSelector('.cm-editor');await page.getByRole('button',{name:/^Activity/}).click();await panel.locator('nav button').first().click();
+ await page.reload();await page.waitForSelector('.cm-editor');await openIdx(0);
  await page.getByText('Question text was kept in memory only and is unavailable after reload.',{exact:true}).first().waitFor();await page.waitForFunction(()=>document.querySelector('textarea[aria-label="Your takeaway"]')?.value==='Human takeaway only.');
  await page.setViewportSize({width:620,height:900});await page.getByLabel('Your takeaway',{exact:true}).scrollIntoViewIfNeeded();await page.screenshot({path:path.join(screens,'thread-narrow.png'),fullPage:true});
  await page.getByRole('button',{name:'Delete thread…',exact:true}).click();await page.getByRole('button',{name:'Confirm delete thread',exact:true}).click();

@@ -66,6 +66,29 @@ try {
   report.blobText = await blob.locator('svg').evaluate((svg) => { const s = svg.getBoundingClientRect().width / svg.viewBox.baseVal.width; return Math.round(Math.min(...[...svg.querySelectorAll('text')].map((t) => parseFloat(t.getAttribute('font-size') || '14') * s)) * 10) / 10; });
   assert(report.blobText >= 12, 'blob text under 12px: ' + report.blobText);
   await page.screenshot({ path: path.join(out, 'blob-diagram-light.png') });
+  // 2b. The "..." menu: keyboard reachable and named; Dismiss hides with an Undo toast; dismissed thoughts can be restored.
+  const more = blob.getByRole('button', { name: 'More actions for this AI thought' });
+  await more.focus(); await page.keyboard.press('Enter');
+  const menu = page.getByRole('menu', { name: 'AI thought actions' }); await menu.waitFor();
+  assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), ['Dismiss thought', 'Show dismissed thoughts']);
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Dismiss thought', 'first menu item takes focus');
+  await page.keyboard.press('ArrowDown'); assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Show dismissed thoughts');
+  await page.keyboard.press('Escape'); await menu.waitFor({ state: 'detached' });
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'More actions for this AI thought', 'Escape returns focus to the menu button');
+  await more.click(); await menu.getByRole('menuitem', { name: 'Dismiss thought' }).click();
+  const toast = page.getByRole('status').filter({ hasText: 'Thought dismissed.' }); await toast.waitFor();
+  await page.waitForFunction(() => !document.querySelector('.margin-card.thought-blob'));
+  await toast.getByRole('button', { name: 'Undo' }).click();
+  await page.locator('.margin-card.thought-blob').first().waitFor();
+  const ledger = JSON.parse(await readFile(path.join(root, 'ledger.json'), 'utf8'));
+  assert(ledger.events.some((e) => e.event === 'dismissed'), 'dismiss is recorded in the ledger');
+  await page.locator('.margin-card.thought-blob').first().getByRole('button', { name: 'More actions for this AI thought' }).click();
+  await page.getByRole('menuitem', { name: 'Dismiss thought' }).click(); await page.waitForFunction(() => !document.querySelector('.margin-card.thought-blob'));
+  await page.keyboard.press('Control+k'); await page.waitForTimeout(200); await page.keyboard.type('dismissed thoughts'); await page.waitForTimeout(200); await page.keyboard.press('Enter');
+  const list = page.getByRole('dialog', { name: 'Dismissed thoughts' }); await list.waitFor();
+  await list.getByRole('button', { name: /^Restore thought/ }).click();
+  await page.locator('.margin-card.thought-blob').first().waitFor();
+  report.thoughtMenu = 'ok';
 
   // 3. The command palette has Visualize too (and only previews).
   await select(from, to);
