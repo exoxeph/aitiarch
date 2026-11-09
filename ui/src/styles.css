@@ -510,7 +510,8 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .thought-ask .invocation-review > strong {font:600 13px var(--font-ui);}
 .thought-ask .invocation-review label {display:grid;gap:4px;}
 .thought-ask .invocation-review input[type=text],.thought-ask .invocation-review input:not([type]) {width:100%;font:inherit;padding:6px 8px;border:1px solid var(--control-border);border-radius:var(--radius-small);background:var(--paper);color:var(--ink-text);}
-.thought-ask blockquote {margin:0;padding-left:8px;border-left:2px solid var(--rule);color:var(--muted);font-size:12px;max-height:3.6em;overflow:hidden;}
+.thought-ask blockquote {margin:0;color:var(--muted);font:italic 12px/1.4 var(--font-body);max-height:3.6em;overflow:hidden;}
+.thought-ask blockquote::before {content:"\201C";} .thought-ask blockquote::after {content:"\201D";}
 .thought-ask .ask-hint {margin:0;}
 .thought-ask .what-is-sent {font-size:12px;} .thought-ask .what-is-sent summary {cursor:pointer;} .thought-ask .what-is-sent pre {max-height:160px;overflow:auto;white-space:pre-wrap;}
 .thought-ask .attach-actions {display:flex;gap:6px;flex-wrap:wrap;}
