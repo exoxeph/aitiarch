@@ -30,3 +30,28 @@ export function previewThoughtInsertion(note:{text:string;version:string},item:I
  const insert=newline+newline+block+(boundary?'':newline);
  return {noteVersion:note.version,changes:{from,to:from,insert},authorship:'ai' as const,insertedBy:'human' as const};
 }
+// ---- Blob placement beside the note column (pure, so it is testable without a browser) ----
+export const BLOB_MIN=280,BLOB_MAX=360,BLOB_EDGE=16,BLOB_GAP_MIN=32,BLOB_GAP_MAX=56;
+/** Width the window must have beyond the note column so a blob fits on each side: gap + minimum width + edge. */
+export const BLOB_RESERVE=2*(BLOB_GAP_MIN+BLOB_MIN+BLOB_EDGE);
+const clamp=(v:number,lo:number,hi:number)=>Math.max(lo,Math.min(hi,v));
+/**
+ * Where a blob sits horizontally, in surface coordinates. It is placed next to the note column (a 32 to 56 px gap that
+ * grows with spare room), 280 to 360 px wide, and never closer than 16 px to the window edge while the minimum width fits.
+ */
+export function blobBox(surfaceWidth:number,noteLeft:number,noteRight:number,side:ThoughtSide){
+ const room=side==='right'?surfaceWidth-noteRight-BLOB_EDGE:noteLeft-BLOB_EDGE;
+ const gap=clamp(room-BLOB_MAX-0,BLOB_GAP_MIN,BLOB_GAP_MAX);
+ const width=clamp(room-gap,BLOB_MIN,BLOB_MAX);
+ const left=side==='right'?noteRight+gap:noteLeft-gap-width;
+ return {left,width,gap};
+}
+/**
+ * Dotted connector from the end of the anchored text to the blob's dot. It leaves the end of the text downward into the
+ * gap under that line, runs sideways under the line, then through the empty margin to the dot, so it never crosses text.
+ */
+export function connectorPath(end:{x:number;lineBottom:number},dot:{x:number;y:number},column:{left:number;right:number},side:ThoughtSide){
+ const gutterX=side==='right'?column.right+(dot.x-column.right)/2:column.left-(column.left-dot.x)/2;
+ const y0=end.lineBottom-1;
+ return [{x:end.x,y:y0},{x:gutterX,y:y0},{x:gutterX,y:dot.y},{x:dot.x,y:dot.y}];
+}

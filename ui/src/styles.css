@@ -431,8 +431,8 @@ summary { cursor: pointer; }
 
 /* Invoked thoughts: display-only rails; the notebook remains a centered column. */
 .ink-surface .margin-rail.thought-rails { position:absolute;inset:0;width:auto;height:auto;max-height:none;display:block;padding:0;background:none;border:0;overflow:auto;pointer-events:none; }
-.thought-rails .margin-card.thought-blob { position:absolute;width:208px;left:auto;right:12px;min-height:0;padding:8px 4px;border:0;border-radius:0;box-shadow:none;background:var(--paper);font:var(--text-ai)/1.5 var(--font-body);color:var(--ink-text);pointer-events:auto; }
-.thought-rails .thought-blob[data-side="left"] {left:12px;right:auto;}
+.thought-rails .margin-card.thought-blob { position:absolute;width:320px;left:auto;right:auto;min-height:0;padding:8px 4px;border:0;border-radius:0;box-shadow:none;background:var(--paper);font:var(--text-ai)/1.5 var(--font-body);color:var(--ink-text);pointer-events:auto; }
+.thought-rails .thought-blob[data-side="left"] .thought-meta {justify-content:flex-end;}
 .thought-open { display:block;width:100%;padding:0;text-align:left;font:inherit;color:inherit;border:0;background:none;cursor:pointer; }
 .thought-meta {display:flex;align-items:center;gap:6px;margin-bottom:6px;}
 .thought-dot {display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--ai-ink);}
@@ -442,11 +442,15 @@ summary { cursor: pointer; }
 .thought-bring {border:0;background:none;color:var(--link);padding:4px 0;font:12px var(--font-ui);text-decoration:underline;text-underline-offset:3px;cursor:pointer;}
 .thought-bring:disabled {color:var(--muted);cursor:default;}
 .thought-diagram-slot:empty {display:none;}
-.thought-connector {position:absolute;left:0;border-left:1px dotted var(--control-border);pointer-events:none;}
+/* Connector: a thin dotted line from the end of the anchored text to the blob dot; faint at rest, stronger on hover/focus. */
+.thought-connectors {position:absolute;left:0;top:0;height:100%;overflow:visible;pointer-events:none;}
+.thought-connector {fill:none;stroke:var(--control-border);stroke-width:1;stroke-dasharray:1 4;stroke-linecap:round;opacity:.45;transition:opacity 140ms,stroke 140ms;}
+.thought-connector-on {opacity:1;stroke:var(--ai-ink);stroke-width:1.5;}
+@media (prefers-reduced-motion: reduce) {.thought-connector {transition:none;}}
 .cm-thought-anchor {text-decoration:underline dotted var(--ai-ink);text-underline-offset:4px;}
 .cm-thought-anchor:hover,.cm-thought-anchor.thought-active {background:var(--ai-surface);}
 .thought-blob:hover,.thought-blob:focus-within,.thought-blob.thought-active {background:var(--ai-surface);}
-.ink-surface[data-thought-layout="wide"] .cm-editor .cm-content {max-width:min(760px,calc(100% - 460px));margin-left:auto;margin-right:auto;}
+.ink-surface[data-thought-layout="wide"] .cm-editor .cm-content {max-width:min(760px,calc(100% - 656px));margin-left:auto;margin-right:auto;}
 /* The fallback is a list beneath the anchored paragraph, never at the end of the note. */
 .cm-ink-group {display:grid;gap:12px;}
 .cm-ink-group .cm-ink-block.thought-blob {margin:8px 0;padding:8px 0;border:0;border-radius:0;box-shadow:none;background:var(--ai-surface);font:var(--text-ai)/1.5 var(--font-body);}
@@ -471,3 +475,9 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .diagram-retry { margin-left: 8px; padding: 4px 8px; border: 1px solid var(--control-border); border-radius: var(--radius-small); background: var(--paper); color: var(--ink-text); font: 12px var(--font-ui); cursor: pointer; }
 .diagram-retry:hover { border-color: var(--accent); }
 .diagram-retry:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* A blob expands in place with its conversation; the panel's own headings and quote would only repeat what the blob shows. */
+.thought-blob[data-expanded] {background:var(--ai-surface);}
+.thought-blob .thought-chat {position:static;z-index:auto;overflow:visible;padding:8px 0 0;background:none;border:0;border-top:1px solid var(--rule);border-radius:0;box-shadow:none;max-height:none;width:auto;margin-top:8px;}
+.thought-blob .thought-chat > header {justify-content:flex-end;}
+.thought-blob .thought-chat > header strong,.thought-blob .thought-chat .thread-panel > h2,.thought-blob .thought-chat .thread-panel h3,.thought-blob .thought-chat .thread-panel > section > blockquote,.thought-blob .thought-chat .thread-panel > .muted {display:none;}

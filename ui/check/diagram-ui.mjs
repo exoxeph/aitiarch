@@ -35,7 +35,7 @@ let browser; const errors = [], report = {};
 try {
   const base = 'http://127.0.0.1:' + await app.listen(0);
   browser = await chromium.launch({ channel: 'msedge', headless: true });
-  const page = await browser.newPage({ viewport: { width: 1700, height: 1000 } });
+  const page = await browser.newPage({ viewport: { width: 1900, height: 1000 } });
   page.setDefaultTimeout(15000);
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(base + '/?debug'); await page.waitForFunction(() => window.__aitiarch?.['fixture.md']);
@@ -62,7 +62,7 @@ try {
   await blob.locator('svg').waitFor();
   assert.equal(calls.length, 1); assert.equal(calls[0].question, VISUALIZE_QUESTION);
   assert.equal(await page.locator('[data-diagram-issue]').count(), 0, 'the near-miss spec was repaired, not rejected');
-  report.firstLabel = await blob.locator('svg text').first().textContent();
+  await page.waitForTimeout(400); report.firstLabel = await blob.locator('svg text').first().textContent();
   report.blobText = await blob.locator('svg').evaluate((svg) => { const s = svg.getBoundingClientRect().width / svg.viewBox.baseVal.width; return Math.round(Math.min(...[...svg.querySelectorAll('text')].map((t) => parseFloat(t.getAttribute('font-size') || '14') * s)) * 10) / 10; });
   assert(report.blobText >= 12, 'blob text under 12px: ' + report.blobText);
   await page.screenshot({ path: path.join(out, 'blob-diagram-light.png') });

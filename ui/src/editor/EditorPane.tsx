@@ -5,7 +5,7 @@ import { Compartment, EditorState } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
 import type { InkItem } from "../../shared/ink.ts";
-import {layoutThoughts,thoughtSide,thoughtVisible} from '../../shared/thoughts.ts';
+import {BLOB_RESERVE,layoutThoughts,thoughtSide,thoughtVisible} from '../../shared/thoughts.ts';
 import { MarginRail, type PlacedMargin } from "../ink/MarginRail.tsx";
 import { api, ApiError, type InkSnapshot, type NoteFile, type ServerEvent } from "../api.ts";
 import { conflictDecorations, conflictHandlers, conflictsField } from "./conflicts.ts";
@@ -171,7 +171,7 @@ export function EditorPane(props: Props) {
         if (!surface.current || !live.current.visible) return;
         const bounds = surface.current.getBoundingClientRect();
         const ink = view.state.field(inkField);
-        const narrow=bounds.width<1080;
+        const narrow=bounds.width<560+BLOB_RESERVE; // the column may shrink to 560px; below that there is no room for a blob on each side
         surface.current.dataset.thoughtLayout=narrow?'narrow':'wide';
         if(ink.items.length&&!!ink.narrow!==narrow){view.dispatch({effects:setThoughtNarrow.of(narrow)});return;}
         const rows = narrow?[]:ink.items.filter(thoughtVisible).flatMap(item => {
@@ -180,7 +180,8 @@ export function EditorPane(props: Props) {
           const coords = view.coordsAtPos(anchor.from);
           if(!coords||coords.bottom<bounds.top||coords.top>bounds.bottom)return [];
           const el=Array.from(surface.current!.querySelectorAll<HTMLElement>('.margin-card')).find(el=>el.dataset.inkId===item.id);
-          return [{id:item.id,item,target:Math.max(8,coords.top-bounds.top),side:thoughtSide(item.id),height:el?.getBoundingClientRect().height??160}];
+          const last=view.coordsAtPos(anchor.to,-1)??coords; // end of the anchored text, for the connector
+          return [{id:item.id,item,target:Math.max(8,coords.top-bounds.top),side:thoughtSide(item.id),height:el?.getBoundingClientRect().height??160,end:{x:last.right-bounds.left,lineBottom:last.bottom-bounds.top}}];
         });
         setMargin(layoutThoughts(rows));
       });
