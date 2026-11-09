@@ -49,3 +49,27 @@ State of play, without claiming parity with a native rich-text editor:
 Composition (IME) text at the start of a heading or quote line landed once, in the right place, in the automated test.
 That test is synthetic (Chromium `Input.imeSetComposition`), so a person typing with a real Windows IME should also
 check it; see the manual test script in the slice A report.
+
+## Known performance limit: very long notes
+
+At about 42,000 lines a keystroke takes about 17 ms median (p95 about 26 ms); cursor moves stay near 1 ms. At about
+4,200 lines a keystroke is about 2.6 ms (p95 3.8 ms). The rendering layer is viewport-only and is not the cause. The
+suspected cause is `ui/src/editor/ink.ts`, which calls `doc.toString()` on every document change to map ink anchors
+(whole-note string work per keystroke). **Not confirmed with a profile, and deliberately not optimised**: `ink.ts` is
+in the protected ink area. Revisit only if real notes get that long.
+
+## Test-suite flakiness (checked 2026-11-09)
+
+Earlier sessions saw 1 to 3 timing failures at default parallelism (plan-stream, usage, providers), and one run during
+slice A showed 5 failures in one file that I did not capture. To pin it down the full unit suite was run 5 more times
+on the same tree: 3 times with `--maxWorkers=2` and 2 times at default parallelism. All 5 runs passed (746 passed,
+1 skipped, about 43 s each). So there is no known intermittently failing file right now. If it comes back, note the
+file and message here; the likely suspects are the timing-based tests, which depend on machine load.
+
+## Fixed: selection toolbar covered the docked margin rail
+
+In narrow layouts (about 620 px) the margin rail is a bar docked at the bottom. The selection toolbar could float over
+it and hide buttons such as "Re-attach to selected text". This was a real user-facing layout bug, not only test
+geometry: with a selection near the bottom of the page the toolbar overlapped the button, so most of the button could
+not be clicked. The toolbar now stays above the rail; if a selection sits under the rail there is no room and the
+toolbar is hidden.
