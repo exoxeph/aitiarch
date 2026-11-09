@@ -147,6 +147,9 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 /* floating selection toolbar */
 .cm-tooltip.cm-sel-toolbar { font-family: var(--font-ui); font-size: 13px; background: var(--paper); color: var(--ink-text); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow-floating); padding: 4px; display: flex; flex-direction: column; gap: 2px; min-width: min(250px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; z-index: 100; isolation: isolate; }
 .cm-sel-row { display: flex; gap: 2px; flex-wrap: wrap; }
+.cm-sel-toolbar-a > .cm-sel-row { flex-wrap: nowrap; align-items: center; }
+.cm-sel-toolbar-a > .cm-sel-row > * { flex-shrink: 0; }
+.cm-sel-toolbar-a select { font: inherit; background: var(--toolbar); color: var(--ink-text); border: 1px solid var(--control-border); border-radius: var(--radius-small); padding: 5px 4px; max-width: 105px; }
 .cm-sel-toolbar button { border: 0; background: none; border-radius: 4px; padding: 3px 8px; cursor: pointer; min-width: 26px; }
 .cm-sel-toolbar button:hover:not(:disabled) { background: var(--rule); }
 .cm-sel-toolbar button:disabled { opacity: .4; cursor: not-allowed; }
@@ -318,8 +321,8 @@ summary { cursor: pointer; }
 .overlay-box li.on { background: var(--accent-soft); }
 .extra-answers { padding: var(--space-2) 0; color: var(--ink-text); }
 .extra-answers > summary { color: var(--ai-ink); font-size: var(--text-control); }
-.cm-sel-toolbar button[title="Think on this (Ctrl+Enter)"] { background: var(--accent); color: var(--on-accent); }
-.cm-sel-toolbar button[title="Think on this (Ctrl+Enter)"]:hover { background: var(--accent); }
+.cm-sel-toolbar button[title="Think on this (Ctrl+Enter)"], .cm-sel-toolbar button[title="Ask about the frozen selection"] { background: var(--ai-surface); color: var(--ai-ink); }
+.cm-sel-toolbar button[title="Think on this (Ctrl+Enter)"]:hover { background: var(--ai-surface); }
 /* CodeMirror injects its own .cm-content padding after app CSS. Keep the page inset. */
 .cm-editor .cm-content { padding-left: var(--page-inset); padding-right: var(--page-inset); }
 .sidebar[hidden] { display: none; }

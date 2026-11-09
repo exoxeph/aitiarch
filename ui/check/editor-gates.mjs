@@ -13,6 +13,7 @@ const wrapped='# A very long launch plan heading that wraps across several visua
 const big=n=>{let s='# Big note\n';for(let i=0;i<n;i++)s+=`\n## Section ${i}\n\nParagraph with **bold** words and *italic* and \`code\` and a [link](https://x.test/${i}).\n\n- bullet one\n- bullet two\n\n> quoted line ${i}\n\nPlain filler paragraph number ${i}.\n`;return s;};
 
 async function session(name,content,fn){
+ if(process.env.EDITOR_GATE_ONLY && process.env.EDITOR_GATE_ONLY!==name)return;
  const root=await mkdtemp(path.join(os.tmpdir(),'aitiarch-gates-'));execFileSync('git',['init','-q'],{cwd:root,stdio:'pipe'});await writeFile(path.join(root,'.gitignore'),'/.cache/\n/ui-state.json*\n');
  const bytes=Buffer.from(content);await writeFile(path.join(root,'n.md'),bytes);
  const store=await Store.open(root),watcher=new NoteWatcher(store,50,10);await watcher.start();
@@ -180,6 +181,26 @@ await session('slash-fallback',slashNote,async({page,theme,root,bytes})=>{
   for(let n=0;n<6&&(await doc(page))!==d;n++)await page.keyboard.press('Control+z');
   assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes);
  }
+});
+await session('toolbar-b',small,async({page,theme,root,bytes})=>{
+ const d=await doc(page),from=d.indexOf('Intro'),to=from+15;
+ await put(page,from,to);const toolbar=page.getByRole('toolbar',{name:'Format selection'});await toolbar.waitFor();
+ assert.equal(await toolbar.locator('.cm-sel-row').count(),1,'variant A must be one row');
+ for(const title of ['Bold (Ctrl+B)','Italic (Ctrl+I)','Strikethrough (Ctrl+Shift+X)','Inline code','Link','Text style'])assert.equal(await toolbar.locator(`[title="${title}"]`).count(),1);
+ await toolbar.getByTitle('Bold (Ctrl+B)',{exact:true}).click();assert.equal(await doc(page),d.slice(0,from)+'**'+d.slice(from,to)+'**'+d.slice(to));
+ await page.keyboard.press('Control+z');assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes);
+ await put(page,from,to);await page.keyboard.press('Alt+F10');assert.equal(await page.evaluate(()=>document.activeElement?.closest('.cm-sel-toolbar')!==null),true,'keyboard cannot enter toolbar');
+ await page.keyboard.press('ArrowRight');assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'Ask...');
+ await page.keyboard.press('Escape');assert.equal(await page.evaluate(`${V}.hasFocus`),true);
+ await toolbar.getByTitle('Link',{exact:true}).click();assert.equal(await doc(page),d.slice(0,from)+'['+d.slice(from,to)+']()'+d.slice(to));await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
+ await put(page,from,to);await toolbar.getByRole('button',{name:'Ask...',exact:true}).click();
+ const frozen=await page.locator('.invocation-review blockquote').textContent();
+ await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,insert:'User edit.\n'}});});
+ assert.equal(await page.locator('.invocation-review blockquote').textContent(),frozen,'frozen selection changed');assert.equal(frozen,d.slice(from,to));
+ await page.getByRole('button',{name:'Cancel preview'}).click();await page.evaluate(()=>window.__aitiarch['n.md'].view.focus());await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
+ await put(page,from,to);await page.locator('.editor-col').screenshot({path:path.join(output,`gate-toolbar-b-${theme}.png`)});
+ await put(page,from);assert.equal(await toolbar.count(),0,'empty selection toolbar shown');
+ report[`toolbar-b-${theme}`]={oneRow:true,keyboard:true,frozenSelection:true,byteExact:true};
 });
 // ---- 3. cost at about 5,000 and 50,000 lines (real app, ink and anchors on)
 for(const n of [380,3850]){
