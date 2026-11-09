@@ -78,8 +78,7 @@ toolbar is hidden.
 `node check/threads.mjs` fails about 2 runs in 5, with or without the A2 styling (measured 2026-11-09: 2 of 5 with, 2 of 5
 without). The failure is at the "re-attach the orphan" step: the page shows "The note or ink changed since selection.
 Review it and try again." and the wait for the orphan list to empty times out at `check/threads.mjs:71`. It looks like a
-race between the pending ink sidecar save and building the re-attach preview. The cause is not clear and not small, so it
-is left alone; the unit suite and every other browser check pass. Worth a look before relying on that flow.
+race between the pending ink sidecar save and building the re-attach preview. The cause was found later the same day; see "Fixes made after the stop at C" below.
 ## Lists, checkboxes and code blocks (D1)
 
 - Bullets, checkboxes and code fences keep their source characters. Away from the line the characters turn transparent
@@ -101,3 +100,36 @@ Follow-up (same day): the original commit before any of this work (`b906d2d`, ch
 there) fails `check/threads.mjs` at the same step, 6 of 6 runs. In the main working tree it failed 2 of 5, 2 of 5 and 3 of 4
 runs at different points of the work. So the failure is not caused by the editor changes; how often it shows seems to depend
 on the machine and timing.
+
+## Before any push: scrub the leftover reflog object
+
+While committing D1 the two protected holdout ZIPs (ui/test/anchoring-holdout/anchoring-holdout.zip and
+nchoring-holdout-round2.zip) were staged by accident. The commit was amended before anything left this machine, so no
+branch contains them, but the old commit is still reachable from the local reflog and its objects are still in
+.git/objects:
+
+- commit `c3199f040701b335d47d5dd812f849ce6829f764` (the pre-amend D1 commit)
+- blobs: 95ae070dd95faa29ed68b5781fdb778b667cf39b ui/test/anchoring-holdout/anchoring-holdout-round2.zip; 48305c12ef22e17b05f3c124b4f529135461209c ui/test/anchoring-holdout/anchoring-holdout.zip
+
+Nothing was pushed. **Before the first push** the repository has to be scrubbed so those objects cannot travel, for
+example by pushing from a fresh clone or after git reflog expire --expire=now --all and git gc --prune=now.
+That was deliberately not run (owner instruction); do it only when told, and re-check with
+`git cat-file -t c3199f0` (it should then report that the object is missing).
+
+## Fixes made after the stop at C
+
+- **Undo after a save could be overwritten.** The "file changed" event carries no content, so the editor fetched the file.
+  A read taken just before our own next save landed after it, looked like an outside edit (versions are content hashes
+  and cannot be ordered) and replaced the editor text, losing the undo. `NoteSession.refresh()` now never reads while a
+  save is in flight and repeats any read that overlapped one of our saves. Deterministic regression test:
+  `ui/test/session-stale-read.test.ts`.
+- **Spurious "note or ink changed" on re-attach.** Two sidecar writes at the same moment (the editor's background ink
+  checkpoint and the user's re-attach) made the second fail on the lock file with "Ink store busy", reported as a 409.
+  `InkStore.write` now queues writes in call order; the lock file still guards other processes. This was the cause of the
+  `check/threads.mjs` failures (a product race present since the ink store and that check were added on 2026-11-07/08),
+  not a test selector problem. The check passed 18 of 18 runs afterwards.
+- **Slash menu timing.** The autocomplete delays are set explicitly (`interactionDelay: 0`, `activateOnTypingDelay: 10`)
+  and Enter or Tab on a `/query` line with the menu still pending applies the best match, so a fast `/code` + Enter no
+  longer inserts a newline. Tab accepts only while a slash menu is showing or pending.
+- **Tooling accident.** Removing a temporary git worktree that held a junction to `ui/node_modules` emptied the real
+  folder; it was restored with `npm ci` from the unchanged lockfile. Never remove such a worktree with the junction in place.
