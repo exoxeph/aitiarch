@@ -1,4 +1,5 @@
-import {readDiagram} from '../shared/diagram.ts';
+import {prepareDiagram,type Diagram,type DiagramIssue} from '../shared/diagram.ts';
+import {captureDiagram} from './diagram-debug.ts';
 import type { Generation } from '../shared/ink.ts';
 import type { Result } from './providers/index.ts';
 
@@ -67,6 +68,18 @@ export function validateProductResult(result:Result,expectedId:string,sources:So
     requireRule('claim_quote_exact',text!.includes(c.quote));
     return {sourceId:c.sourceId,sourceHash:hash(text!),quote:c.quote};
   });
-  const diagram=result.diagram===undefined?undefined:readDiagram(result.diagram);
-  return {body,model,evidence,passedRules,diagram:diagram??undefined,diagramIssue:result.diagram!==undefined&&!diagram?'invalid' as const:undefined};
+  // A diagram is optional and never blocks the text answer. It is repaired when it only misses a limit by a little,
+  // and when it still cannot be used the item records a specific reason instead of a generic one.
+  let diagram:Diagram|undefined,diagramIssue:DiagramIssue|undefined;
+  if(result.diagram!==undefined){
+    const prepared=prepareDiagram(result.diagram);
+    if(prepared.ok){
+      diagram=prepared.diagram;
+      if(prepared.notes)captureDiagram({kind:'repaired',notes:{...prepared.notes},raw:result.diagram});
+    }else{
+      diagramIssue=prepared.code;
+      captureDiagram({kind:'rejected',code:prepared.code,path:prepared.path,...(prepared.notes?{notes:{...prepared.notes}}:{}),raw:result.diagram});
+    }
+  }
+  return {body,model,evidence,passedRules,diagram,diagramIssue};
 }

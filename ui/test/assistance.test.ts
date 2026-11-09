@@ -199,6 +199,6 @@ it('rejects ledger symlinks without overwriting the target', async () => {
 
 it('persists an optional validated diagram and drops an invalid diagram without rejecting the text',async()=>{
  for(const invalid of [false,true]){const f=await fixture();await f.service.start(f.input);const {cicd}=await import('./fixtures/diagrams.ts');
- f.calls[0].resolve({id:f.input.id,provider:'claude',model:null,answer:'Synthetic diagram answer.',claims:[],usage:null,diagram:invalid?{...cicd,svg:'not accepted'}:cicd});await f.service.wait(f.input.id);
- const item=(await f.ink.read('fixture.md')).document.items[0];expect(item.generation?.status).toBe('complete');expect(item.body).toBe('Synthetic diagram answer.');expect(item.diagram).toEqual(invalid?undefined:cicd);expect(item.diagramIssue).toBe(invalid?'invalid':undefined);expect(await readFile(path.join(f.root,'fixture.md'))).toEqual(f.bytes);}
+ f.calls[0].resolve({id:f.input.id,provider:'claude',model:null,answer:'Synthetic diagram answer.',claims:[],usage:null,diagram:invalid?{...cicd,nodes:[]}:cicd});await f.service.wait(f.input.id);
+ const item=(await f.ink.read('fixture.md')).document.items[0];expect(item.generation?.status).toBe('complete');expect(item.body).toBe('Synthetic diagram answer.');expect(item.diagram).toEqual(invalid?undefined:cicd);expect(item.diagramIssue).toBe(invalid?'node_count':undefined);expect(await readFile(path.join(f.root,'fixture.md'))).toEqual(f.bytes);}
 });

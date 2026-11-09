@@ -1,4 +1,4 @@
-import type {Diagram} from '../shared/diagram.ts';
+import type {Diagram,DiagramIssue} from '../shared/diagram.ts';
 import { randomUUID } from 'node:crypto';
 import { mapInkItems } from '../shared/anchor-mapping.ts';
 import { freezeInvocation, type Invocation } from '../shared/invocation.ts';
@@ -80,7 +80,7 @@ export class Assistance {
     let finish!: () => void;
     const job: Job = { path, controller, status: 'queued', done: new Promise(resolve => { finish = resolve; }), run: async () => {
       let body = '', status: Generation['status'] = 'complete', model: string | null = null, evidence: Generation['evidence'] = [];
-      let diagram:Diagram|undefined,diagramIssue:'invalid'|undefined;
+      let diagram:Diagram|undefined,diagramIssue:DiagramIssue|undefined;
       let resultReceived=false,result:Awaited<ReturnType<Provider['invoke']>>|undefined;
       const record=async(row:ValidationRecord)=>{try{await this.validationLog.write(row);}catch{/* Metrics never change acceptance or persistence. */}};
       try {

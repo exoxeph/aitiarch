@@ -5,7 +5,7 @@ import {validateProductResult} from '../server/product-validation.ts';
 for(const kind of ['think','ask','followup'] as const)it(`${kind} requests ask for short plain answers, distinguishing note facts from hypotheses without internal jargon`,()=>{
  const instruction=prepareRequest({id:'short-test',action:kind==='think'?'think':'ask',question:kind==='followup'?'Synthetic follow-up':'',selection:'Synthetic',note:'Synthetic',decisions:[],turns:[]}).instruction;
  expect(instruction).toContain('at most about 120 words');expect(instruction).toContain('plain language');expect(instruction).toContain('first sentence');
- expect(instruction).toContain('what the note says');expect(instruction).toContain('a hypothesis, not stated in the note');expect(instruction).toContain('Do not mention decision IDs, source IDs, contracts or validation in the answer text');
+ expect(instruction).toContain('The first sentence is the answer itself');expect(instruction).toContain('in one short clause at most, and only when the question is about the note');expect(instruction).toContain('Never claim the note says or contains something you did not see');expect(instruction).toContain('as a hypothesis');expect(instruction).toContain('Do not mention decision IDs, source IDs, contracts or validation in the answer text');
  expect(instruction).toContain('The field is named exactly "quote"');
 });
 it('answer length is metadata only; a 150-word answer still passes the unchanged validator',()=>{

@@ -1,4 +1,4 @@
-import {readDiagram,type Diagram} from './diagram.ts';
+import {isDiagramIssue,readDiagram,type Diagram,type DiagramIssue} from './diagram.ts';
 import {validateGeneration,validateThread,type ThreadRecord} from './threads.ts';
 import { resolveAnchor, validateAnchor, type Anchor, type Attachment } from "./anchors.ts";
 
@@ -18,7 +18,7 @@ export interface InkItem {
   kind: "answer" | "margin";
   body: string;
   diagram?: Diagram;
-  diagramIssue?: "invalid";
+  diagramIssue?: DiagramIssue;
   originalAnchor: Anchor;
   anchorHistory?: Anchor[];
   anchor: Anchor;
@@ -60,7 +60,7 @@ export function validateDocument(value: unknown, note: string): asserts value is
         typeof i.id !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(i.id) || ids.has(i.id) ||
         !["answer", "margin"].includes(i.kind) || typeof i.body !== "string" || i.body.length > 100000) throw new Error("Invalid ink item.");
     ids.add(i.id);
-    if((i.diagram!==undefined&&!readDiagram(i.diagram))||(i.diagramIssue!==undefined&&i.diagramIssue!=="invalid"))throw new Error("Invalid ink diagram.");
+    if((i.diagram!==undefined&&!readDiagram(i.diagram))||(i.diagramIssue!==undefined&&!isDiagramIssue(i.diagramIssue)))throw new Error("Invalid ink diagram.");
     if (i.generation !== undefined) validateGeneration(i.generation,i.id);
     if (i.thread !== undefined) validateThread(i.thread,i.id);
     if (i.anchorHistory !== undefined && (!Array.isArray(i.anchorHistory) || i.anchorHistory.length > 100)) throw new Error("Invalid ink anchor history.");

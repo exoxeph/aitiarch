@@ -11,3 +11,6 @@ __pycache__/
 # Git Bash crash dumps (a shell artifact, not project output).
 bash.exe.stackdump
 *.stackdump
+
+# Opt-in local capture of rejected diagram specs (AITIARCH_DEBUG_DIAGRAMS=1); may contain note text.
+/ui/.debug-diagrams/

@@ -16,11 +16,11 @@ it('validates groups, type-specific tree and comparison invariants',()=>{
  expect(readDiagram({...example,groups:[{id:'group',label:'Team',nodeIds:['missing']}]})).toBeNull();
 });
 it('invalid optional diagram drops only diagram; existing answer and quote validation stay strict',()=>{
- const r={id:'r',provider:'claude' as const,model:null,answer:'A short explanation.',claims:[],usage:null,diagram:{...example,svg:'bad'}};
- expect(validateProductResult(r,'r',{note:'Note.',decisions:[]},s=>s,s=>s)).toMatchObject({body:r.answer,diagramIssue:'invalid'});
+ const r={id:'r',provider:'claude' as const,model:null,answer:'A short explanation.',claims:[],usage:null,diagram:{...example,nodes:[]}};
+ expect(validateProductResult(r,'r',{note:'Note.',decisions:[]},s=>s,s=>s)).toMatchObject({body:r.answer,diagramIssue:'node_count'});
  expect(()=>validateProductResult({...r,claims:[{sourceId:'N1',quote:'Not in note'}]},'r',{note:'Note.',decisions:[]},s=>s,s=>s)).toThrow();
 });
 it('Think and Ask share the exact when-to-draw rule and schema without weakening the quote contract',()=>{
  for(const action of ['think','ask'] as const){const p=prepareRequest({id:'r',action,question:'Explain',selection:'Note.',note:'Note.',decisions:[],turns:[]});
- expect(p.instruction).toContain(diagramInstruction);expect(p.instruction).toContain('Otherwise omit diagram');expect(p.instruction).toContain('at most 240 characters');expect(p.instruction).toContain('Never output SVG');}
+ expect(p.instruction).toContain(diagramInstruction);expect(p.instruction).toContain('leave diagram out');expect(p.instruction).toContain('at most 240 characters');expect(p.instruction).toContain('Never output SVG');}
 });

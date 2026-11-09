@@ -80,7 +80,7 @@ async function fixture(options:{enabled?:boolean;hourlyCap?:number;timeoutMs?:nu
       let sequence=0;const event=(value:any)=>res.write('data: '+JSON.stringify({...value,sequence_number:sequence++})+'\n\n');
       if(mode.startsWith('stream-error:')){event({type:'response.failed',response:{status:'failed',error:{code:mode.slice(13),message:tokens[0]}}});return res.end();}
       if(mode==='unknown')event({type:'response.unreviewed',text:tokens[0]});
-      const answer=JSON.stringify({...((mode==='diagram-valid'||mode==='diagram-invalid')?{diagram:mode==='diagram-valid'?cicd:{...cicd,svg:'untrusted'}}:{}),answer:'Synthetic answer.',claims:[{sourceId:'N1',quote:mode==='quote-mismatch'?'Absent.':request.selection,...(mode==='extra-claim'?{other:true}:{})}]});
+      const answer=JSON.stringify({...((mode==='diagram-valid'||mode==='diagram-invalid')?{diagram:mode==='diagram-valid'?cicd:{...cicd,nodes:[]}}:{}),answer:'Synthetic answer.',claims:[{sourceId:'N1',quote:mode==='quote-mismatch'?'Absent.':request.selection,...(mode==='extra-claim'?{other:true}:{})}]});
       if(mode!=='empty')event({type:'response.output_text.delta',output_index:0,content_index:0,item_id:'synthetic-item',delta:answer});
       if(mode==='unknown-field')event({type:'response.output_text.delta',output_index:0,content_index:0,item_id:'synthetic-item',delta:'',secret:'bad'});
       if(mode!=='incomplete')event({type:'response.completed',response:{status:'completed',model:'synthetic-model',output:[{type:'message',role:'assistant',content:[{type:'output_text',text:mode==='empty'?'':answer}]}],usage:{input_tokens:20,input_tokens_details:{cached_tokens:4},output_tokens:10,output_tokens_details:{reasoning_tokens:3}}}});
@@ -338,5 +338,5 @@ it('can enforce exactly one HTTP attempt for a separately approved live check',a
 });
 
 it.each(['diagram-valid','diagram-invalid'])('preserves strict answer contract with optional %s through the fake plan server',async mode=>{
- const f=await fixture();await f.login();f.setMode(mode);const result=await f.provider.invoke(request),value=validateProductResult(result,request.id,request,s=>s,s=>s,'chatgpt-plan');expect(value.body).toBe('Synthetic answer.');expect(value.diagram).toEqual(mode==='diagram-valid'?cicd:undefined);expect(value.diagramIssue).toBe(mode==='diagram-invalid'?'invalid':undefined);
+ const f=await fixture();await f.login();f.setMode(mode);const result=await f.provider.invoke(request),value=validateProductResult(result,request.id,request,s=>s,s=>s,'chatgpt-plan');expect(value.body).toBe('Synthetic answer.');expect(value.diagram).toEqual(mode==='diagram-valid'?cicd:undefined);expect(value.diagramIssue).toBe(mode==='diagram-invalid'?'node_count':undefined);
 });
