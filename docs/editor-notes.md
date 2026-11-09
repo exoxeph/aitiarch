@@ -127,3 +127,30 @@ That was deliberately not run (owner instruction); do it only when told, and re-
   longer inserts a newline. Tab accepts only while a slash menu is showing or pending.
 - **Tooling accident.** Removing a temporary git worktree that held a junction to `ui/node_modules` emptied the real
   folder; it was restored with `npm ci` from the unchanged lockfile. Never remove such a worktree with the junction in place.
+## Diagrams: why "Diagram unavailable" appeared, and what changed
+
+**Cause (offline, no live calls).** Nothing had recorded the two rejected specs: the trial notebook's `.aitiarch` has only
+the successful third diagram, the usage log shows three diagram-sized answers (about 2,000 output tokens each) at
+17:52, 17:53 and 18:05 on 2026-11-09, and the validation log only counts text failures. Running the real validator and the
+real ELK layout over model-shaped specs showed the layer that fails: layout accepted every valid spec, while the strict
+validator rejected 13 of 23 ordinary near misses (a label over 64 characters, `->` or `<` in a label, a URL in a label, an
+extra field such as `direction`, repeated focus ids, an id shared by a node and an edge, an id starting with a digit, a
+tree with two parents or two roots, a comparison with edges or more than 5 items, an over-long caption). **The exact spec
+Claude sent is not known**, so which of these it was is unverified.
+
+**What changed.** The strict check is unchanged and now reports a fixed reason code plus a JSON path. A repair step runs
+first (trim over-long text, replace arrows, remove `<` `>`, URLs and control characters, drop unknown fields, clamp counts,
+make ids valid and unique, fix references, turn an impossible tree or comparison into a flow or layers diagram). It can only
+remove or shorten, so the strict check still guarantees plain text with no markup or URLs. A diagram that still cannot be
+used shows "Diagram unavailable: <reason>" in the blob with a "Try diagram again" button that opens a normal Visualize
+review (no automatic second call).
+
+**Capture for the next real failure.** Start the server with `AITIARCH_DEBUG_DIAGRAMS=1`. Rejected and repaired specs are
+appended to `ui/.debug-diagrams/diagrams.jsonl` (git-ignored, 256 KB cap, 16 KB per spec, oldest dropped first). Each row
+has `at`, `kind`, `code`, `path`, `notes` (repair counts) and `raw`. It can contain text from your notes: keep it local and
+remove anything private before turning a row into a fixture.
+
+**Prompt changes to test live** (not run): the Think/Ask answer wording and the diagram rules are in
+`ui/server/providers/index.ts` and `ui/shared/diagram.ts` (`diagramInstruction`, `visualizeInstruction`). Visualize, or the
+words draw, diagram, visualize, sketch or flowchart in the question or the selection, switches to the required-diagram
+wording.
