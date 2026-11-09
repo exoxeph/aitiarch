@@ -145,6 +145,15 @@ function create(view: EditorView): TooltipView {
   render();
   return {
     dom,
+    offset: {x:0,y:8},
+    getCoords() {
+      const r=view.state.selection.main;
+      const first=view.coordsAtPos(r.from)!,last=view.coordsAtPos(r.to)!;
+      const previous=view.coordsAtPos(Math.max(0,view.state.doc.lineAt(r.from).from-1))!;
+      // Protect the selection AND the preceding line. CM flips below this
+      // whole rectangle when there isn't room above it.
+      return {left:first.left,right:first.right,top:Math.min(first.top-view.defaultLineHeight,previous.top),bottom:last.bottom};
+    },
     update(u: ViewUpdate) {
       if (u.selectionSet || u.docChanged) {
         if (reasonMode && !u.state.selection.main.empty && !u.docChanged) return; // keep the reason box while you type in it
@@ -172,8 +181,10 @@ const toolbarField = StateField.define<Tooltip | null>({
  * In narrow layouts the margin rail is a bar docked at the bottom of the page. The toolbar may float anywhere in the
  * viewport except over it, otherwise it hides the rail's buttons (for example "Re-attach to selected text").
  */
-function toolbarSpace() {
+function toolbarSpace(view:EditorView) {
   const space = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+  const pane=view.dom.closest('.pane')?.getBoundingClientRect();
+  if(pane){space.top=Math.max(space.top,pane.top+8);space.bottom=Math.min(space.bottom,pane.bottom-8);}
   const rail = document.querySelector(".margin-rail");
   if (rail && getComputedStyle(rail).position === "static") {
     const top = rail.getBoundingClientRect().top;

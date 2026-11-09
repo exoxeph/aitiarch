@@ -340,3 +340,5 @@ for(const n of [455,4545]){
 await writeFile(path.join(output,'editor-gates.json'),JSON.stringify({report,providerCalls:calls,externalRequests:external,errors},null,2));
 console.log(JSON.stringify({report,providerCalls:calls,externalRequests:external,errors},null,1));
 assert.equal(calls,0);assert.equal(external,0);assert.deepEqual(errors,[]);
+// The navigation gate uses real pointer/keyboard input and independently checks disk bytes.
+if(!process.env.EDITOR_GATE_ONLY)await import('./navigation.mjs');
