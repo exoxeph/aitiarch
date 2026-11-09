@@ -6,7 +6,7 @@ import { TaskList, Strikethrough, Autolink } from "@lezer/markdown";
 import { describe, it, expect } from "vitest";
 import { buildInline, lineRanges, livePreview } from "../src/editor/livepreview.ts";
 import { taskMarkerAt, taskToggleChange } from "../src/editor/tasks.ts";
-import { slashMatch, slashInsert, slashSource, SLASH_ITEMS } from "../src/editor/slash.ts";
+import { slashMatch, slashInsert, slashPick, slashSource, SLASH_ITEMS } from "../src/editor/slash.ts";
 import { CompletionContext } from "@codemirror/autocomplete";
 import { fenceLabel } from "../src/editor/codeblocks.ts";
 import { touchesSpan, touchesLines, hidesFor, quoteMarkGroups, autolinkHides } from "../src/editor/reveal.ts";
@@ -242,4 +242,9 @@ describe("slash menu (C)", () => {
     expect(at("some text /", "text /")).toBeNull();
     expect(at("    code\n\n/", "\n\n/")).not.toBeNull();
   });
+});
+
+describe("slash fallback pick (C)", () => {
+  it.each([["code", "Code block"], ["head", "Heading 1"], ["h2", "Heading 2"], ["todo", "To-do list"], ["to-do", "To-do list"], ["quo", "Quote"], ["div", "Divider"], ["num", "Numbered list"], ["bul", "Bulleted list"]])("/%s picks %s", (q, label) => expect(slashPick(q)?.label).toBe(label));
+  it("returns null when nothing matches", () => expect(slashPick("zzz")).toBeNull());
 });

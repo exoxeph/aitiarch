@@ -141,13 +141,13 @@ await session('slash',slashNote,async({page,theme,root,bytes})=>{
  await page.keyboard.type('head');R.filtered=await labels();assert.deepEqual(R.filtered.map(s=>s.replace(/#+$/,'')),['Heading 1','Heading 2','Heading 3']);
  await page.locator('.cm-tooltip-autocomplete').screenshot({path:path.join(output,`gate-slash-${theme}.png`)});
  R.selectedContrast=await page.evaluate(()=>{const lin=c=>{c/=255;return c<=.03928?c/12.92:((c+.055)/1.055)**2.4};const rgb=s=>(s.match(/[\d.]+/g)||[]).slice(0,3).map(Number);const L=a=>.2126*lin(a[0])+.7152*lin(a[1])+.0722*lin(a[2]);const li=document.querySelector('.cm-tooltip-autocomplete li[aria-selected]');const cs=getComputedStyle(li);const p=L(rgb(cs.color)),q=L(rgb(cs.backgroundColor));return Math.round((Math.max(p,q)+.05)/(Math.min(p,q)+.05)*100)/100;});assert(R.selectedContrast>=4.5,`selected item contrast ${R.selectedContrast}`);
- await page.waitForTimeout(200);await page.keyboard.press('ArrowDown');await page.waitForTimeout(100);await page.keyboard.press('Enter');await settle(page);
+ await page.keyboard.press('ArrowDown');await page.keyboard.press('Enter');await settle(page);
  assert.equal(await doc(page),d+'\n## ','Heading 2 not inserted as plain Markdown');assert.equal(await menu().count(),0,'menu stayed open after choosing');
  await page.keyboard.press('Control+z');assert.equal(await doc(page),d+'\n/head','undo did not return to the typed text');
  await page.keyboard.press('Escape');assert.equal(await menu().count(),0,'Escape did not close the menu');
  // code block puts the caret between the fences
  await put(page,(await doc(page)).length);await page.keyboard.press('Control+z');await page.keyboard.press('Control+z');
- await put(page,(await doc(page)).length);await page.keyboard.type('\n/code');await menu().waitFor();await page.waitForTimeout(250);await page.keyboard.press('Enter');await settle(page);
+ await put(page,(await doc(page)).length);await page.keyboard.type('\n/code');await menu().waitFor();await page.keyboard.press('Enter');await settle(page);
  const afterCode=await doc(page);assert(afterCode.endsWith('```\n\n```'));R.codeCaretLine=await page.evaluate(`(()=>{const v=${V};return v.state.doc.lineAt(v.state.selection.main.head).number-v.state.doc.lines})()`);assert.equal(R.codeCaretLine,-1,'caret not on the blank line between the fences');
  // not triggered mid-line or in a URL
  await page.keyboard.press('Control+z');await page.keyboard.press('Control+z');await put(page,(await doc(page)).length);
@@ -155,6 +155,17 @@ await session('slash',slashNote,async({page,theme,root,bytes})=>{
  // back to the original bytes
  for(let k=0;k<12&&(await doc(page))!==d;k++){await page.keyboard.press('Control+z');}
  assert.equal(await doc(page),d,'could not undo back to the original');assert.deepEqual(await disk(page,root),bytes,'slash menu session changed bytes');
+
+ // Fast typing: "/code" then Enter with no pause must insert the block, never a stray newline, and never drop the Enter.
+ R.fastEnter=[];
+ for(let k=0;k<25;k++){
+  await put(page,(await doc(page)).length);await page.keyboard.type('\n/code');await page.keyboard.press('Enter');await settle(page);
+  const got=await doc(page);R.fastEnter.push(got===d+'\n```\n\n```');
+  await page.evaluate(([t])=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,to:v.state.doc.length,insert:t}});},[d]);await page.keyboard.press('Escape');
+ }
+ assert(R.fastEnter.every(Boolean),`fast Enter failed in ${R.fastEnter.filter(x=>!x).length} of 25`);
+ for(let k=0;k<10;k++){await put(page,(await doc(page)).length);await page.keyboard.type('\n/todo');await page.keyboard.press('Tab');await settle(page);assert.equal(await doc(page),d+'\n- [ ] ','Tab did not accept');await page.evaluate(([t])=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,to:v.state.doc.length,insert:t}});},[d]);await page.keyboard.press('Escape');}
+ await page.keyboard.press('Escape');assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes,'fast slash typing changed bytes');
 });
 // ---- 3. cost at about 5,000 and 50,000 lines (real app, ink and anchors on)
 for(const n of [380,3850]){
