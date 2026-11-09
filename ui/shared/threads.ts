@@ -6,6 +6,8 @@ export type ThreadFailure=typeof failureCodes[number];
 export interface ThreadReply {diagram?:Diagram;diagramIssue?:DiagramIssue;body:string;generation:Generation;id:string;parentId:string;failure?:{code:ThreadFailure}}
 export interface ThreadRecord {
  schemaVersion:1;dismissed:boolean;
+ /** ISO time the human marked this thought resolved. Absent means open. Not a takeaway or a Skip; it unlocks nothing. */
+ resolvedAt?:string;
  providerConfirmations:{at:string;from:ThreadProvider;to:ThreadProvider}[];
  followups:ThreadReply[];summary:{reply:ThreadReply|null;revealedAt:string|null};
  takeaway:{events:{action:'submit'|'skip'|'reopen';at:string;text:string|null}[];state:'untouched'|'submitted'|'skipped';text:string|null;updatedAt:string|null};
@@ -21,7 +23,7 @@ export function validateGeneration(g:Generation,id:string){
 export const newThread=(i:InkItem):ThreadRecord=>({schemaVersion:1,dismissed:i.generation?.dismissed??false,providerConfirmations:[],followups:[],summary:{reply:null,revealedAt:null},takeaway:{events:[],state:'untouched',text:null,updatedAt:null}});
 export function validateThread(t:ThreadRecord,rootId:string){
  const bad=()=>{throw new Error('Invalid thread schema.');};
- if(!exactKeys(t,['schemaVersion','dismissed','providerConfirmations','followups','summary','takeaway'])||t.schemaVersion!==1||typeof t.dismissed!=='boolean'||!Array.isArray(t.followups)||t.followups.length>100||!Array.isArray(t.providerConfirmations)||t.providerConfirmations.length>100)bad();
+ if(!exactKeys(t,['schemaVersion','dismissed','providerConfirmations','followups','summary','takeaway',...(t.resolvedAt===undefined?[]:['resolvedAt'])])||(t.resolvedAt!==undefined&&!validAt(t.resolvedAt))||t.schemaVersion!==1||typeof t.dismissed!=='boolean'||!Array.isArray(t.followups)||t.followups.length>100||!Array.isArray(t.providerConfirmations)||t.providerConfirmations.length>100)bad();
  for(const c of t.providerConfirmations)if(!exactKeys(c,['at','from','to'])||!validAt(c.at)||!validProvider(c.from)||!validProvider(c.to)||c.from===c.to)bad();
  const k=t.takeaway;if(!exactKeys(k,['events','state','text','updatedAt'])||!Array.isArray(k.events)||k.events.length>1000)bad();
  let state='untouched',text:string|null=null,at:string|null=null;
@@ -42,5 +44,5 @@ export function validateThread(t:ThreadRecord,rootId:string){
  for(const r of replies){const visited=new Set([r.id]);let parent=r.parentId;while(parent!==rootId){if(visited.has(parent))bad();visited.add(parent);const previous=replies.find(p=>p.id===parent);if(!previous)bad();parent=previous!.parentId;}}
  if(t.summary.revealedAt!==null&&t.summary.reply?.generation.status!=='complete')bad();
 }
-export function threadStatus(i:InkItem){const t=i.thread??newThread(i);return t.dismissed?'dismissed':i.attachment.status==='orphaned'?'orphaned':t.takeaway.state==='submitted'?'has_takeaway':t.takeaway.state==='skipped'?'skipped':'open';}
+export function threadStatus(i:InkItem){const t=i.thread??newThread(i);return t.dismissed?'dismissed':t.resolvedAt?'resolved':i.attachment.status==='orphaned'?'orphaned':t.takeaway.state==='submitted'?'has_takeaway':t.takeaway.state==='skipped'?'skipped':'open';}
 export const questionPlaceholder='Question text was kept in memory only and is unavailable after reload.';

@@ -4,7 +4,7 @@ import {InkStore,type InkSnapshot} from './ink-store.ts';import {UiStateStore} f
 import type {InkItem} from '../shared/ink.ts';
 import {newThread,exactKeys,validId,validProvider,failureCodes,type ThreadFailure,type ThreadProvider,type ThreadReply} from '../shared/threads.ts';
 import {validateProductResult} from './product-validation.ts';import {redact,type Result} from './providers/index.ts';import {textHash} from './anchor-cache.ts';
-export type HumanThreadAction={type:'open'|'skip'|'reopen'|'dismiss'|'restore'}|{type:'submit';text:string}|{type:'delete';confirmed:boolean};
+export type HumanThreadAction={type:'open'|'skip'|'reopen'|'dismiss'|'restore'}|{type:'submit';text:string}|{type:'resolve'|'unresolve'}|{type:'delete';confirmed:boolean};
 interface ReplyInput {id:string;parentId:string;provider:ThreadProvider;action:'think'|'ask';purpose:'followup'|'summary'}
 export class ThreadStore {
  private ink:InkStore;private drafts:UiStateStore;readonly ledger:LedgerStore;
@@ -21,7 +21,7 @@ export class ThreadStore {
   return {...s,version:await this.ink.write(note,s.document,s.version)};
  }
  async act(note:string,id:string,version:string|null,action:HumanThreadAction):Promise<InkSnapshot>{
-  const allowed=['open','skip','reopen','dismiss','restore','submit','delete'];
+  const allowed=['open','skip','reopen','dismiss','restore','resolve','unresolve','submit','delete'];
   if(!action||!allowed.includes(action.type)||!exactKeys(action,['type',...(action.type==='submit'?['text']:action.type==='delete'?['confirmed']:[])]))throw new Error('Invalid human thread action.');
   if(action.type==='delete'){
    if(action.confirmed!==true)throw new Error('Confirm thread deletion.');const s=await this.ink.read(note);if(s.version!==version)throw new Error('Ink version conflict.');
@@ -37,7 +37,11 @@ export class ThreadStore {
     const text=action.type==='submit'?action.text:null;if(action.type==='submit'&&(typeof text!=='string'||!text.trim()||text.length>100000))throw new Error('Enter your own takeaway.');
     t.takeaway.events.push({action:action.type,at,text});t.takeaway.state=action.type==='submit'?'submitted':action.type==='skip'?'skipped':'untouched';t.takeaway.text=text;t.takeaway.updatedAt=at;
    }else if(action.type==='dismiss'||action.type==='restore'){t.dismissed=action.type==='dismiss';if(i.generation)i.generation.dismissed=t.dismissed;}
+   // Resolve only marks the thought. It touches no takeaway state and does not reveal the summary.
+   else if(action.type==='resolve'){t.resolvedAt??=at;}
+   else if(action.type==='unresolve'){delete t.resolvedAt;}
   });
+  if(action.type==='resolve'||action.type==='unresolve'){const i=saved.document.items.find(i=>i.id===id)!;for(const r of this.responses(i))if(r.generation?.status==='complete')await this.ledger.append({id:randomUUID(),inkId:id,requestId:r.id,note,event:action.type==='resolve'?'resolved':'reopened',at:new Date().toISOString()});}
   if(action.type==='dismiss'){const i=saved.document.items.find(i=>i.id===id)!;for(const r of this.responses(i))if(r.generation?.status==='complete')await this.ledger.append({id:randomUUID(),inkId:id,requestId:r.id,note,event:'dismissed',at:new Date().toISOString()});}
   return saved;
  }

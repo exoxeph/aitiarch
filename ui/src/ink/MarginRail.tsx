@@ -32,10 +32,11 @@ export function MarginRail({placed}:{placed:PlacedMargin[]}){
    })}
   </svg>}
   {placed.map(({item,top,side})=>{const box=geometry?blobBox(geometry.width,geometry.left,geometry.right,side):null;
-   return <article key={item.id} className="margin-card thought-blob" data-side={side} style={{top,...(box?{left:box.left,width:box.width,right:'auto'}:{})}} data-ink-id={item.id} data-generated-complete={item.generation?.status==='complete'?'true':undefined}
+   const resolved=!!item.thread?.resolvedAt;
+   return <article key={item.id} className={'margin-card thought-blob'+(resolved?' thought-resolved':'')} data-resolved={resolved?'true':undefined} data-side={side} style={{top,...(box?{left:box.left,width:box.width,right:'auto'}:{})}} data-ink-id={item.id} data-generated-complete={item.generation?.status==='complete'?'true':undefined}
    onMouseEnter={()=>{highlight(item.id,true);setActive(item.id);}} onMouseLeave={()=>{highlight(item.id,false);setActive(null);}} onFocus={()=>{highlight(item.id,true);setActive(item.id);}} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget)){highlight(item.id,false);setActive(null);}}}>
   <button className="thought-open" aria-label={'Open AI thought thread: '+thoughtText(item).slice(0,80)} onClick={e=>e.currentTarget.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:item.id,thought:true}}))}>
-    <span className="thought-meta"><span className="thought-dot" aria-hidden="true"/><span className="cm-ink-label">AI</span></span>
+    <span className="thought-meta"><span className="thought-dot" aria-hidden="true"/><span className="cm-ink-label">AI</span>{resolved&&<span className="thought-resolved-tag">Resolved</span>}</span>
     <span className="thought-text">{thoughtText(item)}</span><span className="thought-replies">{item.thread?.followups.filter(r=>r.generation.status==='complete').length??0} {item.thread?.followups.filter(r=>r.generation.status==='complete').length===1?'reply':'replies'}</span>
    </button>
    <DiagramSlot diagram={item.generation?.status==='complete'?item.diagram:undefined} invalid={item.diagramIssue} itemId={item.id}/>
@@ -44,6 +45,7 @@ export function MarginRail({placed}:{placed:PlacedMargin[]}){
     else if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();items[(at+(e.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();}}}>
     <button type="button" aria-haspopup="menu" aria-expanded={menu===item.id} aria-label="More actions for this AI thought" onClick={()=>setMenu(menu===item.id?null:item.id)}>⋯</button>
     {menu===item.id&&<div role="menu" aria-label="AI thought actions">
+     {resolved?<button type="button" role="menuitem" onClick={e=>send(e.currentTarget,'reopen-thought',item.id)}>Reopen thought</button>:<button type="button" role="menuitem" onClick={e=>send(e.currentTarget,'resolve-thought',item.id)}>Resolve thought</button>}
      <button type="button" role="menuitem" onClick={e=>send(e.currentTarget,'dismiss-thought',item.id)}>Dismiss thought</button>
      <button type="button" role="menuitem" onClick={e=>send(e.currentTarget,'show-dismissed')}>Show dismissed thoughts</button>
     </div>}

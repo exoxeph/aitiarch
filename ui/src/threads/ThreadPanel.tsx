@@ -118,7 +118,7 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{
    <details><summary>Exact redacted request</summary><pre>{JSON.stringify(review.packet,null,2)}</pre></details>
    {review.required&&<label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>Switch from {providerLabel(review.from??'claude')} to {providerLabel(review.provider)}: {review.description} Confirm this first change.</label>}
    <button disabled={busy||!confirmed} onClick={()=>void send()}>Send reply</button><button onClick={()=>setReview(null)}>Cancel write-back</button></section>}
-  <div className="thread-actions"><button disabled={busy} onClick={()=>void act({type:'dismiss'})}>Dismiss thread</button><button onClick={()=>setConfirmDelete(true)}>Delete thread…</button></div>
+  <div className="thread-actions"><button disabled={busy} onClick={()=>void act({type:t.resolvedAt?'unresolve':'resolve'})}>{t.resolvedAt?'Reopen thought':'Resolve thought'}</button><button disabled={busy} onClick={()=>void act({type:'dismiss'})}>Dismiss thread</button><button onClick={()=>setConfirmDelete(true)}>Delete thread…</button></div>
   {confirmDelete&&<DeleteConfirm busy={busy} cancel={()=>setConfirmDelete(false)} remove={()=>void act({type:'delete',confirmed:true})}/>}
  </article>;
 }

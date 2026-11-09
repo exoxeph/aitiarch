@@ -70,9 +70,9 @@ try {
   const more = blob.getByRole('button', { name: 'More actions for this AI thought' });
   await more.focus(); await page.keyboard.press('Enter');
   const menu = page.getByRole('menu', { name: 'AI thought actions' }); await menu.waitFor();
-  assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), ['Dismiss thought', 'Show dismissed thoughts']);
-  assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Dismiss thought', 'first menu item takes focus');
-  await page.keyboard.press('ArrowDown'); assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Show dismissed thoughts');
+  assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), ['Resolve thought', 'Dismiss thought', 'Show dismissed thoughts']);
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Resolve thought', 'first menu item takes focus');
+  await page.keyboard.press('ArrowDown'); assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Dismiss thought');
   await page.keyboard.press('Escape'); await menu.waitFor({ state: 'detached' });
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'More actions for this AI thought', 'Escape returns focus to the menu button');
   await more.click(); await menu.getByRole('menuitem', { name: 'Dismiss thought' }).click();
@@ -88,7 +88,30 @@ try {
   const list = page.getByRole('dialog', { name: 'Dismissed thoughts' }); await list.waitFor();
   await list.getByRole('button', { name: /^Restore thought/ }).click();
   await page.locator('.margin-card.thought-blob').first().waitFor();
-  report.thoughtMenu = 'ok';
+  // 2c. Resolve: the thought stays visible but collapses and dims; reopen from the menu, by keyboard; ledger records both.
+  const card = page.locator('.margin-card.thought-blob').first();
+  const openColor = await card.locator('.thought-text').evaluate((el) => getComputedStyle(el).color);
+  await card.getByRole('button', { name: 'More actions for this AI thought' }).click();
+  await page.getByRole('menuitem', { name: 'Resolve thought' }).click();
+  await page.getByRole('status').filter({ hasText: 'Thought resolved.' }).waitFor();
+  const resolved = page.locator('.margin-card.thought-blob.thought-resolved'); await resolved.waitFor();
+  assert.equal(await page.locator('.margin-card.thought-blob').count(), 1, 'a resolved thought stays visible');
+  assert.equal(await resolved.locator('.thought-resolved-tag').textContent(), 'Resolved');
+  const dimColor = await resolved.locator('.thought-text').evaluate((el) => getComputedStyle(el).color);
+  assert.notEqual(dimColor, openColor, 'a resolved thought is dimmed');
+  assert.equal(await resolved.locator('.thought-diagram-slot').evaluate((el) => getComputedStyle(el).display), 'none', 'a resolved thought is collapsed');
+  report.dimContrast = await resolved.locator('.thought-text').evaluate((el) => { const lin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }; const rgb = (s) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number); const L = (a) => 0.2126 * lin(a[0]) + 0.7152 * lin(a[1]) + 0.0722 * lin(a[2]); const fg = rgb(getComputedStyle(el).color); let n = el, bg = [0, 0, 0, 0]; while (n && (bg.length > 3 && bg[3] === 0)) { bg = (getComputedStyle(n).backgroundColor.match(/[\d.]+/g) || []).map(Number); if (bg.length === 3) bg.push(1); n = n.parentElement; } const a = L(fg), b = L(bg.slice(0, 3)); return Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100; });
+  assert(report.dimContrast >= 4.5, 'dimmed text contrast ' + report.dimContrast);
+  await page.screenshot({ path: path.join(out, 'thought-resolved-light.png') });
+  const resolvedMore = resolved.getByRole('button', { name: 'More actions for this AI thought' });
+  await resolvedMore.focus(); await page.keyboard.press('Enter');
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Reopen thought');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => !document.querySelector('.margin-card.thought-resolved'));
+  let ledger2; for (let k = 0; k < 40; k++) { ledger2 = JSON.parse(await readFile(path.join(root, 'ledger.json'), 'utf8')); if (ledger2.events.some((e) => e.event === 'reopened')) break; await page.waitForTimeout(50); } // the ledger row is written just after the sidecar
+  assert(ledger2.events.some((e) => e.event === 'resolved') && ledger2.events.some((e) => e.event === 'reopened'), 'resolve and reopen are recorded');
+  const sidecar = JSON.parse(await readFile(path.join(root, 'ink/fixture.ink.json'), 'utf8'));
+  assert(!JSON.stringify(sidecar).includes('resolvedAt'), 'reopening removes the stored field');  report.thoughtMenu = 'ok';
 
   // 3. The command palette has Visualize too (and only previews).
   await select(from, to);

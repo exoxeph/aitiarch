@@ -498,3 +498,10 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .dismissed-quote {color:var(--muted);} .dismissed-text {font-family:var(--font-body);}
 .dismissed-thoughts li button {justify-self:start;border:1px solid var(--control-border);background:var(--paper);color:var(--ink-text);border-radius:var(--radius-small);padding:4px 10px;cursor:pointer;margin-top:4px;}
 .thought-chat[data-floating] {position:fixed;z-index:150;overflow:auto;padding:12px;background:var(--paper);border:1px solid var(--control-border);border-radius:var(--radius-card);box-shadow:var(--shadow-floating);}
+/* A resolved thought stays visible but collapses and dims: one line, muted type, no reply count, diagram or Bring button. */
+.thought-rails .margin-card.thought-blob.thought-resolved {color:var(--muted);}
+.thought-resolved .thought-text {display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;}
+.thought-resolved .thought-replies,.thought-resolved .thought-diagram-slot,.thought-resolved .thought-bring {display:none;}
+.thought-resolved .thought-dot {background:var(--muted);}
+.thought-resolved .cm-ink-label {background:var(--muted);}
+.thought-resolved-tag {font:600 11px/1.4 var(--font-ui);color:var(--muted);}

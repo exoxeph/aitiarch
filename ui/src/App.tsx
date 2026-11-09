@@ -40,7 +40,7 @@ export default function App() {
   const onInk = useCallback((path: string, items: InkItem[]) => setMappedInk(m => ({ ...m, [path]: items })), []);
   const onInkSaved = useCallback((path: string, snapshot: InkSnapshot) => setInkFiles(m => ({ ...m, [path]: snapshot })), []);
   const [attachDraft, setAttachDraft] = useState<null | { path: string; id: string; from: number; to: number; noteVersion: string; noteText: string; inkVersion: string | null; quote: string; target: string }>(null);
-  const [thoughtChat,setThoughtChat]=useState<string|null>(null),[toast,setToast]=useState<null|{text:string;id:string}>(null),[showDismissed,setShowDismissed]=useState(false);
+  const [thoughtChat,setThoughtChat]=useState<string|null>(null),[toast,setToast]=useState<null|{text:string;id:string;undo:'restore'|'unresolve'}>(null),[showDismissed,setShowDismissed]=useState(false);
   const [bringPreview,setBringPreview]=useState<null|{path:string;id:string;noteText:string;preview:BringPreview;render?:{layout:DiagramLayout;theme:'light'|'dark'}}>(null);
   const [insertionRepair,setInsertionRepair]=useState<RepairStatus|null>(null);
   const [repairError,setRepairError]=useState(false);
@@ -333,8 +333,11 @@ export default function App() {
     });
 
   // Dismiss hides a thought (nothing is deleted); Restore brings it back. Both are the existing human thread actions.
-  const thoughtAction=async(id:string,type:'dismiss'|'restore')=>{if(!active)return;try{const latest=await api.threads(active),s=await api.threadAction(active,id,latest.version,{type});onInkSaved(active,s);setToast(type==='dismiss'?{text:'Thought dismissed.',id}:null);if(type==='restore')setShowDismissed(false);}catch(e){setNotice(e instanceof Error?e.message:'That action could not be applied.');}};
-  useEffect(()=>{const dismiss=(e:Event)=>void thoughtAction((e as CustomEvent<{id:string}>).detail.id,'dismiss'),show=()=>setShowDismissed(true);window.addEventListener('dismiss-thought',dismiss);window.addEventListener('show-dismissed',show);return()=>{window.removeEventListener('dismiss-thought',dismiss);window.removeEventListener('show-dismissed',show);};});
+  const thoughtAction=async(id:string,type:'dismiss'|'restore'|'resolve'|'unresolve')=>{if(!active)return;try{const latest=await api.threads(active),s=await api.threadAction(active,id,latest.version,{type});onInkSaved(active,s);setToast(type==='dismiss'?{text:'Thought dismissed.',id,undo:'restore'}:type==='resolve'?{text:'Thought resolved.',id,undo:'unresolve'}:null);if(type==='restore')setShowDismissed(false);}catch(e){setNotice(e instanceof Error?e.message:'That action could not be applied.');}};
+  useEffect(()=>{const dismiss=(e:Event)=>void thoughtAction((e as CustomEvent<{id:string}>).detail.id,'dismiss'),resolve=(e:Event)=>void thoughtAction((e as CustomEvent<{id:string}>).detail.id,'resolve'),reopen=(e:Event)=>void thoughtAction((e as CustomEvent<{id:string}>).detail.id,'unresolve'),show=()=>setShowDismissed(true);window.addEventListener('dismiss-thought',dismiss);window.addEventListener('resolve-thought',resolve);window.addEventListener('reopen-thought',reopen);window.addEventListener('show-dismissed',show);return()=>{window.removeEventListener('dismiss-thought',dismiss);window.removeEventListener('resolve-thought',resolve);window.removeEventListener('reopen-thought',reopen);window.removeEventListener('show-dismissed',show);};});
+  // Resolving collapses the open conversation (it stays visible, dimmed, in the margin).
+  const wasResolved=useRef(false);
+  useEffect(()=>{const now=!!activeItems.find(i=>i.id===thoughtChat)?.thread?.resolvedAt;if(thoughtChat&&now&&!wasResolved.current)setThoughtChat(null);wasResolved.current=now;},[thoughtChat,activeItems]);
   useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(null),9000);return()=>clearTimeout(timer);},[toast]);
   const commands = useMemo(() => {
     const list: Array<OverlayItem & { run: () => void }> = [
@@ -452,7 +455,7 @@ export default function App() {
           </section>}
         </aside>
       )}
-      {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,'restore')}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
+      {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,toast.undo)}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
       {showDismissed&&<DismissedThoughts items={activeItems} restore={id=>void thoughtAction(id,'restore')} close={()=>setShowDismissed(false)}/>}
       {active&&thoughtChat&&<ThoughtChat id={thoughtChat} close={()=>setThoughtChat(null)}><ThreadPanel path={active} items={activeItems} version={currentInk?.version??null} saved={s=>onInkSaved(active,s)} insert={async item=>{await prepareInsert(item);setShowProps(true);setRightTab('activity');}} openId={thoughtChat} onOpen={id=>{setThoughtChat(id);setThreadId(id);}} visible/></ThoughtChat>}
       {bringPreview&&<ThoughtInsertionPreview text={bringPreview.preview.changes.insert} insert={()=>void bringThought()} cancel={()=>setBringPreview(null)}/>}
