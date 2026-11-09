@@ -34,4 +34,3 @@ it('refuses pending, dismissed, orphaned and stale thought insertion',()=>{
  expect(()=>previewThoughtInsertion(note,i,'old')).toThrow();
  for(const changed of [{...i,generation:undefined},{...i,attachment:{status:'orphaned',reason:'missing'}},{...i,generation:{...i.generation!,status:'pending'}},{...i,generation:{...i.generation!,dismissed:true}}])expect(()=>previewThoughtInsertion(note,changed as InkItem,'v')).toThrow();
 });
-

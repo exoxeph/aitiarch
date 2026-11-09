@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, connectEvents, type InkSnapshot, type NoteFile, type ServerEvent, type TreeNode } from "./api.ts";
 import type { InkItem } from "../shared/ink.ts";
 import { OrphanList } from "./ink/OrphanList.tsx";
+import {inkField} from './editor/ink.ts';
 import { EditorView } from "@codemirror/view";
 import { flattenTree, Overlay, PropertiesPanel, StatusBar, Tabs, Tree, type OverlayItem } from "./components.tsx";
 import { EditorPane, type PaneHandle } from "./editor/EditorPane.tsx";
@@ -11,6 +12,10 @@ import { makeWikiResolver } from "./frontmatter.ts";
 import { ChatGPTSettings } from "./ChatGPTSettings.tsx";
 import { UsagePanel } from './UsagePanel.tsx';
 import {ThreadPanel} from './threads/ThreadPanel.tsx';
+import {ThoughtInsertionPreview} from './ink/ThoughtInsertionPreview.tsx';
+import {ThoughtChat} from './ink/ThoughtChat.tsx';
+import {previewThoughtInsertion} from '../shared/thoughts.ts';
+import {isolateHistory} from '@codemirror/commands';
 import {previewTakeawayInsertion} from '../shared/takeaway-insertion.ts';
 import {SLASH_ITEMS,slashInsert} from './editor/slash.ts';
 
@@ -31,6 +36,8 @@ export default function App() {
   const onInk = useCallback((path: string, items: InkItem[]) => setMappedInk(m => ({ ...m, [path]: items })), []);
   const onInkSaved = useCallback((path: string, snapshot: InkSnapshot) => setInkFiles(m => ({ ...m, [path]: snapshot })), []);
   const [attachDraft, setAttachDraft] = useState<null | { path: string; id: string; from: number; to: number; noteVersion: string; noteText: string; inkVersion: string | null; quote: string; target: string }>(null);
+  const [thoughtChat,setThoughtChat]=useState<string|null>(null);
+  const [bringPreview,setBringPreview]=useState<null|{path:string;id:string;noteText:string;preview:ReturnType<typeof previewThoughtInsertion>}>(null);
   const [threadId,setThreadId]=useState<string|null>(null);
   const [insertPreview,setInsertPreview]=useState<null|{path:string;id:string;noteText:string;inkVersion:string|null;preview:ReturnType<typeof previewTakeawayInsertion>}>(null);
   const [tabs, setTabs] = useState<string[]>([]);
@@ -47,7 +54,7 @@ export default function App() {
   const panes = useRef(new Map<string, PaneHandle>());
   const listeners = useRef(new Set<(e: ServerEvent) => void>());
   const loaded = useRef(false);
-  useEffect(()=>{const open=(event:Event)=>{setThreadId((event as CustomEvent<{id:string}>).detail.id);setRightTab('activity');setShowProps(true);};window.addEventListener('open-thread',open);return()=>window.removeEventListener('open-thread',open);},[]);
+  useEffect(()=>{const open=(event:Event)=>{const detail=(event as CustomEvent<{id:string;thought?:boolean}>).detail;setThreadId(detail.id);if(detail.thought)setThoughtChat(detail.id);else{setThoughtChat(null);setRightTab('activity');setShowProps(true);}};window.addEventListener('open-thread',open);return()=>window.removeEventListener('open-thread',open);},[]);
 
   // Intersection, document visibility and the visible pane determine "shown".
   // Completion in an inactive tab alone must never produce a ledger event.
@@ -227,6 +234,7 @@ export default function App() {
     attachment: active && status[active] === "missing" ? { status: "orphaned" as const, reason: "note-missing" as const }
       : item.attachment,
   })), [currentInk, mappedInk, active, status]);
+  useEffect(()=>{if(thoughtChat&&!activeItems.some(i=>i.id===thoughtChat))setThoughtChat(null);},[thoughtChat,activeItems]);
   useEffect(() => {
     if (activeItems.some(i => i.attachment.status === "orphaned")) setRightTab("activity");
   }, [active, currentInk]);
@@ -256,6 +264,34 @@ export default function App() {
       setInkFiles(m => ({ ...m, [d.path]: s }));
       setAttachDraft(null);
     } catch (e) { setAttachDraft(null); setNotice(e instanceof ApiError && e.status === 409 ? "The note or ink changed since selection. Review it and try again." : "Re-attachment could not be saved."); }
+  };
+  useEffect(()=>{setThoughtChat(null);setBringPreview(null);},[active]);
+  useEffect(()=>{
+    const bring=async(event:Event)=>{
+      const id=(event as CustomEvent<{id:string}>).detail.id;if(!active)return;
+      try{const h=panes.current.get(active);if(!h)throw new Error('Open the note first.');await h.session.flush();
+        if(h.session.status!=='saved')throw new Error('Save or resolve the note before insertion.');
+        const [disk,ink]=await Promise.all([api.file(active),api.threads(active)]);
+        const latest=ink.document.items.find(i=>i.id===id),mapped=h.view.state.field(inkField).items.find(i=>i.id===id);
+        if(!latest||!mapped||disk.text!==h.view.state.doc.toString()||disk.version!==h.session.base.version)throw new Error('The note changed. Review a new preview.');
+        const item={...latest,anchor:mapped.anchor,attachment:mapped.attachment};
+        setBringPreview({path:active,id,noteText:disk.text,preview:previewThoughtInsertion(disk,item,disk.version)});
+      }catch(e){setNotice(e instanceof Error?e.message:'Could not preview AI insertion.');}
+    };window.addEventListener('bring-thought',bring);return()=>window.removeEventListener('bring-thought',bring);
+  },[active]);
+  const bringThought=async()=>{
+    const p=bringPreview;if(!p)return;setBringPreview(null);
+    let inserted=false;
+    try{const h=panes.current.get(p.path);if(!h||h.session.status!=='saved'||h.view.state.doc.toString()!==p.noteText)throw new Error('The note changed. Review a new preview.');
+      const [disk,ink]=await Promise.all([api.file(p.path),api.threads(p.path)]),latest=ink.document.items.find(i=>i.id===p.id),mapped=h.view.state.field(inkField).items.find(i=>i.id===p.id);
+      if(!latest||!mapped)throw new Error('The thought changed. Review a new preview.');
+      const checked=previewThoughtInsertion(disk,{...latest,anchor:mapped.anchor,attachment:mapped.attachment},p.preview.noteVersion);
+      if(JSON.stringify(checked)!==JSON.stringify(p.preview))throw new Error('The thought changed. Review a new preview.');
+      if(h.session.status!=='saved'||h.session.base.version!==disk.version||h.view.state.doc.toString()!==p.noteText)throw new Error('The note changed. Review a new preview.');
+      h.view.dispatch({changes:checked.changes,annotations:isolateHistory.of('full')});inserted=true;
+      await h.session.flush();if(h.session.status!=='saved')throw new Error('Insertion has a save conflict. Resolve it in the editor.');
+      await api.threadCall('brought',{path:p.path,id:p.id,noteVersion:h.session.base.version});h.view.focus();
+    }catch(e){setNotice((inserted?'The insertion is preserved in the editor. ':'')+(e instanceof Error?e.message:'AI insertion failed.'));}
   };
   const prepareInsert=async(item:InkItem)=>{
     if(!active)return;const h=panes.current.get(active);if(!h)throw new Error('Open the note first.');
@@ -390,7 +426,7 @@ export default function App() {
               const sel = h.view.state.selection.main;
               void prepareAttach(item, sel.from, sel.to);
             }} />}
-          {active&&<div hidden={rightTab!=='activity'}><ThreadPanel path={active} items={activeItems} version={currentInk?.version??null} saved={s=>onInkSaved(active,s)} insert={prepareInsert} openId={threadId} onOpen={setThreadId} visible={rightTab==='activity'}/></div>}
+          {active&&!thoughtChat&&<div hidden={rightTab!=='activity'}><ThreadPanel path={active} items={activeItems} version={currentInk?.version??null} saved={s=>onInkSaved(active,s)} insert={prepareInsert} openId={threadId} onOpen={setThreadId} visible={rightTab==='activity'}/></div>}
           {rightTab==='activity'&&insertPreview&&<section className="attach-preview" aria-label="Review takeaway insertion"><h2>Insert your takeaway</h2><p>This adds only your submitted text through the editor. Undo works normally.</p><pre>{insertPreview.preview.changes.insert}</pre><button onClick={()=>void applyInsert()}>Insert my takeaway</button><button onClick={()=>setInsertPreview(null)}>Cancel insertion</button></section>}
           {rightTab === "activity" && attachDraft && <section className="attach-preview" aria-label="Review re-attachment">
             <h2>Review re-attachment</h2>
@@ -400,6 +436,8 @@ export default function App() {
           </section>}
         </aside>
       )}
+      {active&&thoughtChat&&<ThoughtChat id={thoughtChat} close={()=>setThoughtChat(null)}><ThreadPanel path={active} items={activeItems} version={currentInk?.version??null} saved={s=>onInkSaved(active,s)} insert={async item=>{await prepareInsert(item);setShowProps(true);setRightTab('activity');}} openId={thoughtChat} onOpen={id=>{setThoughtChat(id);setThreadId(id);}} visible/></ThoughtChat>}
+      {bringPreview&&<ThoughtInsertionPreview text={bringPreview.preview.changes.insert} insert={()=>void bringThought()} cancel={()=>setBringPreview(null)}/>}
       <footer className="statusbar">
         <StatusBar path={active} status={active ? status[active] : undefined} text={active ? (docs[active] ?? activeFile?.text) : undefined} eol={activeFile?.eol} bom={activeFile?.bom} online={online} rootPath={boot.rootPath} />
       </footer>

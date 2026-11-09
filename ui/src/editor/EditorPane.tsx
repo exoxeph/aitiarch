@@ -5,12 +5,13 @@ import { Compartment, EditorState } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
 import type { InkItem } from "../../shared/ink.ts";
+import {layoutThoughts,thoughtSide,thoughtVisible} from '../../shared/thoughts.ts';
 import { MarginRail, type PlacedMargin } from "../ink/MarginRail.tsx";
 import { api, ApiError, type InkSnapshot, type NoteFile, type ServerEvent } from "../api.ts";
 import { conflictDecorations, conflictHandlers, conflictsField } from "./conflicts.ts";
 import { livePreview, previewHandlers, wikiResolver } from "./livepreview.ts";
 import { externalChange, NoteSession, type SyncStatus } from "./session.ts";
-import { addInk, removeInk, inkField, setInk } from "./ink.ts";
+import { addInk, removeInk, inkField, setInk, setThoughtNarrow } from "./ink.ts";
 import {codeEditing} from "./code-editing.ts";
 import { codeHighlight, codeLanguages } from "./codeblocks.ts";
 import { toggleTaskAtCaret } from "./tasks.ts";
@@ -129,7 +130,7 @@ export function EditorPane(props: Props) {
           EditorView.updateListener.of((u) => {
             const inkChanged = u.transactions.some(t => t.effects.some(e => e.is(setInk) || e.is(addInk) || e.is(removeInk)));
             if (u.docChanged || inkChanged) live.current.onInk?.(path, u.state.field(inkField).items);
-            if (u.docChanged || u.viewportChanged || inkChanged) queueMargin();
+            if (u.docChanged || u.viewportChanged || inkChanged || u.transactions.some(t=>t.effects.some(e=>e.is(setThoughtNarrow)))) queueMargin();
             if (inkChanged && session) queueDoc();
             if (!u.docChanged) return;
             if (!u.transactions.some((t) => t.annotation(externalChange))) session.userChanged();
@@ -159,14 +160,18 @@ export function EditorPane(props: Props) {
         if (!surface.current || !live.current.visible) return;
         const bounds = surface.current.getBoundingClientRect();
         const ink = view.state.field(inkField);
-        const rows = ink.items.filter(i => i.kind === "margin").flatMap(item => {
+        const narrow=bounds.width<1080;
+        surface.current.dataset.thoughtLayout=narrow?'narrow':'wide';
+        if(ink.items.length&&!!ink.narrow!==narrow){view.dispatch({effects:setThoughtNarrow.of(narrow)});return;}
+        const rows = narrow?[]:ink.items.filter(thoughtVisible).flatMap(item => {
           const anchor = item.attachment;
           if (anchor.status !== "attached") return [];
           const coords = view.coordsAtPos(anchor.from);
-          return coords ? [{ item, top: Math.max(8, coords.top - bounds.top) }] : [];
-        }).sort((a, b) => a.top - b.top);
-        let next = 8;
-        setMargin(rows.map(row => { const top = Math.max(row.top, next); next = top + 90; return { ...row, top }; }));
+          if(!coords||coords.bottom<bounds.top||coords.top>bounds.bottom)return [];
+          const el=Array.from(surface.current!.querySelectorAll<HTMLElement>('.margin-card')).find(el=>el.dataset.inkId===item.id);
+          return [{id:item.id,item,target:Math.max(8,coords.top-bounds.top),side:thoughtSide(item.id),height:el?.getBoundingClientRect().height??160}];
+        });
+        setMargin(layoutThoughts(rows));
       });
     }
     function queueDoc() {
@@ -178,6 +183,12 @@ export function EditorPane(props: Props) {
       });
     }
     live.current.onDoc(path, props.file.text);
+    const highlight=(event:Event)=>{
+      const mark=(event.target as Element)?.closest<HTMLElement>('[data-thought-anchor]'),id=event.type==='pointerout'?null:mark?.dataset.thoughtAnchor;
+      surface.current?.querySelectorAll<HTMLElement>('.margin-card').forEach(el=>el.classList.toggle('thought-active',!!id&&el.dataset.inkId===id));
+    };
+    host.current?.addEventListener('pointerover',highlight);host.current?.addEventListener('pointerout',highlight);
+    surface.current?.addEventListener("thought-size",queueMargin);
     host.current?.addEventListener("scroll", queueMargin, { passive: true });
     const observer = new ResizeObserver(queueMargin);
     if (host.current) observer.observe(host.current);
@@ -214,6 +225,8 @@ export function EditorPane(props: Props) {
       unsub();
       cancelAnimationFrame(raf);
       cancelAnimationFrame(marginRaf);
+      host.current?.removeEventListener('pointerover',highlight);host.current?.removeEventListener('pointerout',highlight);
+      surface.current?.removeEventListener("thought-size",queueMargin);
       host.current?.removeEventListener("scroll", queueMargin);
       observer.disconnect();
       void session.flush().finally(() => session.dispose());

@@ -2,31 +2,39 @@ import { StateEffect, StateField, type EditorState } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 import { resolveAnchor } from "../../shared/anchors.ts";
 import { mapInkItems } from "../../shared/anchor-mapping.ts";
+import {thoughtVisible,thoughtText} from '../../shared/thoughts.ts';
 import { externalChange } from "./session.ts";
 import type { InkItem } from "../../shared/ink.ts";
 
-export interface InkPayload { items: InkItem[]; trustedText: string | null; localIds?: string[] }
+export interface InkPayload { items: InkItem[]; trustedText: string | null; localIds?: string[]; narrow?:boolean }
+export const setThoughtNarrow = StateEffect.define<boolean>();
 export const setInk = StateEffect.define<InkPayload>();
 export const addInk = StateEffect.define<InkItem>();
 export const removeInk = StateEffect.define<string>();
 
 class InkWidget extends WidgetType {
-  constructor(readonly id: string, readonly body: string, readonly complete: boolean) { super(); }
-  eq(other: InkWidget) { return other.id === this.id && other.body === this.body && other.complete === this.complete; }
+  constructor(readonly id: string, readonly body: string, readonly complete: boolean, readonly replies:number) { super(); }
+  eq(other: InkWidget) { return other.id === this.id && other.body === this.body && other.complete === this.complete && other.replies===this.replies; }
   toDOM() {
     const el = document.createElement("aside");
-    el.className = "cm-ink-block";
+    el.className = "cm-ink-block thought-blob";
     el.dataset.inkId = this.id;
     if (this.complete) el.dataset.generatedComplete = "true";
     const label = document.createElement("span");
     label.className = "cm-ink-label";
-    label.textContent = "AI · requested answer";
+    label.textContent = "AI";
+    const dot=document.createElement('span');dot.className='thought-dot';dot.setAttribute('aria-hidden','true');el.append(dot);
     const content = document.createElement("div");
     content.className = "cm-ink-body";
     content.textContent = this.body;
     el.append(label, content);
-    const open=document.createElement('button');open.textContent='Open thread';open.type='button';
-    open.addEventListener('click',()=>el.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:this.id}})));el.append(open);
+    const replies=document.createElement('div');replies.className='thought-replies';replies.textContent=this.replies+' '+(this.replies===1?'reply':'replies');el.append(replies);
+    const highlight=(on:boolean)=>el.closest('.ink-surface')?.querySelectorAll<HTMLElement>('[data-thought-anchor]').forEach(mark=>mark.classList.toggle('thought-active',on&&mark.dataset.thoughtAnchor===this.id));
+    el.addEventListener('pointerenter',()=>highlight(true));el.addEventListener('pointerleave',()=>highlight(false));el.addEventListener('focusin',()=>highlight(true));el.addEventListener('focusout',e=>{if(!el.contains(e.relatedTarget as Node))highlight(false);});
+    const open=document.createElement('button');open.textContent='Open thread';open.setAttribute('aria-label','Open AI thought thread: '+this.body.slice(0,80));open.type='button';
+    open.addEventListener('click',()=>el.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:this.id,thought:true}})));el.append(open);
+    const bring=document.createElement('button');bring.type='button';bring.textContent='Bring to notebook';bring.disabled=!this.complete;bring.addEventListener('click',()=>el.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:this.id}})));el.append(bring);
+    const slot=document.createElement('div');slot.className='thought-diagram-slot';slot.setAttribute('aria-label','Diagram slot (not rendered)');el.append(slot);
     return el;
   }
   ignoreEvent() { return true; }
@@ -44,14 +52,20 @@ class InkGroupWidget extends WidgetType {
   ignoreEvent() { return true; }
 }
 function decorations(state: EditorState, payload: InkPayload): DecorationSet {
-  const groups=new Map<string,{position:number;answers:InkWidget[]}>();
+  const groups=new Map<number,InkWidget[]>(),marks=[];
   for(const i of payload.items){
-    if(i.kind!=='answer'||i.generation?.dismissed||i.thread?.dismissed||i.attachment.status!=='attached')continue;
-    const r=i.attachment,key=`${r.from}:${r.to}`;
-    let group=groups.get(key);if(!group){group={position:state.doc.lineAt(r.to).to,answers:[]};groups.set(key,group);}
-    group.answers.push(new InkWidget(i.id,!i.generation||i.generation.status==='complete'?i.body:i.generation.status==='pending'?'Waiting for a validated AI answer?':'Request failed or interrupted. Open thread for details.',i.generation?.status==='complete'));
+    if(!thoughtVisible(i)||i.attachment.status!=='attached')continue;
+    const r=i.attachment;
+    if(r.to>state.doc.length||r.from>=r.to)continue;
+    marks.push(Decoration.mark({class:'cm-thought-anchor',attributes:{'data-thought-anchor':i.id}}).range(r.from,r.to));
+    if(payload.narrow){
+      let line=state.doc.lineAt(r.to);
+      while(line.number<state.doc.lines&&state.doc.line(line.number+1).text.trim())line=state.doc.line(line.number+1);
+      const answers=groups.get(line.to)??[];answers.push(new InkWidget(i.id,thoughtText(i),i.generation?.status==='complete',i.thread?.followups.filter(r=>r.generation.status==='complete').length??0));groups.set(line.to,answers);
+    }
   }
-  return Decoration.set([...groups.values()].map(group=>Decoration.widget({widget:group.answers.length===1?group.answers[0]:new InkGroupWidget(group.answers),side:1,block:true}).range(group.position)),true);
+  for(const [position,answers] of groups)marks.push(Decoration.widget({widget:new InkGroupWidget(answers),side:1,block:true}).range(position));
+  return Decoration.set(marks,true);
 }
 
 export const inkField = StateField.define<InkPayload & { marks: DecorationSet }>({
@@ -59,14 +73,14 @@ export const inkField = StateField.define<InkPayload & { marks: DecorationSet }>
   update(value, tr) {
     let payload: InkPayload = value;
     if (tr.docChanged) payload = { items: mapInkItems(tr.startState.doc.toString(), tr.state.doc.toString(), value.items, tr.changes,
-      tr.annotation(externalChange) ? "external" : "browser"), trustedText: tr.state.doc.toString(), localIds: value.localIds };
-    for (const e of tr.effects) if (e.is(setInk)) {
+      tr.annotation(externalChange) ? "external" : "browser"), trustedText: tr.state.doc.toString(), narrow:value.narrow, localIds: value.localIds };
+    for (const e of tr.effects) if(e.is(setThoughtNarrow))payload={...payload,narrow:e.value};else if (e.is(setInk)) {
       const text = tr.state.doc.toString();
       const localIds = (payload.localIds ?? []).filter(id => {
         const incoming = e.value.items.find(i => i.id === id), current = payload.items.find(i => i.id === id);
         return !incoming || (current && JSON.stringify([incoming.anchor, incoming.attachment]) !== JSON.stringify([current.anchor, current.attachment]));
       });
-      payload = { trustedText: text, localIds, items: [...e.value.items.map(item => {
+      payload = { trustedText: text, narrow:payload.narrow, localIds, items: [...e.value.items.map(item => {
         const current = payload.items.find(i => i.id === item.id);
         if (current && localIds.includes(item.id)) return { ...item, anchor: current.anchor, attachment: current.attachment };
         if (e.value.trustedText === text) return item;

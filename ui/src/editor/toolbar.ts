@@ -173,7 +173,9 @@ const compactPanel=ViewPlugin.fromClass(class {
   const first=view.coordsAtPos(view.state.selection.main.from);if(!first)return null;
   const c=view.contentDOM.getBoundingClientRect(),css=getComputedStyle(view.contentDOM),size=this.panel.dom.getBoundingClientRect();
   const space=toolbarSpace(view),rail=view.dom.closest('.ink-surface')?.querySelector('.margin-rail');
-  if(rail?.querySelector('.margin-card')&&getComputedStyle(rail).position==='absolute')space.right=Math.min(space.right,rail.getBoundingClientRect().left);
+  if(rail?.classList.contains('thought-rails')){
+   for(const card of rail.querySelectorAll<HTMLElement>('.margin-card')){const r=card.getBoundingClientRect();if(card.dataset.side==='right')space.right=Math.min(space.right,r.left);else space.left=Math.max(space.left,r.right);}
+  }else if(rail?.querySelector('.margin-card')&&getComputedStyle(rail).position==='absolute')space.right=Math.min(space.right,rail.getBoundingClientRect().left);
   return placeToolbar({left:c.left+parseFloat(css.paddingLeft),right:c.right-parseFloat(css.paddingRight)},first.top,{width:212,height:size.height||240},space);
  },write:p=>{
   const dom=this.panel.dom,wasHidden=dom.hidden;dom.hidden=!p;if(!p)return;

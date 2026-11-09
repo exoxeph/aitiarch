@@ -428,3 +428,38 @@ summary { cursor: pointer; }
 .cm-fence-head {max-width:calc(100% - 16px);}
 .cm-fence-hint {font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 @media(max-width:600px){.cm-fence-hint {max-width:120px;}}
+
+/* Invoked thoughts: display-only rails; the notebook remains a centered column. */
+.ink-surface .margin-rail.thought-rails { position:absolute;inset:0;width:auto;height:auto;max-height:none;display:block;padding:0;background:none;border:0;overflow:auto;pointer-events:none; }
+.thought-rails .margin-card.thought-blob { position:absolute;width:208px;left:auto;right:12px;min-height:0;padding:8px 4px;border:0;border-radius:0;box-shadow:none;background:var(--paper);font:var(--text-ai)/1.5 var(--font-body);color:var(--ink-text);pointer-events:auto; }
+.thought-rails .thought-blob[data-side="left"] {left:12px;right:auto;}
+.thought-open { display:block;width:100%;padding:0;text-align:left;font:inherit;color:inherit;border:0;background:none;cursor:pointer; }
+.thought-meta {display:flex;align-items:center;gap:6px;margin-bottom:6px;}
+.thought-dot {display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--ai-ink);}
+.thought-blob .cm-ink-label {display:inline-block;background:var(--ai-ink);color:var(--paper);font:600 11px/1.4 var(--font-ui);padding:1px 5px;border-radius:3px;}
+.thought-text {display:block;white-space:pre-wrap;overflow-wrap:anywhere;}
+.thought-replies {display:block;font:12px/1.5 var(--font-ui);color:var(--muted);margin-top:6px;}
+.thought-bring {border:0;background:none;color:var(--link);padding:4px 0;font:12px var(--font-ui);text-decoration:underline;text-underline-offset:3px;cursor:pointer;}
+.thought-bring:disabled {color:var(--muted);cursor:default;}
+.thought-diagram-slot:empty {display:none;}
+.thought-connector {position:absolute;left:0;border-left:1px dotted var(--control-border);pointer-events:none;}
+.cm-thought-anchor {text-decoration:underline dotted var(--ai-ink);text-underline-offset:4px;}
+.cm-thought-anchor:hover,.cm-thought-anchor.thought-active {background:var(--ai-surface);}
+.thought-blob:hover,.thought-blob:focus-within,.thought-blob.thought-active {background:var(--ai-surface);}
+.ink-surface[data-thought-layout="wide"] .cm-editor .cm-content {max-width:min(760px,calc(100% - 460px));margin-left:auto;margin-right:auto;}
+/* The fallback is a list beneath the anchored paragraph, never at the end of the note. */
+.cm-ink-group {display:grid;gap:12px;}
+.cm-ink-group .cm-ink-block.thought-blob {margin:8px 0;padding:8px 0;border:0;border-radius:0;box-shadow:none;background:var(--ai-surface);font:var(--text-ai)/1.5 var(--font-body);}
+.thought-chat {position:fixed;z-index:150;overflow:auto;padding:12px;background:var(--paper);color:var(--ink-text);border:1px solid var(--control-border);border-radius:var(--radius-card);box-shadow:var(--shadow-floating);}
+.thought-chat > header {display:flex;align-items:center;justify-content:space-between;gap:8px;font:var(--text-control) var(--font-ui);}
+.thought-chat .thread-panel {padding:8px 0;}
+.thought-chat .thread-panel > nav {display:none;}
+.thought-chat .thread-card {margin:0;}
+.thought-insert-preview {position:fixed;z-index:180;top:15%;left:50%;transform:translateX(-50%);width:min(600px,calc(100vw - 32px));max-height:75vh;overflow:auto;padding:20px;border:2px solid var(--ai-ink);border-radius:var(--radius-card);background:var(--paper);box-shadow:var(--shadow-floating);}
+.thought-insert-preview pre {white-space:pre-wrap;overflow-wrap:anywhere;background:var(--ai-surface);padding:12px;}
+.thought-chat button:focus-visible,.thought-blob button:focus-visible,.thought-insert-preview button:focus-visible {outline:2px solid var(--focus);outline-offset:3px;}
+.cm-line.cm-callout-ai {border-inline-start:0;background:var(--ai-surface);}
+.cm-callout-ai .cm-callout-marker::after {content:'AI';position:absolute;left:0;top:0;background:var(--ai-ink);color:var(--paper);font:600 12px/1.5 var(--font-ui);padding:1px 5px;border-radius:3px;pointer-events:none;}
+
+dialog.thought-insert-preview {inset:0;margin:auto;transform:none;color:var(--ink-text);}
+dialog.thought-insert-preview::backdrop {background:var(--scrim);}
