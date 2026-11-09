@@ -11,7 +11,7 @@ import { Store } from '../server/store.ts';
 import { NoteWatcher } from '../server/watch.ts';
 import { createApp } from '../server/http.ts';
 import { VISUALIZE_QUESTION } from '../shared/diagram.ts';
-import { cicd } from '../test/fixtures/diagrams.ts';
+import { cicd,rag,lifecycle,requestResponse } from '../test/fixtures/diagrams.ts';
 
 const out = path.resolve(process.env.BATCH2A_OUTPUT ?? '');
 assert(process.env.BATCH2A_OUTPUT && !out.toLowerCase().startsWith(path.resolve('..').toLowerCase()), 'Output must be outside the repo');
@@ -28,7 +28,8 @@ const calls = [];
 const nearMiss = { ...cicd, direction: 'LR', svg: '<svg/>', nodes: cicd.nodes.map((n, i) => (i === 0 ? { ...n, label: 'Code change -> build ' + 'x'.repeat(70) } : n)) };
 const provider = { name: 'claude', checkAvailability: async () => ({ available: true }),
   invoke: async (r) => { calls.push({ question: r.question, selection: r.selection });
-    const diagram = r.question === VISUALIZE_QUESTION ? nearMiss : r.question === 'Break it' ? { ...cicd, nodes: [], edges: [], focus: [] } : undefined;
+    const ref=[cicd,rag,lifecycle,requestResponse].find((_,i)=>r.question==='Reference '+i);
+    const diagram = ref??(r.question === VISUALIZE_QUESTION ? nearMiss : r.question === 'Break it' ? { ...cicd, nodes: [], edges: [], focus: [] } : undefined);
     return { id: r.id, provider: 'claude', model: null, answer: 'Synthetic text answer for a fixture.', claims: [{ sourceId: 'N1', quote: 'The app builds once' }], usage: null, ...(diagram ? { diagram } : {}) }; } };
 const app = createApp({ store, watcher, distDir: path.resolve('dist'), provider });
 let browser; const errors = [], report = {};
@@ -64,7 +65,7 @@ try {
   assert.equal(await page.locator('[data-diagram-issue]').count(), 0, 'the near-miss spec was repaired, not rejected');
   await page.waitForTimeout(400); report.firstLabel = await blob.locator('svg text').first().textContent();
   report.blobText = await blob.locator('svg').evaluate((svg) => { const s = svg.getBoundingClientRect().width / svg.viewBox.baseVal.width; return Math.round(Math.min(...[...svg.querySelectorAll('text')].map((t) => parseFloat(t.getAttribute('font-size') || '14') * s)) * 10) / 10; });
-  assert(report.blobText >= 12, 'blob text under 12px: ' + report.blobText);
+  assert(report.blobText >= 13, 'blob text under 13px: ' + report.blobText);
   await page.screenshot({ path: path.join(out, 'blob-diagram-light.png') });
   // 2b. The "..." menu: keyboard reachable and named; Dismiss hides with an Undo toast; dismissed thoughts can be restored.
   const more = blob.getByRole('button', { name: 'More actions for this AI thought' });
@@ -167,7 +168,9 @@ try {
   assert.equal(await page.evaluate(`${V}.state.doc.toString()`), docBefore, 'rendering changed the document');
   await page.evaluate(() => { const v = window.__aitiarch['fixture.md'].view; v.dispatch({ selection: { anchor: 0 } }); });
   await page.locator('.cm-image img').waitFor();
+  assert(await img.evaluate(i=>i.getBoundingClientRect().width>=i.naturalWidth),'note diagram must not shrink its text');
   await page.screenshot({ path: path.join(out, 'editor-callout-image-light.png') });
+  await page.setViewportSize({width:780,height:1000});await page.locator('.cm-image img').first().scrollIntoViewIfNeeded();await page.screenshot({path:path.join(out,'diagram-narrow.png')});await page.setViewportSize({width:1900,height:1000});
   await page.emulateMedia({ colorScheme: 'dark' }); await page.waitForTimeout(300);
   await page.screenshot({ path: path.join(out, 'editor-callout-image-dark.png') });
   await page.locator('.margin-card.thought-blob svg').first().waitFor();
@@ -213,11 +216,23 @@ try {
   await page.keyboard.press('Enter');
   await page.waitForFunction((id) => document.querySelector(`.margin-card[data-ink-id="${id}"] .thought-text`)?.textContent.includes('Synthetic text answer'), askId);
   assert.equal(calls.length, callsBefore + 1); assert.equal(calls.at(-1).question, 'Why does this matter?');
-  assert.equal(await page.locator(`.thought-connector[data-ink-id="${askId}"]`).count(), 1, 'the reply is joined to its anchor by the connector');
+  assert.equal(await page.locator(`.margin-card[data-ink-id="${askId}"]`).count(),1,'reply preserved at its anchor even when a displaced connector is hidden');
   // Esc cancels an open question.
   await select(from, to); await page.locator('.cm-sel-toolbar').getByRole('button', { name: 'Ask...' }).click();
-  await page.locator('.invocation-review').waitFor(); await page.keyboard.press('Escape');
+  await page.locator('.invocation-review').waitFor();await page.getByLabel('Question for Claude').fill('Unsent question');await page.keyboard.press('Escape');assert.equal(await page.getByLabel('Question for Claude').inputValue(),'Unsent question');await page.locator('header').first().click({position:{x:400,y:15}});assert.equal(await page.getByLabel('Question for Claude').inputValue(),'Unsent question');await page.getByLabel('Question for Claude').fill(''); await page.keyboard.press('Escape');
   await page.waitForFunction(() => !document.querySelector('.invocation-review'));
+  for(const [i,diagram] of [cicd,rag,lifecycle,requestResponse].entries()){
+   const id='reference-'+i;
+   await page.evaluate(async ({id,text,from,to,i})=>{const r=await fetch('/api/assistance/invoke',{method:'PUT',headers:{'Content-Type':'application/json','X-Aitiarch':'1'},body:JSON.stringify({id,path:'fixture.md',action:'ask',question:'Reference '+i,text,from,to})});if(r.status!==202)throw Error('Fixture request failed');},{id,text,from,to,i});
+   await page.waitForFunction(async id=>(await(await fetch('/api/assistance/status?id='+id)).json()).status==='complete',id);
+  }
+  await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);
+  for(let i=0;i<4;i++){
+   const svg=page.locator(`.margin-card[data-ink-id="reference-${i}"] svg`);await svg.waitFor({state:'attached'});
+   const geometry=await svg.evaluate(svg=>{const b=svg.viewBox.baseVal,scale=svg.getBoundingClientRect().width/b.width;return {ratio:b.width/b.height,min:Math.min(...[...svg.querySelectorAll('text')].map(t=>Number(t.getAttribute('font-size'))*scale)),inside:[...svg.querySelectorAll('text')].every(t=>{const r=t.getBBox();return r.x>=0&&r.y>=0&&r.x+r.width<=b.width+.5&&r.y+r.height<=b.height+.5;})};});
+   assert(geometry.inside,'all label boxes inside viewBox');assert(geometry.min>=13,'minimum displayed diagram text 13px: '+JSON.stringify({i,...geometry}));assert(geometry.ratio>=.6&&geometry.ratio<=1.3,'bounded diagram aspect ratio');
+  }
+  report.referenceGeometry='four fixtures passed';
   report.askBlob = 'ok';  console.log(JSON.stringify({ pass: true, calls: calls.length, report, errors }, null, 1));
   assert.deepEqual(errors, []);
 } finally { await browser?.close(); await app.close?.(); await watcher.stop?.(); await rm(root, { recursive: true, force: true }); }

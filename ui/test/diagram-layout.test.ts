@@ -1,7 +1,7 @@
 import {expect,it} from 'vitest';
-import {layoutDiagram} from '../src/diagrams/layout.ts';
+import {layoutDiagram,stepArtwork} from '../src/diagrams/layout.ts';
 import {diagramSvg,validateLayout} from '../shared/diagram-svg.ts';
-import {cicd,rag,lifecycle,diagramCases} from './fixtures/diagrams.ts';
+import {cicd,rag,lifecycle,diagramCases,requestResponse as exchange} from './fixtures/diagrams.ts';
 import {readFileSync} from 'node:fs';
 import {diagramPalettes} from '../shared/diagram-svg.ts';
 import {readDiagram} from '../shared/diagram.ts';
@@ -16,3 +16,13 @@ it('12 fake-provider questions cover six diagrams and six omissions, without cla
 it('export palettes mirror Grove light and dark tokens, with no runtime network assets',()=>{
  const tokens=readFileSync(new URL('../src/tokens.css',import.meta.url),'utf8');for(const palette of Object.values(diagramPalettes))for(const color of Object.values(palette))expect(tokens).toContain(color);
 });
+
+
+for(const d of [cicd,rag,lifecycle,exchange as unknown as import('../shared/diagram.ts').Diagram])it('readable vertical bounded labels '+d.title,async()=>{for(const compact of [true,false]){const l=await layoutDiagram(d,compact);expect(l.width/l.height).toBeGreaterThanOrEqual(.6);expect(l.width/l.height).toBeLessThanOrEqual(1.3);for(const e of l.edges)if(e.label){expect(e.label.x+e.label.width).toBeLessThanOrEqual(l.width);expect(e.label.y+e.label.height).toBeLessThanOrEqual(l.height);}const svg=diagramSvg(d,l,'light',undefined,false,compact);const sizes=[...svg.matchAll(/font-size="([0-9.]+)"/g)].map(m=>Number(m[1]));expect(Math.min(...sizes)).toBeGreaterThanOrEqual(13);}});
+it('merges opposite arrows with wrapped combined labels without mutating the contract',async()=>{const d=exchange as unknown as import('../shared/diagram.ts').Diagram,l=await layoutDiagram(d,true),svg=diagramSvg(d,l,'light',undefined,false,true);expect(svg).toContain('marker-start=');expect(svg.replace(/<[^>]+>/g,'')).toContain('HTTPS/TLS request / HTTPS/TLS response');expect(l.nodes.find(n=>n.id==='api')!.y).toBeGreaterThan(l.nodes.find(n=>n.id==='client')!.y);expect(d.edges).toHaveLength(3);});
+
+it('focused fallback fits a minimum blob without scaling text, and preserves the source',async()=>{const before=JSON.stringify(rag),l=await layoutDiagram(rag,true);for(const focus of rag.focus){const art=stepArtwork(rag,l,focus);expect(validateLayout(art.diagram,art.layout)).toBe(true);expect(art.layout.width).toBeLessThanOrEqual(204);expect(art.layout.width/art.layout.height).toBeGreaterThanOrEqual(.6);expect(art.layout.width/art.layout.height).toBeLessThanOrEqual(1.3);}expect(JSON.stringify(rag)).toBe(before);});
+
+it('rejects an edge label outside the SVG viewBox',async()=>{const l=await layoutDiagram(exchange,true);expect(validateLayout(exchange,{...l,edges:l.edges.map((e,i)=>i?e:{...e,label:{x:l.width-1,y:0,width:20,height:20}})})).toBe(false);});
+
+it('comparison items stack vertically rather than forming a wide row',async()=>{const d=diagramCases[3].diagram!,l=await layoutDiagram(d,true);expect(l.nodes[1].y).toBeGreaterThan(l.nodes[0].y);});

@@ -13,3 +13,7 @@
 .diagram-large .diagram-stage { max-height: 68vh; }
 .diagram-large svg { display: block; max-width: none; }
 .diagram-large .diagram-tools { margin-block: 12px; }
+
+.diagram-stage {overscroll-behavior:contain;}
+.thought-blob .diagram-stage {max-height:none;overflow:visible;}
+.thought-blob .diagram-stage svg {max-width:100%;height:auto;}
