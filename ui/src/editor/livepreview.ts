@@ -234,9 +234,8 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
             const lang = info ? state.sliceDoc(info.from, info.to).trim().toLowerCase() : "";
             if (lang === "mermaid" && !lineIsActive(n.from, n.to) && n.to > n.from) return false; // the block layer draws it
             lineDeco(n.from, n.to, "cm-codeblock");
-            // Fences keep their characters (so nothing shifts or moves vertically) but are transparent while the caret is
-            // elsewhere; the opening fence carries the language label and the Copy button instead.
-            const shown = lineIsActive(n.from, n.to) ? "cm-fence-on" : "cm-fence-off";
+            // Fences keep their characters (so nothing shifts or moves vertically) but remain transparent even while editing; the opening fence carries the language label and the Copy button instead.
+            const shown = "cm-fence-off";
             const first = doc.lineAt(n.from);
             if (first.from >= rFrom) {
               out.push(Decoration.line({ class: `cm-fence cm-fence-open ${shown}` }).range(first.from));

@@ -14,8 +14,6 @@ export const codeLanguages: LanguageDescription[] = [
   LanguageDescription.of({ name: "JSON", alias: ["json", "jsonc"], load: async () => (await import("@codemirror/lang-json")).json() }),
   LanguageDescription.of({ name: "CSS", alias: ["css"], load: async () => (await import("@codemirror/lang-css")).css() }),
   LanguageDescription.of({ name: "Python", alias: ["py", "python"], load: async () => (await import("@codemirror/lang-python")).python() }),
-  LanguageDescription.of({ name: "YAML", alias: ["yaml", "yml"], load: async () => (await import("@codemirror/lang-yaml")).yaml() }),
-  LanguageDescription.of({ name: "SQL", alias: ["sql"], load: async () => (await import("@codemirror/lang-sql")).sql() }),
   LanguageDescription.of({
     name: "Shell",
     alias: ["sh", "bash", "zsh", "shell", "console"],
@@ -70,7 +68,9 @@ export class FenceHeader extends WidgetType {
         () => flash(copy, "Copy failed"),
       );
     });
-    wrap.append(name, copy);
+    const hint=document.createElement("span");
+    hint.className="cm-fence-hint";hint.textContent="Tab indent / Esc then Tab leave / Ctrl+Enter exit";hint.title=hint.textContent;
+    wrap.append(name, hint, copy);
     return wrap;
   }
   ignoreEvent() {

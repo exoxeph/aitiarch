@@ -11,6 +11,7 @@ import { conflictDecorations, conflictHandlers, conflictsField } from "./conflic
 import { livePreview, previewHandlers, wikiResolver } from "./livepreview.ts";
 import { externalChange, NoteSession, type SyncStatus } from "./session.ts";
 import { addInk, removeInk, inkField, setInk } from "./ink.ts";
+import {codeEditing} from "./code-editing.ts";
 import { codeHighlight, codeLanguages } from "./codeblocks.ts";
 import { toggleTaskAtCaret } from "./tasks.ts";
 import { slashMenu } from "./slash.ts";
@@ -104,6 +105,7 @@ export function EditorPane(props: Props) {
           EditorView.lineWrapping,
           wordNavigation,
           markdown({ extensions: [Strikethrough, TaskList, Autolink, Table], codeLanguages, addKeymap: false }), // no auto-inserted list markers: the editor never writes text you didn't type
+          codeEditing,
           invokedKeys,
           formattingKeys,
           keymap.of([

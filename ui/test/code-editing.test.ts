@@ -1,0 +1,16 @@
+import {it,expect} from 'vitest';
+import {EditorState} from '@codemirror/state';
+import {markdown} from '@codemirror/lang-markdown';
+import {codeAction,codePair} from '../src/editor/code-editing.ts';
+const text='Before\n\n```js\n  value\n```\n\nAfter';
+const state=(doc=text,pos=doc.indexOf('value')+5)=>EditorState.create({doc,selection:{anchor:pos},extensions:[markdown()]});
+it('Tab indents and Shift Tab restores source exactly',()=>{const s=state(),a=s.update(codeAction(s,'indent')!).state,b=a.update(codeAction(a,'outdent')!).state;expect(a.doc.toString()).toContain('    value');expect(b.doc.toString()).toBe(text);});
+it('Enter retains indentation',()=>{const s=state();expect(s.update(codeAction(s,'enter')!).state.doc.toString()).toContain('  value\n  \n```');});
+it.each(['(', '[', '{', '"', "'"])('pairs %s only inside code',ch=>{const s=state(text,text.indexOf('value'));expect(codePair(s,ch)).not.toBeNull();expect(codePair(state('plain',3),ch)).toBeNull();});
+it('typing the closing pair moves over it',()=>{const s=state('```\n()\n```',5);expect(s.update(codePair(s,')')!).state.selection.main.head).toBe(6);});
+it('empty block Backspace removes only the block and can be inverted byte exactly',()=>{const doc='\ufeffBefore\r\n\r\n```js\r\n\r\n```\r\n\r\nAfter';let s=state(doc,doc.replace(/\r/g,'').indexOf('```js')+6);const tr=s.update(codeAction(s,'remove')!);expect(tr.newDoc.toString()).not.toContain('```');expect(tr.changes.invert(s.doc).apply(tr.newDoc).toJSON()).toEqual(s.doc.toJSON());});
+it('Backspace never removes nonempty blocks',()=>expect(codeAction(state(),'remove')).toBeNull());
+it('Ctrl Enter exits to following text without changing it',()=>{const s=state();const tr=s.update(codeAction(s,'exit')!);expect(tr.newDoc.toString()).toBe(text);expect(tr.newSelection.main.head).toBe(text.indexOf('```\n')+4);});
+it('Arrow Down exits only at the last body line end',()=>{expect(codeAction(state(text,text.indexOf('value')),'down')).toBeNull();expect(codeAction(state(),'down')).not.toBeNull();});
+it('exit creates a line when the closing fence is the end of the document',()=>{const s=state('```\nx\n```',5),tr=s.update(codeAction(s,'exit')!);expect(tr.newDoc.toString()).toBe('```\nx\n```\n');expect(tr.newSelection.main.head).toBe(tr.newDoc.length);});
+it('all code actions leave prose alone',()=>{for(const a of ['indent','outdent','enter','remove','exit','down'] as const)expect(codeAction(state('plain',2),a)).toBeNull();});

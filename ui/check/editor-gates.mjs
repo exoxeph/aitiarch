@@ -164,13 +164,13 @@ await session('d1',d1,async({page,theme,root,bytes})=>{
  // keyboard toggle on the caret line, and a second toggle back
  await put(page,d.indexOf('done task')+2);await page.keyboard.press('Control+Alt+Enter');await settle(page);assert.equal(await doc(page),d.replace('- [x] done','- [ ] done'));
  await page.keyboard.press('Control+z');assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes);R.keyToggleUndoByteExact=true;
- // code block: header label, Copy copies exactly the code, fences hidden away and shown inside
+ // code block: header label, Copy copies exactly the code, fences always hidden
  await put(page,d.length);
  R.header=await page.evaluate(()=>[...document.querySelectorAll('.cm-fence-lang')].map(e=>e.textContent));assert.deepEqual(R.header,['JavaScript','Shell']);
  R.fenceAway=await page.evaluate(()=>[...document.querySelectorAll('.cm-fence-open')].map(e=>getComputedStyle(e).color));assert(R.fenceAway.every(c=>/rgba\(0, 0, 0, 0\)|transparent/.test(c)),'fences not hidden away from the block');
  await page.locator('.cm-fence-copy').first().click();R.copied=await page.evaluate(()=>window.__copied.at(-1));assert.equal(R.copied,'const answer = "forty-two"; // note\nfunction go(n) { return n + 1; }');
  assert.equal(await doc(page),d,'Copy changed the document');
- await put(page,d.indexOf('const answer')+3);R.fenceOn=await page.evaluate(()=>getComputedStyle(document.querySelector('.cm-fence-open')).color);assert(!/rgba\(0, 0, 0, 0\)/.test(R.fenceOn));
+ await put(page,d.indexOf('const answer')+3);R.fenceOn=await page.evaluate(()=>getComputedStyle(document.querySelector('.cm-fence-open')).color);assert(/rgba\(0, 0, 0, 0\)/.test(R.fenceOn));
  // lazy highlighting: the shell pack was requested because the note has an sh fence; the keyword gets its own colour; every token colour passes AA on the code background
  R.shellChunkRequested=await page.evaluate(()=>performance.getEntriesByType('resource').some(r=>/\/assets\/shell-/.test(r.name)));assert(R.shellChunkRequested,'shell pack was not requested lazily');
  await put(page,d.length);await page.waitForTimeout(400);
@@ -185,6 +185,24 @@ await session('d1',d1,async({page,theme,root,bytes})=>{
  assert.deepEqual(await disk(page,root),bytes,'D1 interactions changed bytes');
  // Probe (recorded, not asserted): undo straight after a save lands. Typed edit, key toggle and click toggle.
  for(const [label,act] of [['typing',async()=>{await put(page,d.indexOf('Lists')+5);await page.keyboard.type('Z');}],['keyToggle',async()=>{await put(page,d.indexOf('open task')+2);await page.keyboard.press('Control+Alt+Enter');}],['clickToggle',async()=>{await put(page,d.length);await page.locator('.cm-task-off').first().click();}]]){await act();await disk(page,root);await page.keyboard.press('Control+z');await page.waitForTimeout(700);(R.undoAfterSaveProbe??={})[label]=(await doc(page))===d;await put(page,d.length);await disk(page,root);await page.waitForTimeout(300);}
+});
+// IDE keys are actual keyboard events; pointer coordinates merely locate the text.
+await session('code-editing','\uFEFFBefore\r\n\r\n```js\r\n  value\r\n```\r\n\r\nAfter\r\n',async({page,theme,root,bytes})=>{
+ const original=await doc(page),R={};report[`code-editing-${theme}`]=R;
+ const click=async(needle,offset=0)=>{const p=await page.evaluate(([n,o])=>{const v=window.__aitiarch['n.md'].view,r=v.coordsAtPos(v.state.doc.toString().indexOf(n)+o);return{x:r.left+1,y:(r.top+r.bottom)/2};},[needle,offset]);await page.mouse.click(p.x,p.y);await settle(page);};
+ const restore=async()=>{for(let n=0;n<12&&(await doc(page))!==original;n++)await page.keyboard.press('Control+z');assert.equal(await doc(page),original);assert.deepEqual(await disk(page,root),bytes);};
+ await click('value',5);await page.keyboard.press('Tab');assert((await doc(page)).includes('    value'));await page.keyboard.press('Shift+Tab');assert.equal(await doc(page),original);R.indentOutdent=true;
+ await page.keyboard.press('Enter');assert((await doc(page)).includes('  value\n  \n```'));await restore();R.enterIndent=true;
+ for(const pair of ['()','[]','{}','""',"''"]){await click('value');await page.keyboard.type(pair[0]);assert((await doc(page)).includes('  '+pair+'value'));await page.keyboard.type(pair[1]);assert((await doc(page)).includes('  '+pair+'value'));await restore();}R.pairs=true;
+ await click('value',2);await page.keyboard.press('Home');assert.equal(await page.evaluate(`${V}.state.selection.main.head`),original.indexOf('  value'));await page.keyboard.press('End');assert.equal(await page.evaluate(`${V}.state.selection.main.head`),original.indexOf('value')+5);
+ await page.keyboard.press('Control+ArrowLeft');assert.equal(await page.evaluate(`${V}.state.selection.main.head`),original.indexOf('value'));R.wordKeys=true;
+ await page.keyboard.press('Control+Enter');assert.equal(await page.evaluate(`${V}.state.selection.main.head`),original.indexOf('```\n\nAfter')+4);assert.equal(await doc(page),original);R.exit=true;
+ await click('value',5);await page.keyboard.press('ArrowDown');assert.equal(await page.evaluate(`${V}.state.selection.main.head`),original.indexOf('```\n\nAfter')+4);R.downExit=true;
+ await click('value',2);await page.keyboard.press('Escape');await page.keyboard.press('Tab');assert.equal(await page.evaluate(`${V}.hasFocus`),false,'Esc Tab trapped focus');R.escapeTab=true;
+ await click('value',2);assert.equal(await page.locator('.cm-fence-on').count(),0);assert.equal(await page.locator('.cm-fence-off').count(),2);assert((await page.locator('.cm-fence-hint').textContent()).includes('Esc then Tab'));R.hiddenFences=true;
+ // Explicit deletion of body, followed by empty-block Backspace; undo restores BOM+CRLF.
+ await click('value');await page.keyboard.down('Shift');await page.keyboard.press('End');await page.keyboard.up('Shift');await page.keyboard.press('Backspace');await page.keyboard.press('Backspace');assert(!(await doc(page)).includes('```'));await restore();R.emptyBlock=true;
+ await page.locator('.editor-col').screenshot({path:path.join(output,`gate-code-keys-${theme}.png`)});assert.deepEqual(await disk(page,root),bytes);R.byteExact=true;
 });
 // ---- 2c. C: slash menu, driven by real key presses
 const slashNote='\uFEFF# Slash gate\r\n\r\nA paragraph.\r\n';

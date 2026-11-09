@@ -196,7 +196,7 @@ describe("tasks (D1)", () => {
 
 describe("code blocks (D1)", () => {
   const doc = "Away\n\n```js\nconst a = 1;\n```\n\nEnd\n";
-  it("fences keep their lines, are off away and on in the block, and the opening fence has a labelled header", () => {
+  it("fences keep their lines, stay hidden even in the block, and the opening fence has a labelled header", () => {
     let s = make(doc, 0);
     expect(cls(s, "cm-fence-off")).toHaveLength(2);
     expect(cls(s, "cm-fence-open")).toHaveLength(1);
@@ -204,8 +204,8 @@ describe("code blocks (D1)", () => {
     const head = rows(s).find((r) => r.spec.widget?.constructor.name === "FenceHeader");
     expect(head?.spec.widget.label).toBe("JavaScript");
     s = s.update({ selection: { anchor: doc.indexOf("const") } }).state;
-    expect(cls(s, "cm-fence-on")).toHaveLength(2);
-    expect(cls(s, "cm-fence-off")).toHaveLength(0);
+    expect(cls(s, "cm-fence-on")).toHaveLength(0);
+    expect(cls(s, "cm-fence-off")).toHaveLength(2);
   });
   it("fenceLabel names known languages, keeps unknown ones, and defaults to text", () => {
     expect([fenceLabel("js"), fenceLabel("TS"), fenceLabel("py"), fenceLabel("bash"), fenceLabel("rust"), fenceLabel("")]).toEqual(["JavaScript", "TypeScript", "Python", "Shell", "rust", "text"]);

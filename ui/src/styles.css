@@ -417,3 +417,7 @@ summary { cursor: pointer; }
 .cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--accent); color: var(--on-accent); }
 .cm-completionDetail { margin-left: 0; font-style: normal; font-family: var(--font-mono); font-size: 12px; opacity: .85; order: 2; }
 .cm-completionMatchedText { text-decoration: underline; text-underline-offset: 2px; }
+
+.cm-fence-head {max-width:calc(100% - 16px);}
+.cm-fence-hint {font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+@media(max-width:600px){.cm-fence-hint {max-width:120px;}}
