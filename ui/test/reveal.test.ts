@@ -245,6 +245,6 @@ describe("slash menu (C)", () => {
 });
 
 describe("slash fallback pick (C)", () => {
-  it.each([["code", "Code block"], ["head", "Heading 1"], ["h2", "Heading 2"], ["todo", "To-do list"], ["to-do", "To-do list"], ["quo", "Quote"], ["div", "Divider"], ["num", "Numbered list"], ["bul", "Bulleted list"]])("/%s picks %s", (q, label) => expect(slashPick(q)?.label).toBe(label));
+  it.each([["code", "Code block"], ["head", "Heading 1"], ["h2", "Heading 2"], ["todo", "Checklist"], ["to-do", "Checklist"], ["quo", "Quote"], ["div", "Divider"], ["num", "Numbered list"], ["bul", "Bulleted list"]])("/%s picks %s", (q, label) => expect(slashPick(q)?.label).toBe(label));
   it("returns null when nothing matches", () => expect(slashPick("zzz")).toBeNull());
 });

@@ -418,6 +418,13 @@ summary { cursor: pointer; }
 .cm-completionDetail { margin-left: 0; font-style: normal; font-family: var(--font-mono); font-size: 12px; opacity: .85; order: 2; }
 .cm-completionMatchedText { text-decoration: underline; text-underline-offset: 2px; }
 
+/* Slash commands: plain labels, descriptions and real typed shortcuts. */
+.cm-editor .cm-tooltip-autocomplete > ul > li:not(.cm-completionSection) { display:grid; grid-template-columns:22px 1fr auto;gap:2px 10px; }
+.cm-slash-icon {grid-column:1;grid-row:1 / 3;align-self:center;text-align:center;}
+.cm-editor .cm-completionLabel {grid-column:2;grid-row:1;}
+.cm-editor .cm-completionDetail {grid-column:2;grid-row:2;font-family:var(--font-ui);font-size:12px;opacity:1;}
+.cm-slash-shortcut {grid-column:3;grid-row:1 / 3;align-self:center;font:11px var(--font-mono);}
+.cm-editor .cm-tooltip-autocomplete > ul > li.cm-completionSection {display:block;font-weight:600;font-size:12px;padding-top:9px;}
 .cm-fence-head {max-width:calc(100% - 16px);}
 .cm-fence-hint {font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 @media(max-width:600px){.cm-fence-hint {max-width:120px;}}

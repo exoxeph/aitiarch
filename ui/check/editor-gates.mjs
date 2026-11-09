@@ -208,9 +208,13 @@ await session('code-editing','\uFEFFBefore\r\n\r\n```js\r\n  value\r\n```\r\n\r\
 const slashNote='\uFEFF# Slash gate\r\n\r\nA paragraph.\r\n';
 await session('slash',slashNote,async({page,theme,root,bytes})=>{
  const R={};report[`slash-${theme}`]=R;const d=await doc(page);const menu=()=>page.locator('.cm-tooltip-autocomplete');
- const labels=()=>page.locator('.cm-tooltip-autocomplete li').allTextContents();
+ const labels=()=>page.locator('.cm-tooltip-autocomplete .cm-completionLabel').allTextContents();
  await put(page,d.length);await page.keyboard.press('Enter');await page.keyboard.type('/');await menu().waitFor({timeout:3000});
- R.allItems=await labels();assert.equal(R.allItems.length,9);
+ R.allItems=await labels();assert.equal(R.allItems.length,17);
+ assert.equal(await page.getByRole('listbox').count(),1);
+ const active=()=>page.locator('.cm-content').getAttribute('aria-activedescendant');
+ for(const [key,last] of [['End',true],['Home',false],['Control+ArrowRight',true],['Control+ArrowLeft',false]]){await page.keyboard.press(key);const id=await active();assert(id);assert.equal(await page.locator(`[id="${id}"] .cm-completionLabel`).textContent(),last?'Footnote':'Text');}
+ await page.locator('.cm-tooltip-autocomplete').screenshot({path:path.join(output,`gate-slash-groups-${theme}.png`)});R.keyboardEdgesAndAria=true;
  await page.keyboard.type('head');R.filtered=await labels();assert.deepEqual(R.filtered.map(s=>s.replace(/#+$/,'')),['Heading 1','Heading 2','Heading 3']);
  await page.locator('.cm-tooltip-autocomplete').screenshot({path:path.join(output,`gate-slash-${theme}.png`)});
  R.selectedContrast=await page.evaluate(()=>{const lin=c=>{c/=255;return c<=.03928?c/12.92:((c+.055)/1.055)**2.4};const rgb=s=>(s.match(/[\d.]+/g)||[]).slice(0,3).map(Number);const L=a=>.2126*lin(a[0])+.7152*lin(a[1])+.0722*lin(a[2]);const li=document.querySelector('.cm-tooltip-autocomplete li[aria-selected]');const cs=getComputedStyle(li);const p=L(rgb(cs.color)),q=L(rgb(cs.backgroundColor));return Math.round((Math.max(p,q)+.05)/(Math.min(p,q)+.05)*100)/100;});assert(R.selectedContrast>=4.5,`selected item contrast ${R.selectedContrast}`);

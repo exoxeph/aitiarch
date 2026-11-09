@@ -1,6 +1,6 @@
 // Slash menu: type "/" at the start of a line to insert a block as plain Markdown. Nothing is inserted until you pick an
 // item (Enter, Tab or click); the insertion is one ordinary transaction, so Ctrl+Z restores the exact bytes.
-import { acceptCompletion, autocompletion, closeCompletion, completionStatus, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { acceptCompletion, autocompletion, currentCompletions, setSelectedCompletion, closeCompletion, completionStatus, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { syntaxTree } from "@codemirror/language";
 import { Prec, StateEffect, StateField, type ChangeSpec, type EditorState } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
@@ -8,23 +8,28 @@ import { frontmatterEnd } from "../frontmatter.ts";
 
 export interface SlashItem {
   label: string;
-  /** The Markdown that gets inserted, shown to the right so nothing is hidden about what you are about to write. */
   detail: string;
+  group: 'Text'|'Lists'|'Insert'|'Advanced';
+  icon: string;
+  shortcut: string;
+  aliases: string[];
   insert: string;
-  /** Where the caret lands, counted from the start of the insertion (defaults to the end). */
   caret?: number;
 }
-
 export const SLASH_ITEMS: readonly SlashItem[] = [
-  { label: "Heading 1", detail: "#", insert: "# " },
-  { label: "Heading 2", detail: "##", insert: "## " },
-  { label: "Heading 3", detail: "###", insert: "### " },
-  { label: "Bulleted list", detail: "-", insert: "- " },
-  { label: "Numbered list", detail: "1.", insert: "1. " },
-  { label: "To-do list", detail: "- [ ]", insert: "- [ ] " },
-  { label: "Quote", detail: ">", insert: "> " },
-  { label: "Code block", detail: "```", insert: "```\n\n```", caret: 4 },
-  { label: "Divider", detail: "---", insert: "---\n" },
+  {label:'Text',detail:'Start a plain paragraph',group:'Text',icon:'T',shortcut:'/text',aliases:['paragraph'],insert:''},
+  ...[1,2,3].map(n=>({label:`Heading ${n}`,detail:`Section heading, level ${n}`,group:'Text' as const,icon:`H${n}`,shortcut:`/h${n}`,aliases:[`h${n}`],insert:'#'.repeat(n)+' '})),
+  {label:'Quote',detail:'Quote a passage',group:'Text',icon:'❝',shortcut:'/quote',aliases:['blockquote'],insert:'> '},
+  {label:'Bulleted list',detail:'An unordered list of items',group:'Lists',icon:'•',shortcut:'/bullets',aliases:['bullets','unordered'],insert:'- '},
+  {label:'Numbered list',detail:'Items in a numbered order',group:'Lists',icon:'1.',shortcut:'/numbered',aliases:['ordered'],insert:'1. '},
+  {label:'Checklist',detail:'Items you can tick off',group:'Lists',icon:'☑',shortcut:'/todo',aliases:['todo','to-do','task','tasks'],insert:'- [ ] '},
+  ...(['note','tip','warning'] as const).map(kind=>({label:kind[0].toUpperCase()+kind.slice(1)+' callout',detail:`Highlight a ${kind}`,group:'Insert' as const,icon:kind==='warning'?'!':'i',shortcut:`/${kind}`,aliases:[kind],insert:`> [!${kind}]\n> `})),
+  {label:'Code block',detail:'A fenced block of code',group:'Insert',icon:'<>',shortcut:'/code',aliases:['snippet'],insert:'```\n\n```',caret:4},
+  {label:'Divider',detail:'Separate sections with a line',group:'Insert',icon:'—',shortcut:'/line',aliases:['line','rule','separator'],insert:'---\n'},
+  {label:'Table',detail:'A Markdown table, edit in source',group:'Insert',icon:'▦',shortcut:'/table',aliases:['grid'],insert:'| Column | Value |\n| --- | --- |\n|  |  |',caret:33},
+  {label:'Link',detail:'Add link text and a destination',group:'Insert',icon:'↗',shortcut:'/link',aliases:['url'],insert:'[]()',caret:1},
+  {label:'Image',detail:'Add alt text and an image path',group:'Insert',icon:'□',shortcut:'/image',aliases:['picture','photo'],insert:'![]()',caret:2},
+  {label:'Footnote',detail:'Add a reference and its definition',group:'Advanced',icon:'¹',shortcut:'/footnote',aliases:['reference'],insert:'[^note]\n\n[^note]: ',caret:17},
 ];
 
 /** `/query` at the start of a line (leading spaces allowed). Returns where the slash is and what has been typed after it. */
@@ -52,28 +57,27 @@ export function slashSource(ctx: CompletionContext): CompletionResult | null {
   const m = slashMatch(line.text, ctx.pos - line.from);
   if (!m || !allowed(ctx.state, line.from + m.offset)) return null;
   const from = line.from + m.offset + 1; // after the slash, so only what you type after it is matched
-  const options: Completion[] = SLASH_ITEMS.map((item) => ({
+  const options: Completion[] = slashItems(m.query).map((item) => ({
     label: item.label,
     detail: item.detail,
+    section: {name:item.group,rank:["Text","Lists","Insert","Advanced"].indexOf(item.group)},
     apply: (view, _c, f, t) => {
       const { changes, caret } = slashInsert(item, f - 1, t); // f - 1 includes the slash itself
       view.dispatch({ changes, selection: { anchor: caret }, userEvent: "input.complete", scrollIntoView: true });
     },
   }));
-  return { from, options, validFor: /^[\w-]*$/ };
+  return { from, options, filter:false, update:(_current,_from,_to,context)=>slashSource(context) };
 }
 
-/** Same idea as the menu's own filter: the typed letters must appear in order in the label; prefix matches come first. */
-export function slashPick(query: string): SlashItem | null {
-  const q = query.toLowerCase().replace(/[\s-]/g, "");
-  const flat = (s: string) => s.toLowerCase().replace(/[\s-]/g, "");
-  const inOrder = (s: string) => {
-    let i = 0;
-    for (const c of s) if (c === q[i]) i++;
-    return i === q.length;
-  };
-  return SLASH_ITEMS.find((it) => flat(it.label).startsWith(q)) ?? SLASH_ITEMS.find((it) => inOrder(flat(it.label))) ?? null;
+/** Synonyms and labels share one filter, including the fast-Enter path. */
+export function slashItems(query:string):SlashItem[]{
+ const flat=(s:string)=>s.toLowerCase().replace(/[\s-]/g,'');const q=flat(query);
+ const names=(it:SlashItem)=>[it.label,...it.aliases].map(flat);
+ const prefix=(it:SlashItem)=>names(it).some(s=>s.startsWith(q));
+ const inOrder=(s:string)=>{let i=0;for(const c of s)if(c===q[i])i++;return i===q.length;};
+ return [...SLASH_ITEMS.filter(prefix),...SLASH_ITEMS.filter(it=>!prefix(it)&&names(it).some(inOrder))];
 }
+export function slashPick(query:string):SlashItem|null{return slashItems(query)[0]??null;}
 
 /**
  * Typing "/code" and pressing Enter faster than the menu can open used to insert a newline instead. If no menu is open,
@@ -115,9 +119,11 @@ export const slashMenu = [
       view.dispatch({ effects: dismissed.of(true) });
       return true;
     } },
+    ...[['Home',false],['End',true],['Ctrl-ArrowLeft',false],['Ctrl-ArrowRight',true]].map(([key,last])=>({key:key as string,run:(view:import('@codemirror/view').EditorView)=>{const n=currentCompletions(view.state).length;if(!n||completionStatus(view.state)!=='active')return false;view.dispatch({effects:setSelectedCompletion(last?n-1:0)});return true;}})),
     { key: "Enter", run: enterWithoutMenu },
     // Tab accepts too, but only while a slash menu is showing or pending, so it never traps focus elsewhere.
     { key: "Tab", run: (view) => (completionStatus(view.state) === "active" ? acceptCompletion(view) : enterWithoutMenu(view)) },
   ])),
-  autocompletion({ override: [slashSource], icons: false, closeOnBlur: true, interactionDelay: 0, activateOnTypingDelay: 10 }),
+  autocompletion({ override: [slashSource], icons: false, closeOnBlur: true, interactionDelay: 0, activateOnTypingDelay: 10,
+    addToOptions:[{position:10,render(completion){const item=SLASH_ITEMS.find(i=>i.label===completion.label)!;const span=document.createElement("span");span.className="cm-slash-icon";span.setAttribute("aria-hidden","true");span.textContent=item.icon;return span;}},{position:90,render(completion){const span=document.createElement("span");span.className="cm-slash-shortcut";span.setAttribute("aria-hidden","true");span.textContent=SLASH_ITEMS.find(i=>i.label===completion.label)!.shortcut+" \u21b5";return span;}}] }),
 ];
