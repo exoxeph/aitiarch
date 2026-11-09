@@ -8,6 +8,7 @@ import { buildInline, lineRanges, livePreview } from "../src/editor/livepreview.
 import { taskMarkerAt, taskToggleChange } from "../src/editor/tasks.ts";
 import { slashMatch, slashInsert, slashPick, slashSource, SLASH_ITEMS } from "../src/editor/slash.ts";
 import { CompletionContext } from "@codemirror/autocomplete";
+import { imageSrc } from "../src/editor/images.ts";
 import { fenceLabel } from "../src/editor/codeblocks.ts";
 import { touchesSpan, touchesLines, hidesFor, quoteMarkGroups, autolinkHides } from "../src/editor/reveal.ts";
 
@@ -247,4 +248,39 @@ describe("slash menu (C)", () => {
 describe("slash fallback pick (C)", () => {
   it.each([["code", "Code block"], ["head", "Heading 1"], ["h2", "Heading 2"], ["todo", "Checklist"], ["to-do", "Checklist"], ["quo", "Quote"], ["div", "Divider"], ["num", "Numbered list"], ["bul", "Bulleted list"]])("/%s picks %s", (q, label) => expect(slashPick(q)?.label).toBe(label));
   it("returns null when nothing matches", () => expect(slashPick("zzz")).toBeNull());
+});
+describe("images (item 5)", () => {
+  const name = "ai-diagram-" + "a".repeat(64) + ".svg";
+  const doc = `Away\n\n> [!ai]\n> Explanation text.\n> ![AI diagram: Flow](assets/${name})\n\n![Elsewhere](https://example.test/x.png)\n`;
+  const widgets = (s: EditorState) => rows(s).filter((r) => r.spec.widget?.constructor.name === "ImageWidget");
+  it("draws diagram assets as pictures and every other image as an alt-text placeholder, away from the caret", () => {
+    const w = widgets(make(doc, 0));
+    expect(w).toHaveLength(2);
+    expect(w[0].spec.widget.src).toBe(`/api/diagram-asset?name=${name}`);
+    expect(w[0].spec.widget.alt).toBe("AI diagram: Flow");
+    expect(w[1].spec.widget.src).toBeNull();
+    expect(w[1].spec.widget.alt).toBe("Elsewhere");
+  });
+  it("covers the whole ![..](..) range, so the raw text is never shown while the caret is elsewhere", () => {
+    const w = widgets(make(doc, 0))[0];
+    expect(doc.slice(w.from, w.to)).toBe(`![AI diagram: Flow](assets/${name})`);
+  });
+  it("shows the source (no widget) when the caret or selection is on that line, and only that line", () => {
+    const onLine = doc.indexOf("![AI diagram") + 4;
+    const w = widgets(make(doc, onLine));
+    expect(w).toHaveLength(1);
+    expect(w[0].spec.widget.alt).toBe("Elsewhere");
+    expect(widgets(make(doc, 0, doc.length))).toHaveLength(0);
+  });
+  it("imageSrc only accepts local diagram assets: no remote, data: or arbitrary paths", () => {
+    expect(imageSrc(`assets/${name}`)).toBe(`/api/diagram-asset?name=${name}`);
+    expect(imageSrc(`../assets/${name}`)).toBe(`/api/diagram-asset?name=${name}`);
+    expect(imageSrc(`<assets/${name}>`)).toBe(`/api/diagram-asset?name=${name}`);
+    for (const bad of [`https://example.test/${name}`, `//evil.test/${name}`, `data:image/svg+xml;base64,AAAA`, `javascript:alert(1)`, "assets/other.svg", "assets/ai-diagram-xyz.svg", `assets/${name}.png`, ""]) expect(imageSrc(bad)).toBeNull();
+  });
+  it("rendering never edits the note: every caret position leaves the text identical", () => {
+    let s = make(doc, 0);
+    for (let p = 0; p <= doc.length; p += 5) { const tr = s.update({ selection: { anchor: p } }); expect(tr.docChanged).toBe(false); s = tr.state; widgets(s); }
+    expect(s.doc.toString()).toBe(doc);
+  });
 });

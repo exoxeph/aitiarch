@@ -7,6 +7,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, typ
 import { frontmatterEnd } from "../frontmatter.ts";
 import { findFailedMarks } from "./format.ts";
 import { FenceHeader, fenceLabel } from "./codeblocks.ts";
+import { ImageWidget, imageSrc } from "./images.ts";
 import { toggleTaskAt } from "./tasks.ts";
 import { autolinkHides, calloutHeader, hidesFor, quoteMarkGroups, touchesLines, touchesSpan } from "./reveal.ts";
 import {previewRanges} from './navigation.ts';
@@ -275,6 +276,20 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
           case "HorizontalRule":
             lineDeco(n.from, n.to, lineIsActive(n.from, n.to) ? "cm-hr" : "cm-hr cm-hr-off");
             return;
+          case "Image": {
+            // `![alt](path)` draws as a picture (or an alt-text placeholder) unless the caret is on its line, which shows the
+            // source. The characters are never changed.
+            const marks: Array<[number, number]> = [];
+            let url = "";
+            for (let c = n.node.firstChild; c; c = c.nextSibling) {
+              if (c.name === "LinkMark") marks.push([c.from, c.to]);
+              else if (c.name === "URL") url = state.sliceDoc(c.from, c.to);
+            }
+            if (marks.length >= 2 && !lineIsActive(n.from, n.to)) {
+              out.push(Decoration.replace({ widget: new ImageWidget(state.sliceDoc(marks[0][1], marks[1][0]), imageSrc(url)) }).range(n.from, n.to));
+            }
+            return false;
+          }
           case "Autolink": {
             const url = n.node.getChild("URL");
             if (!url) return;
