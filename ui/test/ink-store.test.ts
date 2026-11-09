@@ -102,7 +102,9 @@ describe("ink sidecars", () => {
 
   it("serializes simultaneous writers so one loses with a conflict", async () => {
     const first = await seed();
-    const results = await Promise.allSettled([store.write("fixture.md", first.document, first.version),
+    const changed = structuredClone(first.document);
+    changed.items[0].body = "Changed by the first writer."; // must really change the bytes, otherwise the second writer's version is still valid
+    const results = await Promise.allSettled([store.write("fixture.md", changed, first.version),
       store.write("fixture.md", { ...first.document, items: [] }, first.version)]);
     expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
     expect(results.filter(r => r.status === "rejected")).toHaveLength(1);
@@ -232,5 +234,29 @@ describe("persisted re-anchoring", () => {
     await expect(store.reanchor("fixture.md", s.version)).rejects.toThrow();
     expect(readFileSync(file())).toEqual(old);
     expect(readFileSync(path.join(root, "fixture.md"))).toEqual(bad);
+  });
+});
+
+describe("concurrent writes to one sidecar", () => {
+  it("queue instead of failing on the lock: a stale write gets a version conflict, never 'busy'", async () => {
+    const first = await seed();
+    const a = structuredClone(first.document), b = structuredClone(first.document);
+    a.items[0].body = "First concurrent writer.";
+    b.items[0].body = "Second concurrent writer.";
+    const results = await Promise.allSettled([store.write("fixture.md", a, first.version), store.write("fixture.md", b, first.version)]);
+    expect(results[0].status).toBe("fulfilled");
+    expect(results[1].status).toBe("rejected");
+    expect(String((results[1] as PromiseRejectedResult).reason)).toMatch(/Ink version conflict/);
+    expect(String((results[1] as PromiseRejectedResult).reason)).not.toMatch(/busy/);
+    expect(existsSync(file() + ".lock")).toBe(false);
+  });
+  it("two writers with correct, sequential versions both succeed when started together", async () => {
+    const first = await seed();
+    const a = structuredClone(first.document);
+    a.items[0].body = "One.";
+    const p1 = store.write("fixture.md", a, first.version);
+    const p2 = p1.then(async (v) => { const d = structuredClone(a); d.items[0].body = "Two."; return store.write("fixture.md", d, v); });
+    await expect(Promise.all([p1, p2])).resolves.toHaveLength(2);
+    expect((await store.read("fixture.md")).document.items[0].body).toBe("Two.");
   });
 });

@@ -94,7 +94,22 @@ export class InkStore {
     return { document, version: versionOf(bytes) };
   }
 
+  private writeQueues = new Map<string, Promise<unknown>>();
+
+  /**
+   * Writes to one sidecar run one at a time inside this process. Without this, the editor's background checkpoint and an
+   * explicit action (re-attach, thread action) racing each other made the second one fail on the lock file with
+   * "Ink store busy" even though nothing was wrong, which surfaced as a spurious "note or ink changed" conflict. The
+   * lock file still protects against other processes; a write that really is stale still fails its version check.
+   */
   async write(input: string, document: InkDocument, expectedVersion: string | null): Promise<string> {
+    const key = await this.notePath(input);
+    const run = (this.writeQueues.get(key) ?? Promise.resolve()).then(() => this.writeLocked(input, document, expectedVersion));
+    this.writeQueues.set(key, run.catch(() => {}));
+    return run;
+  }
+
+  private async writeLocked(input: string, document: InkDocument, expectedVersion: string | null): Promise<string> {
     const rel = await this.notePath(input);
     validateDocument(document, rel);
     const bytes = Buffer.from(serializeInk(document));
