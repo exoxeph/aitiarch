@@ -170,25 +170,31 @@ export function EditorPane(props: Props) {
 
     let raf = 0;
     let marginRaf = 0;
+    const tail=document.createElement('div');tail.className='thought-scroll-tail';tail.setAttribute('aria-hidden','true');host.current?.append(tail);
     function queueMargin() {
-      cancelAnimationFrame(marginRaf);
+      if(marginRaf)return;
       marginRaf = requestAnimationFrame(() => {
+        marginRaf=0;
         if (!surface.current || !live.current.visible) return;
         const bounds = surface.current.getBoundingClientRect();
         const ink = view.state.field(inkField);
         const narrow=bounds.width<560+BLOB_RESERVE; // the column may shrink to 560px; below that there is no room for a blob on each side
-        surface.current.dataset.thoughtLayout=narrow?'narrow':'wide';
+        if(surface.current.dataset.thoughtLayout!==(narrow?'narrow':'wide')){surface.current.dataset.thoughtLayout=narrow?'narrow':'wide';queueMargin();return;}
         if(ink.items.length&&!!ink.narrow!==narrow){view.dispatch({effects:setThoughtNarrow.of(narrow)});return;}
         const rows = narrow?[]:ink.items.filter(thoughtVisible).flatMap(item => {
           const anchor = item.attachment;
           if (anchor.status !== "attached") return [];
           const coords = view.coordsAtPos(anchor.from);
-          if(!coords||coords.bottom<bounds.top||coords.top>bounds.bottom)return [];
+          const scroll=host.current?.scrollTop??0;
+          const block=view.lineBlockAt(anchor.from);const anchorTop=coords?.top??view.documentTop+block.top;
           const el=Array.from(surface.current!.querySelectorAll<HTMLElement>('.margin-card')).find(el=>el.dataset.inkId===item.id);
           const last=view.coordsAtPos(anchor.to,-1)??coords; // end of the anchored text, for the connector
-          return [{id:item.id,item,target:Math.max(8,coords.top-bounds.top),side:thoughtSide(item.id),height:el?.getBoundingClientRect().height??160,end:{x:last.right-bounds.left,lineBottom:last.bottom-bounds.top}}];
+          return [{id:item.id,item,target:anchorTop-bounds.top+scroll,side:thoughtSide(item.id),height:el?.getBoundingClientRect().height??160,...(last?{end:{x:last.right-bounds.left,lineBottom:last.bottom-bounds.top}}:{})}];
         });
-        setMargin(layoutThoughts(rows));
+        const placed=layoutThoughts(rows),scroll=host.current?.scrollTop??0;
+        setMargin(placed.map(p=>({...p,top:p.top-scroll,target:p.target-scroll})));
+        const bottom=Math.max(0,...placed.map(p=>p.top+p.height+16));
+        tail.style.height=Math.max(0,bottom-view.dom.offsetHeight)+'px';
       });
     }
     function queueDoc() {
@@ -243,7 +249,7 @@ export function EditorPane(props: Props) {
       cancelAnimationFrame(raf);
       cancelAnimationFrame(marginRaf);
       host.current?.removeEventListener('pointerover',highlight);host.current?.removeEventListener('pointerout',highlight);
-      surface.current?.removeEventListener("thought-size",queueMargin);
+      surface.current?.removeEventListener("thought-size",queueMargin);tail.remove();
       host.current?.removeEventListener("scroll", queueMargin);
       observer.disconnect();
       void session.flush().finally(() => session.dispose());

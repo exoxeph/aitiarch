@@ -55,3 +55,5 @@ export function connectorPath(end:{x:number;lineBottom:number},dot:{x:number;y:n
  const y0=end.lineBottom-1;
  return [{x:end.x,y:y0},{x:gutterX,y:y0},{x:gutterX,y:dot.y},{x:dot.x,y:dot.y}];
 }
+
+export const connectorVisible=(target:number,top:number,viewportHeight:number)=>target>=0&&target<=viewportHeight&&Math.abs(top-target)<=48;

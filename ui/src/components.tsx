@@ -1,3 +1,4 @@
+import {transient} from './transient.ts';
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { EolLabel, TreeNode } from "./api.ts";
 import { parseProperties, wordCount } from "./frontmatter.ts";
@@ -177,6 +178,7 @@ export function Overlay({ title, placeholder, items, onPick, onClose }: { title:
   const [i, setI] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => input.current?.focus(), []);
+  useEffect(()=>transient(()=>input.current?.parentElement??null,onClose,300,()=>false),[onClose]);
   const shown = useMemo(() => {
     const order = fuzzy(
       items.map((x) => x.label),
@@ -187,7 +189,7 @@ export function Overlay({ title, placeholder, items, onPick, onClose }: { title:
   useEffect(() => setI(0), [q]);
   useEffect(() => {input.current?.parentElement?.querySelector('[aria-selected="true"]')?.scrollIntoView({block:'nearest'});},[i]);
   return (
-    <div className="overlay" onMouseDown={onClose}>
+    <div className="overlay">
       <div className="overlay-box" role="dialog" aria-label={title} onMouseDown={(e) => e.stopPropagation()}>
         <input
           ref={input}

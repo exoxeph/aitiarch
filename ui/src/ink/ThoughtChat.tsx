@@ -1,3 +1,4 @@
+import {transient,hasUnsentText} from '../transient.ts';
 import {useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 
@@ -24,8 +25,10 @@ export function ThoughtChat({id,close,children}:{id:string;close:()=>void;childr
   if(host===null){place();window.addEventListener('resize',place);}else if(p)delete p.dataset.floating;
   p?.querySelector<HTMLElement>('input,textarea,button')?.focus();window.dispatchEvent(new CustomEvent('thought-layout'));
   return()=>window.removeEventListener('resize',place);
- },[host]); if(host===undefined)return null;
- const section=<section ref={panel} className="thought-chat" role="region" aria-label="AI thought conversation" onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();close();}}}>
+ },[host]);
+ useLayoutEffect(()=>transient(()=>panel.current,close,150),[close,host]);
+ if(host===undefined)return null;
+ const section=<section ref={panel} className="thought-chat" role="region" aria-label="AI thought conversation" onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();if(!hasUnsentText(panel.current))close();}}}>
   <header><button onClick={close} aria-label="Collapse thought conversation">Collapse</button></header>{children}
  </section>;
  return createPortal(section,host??document.body);

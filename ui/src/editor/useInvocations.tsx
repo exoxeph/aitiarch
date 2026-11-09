@@ -1,3 +1,4 @@
+import {transient} from '../transient.ts';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { EditorView } from '@codemirror/view';
 import { captureAnchor } from '../../shared/anchors.ts';
@@ -77,6 +78,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
     if (action === 'think' || visualize) void review(input);
   };
   const cancelPreview = () => { if (draft && view.current) view.current.dispatch({ effects: removeInk.of(draft.input.id) }); setDraft(null); };
+  useEffect(()=>{if(!draft)return;return transient(()=>document.querySelector<HTMLElement>('.ink-surface[data-note-path='+JSON.stringify(path)+'] .invocation-review'),cancelPreview,180,()=>busy||(draft.input.action==='ask'&&draft.input.question!==VISUALIZE_QUESTION&&!!draft.input.question.trim()));},[draft,busy,path]);
   const send = async () => {
     if (!draft?.packet || busy) return;
     const input = draft.input;
@@ -99,7 +101,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   const asking = !!draft && draft.input.action === 'ask' && !hasPacket && draft.input.question !== VISUALIZE_QUESTION;
   const draftSection = draft ? <section aria-label={`Review ${providerLabel} request`} className="invocation-review"
     onKeyDown={e => {
-      if (e.key === 'Escape') { e.stopPropagation(); cancelPreview(); return; }
+      if (e.key === 'Escape') { e.stopPropagation(); if(!busy&&!(draft.input.action==='ask'&&draft.input.question!==VISUALIZE_QUESTION&&draft.input.question.trim()))cancelPreview(); return; }
       if (e.key !== 'Enter' || e.shiftKey || busy) return;
       const target = e.target as HTMLElement;
       if (asking && target.tagName === 'INPUT') { e.preventDefault(); if (draft.input.question.trim()) void review(draft.input); }

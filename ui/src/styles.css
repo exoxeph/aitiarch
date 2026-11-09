@@ -430,7 +430,7 @@ summary { cursor: pointer; }
 @media(max-width:600px){.cm-fence-hint {max-width:120px;}}
 
 /* Invoked thoughts: display-only rails; the notebook remains a centered column. */
-.ink-surface .margin-rail.thought-rails { position:absolute;inset:0;width:auto;height:auto;max-height:none;display:block;padding:0;background:none;border:0;overflow:auto;pointer-events:none; }
+.ink-surface .margin-rail.thought-rails { position:absolute;inset:0;width:auto;height:auto;max-height:none;display:block;padding:0;background:none;border:0;overflow:hidden;pointer-events:none; }
 .thought-rails .margin-card.thought-blob { position:absolute;width:320px;left:auto;right:auto;min-height:0;padding:8px 4px;border:0;border-radius:0;box-shadow:none;background:var(--paper);font:var(--text-ai)/1.5 var(--font-body);color:var(--ink-text);pointer-events:auto; }
 .thought-rails .thought-blob[data-side="left"] .thought-meta {justify-content:flex-end;}
 .thought-open { display:block;width:100%;padding:0;text-align:left;font:inherit;color:inherit;border:0;background:none;cursor:pointer; }
@@ -552,3 +552,13 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .cm-callout-ai:hover .cm-adopt,.cm-adopt:hover,.cm-adopt:focus-visible {opacity:1;border-color:var(--control-border);}
 .cm-adopt:focus-visible {outline:2px solid var(--focus);outline-offset:2px;}
 @media (hover: none) {.cm-adopt {opacity:1;}}
+
+/* One note scroll surface; long thoughts contain their own wheel scrolling. */
+.thought-rails .margin-card.thought-blob {max-height:60vh;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;}
+.thought-scroll-tail {flex:none;pointer-events:none;}
+.thoughts-scrolling .thought-connector {opacity:0;}
+.thoughts-scrolling .thought-connector-on {opacity:1;}
+
+/* Inserted local AI diagrams retain their natural text size rather than becoming strips. */
+.cm-image {overflow:auto;overscroll-behavior:contain;}
+.cm-image img {max-width:none;max-height:none;}

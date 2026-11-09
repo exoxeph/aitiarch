@@ -20,10 +20,33 @@ try{
  assert.equal(await page.locator('.cm-ink-block').count(),0,'wide editor must not contain inline answer widgets');assert.equal(await page.locator('.cm-thought-anchor').count()>0,true);
  const collision=await page.locator('.margin-card').evaluateAll(els=>els.map(e=>({side:e.dataset.side,...Object.fromEntries(['top','bottom','left','right'].map(k=>[k,e.getBoundingClientRect()[k]]))})).sort((a,b)=>a.top-b.top));
  for(const side of ['left','right']){const rows=collision.filter(r=>r.side===side);for(let n=1;n<rows.length;n++)assert(rows[n].top>=rows[n-1].bottom+7);}
+
+ // A tall thought owns its wheel scroll; the next thought and note must not move.
+ const tall=page.locator('.margin-card[data-ink-id="seed1"]');
+ await tall.evaluate(el=>{const filler=document.createElement('div');filler.dataset.scrollFixture='true';filler.style.height='1800px';el.append(filler);});
+ await page.waitForTimeout(120);
+ const beforeWheel=await page.evaluate(()=>({note:document.querySelector('.pane').scrollTop,rail:document.querySelector('.thought-rails').scrollTop,peer:document.querySelector('[data-ink-id="seed2"].margin-card').getBoundingClientRect().top}));
+ await tall.hover();await page.mouse.wheel(0,400);await page.waitForTimeout(250);
+ const afterWheel=await page.evaluate(()=>({note:document.querySelector('.pane').scrollTop,rail:document.querySelector('.thought-rails').scrollTop,peer:document.querySelector('[data-ink-id="seed2"].margin-card').getBoundingClientRect().top}));
+ assert.deepEqual(afterWheel,beforeWheel,'scrolling one thought must not drag its neighbor');
+ assert(await tall.evaluate(el=>el.scrollTop>0),'tall thought scrolls internally');
+ await tall.evaluate(el=>{el.querySelector('[data-scroll-fixture]').remove();el.scrollTop=0;});await page.waitForTimeout(120);
+ await page.evaluate(()=>{const spacer=document.createElement('div');spacer.dataset.noteScrollFixture='true';spacer.style.height='1500px';document.querySelector('.pane').append(spacer);});
+ const paneBox=await page.locator('.pane').boundingBox();await page.mouse.move(paneBox.x+paneBox.width/2,paneBox.y+20);await page.mouse.wheel(0,30);
+ await page.waitForFunction(()=>document.querySelector('.thought-rails').classList.contains('thoughts-scrolling'));
+ assert.equal(await page.locator('.margin-card').count(),3,'offscreen anchors never remove neighbors from collision layout');
+ await page.waitForFunction(()=>!document.querySelector('.thought-rails').classList.contains('thoughts-scrolling'));
+ await page.evaluate(()=>{document.querySelector('[data-note-scroll-fixture]').remove();document.querySelector('.pane').scrollTop=0;});await page.waitForTimeout(200);
+
  assert.deepEqual(await readFile(path.join(root,'fixture.md')),bytes);
  const first=page.locator('.margin-card[data-ink-id="seed1"]');await first.hover();assert(await page.locator('.cm-thought-anchor.thought-active').count()>0);
  const button=first.getByRole('button',{name:/^Open AI thought thread:/});await button.focus();await page.keyboard.press('Enter');
  const chat=page.getByRole('region',{name:'AI thought conversation',exact:true});await chat.waitFor();assert.equal(await chat.getByLabel('Your takeaway',{exact:true}).inputValue(),'');
+ await chat.getByLabel('Write back').fill('Unsent synthetic draft');await page.keyboard.press('Escape');assert.equal(await chat.getByLabel('Write back').inputValue(),'Unsent synthetic draft');
+ await page.locator('header').first().click({position:{x:400,y:15}});assert.equal(await chat.getByLabel('Write back').inputValue(),'Unsent synthetic draft');
+ await page.keyboard.press('Control+k');await page.getByRole('dialog',{name:'Command palette'}).waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog',{name:'Command palette'}).waitFor({state:'detached'});assert.equal(await chat.getByLabel('Write back').inputValue(),'Unsent synthetic draft');
+ await chat.getByLabel('Write back').fill('');await page.locator('header').first().click({position:{x:400,y:15}});await chat.waitFor({state:'detached'});await button.click();await chat.waitFor();
+
  await chat.getByLabel('Write back').fill('What matters?');await chat.getByRole('button',{name:'Review reply',exact:true}).click();await chat.getByRole('button',{name:'Send reply',exact:true}).click();await chat.getByText('Synthetic accepted reply.',{exact:true}).waitFor();assert.equal(calls,1);
  const chatTop=await chat.evaluate(e=>e.getBoundingClientRect().top);
  await page.evaluate(()=>window.__aitiarch['fixture.md'].view.dispatch({changes:{from:0,insert:'Temporary line.\n\n'}}));

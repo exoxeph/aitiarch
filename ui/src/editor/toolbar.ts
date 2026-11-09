@@ -1,3 +1,4 @@
+import {transient} from '../transient.ts';
 // Formatting remains human-only. Invoked AI freezes the selection without editing it.
 import { EditorSelection, Facet, Prec, type TransactionSpec } from "@codemirror/state";
 import { keymap, ViewPlugin, type EditorView, type TooltipView, type ViewUpdate } from "@codemirror/view";
@@ -165,15 +166,16 @@ const compactPanel=ViewPlugin.fromClass(class {
  readonly panel:TooltipView;
  readonly pane:Element|null;
  readonly onScroll=()=>this.place();
+ dismissed=false;dispose:()=>void;
  constructor(readonly view:EditorView){
   this.pane=view.dom.closest(".pane");this.pane?.addEventListener("scroll",this.onScroll,{passive:true});
   this.panel=create(view);this.panel.dom.hidden=true;panels.set(view,this.panel.dom);
   const surface=view.dom.closest('.ink-surface')??view.dom;
-  surface.insertBefore(this.panel.dom,surface.querySelector('.margin-rail'));this.place();
+  surface.insertBefore(this.panel.dom,surface.querySelector('.margin-rail'));this.dispose=transient(()=>this.panel.dom,()=>{const focused=this.panel.dom.contains(document.activeElement);this.dismissed=true;this.panel.dom.hidden=true;if(focused)view.focus();},60);this.place();
  }
- update(u:ViewUpdate){this.panel.update?.(u);this.place();}
+ update(u:ViewUpdate){if(u.selectionSet||u.docChanged)this.dismissed=false;this.panel.update?.(u);this.place();}
  place(){this.view.requestMeasure({key:this,read:view=>{
-  if(view.state.selection.main.empty)return null;
+  if(this.dismissed||view.state.selection.main.empty)return null;
   const first=view.coordsAtPos(view.state.selection.main.from);if(!first)return null;
   const c=view.contentDOM.getBoundingClientRect(),css=getComputedStyle(view.contentDOM),size=this.panel.dom.getBoundingClientRect();
   const space=toolbarSpace(view),rail=view.dom.closest('.ink-surface')?.querySelector('.margin-rail');
@@ -182,12 +184,12 @@ const compactPanel=ViewPlugin.fromClass(class {
   }else if(rail?.querySelector('.margin-card')&&getComputedStyle(rail).position==='absolute')space.right=Math.min(space.right,rail.getBoundingClientRect().left);
   return placeToolbar({left:c.left+parseFloat(css.paddingLeft),right:c.right-parseFloat(css.paddingRight)},first.top,{width:212,height:size.height||240},space);
  },write:p=>{
-  const dom=this.panel.dom,wasHidden=dom.hidden;dom.hidden=!p;if(!p)return;
+  const dom=this.panel.dom,wasHidden=dom.hidden;dom.hidden=this.dismissed||!p;if(dom.hidden||!p)return;
   dom.dataset.placement=p.side;
   Object.assign(dom.style,p.side==='below'?{position:'relative',left:'',top:'',margin:'8px auto'}:{position:'fixed',left:`${p.left}px`,top:`${p.top}px`,margin:'0'});
   if(wasHidden)this.place();
  }});}
- destroy(){this.pane?.removeEventListener("scroll",this.onScroll);this.panel.dom.remove();panels.delete(this.view);}
+ destroy(){this.dispose();this.pane?.removeEventListener("scroll",this.onScroll);this.panel.dom.remove();panels.delete(this.view);}
 });
 
 /**

@@ -1,14 +1,15 @@
+import {transient} from '../transient.ts';
 import {DiagramSlot} from '../diagrams/DiagramSlot.tsx';
 import {ReplyMarkdown} from './ReplyMarkdown.tsx';
 import {useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import type {InkItem} from '../../shared/ink.ts';
-import {blobBox,connectorPath,thoughtText,type ThoughtSide} from '../../shared/thoughts.ts';
+import {blobBox,connectorPath,connectorVisible,thoughtText,type ThoughtSide} from '../../shared/thoughts.ts';
 export interface PlacedMargin {item:InkItem;top:number;target:number;side:ThoughtSide;height:number;end?:{x:number;lineBottom:number}}
 interface Geometry {width:number;left:number;right:number}
 export function MarginRail({placed,renderDraft}:{placed:PlacedMargin[];renderDraft?:(id:string)=>ReactNode}){
  const rail=useRef<HTMLElement>(null),sizes=useRef(new Map<string,number>());
- const [geometry,setGeometry]=useState<Geometry|null>(null),[active,setActive]=useState<string|null>(null),[menu,setMenu]=useState<string|null>(null);
- useLayoutEffect(()=>{if(menu)rail.current?.querySelector<HTMLElement>('.thought-more [role="menu"] button')?.focus();},[menu]);
+ const [geometry,setGeometry]=useState<Geometry|null>(null),[active,setActive]=useState<string|null>(null),[menu,setMenu]=useState<string|null>(null),[focused,setFocused]=useState<string|null>(null);
+ useLayoutEffect(()=>{if(!menu)return;rail.current?.querySelector<HTMLElement>('.thought-more [role="menu"] button')?.focus();return transient(()=>rail.current?.querySelector<HTMLElement>('.thought-more [role="menu"]')??null,()=>{const open=rail.current?.querySelector<HTMLElement>('.thought-more > button[aria-expanded="true"]');setMenu(null);open?.focus();},210,()=>false);},[menu]);
  const send=(el:HTMLElement,type:string,id?:string)=>{setMenu(null);el.dispatchEvent(new CustomEvent(type,{bubbles:true,detail:{id}}));};
  // Where the note column is, in rail coordinates; blobs and connectors are placed from it and recomputed on every layout pass.
  useLayoutEffect(()=>{
@@ -23,19 +24,22 @@ export function MarginRail({placed,renderDraft}:{placed:PlacedMargin[];renderDra
   rail.current?.dispatchEvent(new CustomEvent('thought-layout',{bubbles:true}));
   const observer=new ResizeObserver(measure);rail.current?.querySelectorAll('.thought-blob').forEach(el=>observer.observe(el));measure();return()=>observer.disconnect();
  },[placed]);
+ useLayoutEffect(()=>{const surface=rail.current?.closest('.ink-surface');const hover=(e:Event)=>{const mark=(e.target as Element)?.closest<HTMLElement>('[data-thought-anchor]');if(mark)setActive(e.type==='pointerout'?null:mark.dataset.thoughtAnchor??null);};surface?.addEventListener('pointerover',hover);surface?.addEventListener('pointerout',hover);return()=>{surface?.removeEventListener('pointerover',hover);surface?.removeEventListener('pointerout',hover);};},[]);
  const highlight=(id:string,on:boolean)=>{const surface=rail.current?.closest('.ink-surface');surface?.querySelectorAll<HTMLElement>('[data-thought-anchor]').forEach(el=>el.classList.toggle('thought-active',on&&el.dataset.thoughtAnchor===id));};
+ const [scrolling,setScrolling]=useState(false);
+ useLayoutEffect(()=>{const surface=rail.current?.closest('.ink-surface');let timer:ReturnType<typeof setTimeout>;const scroll=()=>{setScrolling(true);clearTimeout(timer);timer=setTimeout(()=>setScrolling(false),200);};surface?.addEventListener('scroll',scroll,true);return()=>{clearTimeout(timer);surface?.removeEventListener('scroll',scroll,true);};},[]);
  const columns=geometry?placed.map(p=>({p,box:blobBox(geometry.width,geometry.left,geometry.right,p.side)})):[];
- return <aside className="margin-rail thought-rails" aria-label="AI thoughts" ref={rail}>
+ return <aside className={'margin-rail thought-rails'+(scrolling?' thoughts-scrolling':'')} aria-label="AI thoughts" ref={rail}>
   {geometry&&<svg className="thought-connectors" aria-hidden="true" width={geometry.width} height="100%">
-   {columns.filter(({p})=>p.end).map(({p,box})=>{
+   {columns.filter(({p})=>p.end&&connectorVisible(p.target,p.top,rail.current?.clientHeight??0)).map(({p,box})=>{
     const dotX=p.side==='right'?box.left:box.left+box.width,pts=connectorPath({x:p.end!.x+2,lineBottom:p.end!.lineBottom},{x:dotX,y:p.top+14},{left:geometry.left,right:geometry.right},p.side);
-    return <path key={p.item.id} className={'thought-connector'+(active===p.item.id?' thought-connector-on':'')} data-ink-id={p.item.id} d={pts.map((q,i)=>(i?'L':'M')+q.x+' '+q.y).join(' ')}/>;
+    return <path key={p.item.id} className={'thought-connector'+(active===p.item.id||focused===p.item.id?' thought-connector-on':'')} data-ink-id={p.item.id} d={pts.map((q,i)=>(i?'L':'M')+q.x+' '+q.y).join(' ')}/>;
    })}
   </svg>}
   {placed.map(({item,top,side})=>{const box=geometry?blobBox(geometry.width,geometry.left,geometry.right,side):null;
    const resolved=!!item.thread?.resolvedAt;
-   return <article key={item.id} className={'margin-card thought-blob'+(resolved?' thought-resolved':'')} data-resolved={resolved?'true':undefined} data-side={side} style={{top,...(box?{left:box.left,width:box.width,right:'auto'}:{})}} data-ink-id={item.id} data-generated-complete={item.generation?.status==='complete'?'true':undefined}
-   onMouseEnter={()=>{highlight(item.id,true);setActive(item.id);}} onMouseLeave={()=>{highlight(item.id,false);setActive(null);}} onFocus={()=>{highlight(item.id,true);setActive(item.id);}} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget)){highlight(item.id,false);setActive(null);}}}>
+   return <article key={item.id} className={'margin-card thought-blob'+(resolved?' thought-resolved':'')} data-resolved={resolved?'true':undefined} data-side={side} style={{top:0,transform:`translateY(${top}px)`,...(box?{left:box.left,width:box.width,right:'auto'}:{})}} data-ink-id={item.id} data-generated-complete={item.generation?.status==='complete'?'true':undefined}
+   onMouseEnter={()=>{highlight(item.id,true);setActive(item.id);}} onMouseLeave={()=>{highlight(item.id,false);setActive(null);}} onFocus={()=>{highlight(item.id,true);setFocused(item.id);}} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget)){highlight(item.id,false);setFocused(null);}}}>
    {renderDraft?.(item.id)?<div className="thought-ask">{renderDraft(item.id)}</div>:<>
   <button className="thought-open" aria-label={'Open AI thought thread: '+thoughtText(item).slice(0,80)} onClick={e=>e.currentTarget.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:item.id,thought:true}}))}>
     <span className="thought-meta"><span className="thought-dot" aria-hidden="true"/><span className="cm-ink-label">AI</span>{resolved&&<span className="thought-resolved-tag">Resolved</span>}</span>

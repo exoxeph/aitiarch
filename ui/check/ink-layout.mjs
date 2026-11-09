@@ -62,7 +62,9 @@ try {
   const beforeScroll = await page.locator(".margin-card").count();
   await page.locator(".pane").evaluate(el => { el.scrollTop = el.scrollHeight / 2; });
   await page.waitForTimeout(150);
-  if (await page.locator(".margin-card").count() !== 0) throw new Error(`Margin ink stayed visible after its anchor scrolled away (${beforeScroll}).`);
+  const visibleAfterScroll=await page.locator('.margin-card').evaluateAll(els=>els.filter(el=>{const b=el.getBoundingClientRect(),v=el.closest('.thought-rails').getBoundingClientRect();return b.bottom>v.top&&b.top<v.bottom;}).length);
+  if(visibleAfterScroll!==0)throw new Error(`Margin ink stayed onscreen after its anchor scrolled away (${beforeScroll}).`);
+  if(await page.locator('.thought-connector').count()!==0)throw new Error('Offscreen anchors must have no connector.');
   await page.locator(".pane").evaluate(el => { el.scrollTop = 0; });
   await page.locator(".margin-card").first().waitFor();
   await page.addStyleTag({ content: ".statusbar .root { visibility: hidden !important; }" });
@@ -70,6 +72,7 @@ try {
   await page.setViewportSize({ width: 780, height: 820 });
   await page.screenshot({ path: path.join(out, "ink-layout-narrow.png"), fullPage: true });
   await page.setViewportSize({ width: 620, height: 820 });
+  await page.waitForFunction(()=>document.querySelectorAll(".cm-ink-block").length===3&&document.querySelectorAll(".orphan-card").length===2);
   if (await page.locator(".cm-ink-block").count() !== 3 || await page.locator(".orphan-card").count() !== 2) throw new Error("Mobile layout lost ink.");
   await page.screenshot({ path: path.join(out, "ink-layout-mobile.png"), fullPage: true });
   const external = await ink.read("notebook.md");

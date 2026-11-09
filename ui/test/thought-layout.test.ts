@@ -1,6 +1,6 @@
 // Position tests for margin blobs and their connectors (pure functions; no browser).
 import { describe, expect, it } from 'vitest';
-import { BLOB_EDGE, BLOB_GAP_MAX, BLOB_GAP_MIN, BLOB_MAX, BLOB_MIN, BLOB_RESERVE, blobBox, connectorPath } from '../shared/thoughts.ts';
+import { BLOB_EDGE, BLOB_GAP_MAX, BLOB_GAP_MIN, BLOB_MAX, BLOB_MIN, BLOB_RESERVE, blobBox, connectorPath, connectorVisible } from '../shared/thoughts.ts';
 
 const column = (w: number) => { const col = Math.min(760, w - BLOB_RESERVE); return { left: (w - col) / 2, right: (w + col) / 2 }; };
 
@@ -47,3 +47,5 @@ describe('connector path', () => {
     expect(p[2].x).toBe(p[1].x); // then straight down the empty margin
   });
 });
+
+it('connector hides displaced or offscreen anchors even when active',()=>{expect(connectorVisible(100,148,600)).toBe(true);expect(connectorVisible(100,149,600)).toBe(false);expect(connectorVisible(-1,0,600)).toBe(false);expect(connectorVisible(601,601,600)).toBe(false);});

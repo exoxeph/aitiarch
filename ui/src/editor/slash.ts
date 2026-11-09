@@ -1,9 +1,10 @@
+import {transient} from '../transient.ts';
 // Slash menu: type "/" at the start of a line to insert a block as plain Markdown. Nothing is inserted until you pick an
 // item (Enter, Tab or click); the insertion is one ordinary transaction, so Ctrl+Z restores the exact bytes.
 import { acceptCompletion, autocompletion, currentCompletions, setSelectedCompletion, closeCompletion, completionStatus, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { syntaxTree } from "@codemirror/language";
 import { Prec, StateEffect, StateField, type ChangeSpec, type EditorState } from "@codemirror/state";
-import { keymap } from "@codemirror/view";
+import { keymap,ViewPlugin } from "@codemirror/view";
 import { frontmatterEnd } from "../frontmatter.ts";
 
 export interface SlashItem {
@@ -110,6 +111,7 @@ function enterWithoutMenu(view: import("@codemirror/view").EditorView): boolean 
 
 // Timings are set explicitly: no artificial wait before Enter/Tab can accept, and the menu opens almost at once.
 export const slashMenu = [
+  ViewPlugin.define(view=>({destroy:transient(()=>view.dom.querySelector<HTMLElement>('.cm-tooltip-autocomplete'),()=>{closeCompletion(view);view.dispatch({effects:dismissed.of(true)});},250,()=>false)})),
   dismissedField,
   Prec.highest(keymap.of([
     { key: "Escape", run: view => {
