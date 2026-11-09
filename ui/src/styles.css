@@ -347,3 +347,12 @@ summary { cursor: pointer; }
 .cm-hr.cm-hr-off { color: transparent; }
 .cm-quote.cm-quote-d2 { background: linear-gradient(var(--rule), var(--rule)) 12px 0 / 3px 100% no-repeat; padding-left: 24px !important; }
 .cm-quote.cm-quote-d3, .cm-quote.cm-quote-d4 { background: linear-gradient(var(--rule), var(--rule)) 12px 0 / 3px 100% no-repeat, linear-gradient(var(--rule), var(--rule)) 24px 0 / 3px 100% no-repeat; padding-left: 36px !important; }
+
+/* AI versus human (slice A2). AI ink is marked by four cues that survive grayscale: the word "AI" in a filled label with a
+   dot, a hairline outline all the way round (no side stripe), sans-serif type, and an inset from the writing column.
+   The tint alone is too faint to carry the distinction. */
+.cm-ink-label, .margin-label { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 8px; padding: 4px 9px 4px 8px; border-radius: 999px; background: var(--ai-ink); color: var(--ai-surface); font: 700 var(--text-meta)/1 var(--font-ui); letter-spacing: .02em; text-transform: none; white-space: nowrap; }
+.cm-ink-label::before, .margin-label::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.cm-ink-block, .margin-card { border: 1px solid var(--control-border); color: var(--ai-ink); font-family: var(--font-ui); }
+.cm-ink-block { margin: var(--space-4) 28px var(--space-6); }
+.cm-ink-block button, .margin-card button { font-family: var(--font-ui); }

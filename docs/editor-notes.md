@@ -73,3 +73,10 @@ it and hide buttons such as "Re-attach to selected text". This was a real user-f
 geometry: with a selection near the bottom of the page the toolbar overlapped the button, so most of the button could
 not be clicked. The toolbar now stays above the rail; if a selection sits under the rail there is no room and the
 toolbar is hidden.
+## Intermittent browser check: check/threads.mjs
+
+`node check/threads.mjs` fails about 2 runs in 5, with or without the A2 styling (measured 2026-11-09: 2 of 5 with, 2 of 5
+without). The failure is at the "re-attach the orphan" step: the page shows "The note or ink changed since selection.
+Review it and try again." and the wait for the orphan list to empty times out at `check/threads.mjs:71`. It looks like a
+race between the pending ink sidecar save and building the re-attach preview. The cause is not clear and not small, so it
+is left alone; the unit suite and every other browser check pass. Worth a look before relying on that flow.
