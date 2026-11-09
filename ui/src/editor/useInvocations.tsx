@@ -92,22 +92,37 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
     } catch (e) { setDraft({ ...draft, error: e instanceof Error ? e.message : 'Invocation failed. No automatic retry.' }); }
     finally { setBusy(false); }
   };
+  // The ask/review form lives in the margin blob of the frozen selection (Enter to ask or send, Esc to cancel). The top panel
+  // only shows it as a fallback when that blob is not on screen (narrow layout), plus the job status lines.
+  const sendRef = useRef<HTMLButtonElement>(null), hasPacket = draft?.packet !== undefined;
+  useEffect(() => { if (hasPacket) sendRef.current?.focus(); }, [hasPacket]);
+  const asking = !!draft && draft.input.action === 'ask' && !hasPacket && draft.input.question !== VISUALIZE_QUESTION;
+  const draftSection = draft ? <section aria-label={`Review ${providerLabel} request`} className="invocation-review"
+    onKeyDown={e => {
+      if (e.key === 'Escape') { e.stopPropagation(); cancelPreview(); return; }
+      if (e.key !== 'Enter' || e.shiftKey || busy) return;
+      const target = e.target as HTMLElement;
+      if (asking && target.tagName === 'INPUT') { e.preventDefault(); if (draft.input.question.trim()) void review(draft.input); }
+      else if (hasPacket && !['BUTTON', 'SUMMARY', 'INPUT'].includes(target.tagName)) { e.preventDefault(); void send(); }
+    }}>
+    <strong>{draft.input.action === 'think' ? 'Think on this' : draft.input.question === VISUALIZE_QUESTION ? 'Visualize' : `Ask ${providerLabel}`}</strong>
+    <p role="status" className="sr-only">{hasPacket ? 'Review ready. Press Enter to send, Escape to cancel.' : asking ? 'Type your question, then press Enter to review it. Escape cancels.' : ''}</p>
+    {asking && <label>Question for {providerLabel}<input aria-label={`Question for ${providerLabel}`} placeholder="Ask about this selection…" maxLength={8000} autoFocus
+      value={draft.input.question} onChange={e => setDraft({ input: { ...draft.input, question: e.target.value } })} /></label>}
+    <blockquote>{draft.input.text.slice(draft.input.from, draft.input.to)}</blockquote>
+    {asking && <p className="small muted ask-hint">Enter to ask · Esc to cancel</p>}
+    {hasPacket && <details className="what-is-sent"><summary>What will be sent</summary>
+      <p className="small muted">The selection is frozen: editing the note will not change this request. {providerLabel === 'Claude' ? 'Claude CLI' : 'ChatGPT plan'} · transcript context: none. Redaction can miss prose secrets, unfamiliar or encoded credentials, and indirect identifiers. Review before sending.</p>
+      <details><summary>Exact redacted request</summary><pre>{JSON.stringify(draft.packet, null, 2)}</pre></details></details>}
+    {hasPacket && <p className="small muted ask-hint">Enter to send · Esc to cancel</p>}
+    {draft.error && <p role="alert">{draft.error}</p>}
+    {draft.warnings?.map(warning => <p role="note" key={warning}>{warning}</p>)}
+    <div className="attach-actions">{hasPacket
+      ? <button ref={sendRef} disabled={busy} onClick={() => void send()}>Send to {providerLabel}</button>
+      : <button disabled={busy || (draft.input.action === 'ask' && !draft.input.question.trim())} onClick={() => void review(draft.input)}>Review request</button>}
+      <button disabled={busy} onClick={cancelPreview}>Cancel preview</button></div>
+  </section> : null;
   const panel = <div className="invocation-panel">
-    {draft && <section aria-label={`Review ${providerLabel} request`} className="invocation-review">
-      <strong>{draft.input.action === 'think' ? 'Think on this' : draft.input.question === VISUALIZE_QUESTION ? 'Visualize' : `Ask ${providerLabel}`}</strong>
-      <div className="small muted">Selection frozen at click. Editing the note will not change this request.</div>
-      <blockquote>{draft.input.text.slice(draft.input.from, draft.input.to)}</blockquote>
-      {draft.input.action === 'ask' && !draft.packet && <label>Question for {providerLabel}<input aria-label={`Question for ${providerLabel}`} maxLength={8000}
-        value={draft.input.question} onChange={e => setDraft({ input: { ...draft.input, question: e.target.value } })} /></label>}
-      <p className="small muted">{providerLabel==='Claude'?'Claude CLI':'ChatGPT plan'} · transcript context: none. Redaction can miss prose secrets, unfamiliar or encoded credentials, and indirect identifiers. Review before sending.</p>
-      {draft.packet !== undefined && <details><summary>Exact redacted request</summary><pre>{JSON.stringify(draft.packet, null, 2)}</pre></details>}
-      {draft.error && <p role="alert">{draft.error}</p>}
-      {draft.warnings?.map(warning => <p role="note" key={warning}>{warning}</p>)}
-      <div className="attach-actions">{draft.packet !== undefined
-        ? <button disabled={busy} onClick={() => void send()}>Send to {providerLabel}</button>
-        : <button disabled={busy || (draft.input.action === 'ask' && !draft.input.question.trim())} onClick={() => void review(draft.input)}>Review request</button>}
-        <button disabled={busy} onClick={cancelPreview}>Cancel preview</button></div>
-    </section>}
     {jobs.map(j => <div key={j.id} className="invocation-job" data-request-status={j.status}>
       {providerLabel}: {j.status === 'persistence_error' ? 'Answer retained in memory; saving failed.' : j.status}
       {j.error && <span role="alert">{j.error}</span>}
@@ -115,5 +130,5 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       {j.status === 'persistence_error' && <button onClick={() => void api.retryInkSave(j.id).then(async () => { merge(await api.ink(path)); setJobs(all => all.map(k => k.id === j.id ? { ...k, status: 'complete' } : k)); }).catch(() => {})}>Retry saving answer (no new call)</button>}
     </div>)}
   </div>;
-  return { begin, panel };
+  return { begin, panel, draftId: draft?.input.id ?? null, draftSection };
 }

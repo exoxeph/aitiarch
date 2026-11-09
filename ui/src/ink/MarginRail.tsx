@@ -1,10 +1,10 @@
 import {DiagramSlot} from '../diagrams/DiagramSlot.tsx';
-import {useLayoutEffect,useRef,useState} from 'react';
+import {useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import type {InkItem} from '../../shared/ink.ts';
 import {blobBox,connectorPath,thoughtText,type ThoughtSide} from '../../shared/thoughts.ts';
 export interface PlacedMargin {item:InkItem;top:number;target:number;side:ThoughtSide;height:number;end?:{x:number;lineBottom:number}}
 interface Geometry {width:number;left:number;right:number}
-export function MarginRail({placed}:{placed:PlacedMargin[]}){
+export function MarginRail({placed,renderDraft}:{placed:PlacedMargin[];renderDraft?:(id:string)=>ReactNode}){
  const rail=useRef<HTMLElement>(null),sizes=useRef(new Map<string,number>());
  const [geometry,setGeometry]=useState<Geometry|null>(null),[active,setActive]=useState<string|null>(null),[menu,setMenu]=useState<string|null>(null);
  useLayoutEffect(()=>{if(menu)rail.current?.querySelector<HTMLElement>('.thought-more [role="menu"] button')?.focus();},[menu]);
@@ -35,6 +35,7 @@ export function MarginRail({placed}:{placed:PlacedMargin[]}){
    const resolved=!!item.thread?.resolvedAt;
    return <article key={item.id} className={'margin-card thought-blob'+(resolved?' thought-resolved':'')} data-resolved={resolved?'true':undefined} data-side={side} style={{top,...(box?{left:box.left,width:box.width,right:'auto'}:{})}} data-ink-id={item.id} data-generated-complete={item.generation?.status==='complete'?'true':undefined}
    onMouseEnter={()=>{highlight(item.id,true);setActive(item.id);}} onMouseLeave={()=>{highlight(item.id,false);setActive(null);}} onFocus={()=>{highlight(item.id,true);setActive(item.id);}} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget)){highlight(item.id,false);setActive(null);}}}>
+   {renderDraft?.(item.id)?<div className="thought-ask">{renderDraft(item.id)}</div>:<>
   <button className="thought-open" aria-label={'Open AI thought thread: '+thoughtText(item).slice(0,80)} onClick={e=>e.currentTarget.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:item.id,thought:true}}))}>
     <span className="thought-meta"><span className="thought-dot" aria-hidden="true"/><span className="cm-ink-label">AI</span>{resolved&&<span className="thought-resolved-tag">Resolved</span>}</span>
     <span className="thought-text">{thoughtText(item)}</span><span className="thought-replies">{item.thread?.followups.filter(r=>r.generation.status==='complete').length??0} {item.thread?.followups.filter(r=>r.generation.status==='complete').length===1?'reply':'replies'}</span>
@@ -51,6 +52,7 @@ export function MarginRail({placed}:{placed:PlacedMargin[]}){
     </div>}
    </div>
    <button className="thought-bring" disabled={item.generation?.status!=='complete'} onClick={e=>e.currentTarget.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id}}))}>Bring to notebook</button>
+   </>}
   </article>;})}
  </aside>;
 }

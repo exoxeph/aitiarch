@@ -60,6 +60,8 @@ export function EditorPane(props: Props) {
     live.current.onInkSaved?.(props.file.path, snapshot);
   });
   const invokeRef = useRef(invoked.begin); invokeRef.current = invoked.begin;
+  // While a question or review is open in its blob, the format toolbar would sit on top of it, so it is hidden meanwhile.
+  useEffect(() => { surface.current?.toggleAttribute('data-asking', !!invoked.draftId); }, [invoked.draftId]);
   // Try diagram again (a user click) opens a normal, reviewable Visualize request for the same selection.
   useEffect(() => {
     const again = (event: Event) => {
@@ -267,7 +269,8 @@ export function EditorPane(props: Props) {
 
   return <div className={props.visible ? "ink-surface" : "ink-surface surface-hidden"} ref={surface} data-note-path={props.file.path}>
     {invoked.panel}
+    {invoked.draftSection&&!margin.some(m=>m.item.id===invoked.draftId)&&<div className="invocation-panel">{invoked.draftSection}</div>}
     <div className="pane" ref={host} data-path={props.file.path} />
-    <MarginRail placed={margin} />
+    <MarginRail placed={margin} renderDraft={id=>id===invoked.draftId?invoked.draftSection:null} />
   </div>;
 }

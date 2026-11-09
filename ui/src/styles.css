@@ -505,3 +505,16 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .thought-resolved .thought-dot {background:var(--muted);}
 .thought-resolved .cm-ink-label {background:var(--muted);}
 .thought-resolved-tag {font:600 11px/1.4 var(--font-ui);color:var(--muted);}
+/* Ask blob: the question, the privacy review and Send live in the margin blob of the selection (no top-of-page panel). */
+.thought-ask .invocation-review {display:grid;gap:6px;padding:0;margin:0;border:0;background:none;font:var(--text-control) var(--font-ui);}
+.thought-ask .invocation-review > strong {font:600 13px var(--font-ui);}
+.thought-ask .invocation-review label {display:grid;gap:4px;}
+.thought-ask .invocation-review input[type=text],.thought-ask .invocation-review input:not([type]) {width:100%;font:inherit;padding:6px 8px;border:1px solid var(--control-border);border-radius:var(--radius-small);background:var(--paper);color:var(--ink-text);}
+.thought-ask blockquote {margin:0;padding-left:8px;border-left:2px solid var(--rule);color:var(--muted);font-size:12px;max-height:3.6em;overflow:hidden;}
+.thought-ask .ask-hint {margin:0;}
+.thought-ask .what-is-sent {font-size:12px;} .thought-ask .what-is-sent summary {cursor:pointer;} .thought-ask .what-is-sent pre {max-height:160px;overflow:auto;white-space:pre-wrap;}
+.thought-ask .attach-actions {display:flex;gap:6px;flex-wrap:wrap;}
+.thought-ask button {border:1px solid var(--control-border);background:var(--paper);color:var(--ink-text);border-radius:var(--radius-small);padding:4px 10px;cursor:pointer;font:12px var(--font-ui);}
+.thought-ask button:focus-visible,.thought-ask input:focus-visible,.thought-ask summary:focus-visible {outline:2px solid var(--focus);outline-offset:2px;}
+.sr-only {position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;}
+.ink-surface[data-asking] .cm-sel-toolbar {display:none;}

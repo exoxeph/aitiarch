@@ -179,6 +179,30 @@ try {
   assert.equal(await page.evaluate(`${V}.state.doc.toString()`), text, 'one undo must remove the whole callout and image');
   await page.evaluate(() => window.__aitiarch['fixture.md'].session.flush());
   assert.deepEqual(await readFile(path.join(root, 'fixture.md')), bytes, 'bytes after undo');
-  console.log(JSON.stringify({ pass: true, calls: calls.length, report, errors }, null, 1));
+  // 8. Ask blob, keyboard only: question, Enter, privacy review in the same blob, Enter to send, reply in the same blob.
+  await select(from, to);
+  await page.locator('.cm-sel-toolbar').getByRole('button', { name: 'Ask...' }).click();
+  const askBlob = page.locator('.margin-card.thought-blob').filter({ has: page.locator('.invocation-review') });
+  await askBlob.waitFor();
+  assert.equal(await page.locator('.invocation-panel .invocation-review').count(), 0, 'no top-of-page panel');
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Question for Claude', 'the question input takes focus');
+  assert.match(await askBlob.textContent(), /Enter to ask · Esc to cancel/);
+  assert.equal(await page.locator('.cm-sel-toolbar').count() === 0 || !(await page.locator('.cm-sel-toolbar').isVisible()), true, 'format toolbar hidden while asking');
+  const askId = await askBlob.getAttribute('data-ink-id'), callsBefore = calls.length;
+  await page.keyboard.type('Why does this matter?'); await page.keyboard.press('Enter');
+  await askBlob.locator('summary', { hasText: 'What will be sent' }).waitFor();
+  assert.equal(await askBlob.locator('details.what-is-sent').evaluate((d) => d.open), false, 'What will be sent starts collapsed');
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Send to Claude', 'focus moves to Send');
+  assert.match(await askBlob.textContent(), /Enter to send · Esc to cancel/);
+  assert.equal(calls.length, callsBefore, 'nothing is sent before the second Enter');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction((id) => document.querySelector(`.margin-card[data-ink-id="${id}"] .thought-text`)?.textContent.includes('Synthetic text answer'), askId);
+  assert.equal(calls.length, callsBefore + 1); assert.equal(calls.at(-1).question, 'Why does this matter?');
+  assert.equal(await page.locator(`.thought-connector[data-ink-id="${askId}"]`).count(), 1, 'the reply is joined to its anchor by the connector');
+  // Esc cancels an open question.
+  await select(from, to); await page.locator('.cm-sel-toolbar').getByRole('button', { name: 'Ask...' }).click();
+  await page.locator('.invocation-review').waitFor(); await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('.invocation-review'));
+  report.askBlob = 'ok';  console.log(JSON.stringify({ pass: true, calls: calls.length, report, errors }, null, 1));
   assert.deepEqual(errors, []);
 } finally { await browser?.close(); await app.close?.(); await watcher.stop?.(); await rm(root, { recursive: true, force: true }); }
