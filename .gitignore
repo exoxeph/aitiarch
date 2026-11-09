@@ -7,3 +7,7 @@ __pycache__/
 
 # Byte-exact original notes retained locally before publication redaction.
 /NOTES.private.md
+
+# Git Bash crash dumps (a shell artifact, not project output).
+bash.exe.stackdump
+*.stackdump

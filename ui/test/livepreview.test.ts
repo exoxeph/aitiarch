@@ -1,14 +1,14 @@
 import {EditorState,EditorSelection} from '@codemirror/state';
-import {EditorView,type DecorationSet} from '@codemirror/view';
+import {type DecorationSet} from '@codemirror/view';import {ensureSyntaxTree} from '@codemirror/language';
 import {markdown} from '@codemirror/lang-markdown';
-import {TaskList,Strikethrough} from '@lezer/markdown';
+import {TaskList,Strikethrough,Autolink} from '@lezer/markdown';
 import {it,expect} from 'vitest';
-import {livePreview} from '../src/editor/livepreview.ts';
+import {livePreview,buildInline} from '../src/editor/livepreview.ts';
 import {inkField,setInk} from '../src/editor/ink.ts';
 import {captureAnchor} from '../shared/anchors.ts';
 
-const make=(doc:string,anchor=0,head=anchor)=>EditorState.create({doc,selection:{anchor,head},extensions:[markdown({extensions:[TaskList,Strikethrough],addKeymap:false}),livePreview,inkField]});
-function decorations(s:EditorState){const rows:{from:number;to:number;spec:any}[]=[];for(const d of s.facet(EditorView.decorations)){if(typeof d!=='function')(d as DecorationSet).between(0,s.doc.length,(from,to,v)=>{rows.push({from,to,spec:v.spec});});}return rows;}
+const make=(doc:string,anchor=0,head=anchor)=>EditorState.create({doc,selection:{anchor,head},extensions:[markdown({extensions:[TaskList,Strikethrough,Autolink],addKeymap:false}),livePreview,inkField]});
+function decorations(s:EditorState){const rows:{from:number;to:number;spec:any}[]=[];const set:DecorationSet=buildInline(s,[[0,s.doc.length]],ensureSyntaxTree(s,s.doc.length,5000)!);set.between(0,s.doc.length,(from,to,v)=>{rows.push({from,to,spec:v.spec});});return rows;}
 const hidden=(s:EditorState)=>decorations(s).filter(r=>r.to>r.from&&!r.spec.class&&!r.spec.widget).map(r=>[r.from,r.to]);
 
 it.each([['**bold**','bold'],['*italic*','italic'],['~~strike~~','strike'],['`code`','code'],['[link](https://example.test)','link']])('hides inactive inline %s even on the cursor line, reveals only its span',(markup,word)=>{
@@ -23,7 +23,7 @@ it('reveals intersecting spans for a selection, including nested emphasis',()=>{
 });
 it('hides heading, bullet and checkbox syntax except on the active line',()=>{
  const doc='Away\n\n# Heading\n\n- [ ] Task\n- [x] Done\n';let s=make(doc,0);
- expect(hidden(s)).toContainEqual([doc.indexOf('#'),doc.indexOf('#')+2]);
+ expect(decorations(s).some(r=>r.from===doc.indexOf('#')&&r.spec.class==='cm-gm cm-gm-off')).toBe(true);
  expect(decorations(s).filter(r=>r.spec.widget?.constructor.name==='TaskBox')).toHaveLength(2);
  const task=doc.indexOf('Task');s=s.update({selection:{anchor:task}}).state;
  expect(decorations(s).filter(r=>r.spec.widget?.constructor.name==='TaskBox')).toHaveLength(1);
