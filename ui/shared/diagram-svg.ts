@@ -20,7 +20,7 @@ export function validateLayout(d:Diagram,l:DiagramLayout):boolean {
 /** Rendering projection only: keep the stored edge identities and contract unchanged. */
 export function visualEdges(d:Diagram){const used=new Set<string>();return d.edges.flatMap(e=>{if(used.has(e.id))return [];const reverse=d.edges.filter(v=>v.from===e.to&&v.to===e.from&&v.id!==e.id);const peers=reverse.length?d.edges.filter(v=>(v.from===e.from&&v.to===e.to)||(v.from===e.to&&v.to===e.from)):[e];peers.forEach(v=>used.add(v.id));return [{...e,ids:peers.map(v=>v.id),both:reverse.length>0,label:peers.map(v=>v.label).filter(Boolean).join(' / ')}];});}
 // These exported palette values mirror Grove tokens, pinned by a token test.
-export const diagramPalettes={light:{paper:'#fafbf7',surface:'#edf2ec',ink:'#263c32',muted:'#52685a',border:'#718677',accent:'#2e6654',focus:'#deeadf'},dark:{paper:'#1c2b24',surface:'#16231d',ink:'#e5eee4',muted:'#acbfae',border:'#86a58e',accent:'#a9d6ba',focus:'#2e4b3b'}};
+export const diagramPalettes={light:{paper:'#fafbf7',surface:'#edf2ec',ink:'#263c32',muted:'#52685a',border:'#718677',accent:'#2e6654',focus:'#deeadf'},dark:{paper:'#1b150f',surface:'#241c14',ink:'#efe6d3',muted:'#ab9f88',border:'#8a7a63',accent:'#e39a52',focus:'#2e2216'}};
 const xml=(v:string)=>v.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]!));
 /** daptive is for files that leave the app (the inserted asset, exports): a style block recolours the drawing for the other colour scheme, so it stays readable on a light or a dark page. */
 /** compact is the blob drawing: no title block (the page shows the title and caption), thin ink-like lines and little box chrome. */

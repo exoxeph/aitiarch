@@ -1,10 +1,13 @@
 import {DiagramSlot} from '../diagrams/DiagramSlot.tsx';
 import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useRef,useState,type ReactNode} from 'react';
+import {createPortal} from 'react-dom';
 import type {InkItem} from '../../shared/ink.ts';
 import {newThread,questionPlaceholder,threadStatus,type ThreadFailure,type ThreadReply} from '../../shared/threads.ts';
 import {api,type InkSnapshot} from '../api.ts';
 import {rememberQuestion,recalledQuestion,forgetQuestion} from './questions.ts';
+/** The persistence notice lives in the one status spot at the bottom of the app; if that is not mounted it renders in place. */
+const statusNotice=(node:ReactNode)=>{const slot=document.getElementById('status-notice-slot');return slot?createPortal(node,slot):node;};
 export const failureLabels:Record<ThreadFailure,string>={
  disabled:'Provider disabled. Enable it explicitly at server startup.',unavailable:'Provider unavailable. Check your CLI or connection.',
  hourly_cap:'Hourly cap reached. No request was sent.',usage_limit:'Plan usage limit reached. No automatic retry.',
@@ -14,8 +17,8 @@ export const failureLabels:Record<ThreadFailure,string>={
 const providerLabel=(name:string)=>name==='chatgpt-plan'?'ChatGPT plan':'Claude';
 export function TakeawayBox({value,onChange,onSubmit,onSkip,busy,skippedAt,onReopen}:{value:string;onChange:(value:string)=>void;onSubmit:()=>void;onSkip:()=>void;busy:boolean;skippedAt?:string|null;onReopen?:()=>void}){
  if(skippedAt){const date=new Date(skippedAt);return <div className="skipped-takeaway">Skipped on {Number.isNaN(date.getTime())?'Unknown time':new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(date)} - <button disabled={busy} onClick={onReopen}>Reopen takeaway</button></div>;}
- return <section className="human-takeaway"><label>Your takeaway (you write this)<textarea aria-label="Your takeaway" value={value} onChange={e=>onChange(e.target.value)} maxLength={100000} rows={4}/></label>
-  <div className="attach-actions"><button disabled={busy||!value.trim()} onClick={onSubmit}>Submit my takeaway</button><button disabled={busy} onClick={onSkip}>Skip takeaway</button></div></section>;
+ return <section className="human-takeaway"><label><span className="takeaway-title">Your turn: write the conclusion (you write this)</span><textarea aria-label="Your takeaway" placeholder="Write your takeaway…" value={value} onChange={e=>onChange(e.target.value)} maxLength={100000} rows={4}/></label>
+  <div className="attach-actions"><button disabled={busy||!value.trim()} onClick={onSubmit}>Submit my takeaway</button><button className="quiet-link" aria-label="Skip takeaway" disabled={busy} onClick={onSkip}>Skip</button></div></section>;
 }
 export function ReplyView({reply,onAdd}:{reply:ThreadReply;onAdd?:(r:ThreadReply)=>void}){
  return <article className="thread-reply" data-reply-id={reply.id} data-generated-complete={reply.generation.status==='complete'?'true':undefined}>
@@ -108,14 +111,14 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{
   <ReplyStack replies={[initial,...t.followups]} question={id=>recalledQuestion(path,id)??questionPlaceholder} cancel={replyId=>void api.threadCall('cancel',{path,id:item.id,replyId})} onAdd={r=>card.current?.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id,...(r.id===item.id?{}:{replyId:r.id})}}))}/>
   {notice&&<p role="alert">{notice}</p>}
   {saveFailures.filter(id=>[...t.followups,...(t.summary.reply?[t.summary.reply]:[])].some(r=>r.id===id&&r.generation.status==='pending')).map(id=><p key={id} role="alert">{failureLabels.persistence}<button onClick={async()=>{try{update(await api.threadCall<InkSnapshot>('retry-save',{path,id:item.id,replyId:id}));setSaveFailures(all=>all.filter(x=>x!==id));}catch(e){fail(e);}}}>Retry saving reply (no new call)</button></p>)}
-  {draftNotice&&<div className="notice" role="note">Drafts stay in memory until ignore coverage is verified. Add <code>/ui-state.json*</code> to the root .gitignore.
-   <button onClick={async()=>{try{const s=await api.enableThreadDrafts();draft.enabled=s.enabled;setDraftNotice(!s.enabled);if(s.enabled&&draft.dirty)persist(draft.text);}catch(e){fail(e);}}}>Add /ui-state.json* to root .gitignore</button><button onClick={()=>setDraftNotice(false)}>Dismiss draft notice</button></div>}
+  {draftNotice&&statusNotice(<span className="status-notice" role="note"><span className="status-notice-text" title="Drafts stay in memory until ignore coverage is verified. Add /ui-state.json* to the root .gitignore.">Drafts stay in memory until ignore coverage is verified. Add <code>/ui-state.json*</code> to the root .gitignore.</span>
+   <button aria-label="Add /ui-state.json* to root .gitignore" onClick={async()=>{try{const s=await api.enableThreadDrafts();draft.enabled=s.enabled;setDraftNotice(!s.enabled);if(s.enabled&&draft.dirty)persist(draft.text);}catch(e){fail(e);}}}>Add to .gitignore</button><button aria-label="Dismiss draft notice" onClick={()=>setDraftNotice(false)}>Dismiss</button></span>)}
   <TakeawayBox skippedAt={t.takeaway.state==='skipped'?t.takeaway.updatedAt:undefined} onReopen={()=>void act({type:'reopen'})} value={text} busy={busy} onChange={value=>{draft.text=value;draft.dirty=true;setText(value);persist(value);}} onSubmit={()=>void act({type:'submit',text})} onSkip={()=>void act({type:'skip'})}/>
   {t.takeaway.state==='submitted'&&<section><strong>Your submitted takeaway</strong><p className="human-text">{t.takeaway.text}</p><button disabled={busy||item.attachment.status!=='attached'} onClick={()=>void insert(item).catch(fail)}>Preview insertion</button></section>}
   {t.takeaway.state==='submitted'&&<button disabled={busy} onClick={()=>void act({type:'reopen'})}>Reopen takeaway</button>}
-  <section aria-label="Closing summary"><h4>AI closing summary</h4>{!revealed?<p>Hidden until you submit your takeaway or explicitly Skip takeaway.</p>:t.summary.reply?<ReplyView reply={t.summary.reply} onAdd={r=>card.current?.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id,replyId:r.id}}))}/>:<button disabled={busy||item.attachment.status!=='attached'} onClick={()=>void prepare('summary')}>Request closing summary</button>}</section>
-  <label>Write back…<input aria-label="Write back" placeholder="Write back…" value={question} disabled={!!review||busy} maxLength={8000} onChange={e=>setQuestion(e.target.value)}/></label>
-  <button disabled={busy||!question.trim()||item.attachment.status!=='attached'} onClick={()=>void prepare('followup')}>Review reply</button>
+  <section aria-label="Closing summary" className={revealed?undefined:'summary-locked'}>{revealed&&<h4>AI closing summary</h4>}{!revealed?<p>AI summary stays locked until you write your takeaway or skip it.</p>:t.summary.reply?<ReplyView reply={t.summary.reply} onAdd={r=>card.current?.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id,replyId:r.id}}))}/>:<button disabled={busy||item.attachment.status!=='attached'} onClick={()=>void prepare('summary')}>Request closing summary</button>}</section>
+  <div className="writeback"><input aria-label="Write back" placeholder="Write back…" value={question} disabled={!!review||busy} maxLength={8000} onChange={e=>setQuestion(e.target.value)}/>
+  <button className="send-arrow" aria-label="Review reply" title="Review reply" disabled={busy||!question.trim()||item.attachment.status!=='attached'} onClick={()=>void prepare('followup')}><span aria-hidden="true"/></button></div>
   {review&&<section className="thread-request" aria-label="Review thread request"><p>Send to {providerLabel(review.provider)}. Note and selection frozen by version; changes require a new review.</p>
    <details><summary>Exact redacted request</summary><pre>{JSON.stringify(review.packet,null,2)}</pre></details>
    {review.required&&<label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>Switch from {providerLabel(review.from??'claude')} to {providerLabel(review.provider)}: {review.description} Confirm this first change.</label>}

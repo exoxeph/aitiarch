@@ -13,8 +13,8 @@ for(const d of [cicd,rag,lifecycle,...diagramCases.slice(3,5).map(c=>c.diagram!)
 });
 it('12 fake-provider questions cover six diagrams and six omissions, without claiming model judgement',()=>{expect(diagramCases).toHaveLength(12);expect(diagramCases.filter(c=>c.diagram)).toHaveLength(6);for(const c of diagramCases)if(c.diagram)expect(readDiagram(c.diagram)).not.toBeNull();});
 
-it('export palettes mirror Grove light and dark tokens, with no runtime network assets',()=>{
- const tokens=readFileSync(new URL('../src/tokens.css',import.meta.url),'utf8');for(const palette of Object.values(diagramPalettes))for(const color of Object.values(palette))expect(tokens).toContain(color);
+it('the dark export palette mirrors the Ember tokens (the light palette is only for exports opened on a light page), with no runtime network assets',()=>{
+ const tokens=readFileSync(new URL('../src/tokens.css',import.meta.url),'utf8');for(const color of Object.values(diagramPalettes.dark))expect(tokens).toContain(color);
 });
 
 

@@ -74,9 +74,9 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .ink-surface { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; position: relative; }
 .surface-hidden { display: none; }
 .margin-rail { position: absolute; top: 0; bottom: 0; right: 0; width: 220px; pointer-events: none; overflow: hidden; }
-.margin-card { position: absolute; left: 4px; right: 8px; min-height: 80px; padding: 9px 10px; border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 5px; background: var(--paper-2); box-shadow: var(--shadow-small); font-size: 12px; line-height: 1.4; pointer-events: auto; overflow-wrap: anywhere; }
+.margin-card { position: absolute; left: 4px; right: 8px; min-height: 80px; padding: 9px 10px; border: 1px solid var(--rule); border-radius: 5px; background: var(--paper-2); box-shadow: var(--shadow-small); font-size: 12px; line-height: 1.4; pointer-events: auto; overflow-wrap: anywhere; }
 .margin-label, .cm-ink-label { display: block; margin-bottom: 5px; font: 600 10px var(--font-ui); text-transform: uppercase; letter-spacing: .06em; color: var(--accent); }
-.cm-ink-block { margin: 10px 4px 14px; padding: 11px 14px; border-left: 3px solid var(--accent); background: var(--paper-2); font: 13px/1.5 var(--font-ui); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cm-ink-block { margin: 10px 4px 14px; padding: 11px 14px; background: var(--paper-2); font: 13px/1.5 var(--font-ui); white-space: pre-wrap; overflow-wrap: anywhere; }
 .cm-ink-body { color: var(--ink-text); }
 .orphan-list { padding: 12px; }
 .orphan-list h2, .attach-preview h2 { margin: 0 0 12px; font-size: 13px; }
@@ -84,7 +84,9 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .orphan-card { margin: 0 0 10px; padding: 10px; border: 1px solid var(--rule); border-radius: 5px; background: var(--paper); overflow-wrap: anywhere; }
 .orphan-cap { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
 .orphan-body { line-height: 1.4; }
-.orphan-card blockquote, .attach-preview blockquote { margin: 8px 0; padding-left: 8px; border-left: 2px solid var(--rule); color: var(--muted); font-size: 12px; }
+.orphan-card blockquote, .attach-preview blockquote { margin: 8px 0; padding: 0; color: var(--muted); font-size: 12px; font-style: italic; }
+.orphan-card blockquote::before, .attach-preview blockquote::before, .thread-card blockquote::before { content: "C"; }
+.orphan-card blockquote::after, .attach-preview blockquote::after, .thread-card blockquote::after { content: "D"; }
 .orphan-choices { display: grid; gap: 5px; }
 .orphan-card button, .attach-preview button { margin-top: 6px; padding: 5px 7px; border: 1px solid var(--rule); background: var(--paper-2); border-radius: 4px; cursor: pointer; text-align: left; font-size: 12px; }
 .orphan-card button:hover, .attach-preview button:hover { border-color: var(--accent); }
@@ -130,7 +132,7 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .cm-code-inline { font-family: var(--font-mono); font-size: .88em; background: var(--code-bg); border-radius: 3px; padding: 0 3px; }
 .cm-codeblock { font-family: var(--font-mono); font-size: .86em; background: var(--code-bg); padding: 0 10px !important; }
 .cm-fence { color: var(--muted); }
-.cm-quote { border-left: 3px solid var(--rule); padding-left: 12px !important; color: var(--muted); }
+.cm-quote { padding-left: 12px !important; color: var(--muted); font-style: italic; }
 .cm-quote-mark, .cm-list-mark { color: var(--muted); }
 .cm-hr { border-bottom: 1px solid var(--rule); color: var(--muted); }
 .cm-link { color: var(--link); text-decoration: underline; text-underline-offset: 2px; cursor: text; }
@@ -161,9 +163,9 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .cm-table-widget:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .theme-toggle { font: inherit; color: var(--ink-text); background: var(--paper); border: 1px solid var(--control-border); border-radius: var(--radius-small); padding: var(--space-1); }
 .palette-group { display: block; font: var(--text-meta) var(--font-ui); color: var(--muted); }
-.cm-line.cm-callout { background: var(--paper-2); border-inline-start-color: var(--control-border); }
+.cm-line.cm-callout { background: var(--paper-2); }
 .cm-line.cm-callout-tip { background: var(--human-surface); }
-.cm-line.cm-callout-warning { border-inline-start-color: var(--danger); }
+.cm-line.cm-callout-warning { background: var(--paper-2); }
 .cm-callout-marker { position: relative; display: inline-block; font-family: var(--font-mono); font-size: .85em; }
 .cm-callout-off { color: transparent; }
 .cm-callout-off::after { content: attr(data-label); position: absolute; inset-inline-start: 0; color: var(--ink-text); font-family: var(--font-ui); font-weight: 600; text-transform: capitalize; pointer-events: none; }
@@ -203,8 +205,8 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .thread-panel textarea, .thread-panel input:not([type="checkbox"]) { display: block; width: 100%; margin: 8px 0; padding: 8px; border: 1px solid var(--rule); color: inherit; background: var(--paper); font: inherit; }
 .thread-panel textarea { resize: vertical; min-height: 110px; }
 .thread-card { margin-top: 16px; overflow-wrap: anywhere; }
-.thread-card blockquote { margin: 8px 0; padding: 8px; border-left: 2px solid var(--accent); }
-.thread-reply { border-left: 2px solid var(--rule); padding: 8px; margin: 8px 0; }
+.thread-card blockquote { margin: 8px 0; padding: 8px; font-style: italic; }
+.thread-reply { padding: 8px; margin: 8px 0; }
 .ai-answer, .human-text { white-space: pre-wrap; line-height: 1.5; }
 .human-takeaway { border-top: 1px solid var(--rule); padding-top: 16px; margin: 16px 0; }
 .question-placeholder { font-size: 12px; color: var(--muted); }
@@ -240,7 +242,7 @@ body { background: var(--canvas); }
 .cm-tooltip.cm-sel-toolbar { background: var(--toolbar); border-color: var(--control-border); border-radius: var(--radius-human); box-shadow: var(--shadow-floating); padding: var(--space-2); gap: var(--space-1); }
 .cm-sel-toolbar button { padding: 5px var(--space-2); border-radius: var(--radius-small); }
 .cm-sel-toolbar button:hover:not(:disabled) { background: var(--accent-soft); }
-.cm-ink-block, .margin-card { background: var(--ai-surface); border: 1px solid var(--rule); border-left: 3px solid var(--ai-ink); border-radius: var(--radius-card); padding: var(--space-4); font-size: var(--text-ai); line-height: 1.6; }
+.cm-ink-block, .margin-card { background: var(--ai-surface); border: 1px solid var(--rule); border-radius: var(--radius-card); padding: var(--space-4); font-size: var(--text-ai); line-height: 1.6; }
 .cm-ink-block { margin: var(--space-4) 0 var(--space-6); }
 .cm-ink-label, .margin-label { color: var(--ai-ink); font-size: var(--text-meta); letter-spacing: .025em; }
 .cm-ink-block button { padding: var(--space-1) var(--space-2); border-radius: var(--radius-small); border-color: var(--control-border); color: var(--ai-ink); }
@@ -249,7 +251,7 @@ body { background: var(--canvas); }
 button, a, summary, input, select, textarea { transition: color var(--motion-color) var(--ease), background-color var(--motion-color) var(--ease), border-color var(--motion-color) var(--ease); }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .cm-content:focus-visible { outline: none; }
-.cm-editor.cm-focused { box-shadow: inset 3px 0 var(--focus); }
+.cm-editor.cm-focused { box-shadow: inset 0 0 0 1px var(--control-border); }
 @media (max-width: 1099px) and (min-width: 721px) {
   .app { grid-template-columns: 150px minmax(0, 1fr) auto; }
   .editor-col { margin-right: var(--space-2); }
@@ -363,10 +365,10 @@ summary { cursor: pointer; }
 :root { --gutter-room: 28px; }
 .cm-editor .cm-content { padding-left: calc(var(--page-inset) + var(--gutter-room)); }
 @media (max-width: 1099px) and (min-width: 721px) { .cm-editor .cm-content { padding-left: calc(var(--space-5) + var(--gutter-room)); } }
-/* Rule hidden while away; nested quote depth bars (must come after .cm-hr and .cm-quote). */
+/* Rule hidden while away; nested quote depth is indentation only, no side bars (must come after .cm-hr and .cm-quote). */
 .cm-hr.cm-hr-off { color: transparent; }
-.cm-quote.cm-quote-d2 { background: linear-gradient(var(--rule), var(--rule)) 12px 0 / 3px 100% no-repeat; padding-left: 24px !important; }
-.cm-quote.cm-quote-d3, .cm-quote.cm-quote-d4 { background: linear-gradient(var(--rule), var(--rule)) 12px 0 / 3px 100% no-repeat, linear-gradient(var(--rule), var(--rule)) 24px 0 / 3px 100% no-repeat; padding-left: 36px !important; }
+.cm-quote.cm-quote-d2 { padding-left: 24px !important; }
+.cm-quote.cm-quote-d3, .cm-quote.cm-quote-d4 { padding-left: 36px !important; }
 
 /* AI versus human (slice A2). AI ink is marked by four cues that survive grayscale: the word "AI" in a filled label with a
    dot, a hairline outline all the way round (no side stripe), sans-serif type, and an inset from the writing column.
@@ -562,3 +564,91 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 /* Inserted local AI diagrams retain their natural text size rather than becoming strips. */
 .cm-image {overflow:auto;overscroll-behavior:contain;}
 .cm-image img {max-width:none;max-height:none;}
+
+/* ===== Remodel, Stage 2: components in the Ember and Moss worlds. Tokens only, no side stripes, AI marked by label + outline + sans + inset. ===== */
+
+/* Selection panel: Think is the loud action, Visualize is outlined, Ask stays quiet. */
+.cm-tooltip.cm-sel-toolbar { border-radius: var(--radius-card); padding: 5px; box-shadow: var(--shadow-floating); }
+.cm-sel-toolbar button { border-radius: 999px; padding: 6px 13px; font-weight: 600; color: var(--ink-text); }
+.cm-sel-toolbar button:hover:not(:disabled) { background: var(--accent-soft); }
+.cm-sel-toolbar button[title="Think on this (Ctrl+Enter)"] { background: var(--accent); color: var(--on-accent); }
+.cm-sel-toolbar button[title="Think on this (Ctrl+Enter)"]:hover:not(:disabled) { background: var(--accent-hi); }
+.cm-sel-toolbar button[title="Ask about the frozen selection"] { background: none; color: var(--ink-text); }
+.cm-sel-toolbar button.primary { background: none; color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.cm-sel-toolbar button.primary:hover:not(:disabled) { background: var(--accent-soft); }
+
+/* Margin blobs: the AI voice is sans; a resting thought is quiet text, an open one is an outlined, inset blob. */
+.thought-rails .margin-card.thought-blob { font-family: var(--font-ui); font-size: 14.5px; line-height: 1.55; }
+.thought-rails .margin-card.thought-blob[data-expanded] { padding: 14px 16px 12px; border: 1px solid var(--control-border); border-radius: var(--radius-card); box-shadow: var(--shadow-floating); }
+.thought-connector-on { stroke: var(--accent); }
+.thought-blob .cm-ink-label { background: var(--ai-ink); color: var(--ai-surface); border-radius: 4px; padding: 3px 6px 2px; font: 700 10.5px/1 var(--font-ui); letter-spacing: .09em; }
+
+/* Composer: an underline input and a send arrow; the privacy review stays inside the same blob. */
+.thread-panel .writeback { display: flex; align-items: center; gap: 6px; margin: var(--space-3) 0 var(--space-2); border-bottom: 1px solid var(--control-border); }
+.thread-panel .writeback:focus-within { border-bottom-color: var(--accent); box-shadow: 0 1px 0 var(--accent); }
+.thread-panel .writeback input:not([type="checkbox"]) { flex: 1; min-width: 0; margin: 0; padding: 6px 0; border: 0; background: none; outline: none; font: 14px var(--font-ui); }
+.thread-panel .writeback input::placeholder { color: var(--muted); opacity: 1; }
+.thread-panel .writeback .send-arrow { flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.thread-panel .writeback .send-arrow:hover:not(:disabled) { color: var(--accent); background: none; }
+.thread-panel .writeback .send-arrow:disabled { opacity: .35; cursor: default; }
+.send-arrow span { position: relative; display: block; width: 14px; height: 14px; }
+.send-arrow span::before { content: ""; position: absolute; left: 0; right: 1px; top: 50%; height: 1.6px; background: currentColor; transform: translateY(-50%); border-radius: 1px; }
+.send-arrow span::after { content: ""; position: absolute; right: 1px; top: 50%; width: 7px; height: 7px; border-top: 1.6px solid currentColor; border-right: 1.6px solid currentColor; transform: translateY(-50%) rotate(45deg); transform-origin: 70% 30%; }
+
+/* Resolve, Dismiss, Delete, Collapse, "..." and Skip are quiet text, not chunky buttons. */
+.thread-panel .thread-actions { padding-top: var(--space-2); border-top: 0; gap: var(--space-4); }
+.thread-panel .thread-actions button, .thought-chat > header button, .thread-panel .quiet-link { border: 0; background: none; padding: 4px 0; color: var(--muted); font: 12.5px var(--font-ui); text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 4px; cursor: pointer; }
+.thread-panel .thread-actions button:hover:not(:disabled), .thought-chat > header button:hover, .thread-panel .quiet-link:hover:not(:disabled) { background: none; color: var(--ink-text); text-decoration-color: currentColor; }
+.thought-more > button { border-radius: 999px; }
+
+/* Ask blob: underline input, pill buttons. */
+.thought-ask .invocation-review input[type=text], .thought-ask .invocation-review input:not([type]) { padding: 6px 0; border: 0; border-bottom: 1px solid var(--control-border); border-radius: 0; background: none; }
+.thought-ask .invocation-review input:focus-visible { outline: none; border-bottom-color: var(--accent); box-shadow: 0 1px 0 var(--accent); }
+.thought-ask button { border-radius: 999px; padding: 5px 14px; }
+
+/* Add to note and Make it mine: quiet text links. The "added to note" toast is the confirmation moment. */
+.add-to-note, .cm-adopt { color: var(--link); }
+.thought-toast { border-radius: 999px; padding: 11px 18px; background: var(--ink-text); color: var(--paper); border-color: transparent; font-weight: 600; }
+.thought-toast button { background: none; border: 0; color: inherit; text-decoration: underline; text-underline-offset: 4px; font-weight: 500; }
+.thought-toast button:focus-visible { outline-color: var(--accent); }
+
+/* Takeaway: the loud moment. A glowing "your turn" panel with a quiet field and a small Skip. */
+.human-takeaway { border: 2px solid var(--accent); border-radius: calc(var(--radius-card) + 4px); background: var(--human-surface); box-shadow: 0 0 0 1px var(--glow), 0 0 40px var(--glow); padding: var(--space-5) var(--space-5) var(--space-4); }
+.human-takeaway label { display: block; }
+.human-takeaway .takeaway-title { display: block; margin-bottom: var(--space-2); font: italic 500 22px/1.25 var(--font-title); color: var(--ink-text); }
+:root[data-theme=moss] .human-takeaway .takeaway-title { font-style: normal; font-weight: 600; font-size: 19px; }
+.human-takeaway textarea { margin: var(--space-2) 0 var(--space-3); padding: var(--space-2) 0; border: 0; border-bottom: 1px solid var(--accent); border-radius: 0; background: none; color: var(--ink-text); min-height: 110px; }
+.human-takeaway textarea::placeholder { color: var(--muted); opacity: 1; }
+.human-takeaway textarea:focus-visible { outline: none; box-shadow: 0 1px 0 var(--accent); }
+.human-takeaway .attach-actions { align-items: center; justify-content: space-between; flex-wrap: nowrap; }
+.thread-panel .human-takeaway button:first-child:not(:disabled) { border-radius: 999px; padding: 6px 16px; border-color: var(--accent); }
+.thread-panel .human-takeaway .quiet-link { background: none; border: 0; }
+.thread-card > .summary-locked { padding: 0; margin: var(--space-4) 0 0; border: 0; background: none; font-size: 12.5px; }
+.summary-locked > p { position: relative; margin: 0; padding-left: 20px; color: var(--muted); }
+.summary-locked > p::before { content: ""; position: absolute; left: 1px; top: .55em; width: 10px; height: 7px; border: 1.4px solid currentColor; border-radius: 2px; }
+.summary-locked > p::after { content: ""; position: absolute; left: 3.5px; top: calc(.55em - 5px); width: 5px; height: 5px; border: 1.4px solid currentColor; border-bottom: 0; border-radius: 3px 3px 0 0; }
+
+/* One status spot for the "stays in memory" notices; the buttons never overlap the text. */
+.statusbar .status-notice-slot { display: inline-flex; min-width: 0; flex: 0 1 auto; }
+.status-notice { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
+.status-notice-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-notice button { flex: none; border: 0; background: none; padding: 0; color: var(--link); font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.status-notice code { background: none; padding: 0; }
+
+/* AI callouts in the note: filled AI label, outline, sans, inset. Quotes are italic, never a stripe. */
+.cm-line.cm-callout-ai { font-family: var(--font-ui); font-size: .88em; margin-inline: 18px; padding-inline: 14px !important; box-shadow: inset 1px 0 0 var(--control-border), inset -1px 0 0 var(--control-border); }
+.cm-line.cm-callout:not(.cm-callout-ai) { padding-inline: 14px !important; }
+.cm-quote-mark { font-style: normal; }
+
+/* Table, slash menu, palette and diagram frames. */
+.cm-table-widget { font-family: var(--font-ui); font-size: 14px; border-radius: var(--radius-card); }
+.cm-table-widget th { background: none; color: var(--muted); font: 600 12px var(--font-ui); letter-spacing: .06em; text-transform: uppercase; }
+.cm-editor .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--accent-soft); color: var(--ink-text); box-shadow: inset 0 0 0 1px var(--accent); }
+.overlay-box li.on { box-shadow: inset 0 0 0 1px var(--accent); }
+.cm-image img, .thought-diagram-slot { border-radius: var(--radius-card); }
+.cm-tooltip.cm-sel-toolbar-compact { width: 268px; }
+.cm-sel-toolbar-compact button { padding: 5px 11px; }
+.thought-toast { border-radius: 18px; }
+/* Fallback (narrow) thoughts read in the AI voice too: sans type, and quiet text actions instead of default buttons. */
+.cm-ink-group .cm-ink-block.thought-blob { font-family: var(--font-ui); font-size: 14.5px; }
+.cm-ink-block.thought-blob button:not(.thought-open) { border: 0; background: none; padding: 2px 0; margin-right: 14px; color: var(--link); font: 12.5px var(--font-ui); text-decoration: underline; text-underline-offset: 4px; }
