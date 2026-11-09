@@ -178,7 +178,7 @@ export function EditorPane(props: Props) {
 
     const unsub = props.subscribe((e) => {
       if (e.type === "changed" && e.path === path) {
-        api.file(path).then((f) => session.applyExternal(f)).catch(() => {});
+        session.refresh().catch(() => {});
       } else if (e.type === "removed" && e.path === path) session.markMissing();
       else if (e.type === "open") void session.resync().catch(() => {});
     });

@@ -46,6 +46,7 @@ export class NoteSession {
   private conflictTheirs: NoteFile | null = null; // disk version the open conflicts were detected against
   private postponed: NoteFile | null = null; // newer disk version that arrived during a conflict
   private seq = 0;
+  private epoch = 0; // bumps whenever one of our own saves starts or lands; see refresh()
   private disposed = false;
   private debounceMs: number;
   private onStatus?: (s: SyncStatus) => void;
@@ -115,8 +116,10 @@ export class NoteSession {
 
   private async saveOnce(text: string): Promise<"ok" | "merged" | "stop"> {
     this.inflightText = text;
+    this.epoch++;
     this.setStatus("saving");
     const res = await this.api.save(this.path, this.base.version, text);
+    this.epoch++;
     if (res.ok) {
       this.base = { text, version: res.version };
       this.retryMs = 1000;
@@ -218,15 +221,32 @@ export class NoteSession {
     if (this.status === "dirty") this.schedule();
   }
 
-  /** After an SSE reconnect: anything may have changed while we were not listening. */
-  async resync(): Promise<void> {
-    const f = await this.api.load(this.path);
-    if (this.disposed) return;
-    if (!f) return this.setStatus("missing");
-    if (this.status === "missing") this.setStatus(this.settledStatus());
-    this.applyExternal(f);
+  /**
+   * Fetch the file as it is on disk now and merge it. Used for "the file changed" events and after an SSE reconnect.
+   *
+   * Versions are content hashes, so they cannot tell a stale read from a new one. A read that overlaps one of our own
+   * saves may have been taken before that save landed; applying it would put old text back over what you just typed or
+   * undid (a toggle, a save, an undo and a second save used to do exactly that). So a read that started before, or
+   * ended after, one of our saves is thrown away and repeated, and we never read while a save is still in flight.
+   */
+  async refresh(): Promise<void> {
+    for (let attempt = 0; attempt < 5 && !this.disposed; attempt++) {
+      while (this.inflight) await this.inflight.catch(() => {});
+      const started = this.epoch;
+      const f = await this.api.load(this.path);
+      if (this.disposed) return;
+      if (this.epoch !== started) continue;
+      if (!f) return this.setStatus("missing");
+      if (this.status === "missing") this.setStatus(this.settledStatus());
+      this.applyExternal(f);
+      return;
+    }
   }
 
+  /** After an SSE reconnect: anything may have changed while we were not listening. */
+  resync(): Promise<void> {
+    return this.refresh();
+  }
   markMissing(): void {
     this.setStatus("missing");
   }

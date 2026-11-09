@@ -105,7 +105,7 @@ await session('d1',d1,async({page,theme,root,bytes})=>{
  await box.click();await settle(page);
  const toggled=await doc(page);assert.equal(toggled,d.replace('- [ ] open','- [x] open'),'click did not toggle exactly one character');
  const onDisk=await disk(page,root);assert.equal(onDisk.length,bytes.length);assert.equal(onDisk.toString(),bytes.toString().replace('- [ ] open','- [x] open'));
- await page.waitForTimeout(700);await page.keyboard.press('Control+z');assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes,'toggle+undo changed bytes');await page.waitForTimeout(700);assert.equal(await doc(page),d,'document changed after undo');R.clickToggleUndoByteExact=true;
+ await page.keyboard.press('Control+z');assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes,'toggle+undo changed bytes');R.clickToggleUndoByteExact=true;
  // keyboard toggle on the caret line, and a second toggle back
  await put(page,d.indexOf('done task')+2);await page.keyboard.press('Control+Alt+Enter');await settle(page);assert.equal(await doc(page),d.replace('- [x] done','- [ ] done'));
  await page.keyboard.press('Control+z');assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes);R.keyToggleUndoByteExact=true;
