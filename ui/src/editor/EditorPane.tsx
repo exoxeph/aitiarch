@@ -20,6 +20,7 @@ import { tablePreview } from "./tables.ts";
 import {wordNavigation} from './navigation.ts';
 import { invocationHandlers, invokedKeys, formattingKeys, selectionToolbar } from "./toolbar.ts";
 import { useInvocations } from "./useInvocations.tsx";
+import {typingHelp,type TypingOptions} from './typing-help.ts';
 
 export interface PaneHandle {
   view: EditorView;
@@ -27,6 +28,7 @@ export interface PaneHandle {
 }
 
 interface Props {
+  typingOptions?:TypingOptions;
   file: NoteFile;
   visible: boolean;
   resolver: (target: string) => string | null;
@@ -120,6 +122,7 @@ export function EditorPane(props: Props) {
           wordNavigation,
           markdown({ extensions: [Strikethrough, TaskList, Autolink, Table], codeLanguages, addKeymap: false }), // no auto-inserted list markers: the editor never writes text you didn't type
           codeEditing,
+          typingHelp(()=>live.current.typingOptions??{enabled:true,doubleSpace:true}),
           invokedKeys,
           formattingKeys,
           keymap.of([
