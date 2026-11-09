@@ -10,7 +10,7 @@ const output=path.resolve(process.env.BATCH2A_OUTPUT??'');assert(process.env.BAT
 const report={};let calls=0,external=0;const errors=[];
 const small='\uFEFF# Gate heading\r\n\r\nIntro paragraph here.\r\n\r\n## Second heading\r\n\r\nSome **bold** and ~~struck~~ and `code` words, plus https://example.test/page and <https://angle.test>.\r\n\r\n> quoted line\r\n> > nested line\r\n\r\n---\r\n\r\nThe end.\r\n';
 const wrapped='# A very long launch plan heading that wraps across several visual lines in a narrow column of text\r\n\r\n> a quoted line that is also long enough to wrap onto more than one visual line in this narrow column here\r\n\r\nStart **bold words** then ~~struck text~~ and `some code` continue with a long tail of ordinary words so that this paragraph wraps onto several lines in a narrow column.\r\n';
-const big=n=>{let s='# Big note\n';for(let i=0;i<n;i++)s+=`\n## Section ${i}\n\nParagraph with **bold** words and *italic* and \`code\` and a [link](https://x.test/${i}).\n\n- bullet one\n- bullet two\n\n> quoted line ${i}\n\nPlain filler paragraph number ${i}.\n`;return s;};
+const big=n=>{let s='# Big note\n\n| Column | Value |\n| :--- | ---: |\n| **bold *nested*** | `code` |\n';for(let i=0;i<n;i++)s+=`\n## Section ${i}\n\nParagraph with **bold** words and *italic* and \`code\` and a [link](https://x.test/${i}).\n\n- bullet one\n- bullet two\n\n> quoted line ${i}\n\nPlain filler paragraph number ${i}.\n`;return s;};
 
 async function session(name,content,fn,ignore=true){
  if(process.env.EDITOR_GATE_ONLY && process.env.EDITOR_GATE_ONLY!==name)return;
@@ -236,8 +236,31 @@ await session('theme-memory',small,async({page,theme,root})=>{
  await page.getByRole('button',{name:'Add /ui-state.json* to root .gitignore',exact:true}).first().click();await page.waitForTimeout(600);assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).theme,'dark');
  report[`theme-memory-${theme}`]={memoryBeforeConsent:true,persistAfterExplicitConsent:true};
 },false);
+await session('tables','\uFEFFAway\r\n\r\n| Name | Status |\r\n| :---: | ---: |\r\n| **bold *nested*** | `code` and ~~old~~ |\r\n| a \\| b | <script>raw</script> |\r\n\r\nAfter table.\r\n',async({page,theme,root,bytes})=>{
+ const d=await doc(page),start=d.indexOf('| Name'),end=d.indexOf('\n\nAfter'),pos=d.indexOf('nested');await put(page,0);
+ const widget=page.locator('.cm-table-widget');await widget.waitFor();assert.equal(await widget.locator('strong em').textContent(),'nested');assert.equal(await widget.locator('code').textContent(),'code');assert.equal(await widget.locator('script').count(),0);assert.equal(await widget.getByText('a | b',{exact:true}).count(),1);
+ const geometry=async()=>page.evaluate(()=>{const v=window.__aitiarch['n.md'].view,p=v.state.doc.toString().indexOf('After table.');const r=v.coordsAtPos(p);return [r.left,r.top,v.contentHeight];});const before=await geometry();
+ await widget.locator('td').first().click();assert.equal(await widget.count(),0);assert.deepEqual(await geometry(),before,'table/source geometry changed');assert.equal(await doc(page),d);
+ await put(page,pos);await page.keyboard.type('X');assert.equal(await doc(page),d.slice(0,pos)+'X'+d.slice(pos));await page.keyboard.press('Control+z');await page.keyboard.press('Control+y');assert.notEqual(await doc(page),d);await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
+ await page.keyboard.press('Escape');await widget.waitFor();await page.screenshot({path:path.join(output,`gate-table-${theme}.png`)});await widget.focus();await page.keyboard.press('Enter');assert.equal(await widget.count(),0);
+ await put(page,start,end);const copied=await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view,dt=new DataTransfer();v.contentDOM.dispatchEvent(new ClipboardEvent('copy',{clipboardData:dt,bubbles:true,cancelable:true}));return dt.getData('text/plain');});assert.equal(copied,d.slice(start,end));
+ await put(page,start);const cdp=await page.context().newCDPSession(page);await cdp.send('Input.imeSetComposition',{text:'\u3042',selectionStart:1,selectionEnd:1});await cdp.send('Input.insertText',{text:'\u3042'});await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
+ await put(page,0);await page.setViewportSize({width:700,height:1000});await settle(page);const narrow=await geometry();await put(page,pos);assert.deepEqual(await geometry(),narrow,'narrow table/source geometry changed');await put(page,0);await page.screenshot({path:path.join(output,`gate-table-narrow-${theme}.png`)});
+ await writeFile(path.join(root,'n.md'),Buffer.from(d.replace('After table.','After outside edit.').replaceAll('\n','\r\n').replace(/^/,'\uFEFF')));await page.waitForFunction(()=>window.__aitiarch['n.md'].view.state.doc.toString().includes('After outside edit.'));assert.equal(await doc(page),d.replace('After table.','After outside edit.'));await writeFile(path.join(root,'n.md'),bytes);await page.waitForFunction(expected=>window.__aitiarch['n.md'].view.state.doc.toString()===expected,d);
+ assert.deepEqual(await disk(page,root),bytes);report[`tables-${theme}`]={nestedFormatting:true,safeDom:true,noShift:true,byteExact:true,copyMarkdown:true,imeUndoRedo:true,externalRefresh:true};
+});
+await session('wide-table','\uFEFFAway\r\n\r\n| Column one | Column two | Column three | Column four |\r\n| --- | --- | --- | --- |\r\n| VeryLongUniqueUnbrokenValueOne | VeryLongUniqueUnbrokenValueTwo | VeryLongUniqueUnbrokenValueThree | VeryLongUniqueUnbrokenValueFour |\r\n\r\nEnd\r\n',async({page,theme,root,bytes})=>{
+ await put(page,0);await page.setViewportSize({width:700,height:1000});await page.locator('.cm-table-widget').waitFor();const sizes=await page.locator('.cm-table-scroll').evaluate(e=>({width:e.clientWidth,content:e.scrollWidth,overflow:getComputedStyle(e).overflowX,page:document.documentElement.scrollWidth,viewport:innerWidth}));assert(sizes.content>sizes.width);assert.equal(sizes.overflow,'auto');assert(sizes.page<=sizes.viewport);await page.screenshot({path:path.join(output,`gate-wide-table-${theme}.png`)});assert.deepEqual(await disk(page,root),bytes);report[`wide-table-${theme}`]=sizes;
+});
+await session('theme-diagram','\uFEFFAway\r\n\r\n```mermaid\r\nflowchart LR\r\n  A[Plan] --> B[Test]\r\n```\r\n\r\nEnd\r\n',async({page,theme,root,bytes})=>{
+ await put(page,0);const diagram=page.locator('.cm-mermaid-ok');await diagram.waitFor();
+ const toggle=page.getByLabel('Theme',{exact:true});await toggle.selectOption('dark');await page.waitForFunction(()=>document.querySelector('.cm-mermaid-ok')?.getAttribute('data-theme')==='dark',null,{timeout:4000});
+ await toggle.selectOption('light');await page.waitForFunction(()=>document.querySelector('.cm-mermaid-ok')?.getAttribute('data-theme')==='light',null,{timeout:4000});
+ await toggle.selectOption('system');await page.waitForFunction(expected=>document.querySelector('.cm-mermaid-ok')?.getAttribute('data-theme')===expected,theme,{timeout:4000});
+ assert.deepEqual(await disk(page,root),bytes);report[`theme-diagram-${theme}`]={manualAndSystem:true,byteExact:true};
+});
 // ---- 3. cost at about 5,000 and 50,000 lines (real app, ink and anchors on)
-for(const n of [380,3850]){
+for(const n of [455,4545]){
  await session(`big-${n}`,big(n),async({page,theme})=>{
   if(theme!=='light')return;
   const m=await page.evaluate(async()=>{const v=window.__aitiarch['n.md'].view,N=v.state.doc.lines,sl=()=>new Promise(r=>requestAnimationFrame(()=>r()));const st=a=>{a=[...a].sort((x,y)=>x-y);return{median:+a[a.length>>1].toFixed(1),p95:+a[Math.floor(a.length*.95)].toFixed(1)}};

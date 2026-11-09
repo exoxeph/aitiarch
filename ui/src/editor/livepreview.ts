@@ -45,13 +45,14 @@ let mermaidLib: Promise<typeof import("mermaid").default> | null = null;
 let mermaidSeq = 0;
 const goodRenders = new Map<string, string>();
 
-async function renderMermaid(code: string): Promise<string> {
-  const dark = window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+let mermaidTail: Promise<unknown> = Promise.resolve();
+async function renderMermaid(code: string, dark: boolean): Promise<string> {
   const key = (dark ? "d:" : "l:") + code;
   const hit = goodRenders.get(key);
   if (hit) return hit;
   mermaidLib ??= import("mermaid").then((m) => m.default);
   const mermaid = await mermaidLib;
+  const job = mermaidTail.then(async () => {
   mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "default", fontFamily: "inherit", suppressErrorRendering: true });
   const id = `aitiarch-mmd-${++mermaidSeq}`;
   try {
@@ -62,8 +63,12 @@ async function renderMermaid(code: string): Promise<string> {
     document.getElementById(id)?.remove();
     document.getElementById("d" + id)?.remove();
   }
+  });
+  mermaidTail = job.catch(() => {});
+  return job;
 }
 
+const mermaidCleanup = new WeakMap<HTMLElement, () => void>();
 class MermaidWidget extends WidgetType {
   constructor(readonly code: string) {
     super();
@@ -76,9 +81,17 @@ class MermaidWidget extends WidgetType {
     el.className = "cm-mermaid cm-mermaid-pending";
     el.textContent = "Rendering diagramâ€¦";
     el.title = "Click to edit the diagram source";
-    renderMermaid(this.code)
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    let revision = 0;
+    const draw = () => {
+      const current = ++revision;
+      const mode = document.documentElement.dataset.theme;
+      const dark = mode === "dark" || (mode !== "light" && media.matches);
+      renderMermaid(this.code, dark)
       .then((svg) => {
+        if (current !== revision) return;
         el.className = "cm-mermaid cm-mermaid-ok";
+        el.dataset.theme = dark ? "dark" : "light";
         // Defence in depth: Mermaid already renders at securityLevel "strict", we sanitize again, and the CSP blocks scripts.
         el.innerHTML = DOMPurify.sanitize(svg, {
           USE_PROFILES: { svg: true, svgFilters: true, html: true },
@@ -88,10 +101,17 @@ class MermaidWidget extends WidgetType {
         view.requestMeasure();
       })
       .catch((err) => {
+        if (current !== revision) return;
         el.className = "cm-mermaid cm-mermaid-error";
         el.textContent = `Diagram error: ${String(err?.message ?? err).split("\n")[0]}`;
         view.requestMeasure();
       });
+    };
+    const observer = new MutationObserver(draw);
+    observer.observe(document.documentElement, {attributes:true,attributeFilter:['data-theme']});
+    media.addEventListener('change', draw);
+    mermaidCleanup.set(el, () => {revision++;observer.disconnect();media.removeEventListener('change',draw);});
+    draw();
     el.addEventListener("mousedown", (e) => {
       e.preventDefault();
       view.dispatch({ selection: { anchor: view.posAtDOM(el) } });
@@ -102,6 +122,7 @@ class MermaidWidget extends WidgetType {
   ignoreEvent() {
     return true;
   }
+  destroy(dom: HTMLElement) { mermaidCleanup.get(dom)?.(); mermaidCleanup.delete(dom); }
 }
 
 // ---- Selection facts shared by both layers ----
@@ -186,6 +207,9 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
           return;
         }
         switch (n.name) {
+          case "Table":
+            lineDeco(n.from, n.to, "cm-table-source");
+            return false;
           case "Strikethrough": {
             strikes.add(n.from);
             const annotation = failedMarks.find((f) => f.from === n.from && f.textTo + 2 === n.to);

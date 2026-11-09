@@ -1,6 +1,6 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { Autolink, Strikethrough, TaskList } from '@lezer/markdown';
+import { Autolink, Strikethrough, TaskList, Table } from '@lezer/markdown';
 import { Compartment, EditorState } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
@@ -14,6 +14,7 @@ import { addInk, removeInk, inkField, setInk } from "./ink.ts";
 import { codeHighlight, codeLanguages } from "./codeblocks.ts";
 import { toggleTaskAtCaret } from "./tasks.ts";
 import { slashMenu } from "./slash.ts";
+import { tablePreview } from "./tables.ts";
 import { invocationHandlers, invokedKeys, formattingKeys, selectionToolbar } from "./toolbar.ts";
 import { useInvocations } from "./useInvocations.tsx";
 
@@ -100,7 +101,7 @@ export function EditorPane(props: Props) {
           history(),
           drawSelection(),
           EditorView.lineWrapping,
-          markdown({ extensions: [Strikethrough, TaskList, Autolink], codeLanguages, addKeymap: false }), // no auto-inserted list markers: the editor never writes text you didn't type
+          markdown({ extensions: [Strikethrough, TaskList, Autolink, Table], codeLanguages, addKeymap: false }), // no auto-inserted list markers: the editor never writes text you didn't type
           invokedKeys,
           formattingKeys,
           keymap.of([
@@ -115,6 +116,7 @@ export function EditorPane(props: Props) {
           previewHandlers.of({ openWiki: (t) => live.current.onOpenWiki(t) }),
           resolverSlot.current.of(wikiResolver.of(props.resolver)),
           livePreview,
+          tablePreview,
           codeHighlight,
           slashMenu,
           invocationHandlers.of({ invoke: (action, source) => invokeRef.current(action, source) }),

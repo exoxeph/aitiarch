@@ -93,9 +93,13 @@ try {
   const selectedEnd = original.indexOf("End of the focused section.");
   await page.evaluate(pos => {
     const h = window.__aitiarch?.["notebook.md"];
-    h.view.dispatch({ selection: { anchor: pos, head: pos + "End of the focused section.".length } });
+    h.view.dispatch({ selection: { anchor: pos, head: pos + "End of the focused section.".length }, scrollIntoView: true });
     h.view.focus();
   }, selectedEnd);
+  await page.locator('.cm-sel-toolbar').waitFor();await page.waitForTimeout(200);
+  const toolbarClear=await page.evaluate(()=>{const t=document.querySelector('.cm-sel-toolbar').getBoundingClientRect(),rail=document.querySelector('.margin-rail'),r=rail.getBoundingClientRect();const bottom=getComputedStyle(rail).position==='static'&&r.top>120?Math.min(innerHeight,r.top):innerHeight;return t.left>=0&&t.right<=innerWidth&&t.top>=0&&t.bottom<=bottom+1;});
+  if(!toolbarClear)throw new Error('Selection toolbar exceeds the narrow viewport or overlaps the margin rail.');
+  await page.screenshot({path:path.join(out,'toolbar-narrow-rail.png')});
   await page.getByRole("button", { name: "Re-attach to selected text" }).click();
   await page.getByRole("button", { name: "Save re-attachment" }).click();
   await page.waitForTimeout(250);

@@ -147,6 +147,14 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 /* floating selection toolbar */
 .cm-tooltip.cm-sel-toolbar { font-family: var(--font-ui); font-size: 13px; background: var(--paper); color: var(--ink-text); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow-floating); padding: 4px; display: flex; flex-direction: column; gap: 2px; min-width: min(250px, calc(100vw - 16px)); max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; z-index: 100; isolation: isolate; }
 .cm-sel-row { display: flex; gap: 2px; flex-wrap: wrap; }
+.cm-table-widget { --table-line: calc(var(--text-body) * var(--leading-body)); height: calc(var(--table-line) * var(--table-lines)); box-sizing: border-box; max-width: 100%; color: var(--ink-text); border: 1px solid var(--control-border); border-radius: var(--radius-small); background: var(--paper); }
+.cm-table-scroll { max-width: 100%; height: 100%; overflow: auto; }
+.cm-table-widget table { border-collapse: collapse; width: 100%; white-space: nowrap; }
+.cm-table-widget th, .cm-table-widget td { padding: 0 var(--space-3); height: var(--table-line); line-height: calc(var(--table-line) - 1px); border-bottom: 1px solid var(--rule); box-sizing: border-box; }
+.cm-table-widget th { background: var(--paper-2); font-weight: 700; }
+.cm-table-hint { font: var(--text-meta)/var(--table-line) var(--font-ui); color: var(--muted); padding: 0 var(--space-2); white-space: nowrap; }
+.cm-line.cm-table-source { white-space: pre; overflow-x: auto; scrollbar-width: none; }
+.cm-table-widget:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .theme-toggle { font: inherit; color: var(--ink-text); background: var(--paper); border: 1px solid var(--control-border); border-radius: var(--radius-small); padding: var(--space-1); }
 .palette-group { display: block; font: var(--text-meta) var(--font-ui); color: var(--muted); }
 .cm-line.cm-callout { background: var(--paper-2); border-inline-start-color: var(--control-border); }
