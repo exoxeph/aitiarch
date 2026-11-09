@@ -518,3 +518,19 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .thought-ask button:focus-visible,.thought-ask input:focus-visible,.thought-ask summary:focus-visible {outline:2px solid var(--focus);outline-offset:2px;}
 .sr-only {position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;}
 .ink-surface[data-asking] .cm-sel-toolbar {display:none;}
+/* Add to note: one primary action per AI message. Quiet at rest, visible on hover, always visible on keyboard focus and on touch. */
+.add-to-note {display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;background:none;color:var(--link);border-radius:var(--radius-small);padding:4px 8px;font:12px var(--font-ui);cursor:pointer;opacity:.0;transition:opacity 140ms,background 140ms;}
+.thought-blob:hover .add-to-note,.thought-blob:focus-within .add-to-note,.thread-reply:hover .add-to-note,.thread-reply:focus-within .add-to-note,.add-to-note:focus-visible {opacity:1;}
+@media (hover: none) {.add-to-note {opacity:1;}}
+@media (prefers-reduced-motion: reduce) {.add-to-note {transition:none;}}
+.add-to-note:hover:not(:disabled) {background:var(--ai-surface);border-color:var(--control-border);}
+.add-to-note:focus-visible {outline:2px solid var(--focus);outline-offset:2px;}
+.add-to-note:disabled {opacity:0;cursor:default;}
+.add-to-note-icon {padding:3px 6px;margin-left:4px;vertical-align:middle;}
+.thought-toast .added-detail {font-size:12px;max-width:340px;} .thought-toast .added-detail pre {white-space:pre-wrap;max-height:140px;overflow:auto;margin:4px 0 0;}
+.cm-line.cm-flash {animation:cm-flash 1.5s ease-out;}
+@keyframes cm-flash {from {background:color-mix(in srgb,var(--accent) 22%,transparent);} to {background:transparent;}}
+@media (prefers-reduced-motion: reduce) {.cm-line.cm-flash {animation:none;background:color-mix(in srgb,var(--accent) 14%,transparent);}}
+.add-icon {display:inline-block;position:relative;width:12px;height:15px;border:1.4px solid currentColor;border-radius:2px;box-sizing:border-box;}
+.add-icon::before,.add-icon::after {content:"";position:absolute;left:50%;top:50%;background:currentColor;transform:translate(-50%,-50%);}
+.add-icon::before {width:6px;height:1.4px;} .add-icon::after {width:1.4px;height:6px;}

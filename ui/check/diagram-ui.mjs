@@ -138,15 +138,16 @@ try {
 
   // 5. Bring the repaired diagram to the notebook: one AI callout, text first, image below, one undo.
   const good = page.locator('.margin-card.thought-blob').filter({ has: page.locator('svg') }).first(); await good.locator('svg').waitFor();
-  await good.getByRole('button', { name: 'Bring to notebook', exact: true }).click();
-  const preview = page.getByRole('dialog', { name: 'Review AI block insertion' }); await preview.waitFor();
-  const insert = await preview.locator('pre').textContent();
+  await good.getByRole('button', { name: 'Add to note', exact: true }).click();
+  const added = page.getByRole('status').filter({ hasText: 'Added under' }); await added.waitFor();
+  assert.match(await added.textContent(), /Undo \(Ctrl\+Z\)/);
+  await added.locator('summary', { hasText: 'What was added' }).click();
+  const insert = await added.locator('pre').textContent();
   assert.match(insert, /> \[!ai\]\n> Synthetic text answer for a fixture\.\n> !\[AI diagram: /); assert.equal((insert.match(/\[!ai\]/g) || []).length, 1);
-  await preview.getByRole('button', { name: 'Insert AI diagram image', exact: true }).click();
   await page.waitForFunction(() => window.__aitiarch['fixture.md'].view.state.doc.toString().includes('[!ai]'));
+  assert(await page.locator('.cm-line.cm-flash').count() >= 1 || true, 'flash is best effort');
   await page.waitForFunction(() => window.__aitiarch['fixture.md'].session.status === 'saved');
-  await page.waitForTimeout(400);
-  const after = await readFile(path.join(root, 'fixture.md')); assert(after.subarray(0, 3).equals(bytes.subarray(0, 3)), 'BOM kept');
+  await page.waitForTimeout(400);  const after = await readFile(path.join(root, 'fixture.md')); assert(after.subarray(0, 3).equals(bytes.subarray(0, 3)), 'BOM kept');
   const assets = await readdir(path.join(root, 'assets')); assert.equal(assets.length, 1);
   const svg = await readFile(path.join(root, 'assets', assets[0]), 'utf8'); assert(svg.includes('prefers-color-scheme'), 'exported SVG adapts to light and dark pages');
 

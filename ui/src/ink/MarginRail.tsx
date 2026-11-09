@@ -51,7 +51,8 @@ export function MarginRail({placed,renderDraft}:{placed:PlacedMargin[];renderDra
      <button type="button" role="menuitem" onClick={e=>send(e.currentTarget,'show-dismissed')}>Show dismissed thoughts</button>
     </div>}
    </div>
-   <button className="thought-bring" disabled={item.generation?.status!=='complete'} onClick={e=>e.currentTarget.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id}}))}>Bring to notebook</button>
+   <button type="button" className="add-to-note add-to-note-icon" aria-label="Add to note" title="Add to note" disabled={item.generation?.status!=='complete'} onClick={e=>e.currentTarget.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id}}))}>
+    <i className="add-icon" aria-hidden="true"/></button>
    </>}
   </article>;})}
  </aside>;

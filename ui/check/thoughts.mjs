@@ -1,4 +1,5 @@
 // Synthetic notes + in-process fake provider only. No real notebooks or provider CLIs.
+const confirmOn=async page=>{await page.keyboard.press('Control+k');await page.waitForTimeout(150);await page.keyboard.type('Add to note');await page.waitForTimeout(150);if(await page.getByText(/Add to note: confirm before adding/).count()){await page.keyboard.press('Enter');}else{await page.keyboard.press('Escape');}await page.waitForTimeout(100);};
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import os from 'node:os';import path from 'node:path';import {execFileSync} from 'node:child_process';
@@ -29,7 +30,7 @@ try{
  await page.waitForFunction(y=>Math.abs(document.querySelector('.thought-chat').getBoundingClientRect().top-y)>10,chatTop);
  await page.evaluate(()=>window.__aitiarch['fixture.md'].view.focus());await page.keyboard.press('Control+z');await page.waitForFunction(()=>window.__aitiarch['fixture.md'].session.status==='saved');
  await page.screenshot({path:path.join(out,'thoughts-chat-light.png'),fullPage:true});await chat.getByRole('button',{name:'Collapse thought conversation'}).click();
- await first.getByRole('button',{name:'Bring to notebook',exact:true}).click();const preview=page.getByRole('dialog',{name:'Review AI block insertion'});await preview.waitFor();assert.equal(await preview.getByRole('button',{name:'Insert labeled AI block',exact:true}).evaluate(e=>e===document.activeElement),true);await page.keyboard.press('Shift+Tab');assert.equal(await preview.getByRole('button',{name:'Cancel AI insertion',exact:true}).evaluate(e=>e===document.activeElement),true);assert((await preview.locator('pre').textContent()).includes('> [!ai]\n> Synthetic thought seed1.'));assert.deepEqual(await readFile(path.join(root,'fixture.md')),bytes);
+ await confirmOn(page);await first.getByRole('button',{name:'Add to note',exact:true}).click();const preview=page.getByRole('dialog',{name:'Review AI block insertion'});await preview.waitFor();assert.equal(await preview.getByRole('button',{name:'Insert labeled AI block',exact:true}).evaluate(e=>e===document.activeElement),true);await page.keyboard.press('Shift+Tab');assert.equal(await preview.getByRole('button',{name:'Cancel AI insertion',exact:true}).evaluate(e=>e===document.activeElement),true);assert((await preview.locator('pre').textContent()).includes('> [!ai]\n> Synthetic thought seed1.'));assert.deepEqual(await readFile(path.join(root,'fixture.md')),bytes);
  // Delay confirmation's disk read; a simultaneous edit must invalidate its frozen preview.
  let release;const blocked=new Promise(r=>release=r);let reached;const reading=new Promise(r=>reached=r);
  await page.route('**/api/file?path=fixture.md',async route=>{reached();await blocked;await route.continue();});
@@ -37,7 +38,7 @@ try{
  await page.evaluate(()=>window.__aitiarch['fixture.md'].view.dispatch({changes:{from:window.__aitiarch['fixture.md'].view.state.doc.length,insert:'Changed during check.'}}));release();await page.unrouteAll({behavior:'wait'});
  await page.getByRole('alert').filter({hasText:'The note changed. Review a new preview.'}).waitFor();assert(!(await page.evaluate(()=>window.__aitiarch['fixture.md'].view.state.doc.toString())).includes('> [!ai]'));
  await page.evaluate(()=>window.__aitiarch['fixture.md'].view.focus());await page.keyboard.press('Control+z');await page.waitForFunction(()=>window.__aitiarch['fixture.md'].session.status==='saved');
- await first.getByRole('button',{name:'Bring to notebook',exact:true}).click();await preview.waitFor();
+ await confirmOn(page);await first.getByRole('button',{name:'Add to note',exact:true}).click();await preview.waitFor();
  await preview.getByRole('button',{name:'Insert labeled AI block',exact:true}).click();await page.waitForFunction(()=>window.__aitiarch['fixture.md'].session.status==='saved'&&window.__aitiarch['fixture.md'].view.state.doc.toString().includes('> [!ai]'));
  await page.waitForFunction(async()=>{const r=await fetch('/api/threads?path=fixture.md');return r.ok;});await page.waitForTimeout(150);
  const inserted=await readFile(path.join(root,'fixture.md'));const expected=text.replace('\n\nA second','\n\n> [!ai]\n> Synthetic thought seed1.\n\nA second');assert.equal(inserted.toString(),'\ufeff'+expected.replace(/\n/g,'\r\n'));

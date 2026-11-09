@@ -1,4 +1,5 @@
 // Fake provider + hand-built references only. No external calls or user notes.
+const confirmOn=async page=>{await page.keyboard.press('Control+k');await page.waitForTimeout(150);await page.keyboard.type('Add to note');await page.waitForTimeout(150);if(await page.getByText(/Add to note: confirm before adding/).count()){await page.keyboard.press('Enter');}else{await page.keyboard.press('Escape');}await page.waitForTimeout(100);};
 import assert from 'node:assert/strict';import {mkdtemp,mkdir,writeFile,readFile,rm,unlink,readdir} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {execFileSync} from 'node:child_process';import {chromium} from 'playwright-core';
 import {Store} from '../server/store.ts';import {InkStore} from '../server/ink-store.ts';import {NoteWatcher} from '../server/watch.ts';import {createApp} from '../server/http.ts';import {cicd,rag,lifecycle,diagramCases} from '../test/fixtures/diagrams.ts';
 const out=path.resolve(process.env.BATCH2A_OUTPUT??'');assert(process.env.BATCH2A_OUTPUT&&!out.toLowerCase().startsWith(path.resolve('..').toLowerCase()));await mkdir(out,{recursive:true});
@@ -29,7 +30,7 @@ try{
  }
  await seedReference(0);await page.reload();const blob=page.locator('.margin-card[data-ink-id="diagram-0"]');await blob.locator('svg').waitFor();
  // Durable recovery: force ledger failure only after a saved Markdown edit.
- const lock=path.join(root,'ledger.json.lock');await writeFile(lock,'synthetic lock');await blob.getByRole('button',{name:'Bring to notebook',exact:true}).click();const preview=page.getByRole('dialog',{name:'Review AI block insertion'});await preview.waitFor();const insert=await preview.locator('pre').textContent();assert(insert.includes('![AI diagram: CI/CD'));
+ const lock=path.join(root,'ledger.json.lock');await writeFile(lock,'synthetic lock');await confirmOn(page);await blob.getByRole('button',{name:'Add to note',exact:true}).click();const preview=page.getByRole('dialog',{name:'Review AI block insertion'});await preview.waitFor();const insert=await preview.locator('pre').textContent();assert(insert.includes('![AI diagram: CI/CD'));
  await preview.getByRole('button',{name:'Insert AI diagram image',exact:true}).click();await page.getByRole('status',{name:'AI insertion recording pending'}).waitFor();await page.waitForFunction(()=>window.__aitiarch['fixture.md'].session.status==='saved');
  const after=await readFile(path.join(root,'fixture.md'));assert.equal(after.toString().replace(insert.replace(/\n/g,'\r\n'),''),bytes.toString());const assets=await readdir(path.join(root,'assets'));assert.equal(assets.length,1);assert((await readFile(path.join(root,'assets',assets[0]),'utf8')).startsWith('<svg'));
  await page.reload();await page.getByRole('status',{name:'AI insertion recording pending'}).waitFor();assert.deepEqual(await readFile(path.join(root,'fixture.md')),after);

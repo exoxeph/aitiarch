@@ -24,6 +24,7 @@ export interface UiState {
   active: string | null;
   treeCollapsed?: boolean;
   theme?: 'system' | 'light' | 'dark';
+  confirmAdd?: boolean;
 }
 import type { InkDocument, InkItem } from "../shared/ink.ts";
 import type { Invocation } from "../shared/invocation.ts";

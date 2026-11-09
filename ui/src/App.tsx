@@ -18,7 +18,13 @@ import {DismissedThoughts} from './ink/DismissedThoughts.tsx';
 import {ThoughtInsertionPreview} from './ink/ThoughtInsertionPreview.tsx';
 import {ThoughtChat} from './ink/ThoughtChat.tsx';
 import {previewThoughtInsertion} from '../shared/thoughts.ts';
-import {isolateHistory} from '@codemirror/commands';
+import {isolateHistory,undo} from '@codemirror/commands';
+/** A brief highlight on the lines that were just added, so you can see where they went. */
+function flashInserted(view:{state:{doc:{lineAt:(p:number)=>{from:number;to:number;number:number};length:number}};domAtPos:(p:number)=>{node:Node}},from:number,length:number){
+  requestAnimationFrame(()=>{try{const end=Math.min(from+length,view.state.doc.length);let pos=from;const seen=new Set<Element>();
+    while(pos<=end){const line=view.state.doc.lineAt(pos),el=(view.domAtPos(line.from).node as HTMLElement).closest?.('.cm-line')??(view.domAtPos(line.from).node.parentElement?.closest('.cm-line'));if(el&&!seen.has(el)){seen.add(el);el.classList.add('cm-flash');}if(line.to+1<=pos)break;pos=line.to+1;}
+    setTimeout(()=>seen.forEach(el=>el.classList.remove('cm-flash')),1600);}catch{/* the highlight is only a courtesy */}});
+}
 import {previewTakeawayInsertion} from '../shared/takeaway-insertion.ts';
 import {SLASH_ITEMS,slashInsert} from './editor/slash.ts';
 import {invokeSelection} from './editor/toolbar.ts';
@@ -40,8 +46,8 @@ export default function App() {
   const onInk = useCallback((path: string, items: InkItem[]) => setMappedInk(m => ({ ...m, [path]: items })), []);
   const onInkSaved = useCallback((path: string, snapshot: InkSnapshot) => setInkFiles(m => ({ ...m, [path]: snapshot })), []);
   const [attachDraft, setAttachDraft] = useState<null | { path: string; id: string; from: number; to: number; noteVersion: string; noteText: string; inkVersion: string | null; quote: string; target: string }>(null);
-  const [thoughtChat,setThoughtChat]=useState<string|null>(null),[toast,setToast]=useState<null|{text:string;id:string;undo:'restore'|'unresolve'}>(null),[showDismissed,setShowDismissed]=useState(false);
-  const [bringPreview,setBringPreview]=useState<null|{path:string;id:string;noteText:string;preview:BringPreview;render?:{layout:DiagramLayout;theme:'light'|'dark'}}>(null);
+  const [thoughtChat,setThoughtChat]=useState<string|null>(null),[toast,setToast]=useState<null|{text:string;id:string;undo:'restore'|'unresolve'}>(null),[confirmAdd,setConfirmAdd]=useState(false),[added,setAdded]=useState<null|{text:string;detail:string}>(null),[showDismissed,setShowDismissed]=useState(false);
+  const [bringPreview,setBringPreview]=useState<null|{path:string;id:string;noteText:string;preview:BringPreview;render?:{layout:DiagramLayout;theme:'light'|'dark'};replyId?:string}>(null);
   const [insertionRepair,setInsertionRepair]=useState<RepairStatus|null>(null);
   const [repairError,setRepairError]=useState(false);
   const [threadId,setThreadId]=useState<string|null>(null);
@@ -133,7 +139,7 @@ export default function App() {
           sessionStorage.setItem(`anchor-cache-notice:${s.rootPath}`, "shown");
         }
         const [t, ui, persistence] = await Promise.all([api.tree(), api.uiState(),api.uiStatePersistence().catch(()=>({enabled:false}))]);
-        setTreeCollapsed(ui.treeCollapsed??false);setTreePersistence(persistence.enabled);
+        setTreeCollapsed(ui.treeCollapsed??false);setConfirmAdd(ui.confirmAdd??false);setTreePersistence(persistence.enabled);
         if(persistence.enabled)setTheme(ui.theme??'system');
         setTree(t);
         const all = flattenTree(t);
@@ -176,9 +182,9 @@ export default function App() {
   // ---- persist open tabs (a small file in the notebook folder) ----
   useEffect(() => {
     if (!loaded.current) return;
-    const t = setTimeout(() => void api.putUiState({ v: 1, tabs, active, ...(treePersistence?{treeCollapsed,theme}:{}) }).catch(() => {if(treePersistence){setTreePersistence(false);setTreeNotice(true);}}), 300);
+    const t = setTimeout(() => void api.putUiState({ v: 1, tabs, active, ...(treePersistence?{treeCollapsed,theme,confirmAdd}:{}) }).catch(() => {if(treePersistence){setTreePersistence(false);setTreeNotice(true);}}), 300);
     return () => clearTimeout(t);
-  }, [tabs, active, treeCollapsed,treePersistence,theme]);
+  }, [tabs, active, treeCollapsed,treePersistence,theme,confirmAdd]);
 
   const closeTab = useCallback(
     async (path: string) => {
@@ -272,38 +278,48 @@ export default function App() {
     } catch (e) { setAttachDraft(null); setNotice(e instanceof ApiError && e.status === 409 ? "The note or ink changed since selection. Review it and try again." : "Re-attachment could not be saved."); }
   };
   useEffect(()=>{setThoughtChat(null);setBringPreview(null);setInsertionRepair(null);setRepairError(false);if(!active)return;let stopped=false;void api.insertionStatus(active).then(s=>{if(!stopped)setInsertionRepair(s);}).catch(()=>{if(!stopped)setRepairError(true);});return()=>{stopped=true;};},[active]);
+  // Add to note: the same journaled steps as before (preview, prepare, one editor dispatch, complete). By default they run
+  // straight away from one click and the text that was added is shown afterwards; with "confirm before adding" on, the preview
+  // dialog comes first. `replyId` picks one specific AI message instead of the first answer.
+  const runBring=async(p:NonNullable<typeof bringPreview>)=>{
+    let inserted=false,operationId:string|undefined;
+    try{const h=panes.current.get(p.path);if(!h||h.session.status!=='saved'||h.view.state.doc.toString()!==p.noteText)throw new Error('The note changed. Review a new preview.');
+      const [disk,ink]=await Promise.all([api.file(p.path),api.threads(p.path)]),latest=ink.document.items.find(i=>i.id===p.id),mapped=h.view.state.field(inkField).items.find(i=>i.id===p.id);
+      if(!latest||!mapped)throw new Error('The thought changed. Review a new preview.');
+      const extra=p.replyId?{replyId:p.replyId}:{};
+      const checked=await api.threadCall<BringPreview>('bring-preview',{path:p.path,id:p.id,noteVersion:p.preview.noteVersion,...p.render,...extra});
+      if(JSON.stringify(checked)!==JSON.stringify(p.preview))throw new Error('The thought changed. Review a new preview.');
+      if(h.session.status!=='saved'||h.session.base.version!==disk.version||h.view.state.doc.toString()!==p.noteText)throw new Error('The note changed. Review a new preview.');
+      const prepared=await api.threadCall<{operationId:string}>('bring-prepare',{path:p.path,id:p.id,noteVersion:p.preview.noteVersion,...p.render,...extra,preview:p.preview});operationId=prepared.operationId;
+      if(h.session.status!=='saved'||h.session.base.version!==disk.version||h.view.state.doc.toString()!==p.noteText)throw new Error('The note changed. Review a new preview.');
+      h.view.dispatch({changes:checked.changes,annotations:isolateHistory.of('full')});inserted=true;setInsertionRepair({pending:1,unverified:0});
+      flashInserted(h.view,checked.changes.from,checked.changes.insert.length);
+      const quote=mapped.anchor.quote.replace(/\s+/g,' ').trim();setAdded({text:`Added under “${quote.length>36?quote.slice(0,35)+'…':quote}”`,detail:checked.changes.insert.trim()});
+      await h.session.flush();if(h.session.status!=='saved')throw new Error('Insertion has a save conflict. Resolve it in the editor.');
+      setInsertionRepair(await api.threadCall<RepairStatus>('bring-complete',{path:p.path,id:p.id,operationId}));
+    }catch(e){if(operationId&&!inserted)await api.threadCall('bring-cancel',{path:p.path,id:p.id,operationId}).catch(()=>{});setAdded(null);setNotice((inserted?'The insertion is preserved in the editor. ':'')+(e instanceof Error?e.message:'AI insertion failed.'));}
+  };
+  const bringConfirm=useRef(false);bringConfirm.current=confirmAdd;
   useEffect(()=>{
     const bring=async(event:Event)=>{
-      const id=(event as CustomEvent<{id:string}>).detail.id;if(!active)return;
+      const {id,replyId}=(event as CustomEvent<{id:string;replyId?:string}>).detail;if(!active)return;
       try{const h=panes.current.get(active);if(!h)throw new Error('Open the note first.');await h.session.flush();
         if(h.session.status!=='saved')throw new Error('Save or resolve the note before insertion.');
         const [disk,ink]=await Promise.all([api.file(active),api.threads(active)]);
         const latest=ink.document.items.find(i=>i.id===id),mapped=h.view.state.field(inkField).items.find(i=>i.id===id);
         if(!latest||!mapped||disk.text!==h.view.state.doc.toString()||disk.version!==h.session.base.version)throw new Error('The note changed. Review a new preview.');
-        const item={...latest,anchor:mapped.anchor,attachment:mapped.attachment};
-        let render:{layout:DiagramLayout;theme:'light'|'dark'}|undefined;if(item.diagram){const m=await import('./diagrams/view.ts');render={layout:await m.cachedLayout(item.diagram),theme:m.diagramTheme()};}
-        const preview=await api.threadCall<BringPreview>('bring-preview',{path:active,id,noteVersion:disk.version,...render});
-        setBringPreview({path:active,id,noteText:disk.text,preview,render});
+        const reply=replyId?[...(latest.thread?.followups??[]),...(latest.thread?.summary.reply?[latest.thread.summary.reply]:[])].find(r=>r.id===replyId):undefined;
+        if(replyId&&!reply)throw new Error('That reply was not found.');
+        const diagram=reply?reply.diagram:latest.diagram;
+        let render:{layout:DiagramLayout;theme:'light'|'dark'}|undefined;if(diagram){const m=await import('./diagrams/view.ts');render={layout:await m.cachedLayout(diagram),theme:m.diagramTheme()};}
+        const extra=replyId?{replyId}:{};
+        const preview=await api.threadCall<BringPreview>('bring-preview',{path:active,id,noteVersion:disk.version,...render,...extra});
+        const p={path:active,id,noteText:disk.text,preview,render,...extra};
+        if(bringConfirm.current)setBringPreview(p);else void runBring(p);
       }catch(e){setNotice(e instanceof Error?e.message:'Could not preview AI insertion.');}
     };window.addEventListener('bring-thought',bring);return()=>window.removeEventListener('bring-thought',bring);
-  },[active]);
-  const bringThought=async()=>{
-    const p=bringPreview;if(!p)return;setBringPreview(null);
-    let inserted=false,operationId:string|undefined;
-    try{const h=panes.current.get(p.path);if(!h||h.session.status!=='saved'||h.view.state.doc.toString()!==p.noteText)throw new Error('The note changed. Review a new preview.');
-      const [disk,ink]=await Promise.all([api.file(p.path),api.threads(p.path)]),latest=ink.document.items.find(i=>i.id===p.id),mapped=h.view.state.field(inkField).items.find(i=>i.id===p.id);
-      if(!latest||!mapped)throw new Error('The thought changed. Review a new preview.');
-      const checked=await api.threadCall<BringPreview>('bring-preview',{path:p.path,id:p.id,noteVersion:p.preview.noteVersion,...p.render});
-      if(JSON.stringify(checked)!==JSON.stringify(p.preview))throw new Error('The thought changed. Review a new preview.');
-      if(h.session.status!=='saved'||h.session.base.version!==disk.version||h.view.state.doc.toString()!==p.noteText)throw new Error('The note changed. Review a new preview.');
-      const prepared=await api.threadCall<{operationId:string}>('bring-prepare',{path:p.path,id:p.id,noteVersion:p.preview.noteVersion,...p.render,preview:p.preview});operationId=prepared.operationId;
-      if(h.session.status!=='saved'||h.session.base.version!==disk.version||h.view.state.doc.toString()!==p.noteText)throw new Error('The note changed. Review a new preview.');
-      h.view.dispatch({changes:checked.changes,annotations:isolateHistory.of('full')});inserted=true;setInsertionRepair({pending:1,unverified:0});
-      await h.session.flush();if(h.session.status!=='saved')throw new Error('Insertion has a save conflict. Resolve it in the editor.');
-      setInsertionRepair(await api.threadCall<RepairStatus>('bring-complete',{path:p.path,id:p.id,operationId}));h.view.focus();
-    }catch(e){if(operationId&&!inserted)await api.threadCall('bring-cancel',{path:p.path,id:p.id,operationId}).catch(()=>{});setNotice((inserted?'The insertion is preserved in the editor. ':'')+(e instanceof Error?e.message:'AI insertion failed.'));}
-  };
-  const prepareInsert=async(item:InkItem)=>{
+  });
+  const bringThought=async()=>{const p=bringPreview;if(!p)return;setBringPreview(null);await runBring(p);panes.current.get(p.path)?.view.focus();};  const prepareInsert=async(item:InkItem)=>{
     if(!active)return;const h=panes.current.get(active);if(!h)throw new Error('Open the note first.');
     await h.session.flush();if(h.session.status!=='saved')throw new Error('Save or resolve the note before insertion.');
     const [disk,s]=await Promise.all([api.file(active),api.threads(active)]),latest=s.document.items.find(i=>i.id===item.id);
@@ -338,6 +354,7 @@ export default function App() {
   // Resolving collapses the open conversation (it stays visible, dimmed, in the margin).
   const wasResolved=useRef(false);
   useEffect(()=>{const now=!!activeItems.find(i=>i.id===thoughtChat)?.thread?.resolvedAt;if(thoughtChat&&now&&!wasResolved.current)setThoughtChat(null);wasResolved.current=now;},[thoughtChat,activeItems]);
+  useEffect(()=>{if(!added)return;const timer=setTimeout(()=>setAdded(null),12000);return()=>clearTimeout(timer);},[added]);
   useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(null),9000);return()=>clearTimeout(timer);},[toast]);
   const commands = useMemo(() => {
     const list: Array<OverlayItem & { run: () => void }> = [
@@ -346,6 +363,7 @@ export default function App() {
         const r=h.view.state.selection.main,insert=slashInsert(item,r.from,r.to);
         h.view.dispatch({changes:insert.changes,selection:{anchor:insert.caret},userEvent:'input.palette',scrollIntoView:true});h.view.focus();
       })})),
+      {id:'confirm-add',label:confirmAdd?'Add to note: add straight away (no confirmation)':'Add to note: confirm before adding',group:'AI',run:()=>{setConfirmAdd(v=>!v);if(!treePersistence)setTreeNotice(true);}},
       {id:'dismissed',label:'Show dismissed thoughts',group:'AI',run:()=>setShowDismissed(true)},
       {id:'visualize',label:'AI: Visualize selection as a diagram',group:'AI',run:withView(h=>{if(!invokeSelection(h.view,'visualize'))setNotice('Select some text first, then choose Visualize.');})},
       {id:'tree',label:treeCollapsed?'Expand file tree':'Collapse file tree',group:'Workspace',run:()=>{setTreeCollapsed(v=>!v);if(!treePersistence)setTreeNotice(true);}},
@@ -366,7 +384,7 @@ export default function App() {
     ];
     return list.map(item=>({...item,group:item.group??(['open','props','save','reload'].includes(item.id)?'Workspace':'Formatting')}));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, showProps,paths,treeCollapsed,treePersistence,openNote]);
+  }, [active, showProps,paths,treeCollapsed,treePersistence,openNote,confirmAdd]);
 
   if (boot.state === "loading") return <div className="boot">Opening notebook…</div>;
   if (boot.state === "error") {
@@ -456,6 +474,7 @@ export default function App() {
         </aside>
       )}
       {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,toast.undo)}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
+      {added&&<div className="thought-toast" role="status"><span>{added.text} · Undo (Ctrl+Z)</span><details className="added-detail"><summary>What was added</summary><pre>{added.detail}</pre></details><button onClick={()=>{const h=active?panes.current.get(active):undefined;if(h){undo(h.view);h.view.focus();}setAdded(null);}}>Undo</button><button aria-label="Close notice" onClick={()=>setAdded(null)}>Close</button></div>}
       {showDismissed&&<DismissedThoughts items={activeItems} restore={id=>void thoughtAction(id,'restore')} close={()=>setShowDismissed(false)}/>}
       {active&&thoughtChat&&<ThoughtChat id={thoughtChat} close={()=>setThoughtChat(null)}><ThreadPanel path={active} items={activeItems} version={currentInk?.version??null} saved={s=>onInkSaved(active,s)} insert={async item=>{await prepareInsert(item);setShowProps(true);setRightTab('activity');}} openId={thoughtChat} onOpen={id=>{setThoughtChat(id);setThreadId(id);}} visible/></ThoughtChat>}
       {bringPreview&&<ThoughtInsertionPreview text={bringPreview.preview.changes.insert} insert={()=>void bringThought()} cancel={()=>setBringPreview(null)}/>}

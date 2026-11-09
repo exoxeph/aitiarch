@@ -16,15 +16,16 @@ export function TakeawayBox({value,onChange,onSubmit,onSkip,busy,skippedAt,onReo
  return <section className="human-takeaway"><label>Your takeaway (you write this)<textarea aria-label="Your takeaway" value={value} onChange={e=>onChange(e.target.value)} maxLength={100000} rows={4}/></label>
   <div className="attach-actions"><button disabled={busy||!value.trim()} onClick={onSubmit}>Submit my takeaway</button><button disabled={busy} onClick={onSkip}>Skip takeaway</button></div></section>;
 }
-export function ReplyView({reply}:{reply:ThreadReply}){
+export function ReplyView({reply,onAdd}:{reply:ThreadReply;onAdd?:(r:ThreadReply)=>void}){
  return <article className="thread-reply" data-reply-id={reply.id} data-generated-complete={reply.generation.status==='complete'?'true':undefined}>
   <div className="small muted">AI · {providerLabel(reply.generation.provider)} · {reply.generation.status}</div>
   {reply.generation.status==='complete'?<div className="ai-answer">{reply.body}<DiagramSlot diagram={reply.diagram} invalid={reply.diagramIssue}/></div>:<p role="status">{reply.failure?failureLabels[reply.failure.code]:reply.generation.status==='pending'?'Waiting for a validated answer…':'Answer unavailable. No partial answer was accepted.'}</p>}
+  {onAdd&&reply.generation.status==='complete'&&<button type="button" className="add-to-note" aria-label={'Add to note: '+reply.body.replace(/\s+/g,' ').slice(0,48)} onClick={()=>onAdd(reply)}>Add to note</button>}
  </article>;
 }
 interface MemoryDraft {text:string;revision:string|null;loaded:boolean;dirty:boolean;enabled:boolean;sequence:number;queue:Promise<unknown>}
-export function ReplyStack({replies,question,cancel}:{replies:ThreadReply[];question:(id:string)=>string;cancel:(id:string)=>void}){
- const render=(r:ThreadReply)=><section key={r.id}><p className="question-placeholder">{question(r.id)}</p><ReplyView reply={r}/>{r.generation.status==='pending'&&<button onClick={()=>cancel(r.id)}>Cancel reply</button>}</section>;
+export function ReplyStack({replies,question,cancel,onAdd}:{replies:ThreadReply[];question:(id:string)=>string;cancel:(id:string)=>void;onAdd?:(r:ThreadReply)=>void}){
+ const render=(r:ThreadReply)=><section key={r.id}><p className="question-placeholder">{question(r.id)}</p><ReplyView reply={r} onAdd={onAdd}/>{r.generation.status==='pending'&&<button onClick={()=>cancel(r.id)}>Cancel reply</button>}</section>;
  return <>{replies.slice(0,2).map(render)}{replies.length>2&&<details className="extra-answers"><summary>Show {replies.length-2} more</summary>{replies.slice(2).map(render)}</details>}</>;
 }
 // Survives hiding the panel or closing a note tab, but never a page reload.
@@ -103,7 +104,7 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{
  return <article className="thread-card" data-thread-id={item.id} ref={card}>
   <blockquote>{item.anchor.quote}</blockquote>
   <p className="small">{threadStatus(item)}{item.attachment.status==='orphaned'?' · Re-attach using the orphan list above. Your takeaway is preserved.':''}</p>
-  <ReplyStack replies={[initial,...t.followups]} question={id=>recalledQuestion(path,id)??questionPlaceholder} cancel={replyId=>void api.threadCall('cancel',{path,id:item.id,replyId})}/>
+  <ReplyStack replies={[initial,...t.followups]} question={id=>recalledQuestion(path,id)??questionPlaceholder} cancel={replyId=>void api.threadCall('cancel',{path,id:item.id,replyId})} onAdd={r=>card.current?.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id,...(r.id===item.id?{}:{replyId:r.id})}}))}/>
   {notice&&<p role="alert">{notice}</p>}
   {saveFailures.filter(id=>[...t.followups,...(t.summary.reply?[t.summary.reply]:[])].some(r=>r.id===id&&r.generation.status==='pending')).map(id=><p key={id} role="alert">{failureLabels.persistence}<button onClick={async()=>{try{update(await api.threadCall<InkSnapshot>('retry-save',{path,id:item.id,replyId:id}));setSaveFailures(all=>all.filter(x=>x!==id));}catch(e){fail(e);}}}>Retry saving reply (no new call)</button></p>)}
   {draftNotice&&<div className="notice" role="note">Drafts stay in memory until ignore coverage is verified. Add <code>/ui-state.json*</code> to the root .gitignore.
@@ -111,7 +112,7 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{
   <TakeawayBox skippedAt={t.takeaway.state==='skipped'?t.takeaway.updatedAt:undefined} onReopen={()=>void act({type:'reopen'})} value={text} busy={busy} onChange={value=>{draft.text=value;draft.dirty=true;setText(value);persist(value);}} onSubmit={()=>void act({type:'submit',text})} onSkip={()=>void act({type:'skip'})}/>
   {t.takeaway.state==='submitted'&&<section><strong>Your submitted takeaway</strong><p className="human-text">{t.takeaway.text}</p><button disabled={busy||item.attachment.status!=='attached'} onClick={()=>void insert(item).catch(fail)}>Preview insertion</button></section>}
   {t.takeaway.state==='submitted'&&<button disabled={busy} onClick={()=>void act({type:'reopen'})}>Reopen takeaway</button>}
-  <section aria-label="Closing summary"><h4>AI closing summary</h4>{!revealed?<p>Hidden until you submit your takeaway or explicitly Skip takeaway.</p>:t.summary.reply?<ReplyView reply={t.summary.reply}/>:<button disabled={busy||item.attachment.status!=='attached'} onClick={()=>void prepare('summary')}>Request closing summary</button>}</section>
+  <section aria-label="Closing summary"><h4>AI closing summary</h4>{!revealed?<p>Hidden until you submit your takeaway or explicitly Skip takeaway.</p>:t.summary.reply?<ReplyView reply={t.summary.reply} onAdd={r=>card.current?.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id,replyId:r.id}}))}/>:<button disabled={busy||item.attachment.status!=='attached'} onClick={()=>void prepare('summary')}>Request closing summary</button>}</section>
   <label>Write back…<input aria-label="Write back" placeholder="Write back…" value={question} disabled={!!review||busy} maxLength={8000} onChange={e=>setQuestion(e.target.value)}/></label>
   <button disabled={busy||!question.trim()||item.attachment.status!=='attached'} onClick={()=>void prepare('followup')}>Review reply</button>
   {review&&<section className="thread-request" aria-label="Review thread request"><p>Send to {providerLabel(review.provider)}. Note and selection frozen by version; changes require a new review.</p>

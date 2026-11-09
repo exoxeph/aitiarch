@@ -1,11 +1,18 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {lstat,mkdir,open,readFile,rename,unlink} from 'node:fs/promises';
 import path from 'node:path';
+import type {InkItem} from '../shared/ink.ts';
 import type {InkStore} from './ink-store.ts';import type {Store} from './store.ts';import type {LedgerStore} from './ledger-store.ts';
 import {normalizeRel} from './paths.ts';import {previewThoughtInsertion} from '../shared/thoughts.ts';
 import {diagramSvg,type DiagramLayout} from '../shared/diagram-svg.ts';
-export interface BringInput {path:string;id:string;noteVersion:string;layout?:DiagramLayout;theme?:'light'|'dark'}
+export interface BringInput {path:string;id:string;noteVersion:string;layout?:DiagramLayout;theme?:'light'|'dark';replyId?:string}
 export interface BringPreview {noteVersion:string;changes:{from:number;to:number;insert:string};authorship:'ai';insertedBy:'human';assetName?:string}
+/** The message to insert as an item-shaped value: the thought's first answer, or one of its replies. */
+function replyAsItem(item:InkItem,replyId:string):InkItem{
+ const t=item.thread,reply=[...(t?.followups??[]),...(t?.summary.reply?[t.summary.reply]:[])].find(r=>r.id===replyId);
+ if(!reply)throw new Error('That reply was not found.');
+ return {...item,body:reply.body,diagram:reply.diagram,generation:reply.generation};
+}
 interface Intent {id:string;inkId:string;note:string;at:string;beforeHash:string;afterHash:string;insertHash:string;from:number;length:number;state:'prepared'|'recorded'|'cancelled'}
 export interface RepairStatus {pending:number;unverified:number}
 const hash=(s:string|Buffer)=>createHash('sha256').update(s).digest('hex');
@@ -39,8 +46,9 @@ export class InsertionStore {
  private async build(input:BringInput){
   const note=await this.store.read(input.path);if(note.version!==input.noteVersion)throw new Error('The note changed. Review a new preview.');
   const s=await this.ink.read(input.path),mapped=await this.ink.reanchor(input.path,s.version),item=mapped.document.items.find(i=>i.id===input.id);if(!item)throw new Error('Thought not found.');
-  const base=previewThoughtInsertion(note,item,input.noteVersion);let preview:BringPreview=base,svg:string|undefined;
-  if(item.diagram){if(!input.layout||!['light','dark'].includes(input.theme??''))throw new Error('Review the diagram before inserting.');svg=diagramSvg(item.diagram,input.layout,input.theme!,undefined,true);const assetName='ai-diagram-'+hash(svg)+'.svg',relative=path.posix.relative(path.posix.dirname(input.path),'assets/'+assetName),alt=('AI diagram: '+item.diagram.title).replace(/[\\\[\]]/g,'\\$&');
+  const source=input.replyId?replyAsItem(item,input.replyId):item; // a specific AI message (a reply) can be added instead of the first answer
+  const base=previewThoughtInsertion(note,source,input.noteVersion);let preview:BringPreview=base,svg:string|undefined;
+  if(source.diagram){if(!input.layout||!['light','dark'].includes(input.theme??''))throw new Error('Review the diagram before inserting.');svg=diagramSvg(source.diagram,input.layout,input.theme!,undefined,true);const assetName='ai-diagram-'+hash(svg)+'.svg',relative=path.posix.relative(path.posix.dirname(input.path),'assets/'+assetName),alt=('AI diagram: '+source.diagram.title).replace(/[\\\[\]]/g,'\\$&');
    // One AI callout: the explanation stays and the diagram goes inside it, below the text, in the note's own line ending.
    const nl=note.text.includes('\r\n')?'\r\n':'\n',tail=base.changes.from===note.text.length?nl:'';
    preview={...base,changes:{...base.changes,insert:base.changes.insert.slice(0,base.changes.insert.length-tail.length)+nl+'> !['+alt+']('+relative+')'+tail},assetName};
