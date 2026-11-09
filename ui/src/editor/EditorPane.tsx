@@ -15,6 +15,7 @@ import { codeHighlight, codeLanguages } from "./codeblocks.ts";
 import { toggleTaskAtCaret } from "./tasks.ts";
 import { slashMenu } from "./slash.ts";
 import { tablePreview } from "./tables.ts";
+import {wordNavigation} from './navigation.ts';
 import { invocationHandlers, invokedKeys, formattingKeys, selectionToolbar } from "./toolbar.ts";
 import { useInvocations } from "./useInvocations.tsx";
 
@@ -101,6 +102,7 @@ export function EditorPane(props: Props) {
           history(),
           drawSelection(),
           EditorView.lineWrapping,
+          wordNavigation,
           markdown({ extensions: [Strikethrough, TaskList, Autolink, Table], codeLanguages, addKeymap: false }), // no auto-inserted list markers: the editor never writes text you didn't type
           invokedKeys,
           formattingKeys,

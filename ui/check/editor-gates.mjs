@@ -35,6 +35,60 @@ const doc=p=>p.evaluate(`${V}.state.doc.toString()`);
 const put=async(p,anchor,head=anchor)=>{await p.evaluate(([a,h])=>{const v=window.__aitiarch['n.md'].view;v.dispatch({selection:{anchor:a,head:h}});v.focus();},[anchor,head]);await settle(p);};
 const disk=async(p,root)=>{await p.evaluate(()=>window.__aitiarch['n.md'].session.flush());return readFile(path.join(root,'n.md'));};
 
+// The drawn CodeMirror caret follows both system and manual themes; the native caret
+// remains hidden so typing never shows two overlapping cursors.
+await session('caret','\uFEFFSynthetic typing fixture.\r\n',async({page,theme,root,bytes})=>{
+ await put(page,5);
+ const caret=()=>page.locator('.cm-cursor-primary').evaluate(e=>getComputedStyle(e).borderLeftColor);
+ assert.equal(await caret(),theme==='dark'?'rgb(255, 255, 255)':'rgb(46, 102, 84)','system theme caret color');
+ for(const mode of ['dark','light']){
+  await page.evaluate(m=>{document.documentElement.dataset.theme=m;},mode);
+  assert.equal(await caret(),mode==='dark'?'rgb(255, 255, 255)':'rgb(46, 102, 84)','manual theme caret color');
+ }
+ await page.evaluate(()=>{delete document.documentElement.dataset.theme;});
+ assert.equal(await page.locator('.cm-content').evaluate(e=>getComputedStyle(e).caretColor),'rgba(0, 0, 0, 0)','native caret must remain hidden');
+ await page.evaluate(()=>{
+  window.__caretMoves=[];window.__caretFrameProbes=[];
+  document.querySelector('.cm-editor').addEventListener('transitionrun',e=>{
+   if(!e.target.matches('.cm-cursor-primary'))return;
+   window.__caretMoves.push(e.propertyName);if(e.propertyName!=='left')return;
+   const animation=e.target.getAnimations().find(a=>a.transitionProperty==='left');if(!animation)return;
+   const savedTime=animation.currentTime;animation.pause();
+   const v=window.__aitiarch['n.md'].view,target=v.coordsAtPos(v.state.selection.main.head).left;
+   const gap=()=>Math.abs(e.target.getBoundingClientRect().left-parseFloat(getComputedStyle(e.target).marginLeft)-target);
+   // Sample the real browser interpolation at one and two 60-Hz frames. This is
+   // independent of test-machine load and catches a caret that chases visible text.
+   animation.currentTime=1000/60;const gapAfterOneFrame=gap();
+   animation.currentTime=1000/30;const gapAfterTwoFrames=gap();
+   window.__caretFrameProbes.push({gapAfterOneFrame,gapAfterTwoFrames});
+   animation.currentTime=savedTime;animation.play();
+  });
+ });
+ const before=await doc(page);await page.keyboard.type('X');
+ assert.equal(await doc(page),before.slice(0,5)+'X'+before.slice(5),'smooth caret must not delay typing');
+ await page.waitForFunction(()=>window.__caretMoves.includes('left'),{},{timeout:1500});
+ const single=await page.evaluate(()=>window.__caretFrameProbes.at(-1));
+ assert(single.gapAfterOneFrame<1.5,`typing-caret-catchup: gap after one frame ${single.gapAfterOneFrame.toFixed(2)}px must be <1.5px`);
+ assert(single.gapAfterTwoFrames<0.1,`typing-caret-catchup: gap after two frames ${single.gapAfterTwoFrames.toFixed(2)}px must be <0.1px`);
+ await page.waitForTimeout(120);
+ assert(await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view;return Math.abs(document.querySelector('.cm-cursor-primary').getBoundingClientRect().left-v.coordsAtPos(v.state.selection.main.head).left)<2;}),'caret must settle at the actual insertion point');
+ await page.keyboard.press('Control+z');assert.equal(await doc(page),before);
+ await page.waitForTimeout(120);await page.evaluate(()=>{window.__caretFrameProbes=[];});
+ await page.keyboard.type('rapidtyping',{delay:8});
+ assert.equal(await doc(page),before.slice(0,5)+'rapidtyping'+before.slice(5),'rapid typing must remain immediate');
+ await page.waitForTimeout(120);const rapid=await page.evaluate(()=>window.__caretFrameProbes);
+ assert(rapid.length>0,'rapid typing must exercise caret animation');
+ assert(rapid.every(p=>p.gapAfterOneFrame<1.5&&p.gapAfterTwoFrames<0.1),'rapid-typing-caret-catchup: animation must not accumulate lag');
+ await page.keyboard.press('Control+z');assert.equal(await doc(page),before);
+ await page.emulateMedia({reducedMotion:'reduce'});
+ assert.equal(await page.locator('.cm-cursor-primary').evaluate(e=>getComputedStyle(e).transitionDuration.split(',').every(t=>parseFloat(t)===0)),true,'reduced motion must disable caret glide');
+ await page.keyboard.type('Y');assert.equal(await doc(page),before.slice(0,5)+'Y'+before.slice(5));await page.keyboard.press('Control+z');
+ assert.deepEqual(await disk(page,root),bytes,'caret appearance changed Markdown bytes');
+ report[`caret-${theme}`]={systemTheme:true,manualTheme:true,noDoubleCaret:true,smoothMovement:true,immediateTyping:true,reducedMotion:true,byteExact:true,
+  singleCharacter:single,rapidTyping:{samples:rapid.length,maxGapAfterOneFrame:Math.max(...rapid.map(p=>p.gapAfterOneFrame)),maxGapAfterTwoFrames:Math.max(...rapid.map(p=>p.gapAfterTwoFrames))}};
+ await page.screenshot({path:path.join(output,`gate-caret-${theme}.png`)});
+});
+
 // ---- 1. byte-exact, undo, IME, copy, geometry on a BOM + CRLF note
 await session('small',small,async({page,theme,root,bytes})=>{
  const d=await doc(page);const R={};report[`small-${theme}`]=R;

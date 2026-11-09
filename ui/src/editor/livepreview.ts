@@ -9,6 +9,7 @@ import { findFailedMarks } from "./format.ts";
 import { FenceHeader, fenceLabel } from "./codeblocks.ts";
 import { toggleTaskAt } from "./tasks.ts";
 import { autolinkHides, calloutHeader, hidesFor, quoteMarkGroups, touchesLines, touchesSpan } from "./reveal.ts";
+import {previewRanges} from './navigation.ts';
 
 export interface PreviewHandlers {
   openWiki(target: string): void;
@@ -164,7 +165,7 @@ const gutterMark = (revealed: boolean, selected = false) => Decoration.mark({ cl
  */
 export function buildInline(state: EditorState, ranges: readonly (readonly [number, number])[], tree = syntaxTree(state)): DecorationSet {
   const doc = state.doc;
-  const ctx = lineHelpers(state);
+  const ctx = {...lineHelpers(state),sel:previewRanges(state)};
   const out: Range<Decoration>[] = [];
   const fmEnd = frontmatterOf(doc);
   const resolve = state.facet(wikiResolver);
