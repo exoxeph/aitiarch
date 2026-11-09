@@ -1,3 +1,4 @@
+import {validNeverCorrect} from '../shared/typing-preferences.ts';
 import {lstat,readFile,open,rename,unlink,writeFile} from 'node:fs/promises';
 import {execFile} from 'node:child_process';import {promisify} from 'node:util';
 import {randomUUID,createHash} from 'node:crypto';import path from 'node:path';
@@ -5,7 +6,7 @@ import {normalizeRel,isNotePath} from './paths.ts';
 import {exactKeys,validAt,validId} from '../shared/threads.ts';
 const exec=promisify(execFile);
 export interface ThreadDraft {note:string;inkId:string;text:string;updatedAt:string;revision:string}
-export interface SavedUiState {v:1;tabs:string[];active:string|null;treeCollapsed?:boolean;theme?:'system'|'light'|'dark';confirmAdd?:boolean;typingHelp?:boolean;doubleSpacePeriod?:boolean;threadDrafts?:Record<string,ThreadDraft>}
+export interface SavedUiState {v:1;tabs:string[];active:string|null;treeCollapsed?:boolean;theme?:'system'|'light'|'dark';confirmAdd?:boolean;typingHelp?:boolean;doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];threadDrafts?:Record<string,ThreadDraft>}
 const key=(note:string,id:string)=>createHash('sha256').update(note+'\0'+id).digest('hex');
 export class UiStateStore {
  private root:string;private file:string;
@@ -33,6 +34,8 @@ export class UiStateStore {
   if(typeof d.confirmAdd==='boolean')state.confirmAdd=d.confirmAdd;
   if(typeof d.typingHelp==='boolean')state.typingHelp=d.typingHelp;
   if(typeof d.doubleSpacePeriod==='boolean')state.doubleSpacePeriod=d.doubleSpacePeriod;
+  if(typeof d.smartCorrections==='boolean')state.smartCorrections=d.smartCorrections;
+  if(d.neverCorrect!==undefined){if(!validNeverCorrect(d.neverCorrect))throw new Error('Invalid typing preference.');state.neverCorrect=d.neverCorrect;}
   if(d.threadDrafts!==undefined){if(!d.threadDrafts||typeof d.threadDrafts!=='object'||Array.isArray(d.threadDrafts)||Object.keys(d.threadDrafts).length>1000)throw new Error('Invalid thread drafts.');
    for(const [k,v] of Object.entries(d.threadDrafts) as [string,ThreadDraft][]){if(!exactKeys(v,['note','inkId','text','updatedAt','revision'])||!validId(v.inkId)||!validId(v.revision)||!validAt(v.updatedAt)||typeof v.text!=='string'||v.text.length>100000||normalizeRel(v.note)!==v.note||!isNotePath(v.note)||k!==key(v.note,v.inkId))throw new Error('Invalid thread draft.');}
    state.threadDrafts=d.threadDrafts;
@@ -44,18 +47,19 @@ export class UiStateStore {
  }
  private async mutateLocked<T>(fn:(s:SavedUiState)=>T,requireIgnored=false){
   await this.safe();const lock=await open(this.file+'.lock','wx',0o600),temp=this.file+'.'+randomUUID()+'.tmp';
-  try{const s=await this.read();if(requireIgnored||s.treeCollapsed!==undefined||s.theme!==undefined||s.confirmAdd!==undefined||s.typingHelp!==undefined||s.doubleSpacePeriod!==undefined||Object.keys(s.threadDrafts??{}).length)await this.ignored(temp);const result=fn(s),data=JSON.stringify(s,null,2)+'\n';if(Buffer.byteLength(data)>2*1024*1024)throw new Error('UI state too large.');
+  try{const s=await this.read();if(requireIgnored||s.treeCollapsed!==undefined||s.theme!==undefined||s.confirmAdd!==undefined||s.typingHelp!==undefined||s.doubleSpacePeriod!==undefined||s.smartCorrections!==undefined||s.neverCorrect!==undefined||Object.keys(s.threadDrafts??{}).length)await this.ignored(temp);const result=fn(s),data=JSON.stringify(s,null,2)+'\n';if(Buffer.byteLength(data)>2*1024*1024)throw new Error('UI state too large.');
    const f=await open(temp,'wx',0o600);try{await f.writeFile(data);await f.sync();}finally{await f.close();}await this.safe();await rename(temp,this.file);return result;
   }finally{await unlink(temp).catch(()=>{});await lock.close();await unlink(this.file+'.lock');}
  }
- async updateTabs(tabs:Pick<SavedUiState,'v'|'tabs'|'active'|'treeCollapsed'|'theme'|'confirmAdd'|'typingHelp'|'doubleSpacePeriod'>){
-  for(const name of ['typingHelp','doubleSpacePeriod'] as const)if(tabs[name]!==undefined&&typeof tabs[name]!=='boolean')throw new Error('Invalid typing preference.');
+ async updateTabs(tabs:Pick<SavedUiState,'v'|'tabs'|'active'|'treeCollapsed'|'theme'|'confirmAdd'|'typingHelp'|'doubleSpacePeriod'|'smartCorrections'|'neverCorrect'>){
+  for(const name of ['typingHelp','doubleSpacePeriod','smartCorrections'] as const)if(tabs[name]!==undefined&&typeof tabs[name]!=='boolean')throw new Error('Invalid typing preference.');
   if(tabs.confirmAdd!==undefined&&typeof tabs.confirmAdd!=='boolean')throw new Error('Invalid confirm-before-adding preference.');
   if(tabs.treeCollapsed!==undefined&&typeof tabs.treeCollapsed!=='boolean')throw new Error('Invalid tree preference.');
   if(tabs.theme!==undefined&&!['system','light','dark'].includes(tabs.theme))throw new Error('Invalid theme preference.');
-  return this.mutate(s=>{s.tabs=tabs.tabs;s.active=tabs.active;if(tabs.treeCollapsed!==undefined)s.treeCollapsed=tabs.treeCollapsed;if(tabs.theme!==undefined)s.theme=tabs.theme;if(tabs.confirmAdd!==undefined)s.confirmAdd=tabs.confirmAdd;
-   for(const name of ['typingHelp','doubleSpacePeriod'] as const)if(tabs[name]!==undefined)s[name]=tabs[name];
-   return {v:1 as const,tabs:s.tabs,active:s.active,...(s.treeCollapsed!==undefined?{treeCollapsed:s.treeCollapsed}:{}),...(s.theme!==undefined?{theme:s.theme}:{}),...(s.confirmAdd!==undefined?{confirmAdd:s.confirmAdd}:{}),...(s.typingHelp!==undefined?{typingHelp:s.typingHelp}:{}),...(s.doubleSpacePeriod!==undefined?{doubleSpacePeriod:s.doubleSpacePeriod}:{})};},tabs.treeCollapsed!==undefined||tabs.theme!==undefined||tabs.confirmAdd!==undefined||tabs.typingHelp!==undefined||tabs.doubleSpacePeriod!==undefined);
+  if(tabs.neverCorrect!==undefined&&!validNeverCorrect(tabs.neverCorrect))throw new Error('Invalid typing preference.');
+  return this.mutate(s=>{if(tabs.neverCorrect!==undefined)s.neverCorrect=[...new Set(tabs.neverCorrect)];s.tabs=tabs.tabs;s.active=tabs.active;if(tabs.treeCollapsed!==undefined)s.treeCollapsed=tabs.treeCollapsed;if(tabs.theme!==undefined)s.theme=tabs.theme;if(tabs.confirmAdd!==undefined)s.confirmAdd=tabs.confirmAdd;
+   for(const name of ['typingHelp','doubleSpacePeriod','smartCorrections'] as const)if(tabs[name]!==undefined)s[name]=tabs[name];
+   return {v:1 as const,tabs:s.tabs,active:s.active,...(s.treeCollapsed!==undefined?{treeCollapsed:s.treeCollapsed}:{}),...(s.theme!==undefined?{theme:s.theme}:{}),...(s.confirmAdd!==undefined?{confirmAdd:s.confirmAdd}:{}),...(s.typingHelp!==undefined?{typingHelp:s.typingHelp}:{}),...(s.doubleSpacePeriod!==undefined?{doubleSpacePeriod:s.doubleSpacePeriod}:{}),...(s.smartCorrections!==undefined?{smartCorrections:s.smartCorrections}:{}),...(s.neverCorrect!==undefined?{neverCorrect:s.neverCorrect}:{})};},tabs.treeCollapsed!==undefined||tabs.theme!==undefined||tabs.confirmAdd!==undefined||tabs.typingHelp!==undefined||tabs.doubleSpacePeriod!==undefined||tabs.smartCorrections!==undefined||tabs.neverCorrect!==undefined);
  }
  async draft(note:string,id:string){return (await this.read()).threadDrafts?.[key(note,id)]??null;}
  async saveDraft(note:string,id:string,text:string,revision:string|null){if(normalizeRel(note)!==note||!isNotePath(note)||!validId(id)||typeof text!=='string'||text.length>100000)throw new Error('Invalid human draft.');

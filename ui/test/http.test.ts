@@ -93,6 +93,15 @@ describe("auth", () => {
 });
 
 describe("file API", () => {
+  it('round-trips smart correction preferences and rejects unsafe personal words',async()=>{
+    execFileSync('git',['init','-q'],{cwd:tmp,stdio:'pipe'});writeFileSync(path.join(root,'.gitignore'),'/ui-state.json*\n');
+    const body={v:1,tabs:[],active:null,smartCorrections:false,neverCorrect:['helo']};
+    expect((await call('PUT','/api/ui-state',{headers:writeHeaders(),body})).status).toBe(200);
+    expect(JSON.parse((await call('GET','/api/ui-state',{headers:authed()})).body)).toMatchObject(body);
+    const bytes=readFileSync(path.join(root,'ui-state.json'));
+    expect((await call('PUT','/api/ui-state',{headers:writeHeaders(),body:{...body,neverCorrect:['private/path']}})).status).not.toBe(200);
+    expect(readFileSync(path.join(root,'ui-state.json'))).toEqual(bytes);
+  });
   it("rejects traversal and private folders", async () => {
     for (const p of ["../x.md", "..%2f..%2fetc%2fpasswd.md", "runs/private.md", "C:/Windows/win.ini", "a\\b.md"]) {
       const r = await call("GET", `/api/file?path=${p}`, { headers: authed() });

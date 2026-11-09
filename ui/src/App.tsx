@@ -1,3 +1,4 @@
+import {notebookWords} from './editor/smart-dictionary.ts';
 import type {BringPreview,RepairStatus} from '../server/insertion-store.ts';
 import type {DiagramLayout} from '../shared/diagram-svg.ts';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -39,6 +40,10 @@ export default function App() {
   const [treePersistence,setTreePersistence]=useState(false);
   const [treeNotice,setTreeNotice]=useState(false);
   const [theme,setTheme]=useState<'system'|'light'|'dark'>('system');
+  const [smartCorrections,setSmartCorrections]=useState(true),[neverCorrect,setNeverCorrect]=useState<string[]>([]);
+  const [vocabulary,setVocabulary]=useState<ReadonlySet<string>|null>(null);
+  const vocabularyNotes=useRef(new Map<string,string>());
+  const rejectCorrection=useCallback((word:string)=>{setNeverCorrect(previous=>previous.includes(word)?previous:[...previous,word].slice(-10000));if(!treePersistence)setTreeNotice(true);},[treePersistence]);
   const [typingHelpOn,setTypingHelpOn]=useState(true),[doubleSpacePeriod,setDoubleSpacePeriod]=useState(true);
   useEffect(()=>{document.documentElement.dataset.theme=theme;},[theme]);
   const chooseTheme=(value:'system'|'light'|'dark')=>{setTheme(value);if(!treePersistence)setTreeNotice(true);};
@@ -112,6 +117,8 @@ export default function App() {
     setNotice(`Ink for ${path} could not be loaded. Its sidecar is preserved.`);
   }), []);
   const paths = useMemo(() => flattenTree(tree), [tree]);
+  // Read only local note APIs. Failed reads disable dictionary guesses conservatively.
+  useEffect(()=>{let current=true;setVocabulary(null);void (async()=>{const notes=new Map<string,string>();for(const p of paths)notes.set(p,(await api.file(p)).text);if(current){vocabularyNotes.current=notes;setVocabulary(notebookWords(notes));}})().catch(()=>{});return()=>{current=false;};},[paths]);
   const resolver = useMemo(() => makeWikiResolver(paths), [paths]);
 
   const openNote = useCallback(async (path: string) => {
@@ -142,7 +149,7 @@ export default function App() {
         }
         const [t, ui, persistence] = await Promise.all([api.tree(), api.uiState(),api.uiStatePersistence().catch(()=>({enabled:false}))]);
         setTreeCollapsed(ui.treeCollapsed??false);setConfirmAdd(ui.confirmAdd??false);setTreePersistence(persistence.enabled);
-        if(persistence.enabled){setTheme(ui.theme??'system');setTypingHelpOn(ui.typingHelp??true);setDoubleSpacePeriod(ui.doubleSpacePeriod??true);}
+        if(persistence.enabled){setTheme(ui.theme??'system');setTypingHelpOn(ui.typingHelp??true);setDoubleSpacePeriod(ui.doubleSpacePeriod??true);setSmartCorrections(ui.smartCorrections??true);setNeverCorrect(ui.neverCorrect??[]);}
         setTree(t);
         const all = flattenTree(t);
         let want = ui.tabs.filter((p) => all.includes(p));
@@ -172,6 +179,9 @@ export default function App() {
           if (e.type === "closed") setOnline(false);
           if (e.type === "tree" || e.type === "removed") void refreshTree();
           if (e.type === "ink" && e.path) void refreshInk(e.path);
+          if(e.type==='changed'&&e.path){const path=e.path;void api.file(path).then(f=>{vocabularyNotes.current.set(path,f.text);const view=panes.current.get(path)?.view;
+            setVocabulary(notebookWords(vocabularyNotes.current,view?{path,text:view.state.doc.toString(),head:view.state.selection.main.head}:undefined));
+          }).catch(()=>setVocabulary(null));}
           for (const l of listeners.current) l(e);
         });
       } catch (e) {
@@ -184,9 +194,9 @@ export default function App() {
   // ---- persist open tabs (a small file in the notebook folder) ----
   useEffect(() => {
     if (!loaded.current) return;
-    const t = setTimeout(() => void api.putUiState({ v: 1, tabs, active, ...(treePersistence?{treeCollapsed,theme,confirmAdd,typingHelp:typingHelpOn,doubleSpacePeriod}:{}) }).catch(() => {if(treePersistence){setTreePersistence(false);setTreeNotice(true);}}), 300);
+    const t = setTimeout(() => void api.putUiState({ v: 1, tabs, active, ...(treePersistence?{treeCollapsed,theme,confirmAdd,typingHelp:typingHelpOn,doubleSpacePeriod,smartCorrections,neverCorrect}:{}) }).catch(() => {if(treePersistence){setTreePersistence(false);setTreeNotice(true);}}), 300);
     return () => clearTimeout(t);
-  }, [tabs, active, treeCollapsed,treePersistence,theme,confirmAdd,typingHelpOn,doubleSpacePeriod]);
+  }, [tabs, active, treeCollapsed,treePersistence,theme,confirmAdd,typingHelpOn,doubleSpacePeriod,smartCorrections,neverCorrect]);
 
   const closeTab = useCallback(
     async (path: string) => {
@@ -384,6 +394,7 @@ export default function App() {
       {id:'visualize',label:'AI: Visualize selection as a diagram',group:'AI',run:withView(h=>{if(!invokeSelection(h.view,'visualize'))setNotice('Select some text first, then choose Visualize.');})},
       {id:'tree',label:treeCollapsed?'Expand file tree':'Collapse file tree',group:'Workspace',run:()=>{setTreeCollapsed(v=>!v);if(!treePersistence)setTreeNotice(true);}},
       {id:'typing-help',label:`Typing help: ${typingHelpOn?'On':'Off'}`,group:'Typing',run:()=>{setTypingHelpOn(v=>!v);if(!treePersistence)setTreeNotice(true);}},
+      {id:'smart-corrections',label:`Smart corrections: ${smartCorrections?'On':'Off'}`,group:'Typing',run:()=>{setSmartCorrections(v=>!v);if(!treePersistence)setTreeNotice(true);}},
       {id:'double-space',label:`Double-space period: ${doubleSpacePeriod?'On':'Off'}`,group:'Typing',run:()=>{setDoubleSpacePeriod(v=>!v);if(!treePersistence)setTreeNotice(true);}},
       ...(['system','light','dark'] as const).map(value=>({id:`theme:${value}`,label:`Theme: ${value[0].toUpperCase()+value.slice(1)}`,group:'Appearance',run:()=>chooseTheme(value)})),
       { id: "open", label: "Open note…", hint: "Ctrl+O", run: () => setOverlay("switcher") },
@@ -402,7 +413,7 @@ export default function App() {
     ];
     return list.map(item=>({...item,group:item.group??(['open','props','save','reload'].includes(item.id)?'Workspace':'Formatting')}));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, showProps,paths,treeCollapsed,treePersistence,openNote,confirmAdd,typingHelpOn,doubleSpacePeriod]);
+  }, [active, showProps,paths,treeCollapsed,treePersistence,openNote,confirmAdd,typingHelpOn,doubleSpacePeriod,smartCorrections,neverCorrect]);
 
   if (boot.state === "loading") return <div className="boot">Opening notebook…</div>;
   if (boot.state === "error") {
@@ -460,7 +471,7 @@ export default function App() {
           files[p] ? (
             <EditorPane key={p} file={files[p]} visible={p === active} resolver={resolver} onOpenWiki={onOpenWiki} onStatus={onStatus} onDoc={onDoc} subscribe={subscribe} register={register}
               inkItems={inkFiles[p]?.document.items} trustedText={p === active ? trustedText : null}
-              typingOptions={{enabled:typingHelpOn,doubleSpace:doubleSpacePeriod}}
+              typingOptions={{enabled:typingHelpOn,doubleSpace:doubleSpacePeriod,smart:smartCorrections,vocabulary:vocabulary??undefined,neverCorrect,onReject:rejectCorrection}}
               inkVersion={inkFiles[p]?.version} onInk={onInk} onInkSaved={onInkSaved} onInkError={setNotice} />
           ) : null,
         )}

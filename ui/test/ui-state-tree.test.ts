@@ -2,6 +2,16 @@ import {mkdtemp,readFile,writeFile,readdir,rm} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';import os from 'node:os';import path from 'node:path';
 import {it,expect,afterEach} from 'vitest';import {UiStateStore} from '../server/ui-state-store.ts';
 const roots:string[]=[];afterEach(async()=>{for(const root of roots.splice(0))await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});});
+it('persists smart corrections and personal never-correct words only in verified ignored UI state',async()=>{
+ const f=await fixture('/ui-state.json*\n');await f.store.updateTabs({v:1,tabs:[],active:null,smartCorrections:false,neverCorrect:['helo','wht']} as any);
+ await f.store.updateTabs({v:1,tabs:[],active:null});expect(await f.store.read()).toMatchObject({smartCorrections:false,neverCorrect:['helo','wht']});
+ await writeFile(path.join(f.root,'.gitignore'),'');await expect(f.store.updateTabs({v:1,tabs:[],active:null,neverCorrect:['helo']} as any)).rejects.toThrow(/ignored/i);
+});
+it('rejects unsafe or unignored personal typing preferences without writing them',async()=>{
+ const f=await fixture();for(const pref of [{smartCorrections:true},{neverCorrect:['helo']}])await expect(f.store.updateTabs({v:1,tabs:[],active:null,...pref} as any)).rejects.toThrow(/ignored/i);
+ for(const neverCorrect of ['helo',['a/b'],[1],Array(10001).fill('helo')])await expect(f.store.updateTabs({v:1,tabs:[],active:null,neverCorrect} as any)).rejects.toThrow(/typing/i);
+ expect(await readdir(f.root)).not.toContain('ui-state.json');
+});
 async function fixture(ignore=''){const root=await mkdtemp(path.join(os.tmpdir(),'aitiarch-tree-state-'));roots.push(root);execFileSync('git',['init','-q'],{cwd:root,stdio:'pipe'});if(ignore)await writeFile(path.join(root,'.gitignore'),ignore);return {root,store:new UiStateStore(root)};}
 it('persists boolean typing help preferences only with ignore coverage, preserving them across tab writes',async()=>{
  const f=await fixture('/ui-state.json*\n');await f.store.updateTabs({v:1,tabs:[],active:null,typingHelp:false,doubleSpacePeriod:false});

@@ -1,3 +1,4 @@
+import {validNeverCorrect} from '../shared/typing-preferences.ts';
 import {InsertionStore} from './insertion-store.ts';
 import { UiStateStore } from './ui-state-store.ts';
 import {ThreadStore} from './thread-store.ts';
@@ -66,7 +67,7 @@ interface UiState {
   theme?: 'system' | 'light' | 'dark';
   confirmAdd?: boolean;
   typingHelp?:boolean;
-  doubleSpacePeriod?:boolean;
+  doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];
 }
 
 export function createApp(opts: AppOptions) {
@@ -128,7 +129,7 @@ export function createApp(opts: AppOptions) {
     name:'claude',checkAvailability:async()=>({available:false,code:'unsupported_cli',message:'Provider disabled. Enable it explicitly at server startup.'}),invoke:async()=>{throw new ProviderError('unsupported_cli');}
   },path=>{for(const c of clients)c.write(`event: ink\ndata: ${JSON.stringify({type:'ink',path})}\n\n`);}));
   async function readUiState(): Promise<UiState> {
-    try { const {v,tabs,active,treeCollapsed,theme,confirmAdd,typingHelp,doubleSpacePeriod}=await uiStateStore.read();return {v,tabs,active,...(treeCollapsed!==undefined?{treeCollapsed}:{}),...(theme!==undefined?{theme}:{}),...(confirmAdd!==undefined?{confirmAdd}:{}),...(typingHelp!==undefined?{typingHelp}:{}),...(doubleSpacePeriod!==undefined?{doubleSpacePeriod}:{})}; }
+    try { const {v,tabs,active,treeCollapsed,theme,confirmAdd,typingHelp,doubleSpacePeriod,smartCorrections,neverCorrect}=await uiStateStore.read();return {v,tabs,active,...(treeCollapsed!==undefined?{treeCollapsed}:{}),...(theme!==undefined?{theme}:{}),...(confirmAdd!==undefined?{confirmAdd}:{}),...(typingHelp!==undefined?{typingHelp}:{}),...(doubleSpacePeriod!==undefined?{doubleSpacePeriod}:{}),...(smartCorrections!==undefined?{smartCorrections}:{}),...(neverCorrect!==undefined?{neverCorrect}:{})}; }
     catch { return {v:1,tabs:[],active:null}; }
   }
   function sanitizeUiState(raw: unknown): UiState {
@@ -144,11 +145,12 @@ export function createApp(opts: AppOptions) {
         }
       }
     }
+    if(r.neverCorrect!==undefined&&!validNeverCorrect(r.neverCorrect))throw new Error('Invalid typing preference.');
     const active = typeof r.active === "string" && tabs.includes(r.active) ? r.active : null;
     if(r.theme!==undefined&&r.theme!=='system'&&r.theme!=='light'&&r.theme!=='dark')throw new Error('Invalid theme preference.');
     if(r.confirmAdd!==undefined&&typeof r.confirmAdd!=='boolean')throw new Error('Invalid confirm-before-adding preference.');
-    for(const name of ['typingHelp','doubleSpacePeriod'] as const)if(r[name]!==undefined&&typeof r[name]!=='boolean')throw new Error('Invalid typing preference.');
-    return { v: 1, tabs, active, ...(typeof r.treeCollapsed==='boolean'?{treeCollapsed:r.treeCollapsed}:{}),...(r.theme!==undefined?{theme:r.theme}:{}),...(typeof r.confirmAdd==='boolean'?{confirmAdd:r.confirmAdd}:{}),...(typeof r.typingHelp==='boolean'?{typingHelp:r.typingHelp}:{}),...(typeof r.doubleSpacePeriod==='boolean'?{doubleSpacePeriod:r.doubleSpacePeriod}:{}) };
+    for(const name of ['typingHelp','doubleSpacePeriod','smartCorrections'] as const)if(r[name]!==undefined&&typeof r[name]!=='boolean')throw new Error('Invalid typing preference.');
+    return { v: 1, tabs, active, ...(typeof r.treeCollapsed==='boolean'?{treeCollapsed:r.treeCollapsed}:{}),...(r.theme!==undefined?{theme:r.theme}:{}),...(typeof r.confirmAdd==='boolean'?{confirmAdd:r.confirmAdd}:{}),...(typeof r.typingHelp==='boolean'?{typingHelp:r.typingHelp}:{}),...(r.neverCorrect!==undefined?{neverCorrect:r.neverCorrect as string[]}:{}),...(typeof r.smartCorrections==='boolean'?{smartCorrections:r.smartCorrections}:{}),...(typeof r.doubleSpacePeriod==='boolean'?{doubleSpacePeriod:r.doubleSpacePeriod}:{}) };
   }
   async function writeUiState(s: UiState) { await uiStateStore.updateTabs(s); }
 

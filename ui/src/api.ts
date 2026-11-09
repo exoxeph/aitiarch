@@ -24,7 +24,7 @@ export interface UiState {
   active: string | null;
   treeCollapsed?: boolean;
   typingHelp?:boolean;
-  doubleSpacePeriod?:boolean;
+  doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];
   theme?: 'system' | 'light' | 'dark';
   confirmAdd?: boolean;
 }
