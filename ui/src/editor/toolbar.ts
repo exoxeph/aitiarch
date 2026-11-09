@@ -1,6 +1,6 @@
 // Formatting remains human-only. Invoked AI freezes the selection without editing it.
 import { Facet, StateField, type EditorState, type TransactionSpec } from "@codemirror/state";
-import { keymap, showTooltip, type EditorView, type Tooltip, type TooltipView, type ViewUpdate } from "@codemirror/view";
+import { keymap, showTooltip, tooltips, type EditorView, type Tooltip, type TooltipView, type ViewUpdate } from "@codemirror/view";
 import { failedMarkAt, indentLines, markFailed, restoreFailed, setHeading, toggleCodeBlock, toggleInline, toggleList } from "./format.ts";
 
 export type SelectedSource = { text: string; from: number; to: number };
@@ -140,10 +140,26 @@ function toTooltip(state: EditorState): Tooltip | null {
   return r.empty ? null : { pos: r.from, above: true, strictSide: false, arrow: false, create };
 }
 
-export const selectionToolbar = StateField.define<Tooltip | null>({
+const toolbarField = StateField.define<Tooltip | null>({
   create: toTooltip,
   update(v, tr) {
     return tr.docChanged || tr.selection ? toTooltip(tr.state) : v;
   },
   provide: (f) => showTooltip.from(f),
 });
+
+/**
+ * In narrow layouts the margin rail is a bar docked at the bottom of the page. The toolbar may float anywhere in the
+ * viewport except over it, otherwise it hides the rail's buttons (for example "Re-attach to selected text").
+ */
+function toolbarSpace() {
+  const space = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+  const rail = document.querySelector(".margin-rail");
+  if (rail && getComputedStyle(rail).position === "static") {
+    const top = rail.getBoundingClientRect().top;
+    if (top > 120) space.bottom = Math.min(space.bottom, top);
+  }
+  return space;
+}
+
+export const selectionToolbar = [toolbarField, tooltips({ tooltipSpace: toolbarSpace })];
