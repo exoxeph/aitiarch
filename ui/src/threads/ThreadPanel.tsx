@@ -1,4 +1,5 @@
 import {DiagramSlot} from '../diagrams/DiagramSlot.tsx';
+import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
 import {useEffect,useRef,useState} from 'react';
 import type {InkItem} from '../../shared/ink.ts';
 import {newThread,questionPlaceholder,threadStatus,type ThreadFailure,type ThreadReply} from '../../shared/threads.ts';
@@ -19,7 +20,7 @@ export function TakeawayBox({value,onChange,onSubmit,onSkip,busy,skippedAt,onReo
 export function ReplyView({reply,onAdd}:{reply:ThreadReply;onAdd?:(r:ThreadReply)=>void}){
  return <article className="thread-reply" data-reply-id={reply.id} data-generated-complete={reply.generation.status==='complete'?'true':undefined}>
   <div className="small muted">AI · {providerLabel(reply.generation.provider)} · {reply.generation.status}</div>
-  {reply.generation.status==='complete'?<div className="ai-answer">{reply.body}<DiagramSlot diagram={reply.diagram} invalid={reply.diagramIssue}/></div>:<p role="status">{reply.failure?failureLabels[reply.failure.code]:reply.generation.status==='pending'?'Waiting for a validated answer…':'Answer unavailable. No partial answer was accepted.'}</p>}
+  {reply.generation.status==='complete'?<div className="ai-answer"><ReplyMarkdown text={reply.body}/><DiagramSlot diagram={reply.diagram} invalid={reply.diagramIssue}/></div>:<p role="status">{reply.failure?failureLabels[reply.failure.code]:reply.generation.status==='pending'?'Waiting for a validated answer…':'Answer unavailable. No partial answer was accepted.'}</p>}
   {onAdd&&reply.generation.status==='complete'&&<button type="button" className="add-to-note" aria-label={'Add to note: '+reply.body.replace(/\s+/g,' ').slice(0,48)} onClick={()=>onAdd(reply)}>Add to note</button>}
  </article>;
 }

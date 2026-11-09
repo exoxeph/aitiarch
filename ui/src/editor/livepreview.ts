@@ -250,6 +250,7 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
             return;
           case "FencedCode": {
             code.push([n.from, n.to]);
+            for(const mark of n.node.getChildren('QuoteMark'))out.push(Decoration.mark({class:'cm-code-quote-off'}).range(mark.from,mark.to));
             const info = n.node.getChild("CodeInfo");
             const lang = info ? state.sliceDoc(info.from, info.to).trim().toLowerCase() : "";
             if (lang === "mermaid" && !lineIsActive(n.from, n.to) && n.to > n.from) return false; // the block layer draws it
@@ -259,10 +260,10 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
             const first = doc.lineAt(n.from);
             if (first.from >= rFrom) {
               out.push(Decoration.line({ class: `cm-fence cm-fence-open ${shown}` }).range(first.from));
-              out.push(Decoration.widget({ widget: new FenceHeader(fenceLabel(lang)), side: -1 }).range(first.from));
+              out.push(Decoration.widget({ widget: new FenceHeader(fenceLabel(lang),n.from), side: -1 }).range(first.from));
             }
             const last = doc.lineAt(Math.min(n.to, doc.length));
-            if (last.number > first.number && /^\s*(```|~~~)\s*$/.test(last.text) && last.to <= rTo) out.push(Decoration.line({ class: `cm-fence cm-fence-close ${shown}` }).range(last.from));
+            if (last.number > first.number && /^(?:\s*>)*\s*(```|~~~)\s*$/.test(last.text) && last.to <= rTo) out.push(Decoration.line({ class: `cm-fence cm-fence-close ${shown}` }).range(last.from));
             return false;
           }
           case "CodeBlock":

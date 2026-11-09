@@ -1,4 +1,5 @@
 import {DiagramSlot} from '../diagrams/DiagramSlot.tsx';
+import {ReplyMarkdown} from './ReplyMarkdown.tsx';
 import {useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import type {InkItem} from '../../shared/ink.ts';
 import {blobBox,connectorPath,thoughtText,type ThoughtSide} from '../../shared/thoughts.ts';
@@ -38,8 +39,9 @@ export function MarginRail({placed,renderDraft}:{placed:PlacedMargin[];renderDra
    {renderDraft?.(item.id)?<div className="thought-ask">{renderDraft(item.id)}</div>:<>
   <button className="thought-open" aria-label={'Open AI thought thread: '+thoughtText(item).slice(0,80)} onClick={e=>e.currentTarget.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:item.id,thought:true}}))}>
     <span className="thought-meta"><span className="thought-dot" aria-hidden="true"/><span className="cm-ink-label">AI</span>{resolved&&<span className="thought-resolved-tag">Resolved</span>}</span>
-    <span className="thought-text">{thoughtText(item)}</span><span className="thought-replies">{item.thread?.followups.filter(r=>r.generation.status==='complete').length??0} {item.thread?.followups.filter(r=>r.generation.status==='complete').length===1?'reply':'replies'}</span>
    </button>
+   <div className="thought-text" onClick={e=>{if(!(e.target as HTMLElement).closest('button,input'))e.currentTarget.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:item.id,thought:true}}));}}><ReplyMarkdown text={thoughtText(item)}/></div>
+   <span className="thought-replies">{item.thread?.followups.filter(r=>r.generation.status==='complete').length??0} {item.thread?.followups.filter(r=>r.generation.status==='complete').length===1?'reply':'replies'}</span>
    <DiagramSlot diagram={item.generation?.status==='complete'?item.diagram:undefined} invalid={item.diagramIssue} itemId={item.id}/>
    <div className="thought-more" onKeyDown={e=>{if(menu!==item.id)return;const items=[...e.currentTarget.querySelectorAll<HTMLElement>('[role=menuitem]')],at=items.indexOf(document.activeElement as HTMLElement);
     if(e.key==='Escape'){e.stopPropagation();setMenu(null);e.currentTarget.querySelector<HTMLElement>('button')?.focus();}

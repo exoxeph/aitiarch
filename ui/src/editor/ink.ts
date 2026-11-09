@@ -6,6 +6,9 @@ import { mapInkItems } from "../../shared/anchor-mapping.ts";
 import {thoughtVisible,thoughtText} from '../../shared/thoughts.ts';
 import { externalChange } from "./session.ts";
 import type { InkItem } from "../../shared/ink.ts";
+import {createElement} from 'react';
+import {createRoot} from 'react-dom/client';
+import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
 
 export interface InkPayload { items: InkItem[]; trustedText: string | null; localIds?: string[]; narrow?:boolean }
 export const setThoughtNarrow = StateEffect.define<boolean>();
@@ -28,7 +31,8 @@ class InkWidget extends WidgetType {
     const dot=document.createElement('span');dot.className='thought-dot';dot.setAttribute('aria-hidden','true');el.append(dot);
     const content = document.createElement("div");
     content.className = "cm-ink-body";
-    content.textContent = this.body;
+    const root=createRoot(content);root.render(createElement(ReplyMarkdown,{text:this.body}));
+    widgetCleanup.set(el,()=>{queueMicrotask(()=>root.unmount());});
     el.append(label, content);
     const replies=document.createElement('div');replies.className='thought-replies';replies.textContent=this.replies+' '+(this.replies===1?'reply':'replies');el.append(replies);
     const highlight=(on:boolean)=>el.closest('.ink-surface')?.querySelectorAll<HTMLElement>('[data-thought-anchor]').forEach(mark=>mark.classList.toggle('thought-active',on&&mark.dataset.thoughtAnchor===this.id));
@@ -37,7 +41,7 @@ class InkWidget extends WidgetType {
     open.addEventListener('click',()=>el.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:this.id,thought:true}})));el.append(open);
     const bring=document.createElement('button');bring.type='button';bring.textContent='Bring to notebook';bring.disabled=!this.complete;bring.addEventListener('click',()=>el.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:this.id}})));el.append(bring);
     const slot=document.createElement('div');slot.className='thought-diagram-slot';el.append(slot);
-    if(this.diagram&&this.complete){slot.textContent='Loading diagram...';let disposed=false,cleanup:(()=>void)|undefined;widgetCleanup.set(el,()=>{disposed=true;cleanup?.();});void import('../diagrams/view.ts').then(m=>{if(!disposed&&el.isConnected)cleanup=m.mountDiagram(slot,this.diagram!);}).catch(()=>{if(!disposed)slot.textContent=unavailableText('layout');});}else if(this.diagramIssue){const note=document.createElement('span');note.textContent=unavailableText(this.diagramIssue);note.dataset.diagramIssue=this.diagramIssue;const again=document.createElement('button');again.type='button';again.className='diagram-retry';again.textContent='Try diagram again';again.addEventListener('click',()=>again.dispatchEvent(new CustomEvent('visualize-again',{bubbles:true,detail:{id:this.id}})));slot.replaceChildren(note,again);}
+    if(this.diagram&&this.complete){slot.textContent='Loading diagram...';let disposed=false,cleanup:(()=>void)|undefined;const previous=widgetCleanup.get(el);widgetCleanup.set(el,()=>{previous?.();disposed=true;cleanup?.();});void import('../diagrams/view.ts').then(m=>{if(!disposed&&el.isConnected)cleanup=m.mountDiagram(slot,this.diagram!);}).catch(()=>{if(!disposed)slot.textContent=unavailableText('layout');});}else if(this.diagramIssue){const note=document.createElement('span');note.textContent=unavailableText(this.diagramIssue);note.dataset.diagramIssue=this.diagramIssue;const again=document.createElement('button');again.type='button';again.className='diagram-retry';again.textContent='Try diagram again';again.addEventListener('click',()=>again.dispatchEvent(new CustomEvent('visualize-again',{bubbles:true,detail:{id:this.id}})));slot.replaceChildren(note,again);}
     return el;
   }
   destroy(dom:HTMLElement){widgetCleanup.get(dom)?.();widgetCleanup.delete(dom);}

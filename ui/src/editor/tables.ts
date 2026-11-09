@@ -4,6 +4,7 @@ import {Decoration,EditorView,WidgetType,keymap,type DecorationSet} from '@codem
 import {syntaxTree} from '@codemirror/language';
 import type {SyntaxNode} from '@lezer/common';
 import {inkField} from './ink.ts';
+import {domElements,type Elements} from './widget-elements.ts';
 export interface TablePart {tag:'text'|'strong'|'em'|'s'|'code'|'span';text?:string;children?:TablePart[]}
 export interface TableModel {rows:{header:boolean;cells:{from:number;to:number;parts:TablePart[]}[]}[];align:('left'|'center'|'right')[]}
 const marks=new Set(['EmphasisMark','StrikethroughMark','CodeMark','LinkMark','LinkTitle']);
@@ -32,15 +33,17 @@ export function tableModel(node:SyntaxNode,doc:Text):TableModel{
   for(let c=r.firstChild;c;c=c.nextSibling)if(c.name==='TableCell')cells.push({from:c.from,to:c.to,parts:parts(c,doc)});
   rows.push({header:r.name==='TableHeader',cells});
  }
- const delimiter=node.getChild('TableDelimiter'),columns=delimiter?doc.sliceString(delimiter.from,delimiter.to).split('|').map(s=>s.trim()).filter(Boolean):[];
+ const delimiter=node.getChild('TableDelimiter'),columns=delimiter?doc.sliceString(delimiter.from,delimiter.to).replace(/^(?:>\s*)+/,'').split('|').map(s=>s.trim()).filter(Boolean):[];
  return {rows,align:columns.map(s=>s.startsWith(':')&&s.endsWith(':')?'center':s.endsWith(':')?'right':'left')};
 }
 export const closeTableSource=StateEffect.define<{from:number;to:number}>();
 const closed=StateField.define<{from:number;to:number}|null>({create:()=>null,update(value,tr){
  if(tr.docChanged||tr.selection)value=null;for(const e of tr.effects)if(e.is(closeTableSource))value=e.value;return value;
 }});
-function appendParts(parent:HTMLElement,values:TablePart[]){
- for(const p of values){if(p.tag==='text')parent.append(document.createTextNode(p.text??''));else{const el=document.createElement(p.tag);appendParts(el,p.children??[]);parent.append(el);}}
+export function tableElement<T>(model:TableModel,make:Elements<T>):T{
+ const parts=(values:TablePart[]):(T|string)[]=>values.map(p=>p.tag==='text'?p.text??'':make(p.tag,{},parts(p.children??[])));
+ const rows=(header:boolean)=>model.rows.filter(r=>r.header===header).map(row=>make('tr',{},row.cells.map((cell,i)=>make(header?'th':'td',{style:{textAlign:model.align[i]??'left'},'data-source-from':String(cell.from)},parts(cell.parts)))));
+ return make('table',{},[make('thead',{},rows(true)),make('tbody',{},rows(false))]);
 }
 const observers=new WeakMap<HTMLElement,ResizeObserver>();
 class TableWidget extends WidgetType{
@@ -52,12 +55,8 @@ class TableWidget extends WidgetType{
   wrap.style.setProperty('--table-line',`${view.defaultLineHeight}px`);
   const observer=new ResizeObserver(()=>view.requestMeasure({key:wrap,read:()=>view.defaultLineHeight,write:height=>wrap.style.setProperty('--table-line',`${height}px`)}));observer.observe(view.contentDOM);observers.set(wrap,observer);
   const scroll=document.createElement('div');scroll.className='cm-table-scroll';
-  const table=document.createElement('table'),model=tableModel(this.node,this.doc);
+  const model=tableModel(this.node,this.doc),table=tableElement(model,domElements);
   const open=(pos:number)=>{view.dispatch({selection:{anchor:pos},scrollIntoView:true});view.focus();};
-  const head=document.createElement('thead'),body=document.createElement('tbody');table.append(head,body);
-  for(const row of model.rows){const tr=document.createElement('tr');
-   row.cells.forEach((cell,i)=>{const td=document.createElement(row.header?'th':'td');td.style.textAlign=model.align[i]??'left';td.dataset.sourceFrom=String(cell.from);appendParts(td,cell.parts);tr.append(td);});(row.header?head:body).append(tr);
-  }
   const hint=document.createElement('div');hint.className='cm-table-hint';hint.textContent='Click or Enter to edit Markdown · Escape to render';
   scroll.append(table,hint);wrap.append(scroll);
   wrap.addEventListener('mousedown',e=>{if(e.button!==0)return;const cell=(e.target as HTMLElement).closest<HTMLElement>('[data-source-from]');if(!cell)return;e.preventDefault();open(Number(cell.dataset.sourceFrom));});
@@ -69,14 +68,14 @@ class TableWidget extends WidgetType{
 }
 function build(state:EditorState){
  const out:Range<Decoration>[]=[];const forced=state.field(closed);
- for(let n=syntaxTree(state).topNode.firstChild;n;n=n.nextSibling){
-  if(n.name!=='Table')continue;
+ const nodes:SyntaxNode[]=[];syntaxTree(state).iterate({enter:n=>{if(n.name==='Table'){nodes.push(n.node);return false;}}});
+ for(const n of nodes){
   // A replacement must never swallow an existing inline answer widget inside the table.
   if(state.field(inkField,false)?.items.some(item=>item.kind==='answer'&&!item.generation?.dismissed&&!item.thread?.dismissed&&item.attachment.status==='attached'&&item.attachment.to>=n!.from&&item.attachment.to<=n!.to))continue;
   const a=state.doc.lineAt(n.from).number,b=state.doc.lineAt(n.to).number;
   const active=state.selection.ranges.some(r=>state.doc.lineAt(r.from).number<=b&&state.doc.lineAt(r.to).number>=a);
   if(active&&!(forced?.from===n.from&&forced.to===n.to))continue;
-  out.push(Decoration.replace({block:true,widget:new TableWidget(n,state.doc,state.sliceDoc(n.from,n.to),b-a+1)}).range(n.from,n.to));
+  out.push(Decoration.replace({block:true,widget:new TableWidget(n,state.doc,state.sliceDoc(n.from,n.to),b-a+1)}).range(state.doc.lineAt(n.from).from,n.to));
  }
  return Decoration.set(out,true);
 }

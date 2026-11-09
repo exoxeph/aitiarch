@@ -191,7 +191,11 @@ await session('d1',d1,async({page,theme,root,bytes})=>{
 // IDE keys are actual keyboard events; pointer coordinates merely locate the text.
 await session('code-editing','\uFEFFBefore\r\n\r\n```js\r\n  value\r\n```\r\n\r\nAfter\r\n',async({page,theme,root,bytes})=>{
  const original=await doc(page),R={};report[`code-editing-${theme}`]=R;
- const click=async(needle,offset=0)=>{const p=await page.evaluate(([n,o])=>{const v=window.__aitiarch['n.md'].view,r=v.coordsAtPos(v.state.doc.toString().indexOf(n)+o);return{x:r.left+1,y:(r.top+r.bottom)/2};},[needle,offset]);await page.mouse.click(p.x,p.y);await settle(page);};
+ const click=async(needle,offset=0)=>{
+  // The view exists before its first measurement finishes. A click must use the measured layout, not stale startup coordinates.
+  await page.evaluate(()=>new Promise(resolve=>window.__aitiarch['n.md'].view.requestMeasure({read:()=>null,write:()=>requestAnimationFrame(resolve)})));
+  const p=await page.evaluate(([n,o])=>{const v=window.__aitiarch['n.md'].view,r=v.coordsAtPos(v.state.doc.toString().indexOf(n)+o);return{x:r.left+1,y:(r.top+r.bottom)/2};},[needle,offset]);await page.mouse.click(p.x,p.y);await settle(page);
+ };
  const restore=async()=>{for(let n=0;n<12&&(await doc(page))!==original;n++)await page.keyboard.press('Control+z');assert.equal(await doc(page),original);assert.deepEqual(await disk(page,root),bytes);};
  await click('value',5);const beforeTab=await page.evaluate(()=>({head:window.__aitiarch['n.md'].view.state.selection.main.head,focus:document.activeElement?.className}));await page.keyboard.press('Tab');assert((await doc(page)).includes('    value'),JSON.stringify({theme,beforeTab,after:await doc(page)}));await page.keyboard.press('Shift+Tab');assert.equal(await doc(page),original);R.indentOutdent=true;
  await page.keyboard.press('Enter');assert((await doc(page)).includes('  value\n  \n```'));await restore();R.enterIndent=true;

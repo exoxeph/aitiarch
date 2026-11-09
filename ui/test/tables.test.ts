@@ -9,6 +9,7 @@ import {captureAnchor} from '../shared/anchors.ts';
 import {EditorView,type DecorationSet} from '@codemirror/view';
 import {history,undo} from '@codemirror/commands';
 import {decode,encode} from '../server/codec.ts';
+import {previewThoughtInsertion} from '../shared/thoughts.ts';
 const text='Away\n\n| Name | Status |\n| :---: | ---: |\n| **bold *nested*** | ~~old~~ and `code` |\n| a \\| b | <script>raw</script> |\n\nEnd';
 const make=(doc=text)=>EditorState.create({doc,extensions:[markdown({extensions:[Table,Strikethrough]}),tablePreview,inkField]});
 function table(s:EditorState){const tree=ensureSyntaxTree(s,s.doc.length,5000)!;let node=tree.topNode.firstChild;while(node&&node.name!=='Table')node=node.nextSibling;return node!;}
@@ -75,4 +76,17 @@ it('undo restores the exact original BOM+CRLF table bytes after a source-cell ed
  expect(edited.bytes).not.toEqual(byteTable);
  expect(undo({state,dispatch:tr=>{state=tr.state;}})).toBe(true);
  expect(encode(state.doc.toString(),edited.original)).toEqual(byteTable);
+});
+it('Add to note preserves table and code source in one AI callout; undo restores BOM+CRLF bytes',()=>{
+ const bytes=Buffer.from('\uFEFFAnchor paragraph.\r\n\r\nUntouched  tail.\r\n'),original=decode(bytes);
+ const body='| A | B |\n| :---: | ---: |\n| **bold** | `code` |\n\n```js\nconst x = 1;\n```';
+ const anchor=captureAnchor(original.text,0,17),item={id:'reply',kind:'answer' as const,body,anchor,originalAnchor:anchor,attachment:{status:'attached' as const,from:0,to:17},generation:{requestId:'reply',action:'think' as const,provider:'claude' as const,model:null,status:'complete' as const,createdAt:'2026-11-10T00:00:00Z',evidence:[],dismissed:false}};
+ const preview=previewThoughtInsertion({text:original.text,version:'fixture'},item,'fixture');
+ let state=EditorState.create({doc:original.text,extensions:[markdown({extensions:[Table,Strikethrough]}),tablePreview,inkField,history()]});
+ state=state.update({changes:preview.changes,userEvent:'input'}).state;
+ const inserted=encode(state.doc.toString(),original),offset=bytes.indexOf(Buffer.from('\r\n\r\n'));
+ expect(inserted).toEqual(Buffer.concat([bytes.subarray(0,offset),Buffer.from(preview.changes.insert.replace(/\n/g,'\r\n')),bytes.subarray(offset)]));
+ expect(state.doc.toString()).toContain('> | :---: | ---: |');expect(state.doc.toString()).toContain('> ```js\n> const x = 1;\n> ```');
+ expect(widgets(state)).toBe(1);
+ expect(undo({state,dispatch:tr=>{state=tr.state;}})).toBe(true);expect(encode(state.doc.toString(),original)).toEqual(bytes);
 });
