@@ -23,6 +23,8 @@ export interface UiState {
   tabs: string[];
   active: string | null;
   treeCollapsed?: boolean;
+  typingHelp?:boolean;
+  doubleSpacePeriod?:boolean;
   theme?: 'system' | 'light' | 'dark';
   confirmAdd?: boolean;
 }

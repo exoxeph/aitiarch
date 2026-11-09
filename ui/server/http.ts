@@ -65,6 +65,8 @@ interface UiState {
   treeCollapsed?: boolean;
   theme?: 'system' | 'light' | 'dark';
   confirmAdd?: boolean;
+  typingHelp?:boolean;
+  doubleSpacePeriod?:boolean;
 }
 
 export function createApp(opts: AppOptions) {
@@ -126,7 +128,7 @@ export function createApp(opts: AppOptions) {
     name:'claude',checkAvailability:async()=>({available:false,code:'unsupported_cli',message:'Provider disabled. Enable it explicitly at server startup.'}),invoke:async()=>{throw new ProviderError('unsupported_cli');}
   },path=>{for(const c of clients)c.write(`event: ink\ndata: ${JSON.stringify({type:'ink',path})}\n\n`);}));
   async function readUiState(): Promise<UiState> {
-    try { const {v,tabs,active,treeCollapsed,theme,confirmAdd}=await uiStateStore.read();return {v,tabs,active,...(treeCollapsed!==undefined?{treeCollapsed}:{}),...(theme!==undefined?{theme}:{}),...(confirmAdd!==undefined?{confirmAdd}:{})}; }
+    try { const {v,tabs,active,treeCollapsed,theme,confirmAdd,typingHelp,doubleSpacePeriod}=await uiStateStore.read();return {v,tabs,active,...(treeCollapsed!==undefined?{treeCollapsed}:{}),...(theme!==undefined?{theme}:{}),...(confirmAdd!==undefined?{confirmAdd}:{}),...(typingHelp!==undefined?{typingHelp}:{}),...(doubleSpacePeriod!==undefined?{doubleSpacePeriod}:{})}; }
     catch { return {v:1,tabs:[],active:null}; }
   }
   function sanitizeUiState(raw: unknown): UiState {
@@ -145,7 +147,8 @@ export function createApp(opts: AppOptions) {
     const active = typeof r.active === "string" && tabs.includes(r.active) ? r.active : null;
     if(r.theme!==undefined&&r.theme!=='system'&&r.theme!=='light'&&r.theme!=='dark')throw new Error('Invalid theme preference.');
     if(r.confirmAdd!==undefined&&typeof r.confirmAdd!=='boolean')throw new Error('Invalid confirm-before-adding preference.');
-    return { v: 1, tabs, active, ...(typeof r.treeCollapsed==='boolean'?{treeCollapsed:r.treeCollapsed}:{}),...(r.theme!==undefined?{theme:r.theme}:{}),...(typeof r.confirmAdd==='boolean'?{confirmAdd:r.confirmAdd}:{}) };
+    for(const name of ['typingHelp','doubleSpacePeriod'] as const)if(r[name]!==undefined&&typeof r[name]!=='boolean')throw new Error('Invalid typing preference.');
+    return { v: 1, tabs, active, ...(typeof r.treeCollapsed==='boolean'?{treeCollapsed:r.treeCollapsed}:{}),...(r.theme!==undefined?{theme:r.theme}:{}),...(typeof r.confirmAdd==='boolean'?{confirmAdd:r.confirmAdd}:{}),...(typeof r.typingHelp==='boolean'?{typingHelp:r.typingHelp}:{}),...(typeof r.doubleSpacePeriod==='boolean'?{doubleSpacePeriod:r.doubleSpacePeriod}:{}) };
   }
   async function writeUiState(s: UiState) { await uiStateStore.updateTabs(s); }
 

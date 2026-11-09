@@ -39,6 +39,7 @@ export default function App() {
   const [treePersistence,setTreePersistence]=useState(false);
   const [treeNotice,setTreeNotice]=useState(false);
   const [theme,setTheme]=useState<'system'|'light'|'dark'>('system');
+  const [typingHelpOn,setTypingHelpOn]=useState(true),[doubleSpacePeriod,setDoubleSpacePeriod]=useState(true);
   useEffect(()=>{document.documentElement.dataset.theme=theme;},[theme]);
   const chooseTheme=(value:'system'|'light'|'dark')=>{setTheme(value);if(!treePersistence)setTreeNotice(true);};
   const [files, setFiles] = useState<Record<string, NoteFile>>({});
@@ -141,7 +142,7 @@ export default function App() {
         }
         const [t, ui, persistence] = await Promise.all([api.tree(), api.uiState(),api.uiStatePersistence().catch(()=>({enabled:false}))]);
         setTreeCollapsed(ui.treeCollapsed??false);setConfirmAdd(ui.confirmAdd??false);setTreePersistence(persistence.enabled);
-        if(persistence.enabled)setTheme(ui.theme??'system');
+        if(persistence.enabled){setTheme(ui.theme??'system');setTypingHelpOn(ui.typingHelp??true);setDoubleSpacePeriod(ui.doubleSpacePeriod??true);}
         setTree(t);
         const all = flattenTree(t);
         let want = ui.tabs.filter((p) => all.includes(p));
@@ -183,9 +184,9 @@ export default function App() {
   // ---- persist open tabs (a small file in the notebook folder) ----
   useEffect(() => {
     if (!loaded.current) return;
-    const t = setTimeout(() => void api.putUiState({ v: 1, tabs, active, ...(treePersistence?{treeCollapsed,theme,confirmAdd}:{}) }).catch(() => {if(treePersistence){setTreePersistence(false);setTreeNotice(true);}}), 300);
+    const t = setTimeout(() => void api.putUiState({ v: 1, tabs, active, ...(treePersistence?{treeCollapsed,theme,confirmAdd,typingHelp:typingHelpOn,doubleSpacePeriod}:{}) }).catch(() => {if(treePersistence){setTreePersistence(false);setTreeNotice(true);}}), 300);
     return () => clearTimeout(t);
-  }, [tabs, active, treeCollapsed,treePersistence,theme,confirmAdd]);
+  }, [tabs, active, treeCollapsed,treePersistence,theme,confirmAdd,typingHelpOn,doubleSpacePeriod]);
 
   const closeTab = useCallback(
     async (path: string) => {
@@ -382,6 +383,8 @@ export default function App() {
       {id:'dismissed',label:'Show dismissed thoughts',group:'AI',run:()=>setShowDismissed(true)},
       {id:'visualize',label:'AI: Visualize selection as a diagram',group:'AI',run:withView(h=>{if(!invokeSelection(h.view,'visualize'))setNotice('Select some text first, then choose Visualize.');})},
       {id:'tree',label:treeCollapsed?'Expand file tree':'Collapse file tree',group:'Workspace',run:()=>{setTreeCollapsed(v=>!v);if(!treePersistence)setTreeNotice(true);}},
+      {id:'typing-help',label:`Typing help: ${typingHelpOn?'On':'Off'}`,group:'Typing',run:()=>{setTypingHelpOn(v=>!v);if(!treePersistence)setTreeNotice(true);}},
+      {id:'double-space',label:`Double-space period: ${doubleSpacePeriod?'On':'Off'}`,group:'Typing',run:()=>{setDoubleSpacePeriod(v=>!v);if(!treePersistence)setTreeNotice(true);}},
       ...(['system','light','dark'] as const).map(value=>({id:`theme:${value}`,label:`Theme: ${value[0].toUpperCase()+value.slice(1)}`,group:'Appearance',run:()=>chooseTheme(value)})),
       { id: "open", label: "Open note…", hint: "Ctrl+O", run: () => setOverlay("switcher") },
       { id: "props", label: showProps ? "Hide properties panel" : "Show properties panel", run: () => setShowProps((v) => !v) },
@@ -399,7 +402,7 @@ export default function App() {
     ];
     return list.map(item=>({...item,group:item.group??(['open','props','save','reload'].includes(item.id)?'Workspace':'Formatting')}));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, showProps,paths,treeCollapsed,treePersistence,openNote,confirmAdd]);
+  }, [active, showProps,paths,treeCollapsed,treePersistence,openNote,confirmAdd,typingHelpOn,doubleSpacePeriod]);
 
   if (boot.state === "loading") return <div className="boot">Opening notebook…</div>;
   if (boot.state === "error") {
@@ -457,6 +460,7 @@ export default function App() {
           files[p] ? (
             <EditorPane key={p} file={files[p]} visible={p === active} resolver={resolver} onOpenWiki={onOpenWiki} onStatus={onStatus} onDoc={onDoc} subscribe={subscribe} register={register}
               inkItems={inkFiles[p]?.document.items} trustedText={p === active ? trustedText : null}
+              typingOptions={{enabled:typingHelpOn,doubleSpace:doubleSpacePeriod}}
               inkVersion={inkFiles[p]?.version} onInk={onInk} onInkSaved={onInkSaved} onInkError={setNotice} />
           ) : null,
         )}

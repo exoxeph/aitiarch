@@ -3,6 +3,17 @@ import {execFileSync} from 'node:child_process';import os from 'node:os';import 
 import {it,expect,afterEach} from 'vitest';import {UiStateStore} from '../server/ui-state-store.ts';
 const roots:string[]=[];afterEach(async()=>{for(const root of roots.splice(0))await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});});
 async function fixture(ignore=''){const root=await mkdtemp(path.join(os.tmpdir(),'aitiarch-tree-state-'));roots.push(root);execFileSync('git',['init','-q'],{cwd:root,stdio:'pipe'});if(ignore)await writeFile(path.join(root,'.gitignore'),ignore);return {root,store:new UiStateStore(root)};}
+it('persists boolean typing help preferences only with ignore coverage, preserving them across tab writes',async()=>{
+ const f=await fixture('/ui-state.json*\n');await f.store.updateTabs({v:1,tabs:[],active:null,typingHelp:false,doubleSpacePeriod:false});
+ await f.store.updateTabs({v:1,tabs:['fixture.md'],active:'fixture.md'});expect(await f.store.read()).toMatchObject({typingHelp:false,doubleSpacePeriod:false});
+ const bytes=await readFile(path.join(f.root,'ui-state.json'));await writeFile(path.join(f.root,'.gitignore'),'');
+ await expect(f.store.updateTabs({v:1,tabs:[],active:null,typingHelp:true})).rejects.toThrow(/ignored/i);expect(await readFile(path.join(f.root,'ui-state.json'))).toEqual(bytes);
+});
+it('rejects non-boolean typing preferences and does not create an unignored state file',async()=>{
+ const f=await fixture();for(const setting of [{typingHelp:true},{doubleSpacePeriod:true}])await expect(f.store.updateTabs({v:1,tabs:[],active:null,...setting})).rejects.toThrow(/ignored/i);
+ for(const setting of [{typingHelp:'yes'},{doubleSpacePeriod:null}])await expect(f.store.updateTabs({v:1,tabs:[],active:null,...setting} as any)).rejects.toThrow(/typing/i);
+ expect(await readdir(f.root)).not.toContain('ui-state.json');
+});
 it('remembers the tree state only in ignored UI state and preserves it across legacy tab writes',async()=>{
  const f=await fixture('/ui-state.json*\n');await f.store.updateTabs({v:1,tabs:['fixture.md'],active:'fixture.md',treeCollapsed:true});
  expect(await new UiStateStore(f.root).read()).toMatchObject({treeCollapsed:true});await f.store.updateTabs({v:1,tabs:[],active:null});expect((await f.store.read()).treeCollapsed).toBe(true);
