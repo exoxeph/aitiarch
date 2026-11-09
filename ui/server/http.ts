@@ -189,6 +189,8 @@ export function createApp(opts: AppOptions) {
         if(url.pathname==='/api/thread-drafts/enable'){
           if(b.action!=='add-ignore-line')throw new Error('Explicit ignore setup action required.');return json(res,200,await uiStateStore.enableDrafts());
         }
+        // "Make it mine" targets a callout position in a note, not a thread id.
+        if(url.pathname==='/api/threads/bring-adopt'){if(typeof b.path!=='string'||typeof b.from!=='number')throw new Error('Invalid callout target.');return json(res,200,await (await insertionsReady).adopt(b.path,b.from));}
         if(typeof b.path!=='string'||!validId(b.id))throw new Error('Invalid thread target.');
         if(url.pathname==='/api/thread-drafts/save')return json(res,200,await threads.saveDraft(b.path,b.id,b.text,b.revision));
         if(url.pathname==='/api/threads/bring-preview')return json(res,200,await (await insertionsReady).preview(b));

@@ -534,3 +534,8 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .add-icon {display:inline-block;position:relative;width:12px;height:15px;border:1.4px solid currentColor;border-radius:2px;box-sizing:border-box;}
 .add-icon::before,.add-icon::after {content:"";position:absolute;left:50%;top:50%;background:currentColor;transform:translate(-50%,-50%);}
 .add-icon::before {width:6px;height:1.4px;} .add-icon::after {width:1.4px;height:6px;}
+/* "Make it mine" on an AI callout: quiet at rest, clear on hover and keyboard focus. */
+.cm-adopt {margin-left:12px;padding:2px 8px;border:1px solid transparent;border-radius:var(--radius-small);background:none;color:var(--link);font:12px var(--font-ui);cursor:pointer;opacity:.55;vertical-align:baseline;}
+.cm-callout-ai:hover .cm-adopt,.cm-adopt:hover,.cm-adopt:focus-visible {opacity:1;border-color:var(--control-border);}
+.cm-adopt:focus-visible {outline:2px solid var(--focus);outline-offset:2px;}
+@media (hover: none) {.cm-adopt {opacity:1;}}

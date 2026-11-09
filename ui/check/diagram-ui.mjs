@@ -174,6 +174,20 @@ try {
   await page.screenshot({ path: path.join(out, 'blob-diagram-dark.png') });
   await page.emulateMedia({ colorScheme: 'light' });
 
+  // 6b. Make it mine: an explicit click (keyboard here) removes the AI label, records the adoption; Undo brings the label back.
+  const mine = page.getByRole('button', { name: /^Make it mine/ }); await mine.waitFor();
+  assert.match(await mine.getAttribute('aria-label'), /remove the AI label/);
+  const bytesBeforeAdopt = await readFile(path.join(root, 'fixture.md'));
+  await mine.focus(); await page.keyboard.press('Enter');
+  await page.waitForFunction(() => !window.__aitiarch['fixture.md'].view.state.doc.toString().includes('[!ai]'));
+  const adoptedDoc = await page.evaluate(`${V}.state.doc.toString()`);
+  assert(adoptedDoc.includes('> Synthetic text answer for a fixture.') && adoptedDoc.includes('> ![AI diagram:'), 'the text and diagram stay, now as plain blockquote');
+  let ledger3; for (let k = 0; k < 40; k++) { ledger3 = JSON.parse(await readFile(path.join(root, 'ledger.json'), 'utf8')); if (ledger3.events.some((e) => e.event === 'adopted')) break; await page.waitForTimeout(50); }
+  assert(ledger3.events.some((e) => e.event === 'inserted') && ledger3.events.some((e) => e.event === 'adopted'), 'inserted, then adopted, are both recorded');
+  await page.keyboard.press('Control+z'); await page.waitForTimeout(150);
+  assert((await page.evaluate(`${V}.state.doc.toString()`)).includes('[!ai]'), 'Undo brings the AI label back');
+  await page.evaluate(() => window.__aitiarch['fixture.md'].session.flush());
+  report.adopt = 'ok';
   // 7. One Ctrl+Z removes the whole insertion (callout and image together).
   await page.evaluate(() => window.__aitiarch['fixture.md'].view.focus());
   await page.keyboard.press('Control+z'); await page.waitForTimeout(150);

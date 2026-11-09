@@ -15,6 +15,7 @@ import { ChatGPTSettings } from "./ChatGPTSettings.tsx";
 import { UsagePanel } from './UsagePanel.tsx';
 import {ThreadPanel} from './threads/ThreadPanel.tsx';
 import {DismissedThoughts} from './ink/DismissedThoughts.tsx';
+import {calloutHeader} from './editor/reveal.ts';
 import {ThoughtInsertionPreview} from './ink/ThoughtInsertionPreview.tsx';
 import {ThoughtChat} from './ink/ThoughtChat.tsx';
 import {previewThoughtInsertion} from '../shared/thoughts.ts';
@@ -319,7 +320,21 @@ export default function App() {
       }catch(e){setNotice(e instanceof Error?e.message:'Could not preview AI insertion.');}
     };window.addEventListener('bring-thought',bring);return()=>window.removeEventListener('bring-thought',bring);
   });
-  const bringThought=async()=>{const p=bringPreview;if(!p)return;setBringPreview(null);await runBring(p);panes.current.get(p.path)?.view.focus();};  const prepareInsert=async(item:InkItem)=>{
+  // "Make it mine": an explicit click on an AI callout removes its AI label (one undoable edit) and records the adoption.
+  useEffect(()=>{
+    const adopt=async(event:Event)=>{
+      const pos=(event as CustomEvent<{pos:number}>).detail.pos;if(!active)return;const h=panes.current.get(active);if(!h)return;
+      const doc=h.view.state.doc,line=doc.lineAt(Math.min(pos,doc.length)),header=calloutHeader(line.text);if(!header||header.kind!=='ai')return;
+      let recorded=false;
+      try{await h.session.flush();if(h.session.status==='saved')recorded=(await api.threadCall<{recorded:boolean}>('bring-adopt',{path:active,from:line.from})).recorded;}
+      catch(e){setNotice(e instanceof Error?e.message:'The adoption could not be recorded.');}
+      const end=Math.min(line.to+1,doc.length);
+      h.view.dispatch({changes:{from:line.from,to:end,insert:''},userEvent:'input.adopt',annotations:isolateHistory.of('full')});
+      setAdded({text:'Made it mine · the AI label is removed',detail:recorded?'Recorded: AI-inserted, later adopted by you.':'No AI insertion was on record for this block, so only the label was removed.'});
+      h.view.focus();
+    };
+    window.addEventListener('adopt-callout',adopt);return()=>window.removeEventListener('adopt-callout',adopt);
+  });  const bringThought=async()=>{const p=bringPreview;if(!p)return;setBringPreview(null);await runBring(p);panes.current.get(p.path)?.view.focus();};  const prepareInsert=async(item:InkItem)=>{
     if(!active)return;const h=panes.current.get(active);if(!h)throw new Error('Open the note first.');
     await h.session.flush();if(h.session.status!=='saved')throw new Error('Save or resolve the note before insertion.');
     const [disk,s]=await Promise.all([api.file(active),api.threads(active)]),latest=s.document.items.find(i=>i.id===item.id);

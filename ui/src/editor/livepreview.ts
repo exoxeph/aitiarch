@@ -42,6 +42,25 @@ class Chip extends WidgetType {
   }
 }
 
+/** "Make it mine" on an AI callout. An explicit click only: the app never detects edits, and the label stays until this click. */
+class AdoptButton extends WidgetType {
+  eq() {
+    return true;
+  }
+  toDOM(view: EditorView) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "cm-adopt";
+    b.textContent = "Make it mine";
+    b.setAttribute("aria-label", "Make it mine: remove the AI label from this callout");
+    b.addEventListener("mousedown", (e) => e.preventDefault());
+    b.addEventListener("click", () => b.dispatchEvent(new CustomEvent("adopt-callout", { bubbles: true, detail: { pos: view.posAtDOM(b) } })));
+    return b;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
 // ---- Mermaid (lazy, strict security level; never throws into the editor) ----
 let mermaidLib: Promise<typeof import("mermaid").default> | null = null;
 let mermaidSeq = 0;
@@ -255,6 +274,7 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
             const first = doc.lineAt(n.from), header = calloutHeader(first.text);
             if (header) {
               lineDeco(n.from, n.to, `cm-callout cm-callout-${header.kind}`);
+              if (header.kind === 'ai' && first.from >= rFrom) out.push(Decoration.widget({ widget: new AdoptButton(), side: 1 }).range(first.to));
               if (first.from >= rFrom) out.push(Decoration.mark({class:`cm-callout-marker${lineIsActive(first.from, first.to) ? '' : ' cm-callout-off'}`,attributes:{'data-label':header.kind}}).range(first.from+header.from, first.from+header.to));
             }
             return;

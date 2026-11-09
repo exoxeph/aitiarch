@@ -73,6 +73,20 @@ export class InsertionStore {
  }
  async complete(note:string,id:string){return this.serial(async()=>{const operations=await this.journal();if(!operations.some(o=>o.note===note&&o.id===id))throw new Error('Insertion intent not found.');return this.reconcileLocked(note,id);});}
  async reconcile(note:string){normalizeRel(note);return this.serial(()=>this.reconcileLocked(note));}
+ /**
+  * The human clicked "Make it mine" on an AI callout at offset `from`. This records "AI-inserted, later adopted by human" in the
+  * ledger. Pairing uses the journal only and never reads the callout's text for meaning: the exact inserted text if it is still
+  * unedited, otherwise the nearest recorded insertion in this note that has not been adopted yet. Nothing is recorded when none exists.
+  */
+ async adopt(note:string,from:number){normalizeRel(note);if(!Number.isFinite(from)||from<0)throw new Error('Invalid callout position.');
+  return this.serial(async()=>{const operations=await this.journal(),events=(await this.ledger.read()).events,adopted=new Set(events.filter(e=>e.event==='adopted').map(e=>e.requestId));
+   const candidates=operations.filter(o=>o.note===note&&o.state==='recorded'&&!adopted.has(o.id));if(!candidates.length)return {recorded:false as const};
+   let current:string|null=null;try{current=(await this.store.read(note)).text;}catch{/* fall back to position */}
+   const exact=current===null?undefined:candidates.find(o=>hash(current!.slice(o.from,o.from+o.length))===o.insertHash);
+   const pick=exact??[...candidates].sort((a,b)=>Math.abs(a.from-from)-Math.abs(b.from-from))[0];
+   await this.ledger.append({id:randomUUID(),inkId:pick.inkId,requestId:pick.id,note,event:'adopted',at:new Date().toISOString()});
+   return {recorded:true as const,operationId:pick.id};});
+ }
  async cancel(note:string,id:string){return this.serial(async()=>{const operations=await this.journal(),o=operations.find(o=>o.note===note&&o.id===id);if(o?.state==='prepared'){o.state='cancelled';await this.save(operations);}return {};});}
  async asset(name:string){if(!assetPattern.test(name))throw new Error('Invalid diagram asset name.');const file=await this.confined('assets/'+name),bytes=await readFile(file);if(bytes.length>1048576||hash(bytes)!==name.slice(11,-4))throw new Error('Invalid diagram asset.');return bytes;}
 }
