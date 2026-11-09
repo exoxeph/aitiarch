@@ -1,0 +1,13 @@
+.ai-diagram { margin-block: 12px; font: 13px/1.4 var(--font-ui); color: var(--ink-text); }
+.diagram-stage { overflow: auto; background: var(--paper); border: 1px solid var(--control-border); border-radius: 6px; max-height: 220px; }
+.thought-blob .diagram-stage svg { display: block; width: 100%; height: auto; }
+.diagram-caption { color: var(--muted); margin: 8px 0; font-size: 12px; }
+.diagram-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.diagram-tools button { background: var(--paper); color: var(--ink-text); border: 1px solid var(--control-border); border-radius: 4px; padding: 4px 6px; font-size: 12px; }
+.diagram-tools button:disabled { opacity: .6; }
+.ai-diagram :focus-visible, .diagram-large :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.diagram-large { color: var(--ink-text); background: var(--paper); border: 1px solid var(--control-border); border-radius: 8px; width: min(960px, 90vw); max-height: 90vh; padding: 20px; }
+.diagram-large::backdrop { background: var(--scrim); }
+.diagram-large .diagram-stage { max-height: 68vh; }
+.diagram-large svg { display: block; max-width: none; }
+.diagram-large .diagram-tools { margin-block: 12px; }

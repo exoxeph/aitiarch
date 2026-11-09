@@ -1,3 +1,4 @@
+import {DiagramSlot} from '../diagrams/DiagramSlot.tsx';
 import {useLayoutEffect,useRef} from 'react';
 import type {InkItem} from '../../shared/ink.ts';
 import {thoughtText,type ThoughtSide} from '../../shared/thoughts.ts';
@@ -18,7 +19,7 @@ export function MarginRail({placed}:{placed:PlacedMargin[]}){
     <span className="thought-meta"><span className="thought-dot" aria-hidden="true"/><span className="cm-ink-label">AI</span></span>
     <span className="thought-text">{thoughtText(item)}</span><span className="thought-replies">{item.thread?.followups.filter(r=>r.generation.status==='complete').length??0} {item.thread?.followups.filter(r=>r.generation.status==='complete').length===1?'reply':'replies'}</span>
    </button>
-   <div className="thought-diagram-slot" aria-label="Diagram slot (not rendered)"/>
+   <DiagramSlot diagram={item.generation?.status==='complete'?item.diagram:undefined} invalid={item.diagramIssue}/>
    <button className="thought-bring" disabled={item.generation?.status!=='complete'} onClick={e=>e.currentTarget.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id}}))}>Bring to notebook</button>
   </article>)}
  </aside>;

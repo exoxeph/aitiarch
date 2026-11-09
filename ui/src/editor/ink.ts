@@ -1,3 +1,4 @@
+import type {Diagram} from '../../shared/diagram.ts';
 import { StateEffect, StateField, type EditorState } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 import { resolveAnchor } from "../../shared/anchors.ts";
@@ -12,9 +13,10 @@ export const setInk = StateEffect.define<InkPayload>();
 export const addInk = StateEffect.define<InkItem>();
 export const removeInk = StateEffect.define<string>();
 
+const widgetCleanup=new WeakMap<HTMLElement,()=>void>();
 class InkWidget extends WidgetType {
-  constructor(readonly id: string, readonly body: string, readonly complete: boolean, readonly replies:number) { super(); }
-  eq(other: InkWidget) { return other.id === this.id && other.body === this.body && other.complete === this.complete && other.replies===this.replies; }
+  constructor(readonly id: string, readonly body: string, readonly complete: boolean, readonly replies:number,readonly diagram?:Diagram,readonly diagramIssue?:string) { super(); }
+  eq(other: InkWidget) { return other.id === this.id && other.body === this.body && other.complete === this.complete && other.replies===this.replies&&other.diagram===this.diagram&&other.diagramIssue===this.diagramIssue; }
   toDOM() {
     const el = document.createElement("aside");
     el.className = "cm-ink-block thought-blob";
@@ -34,9 +36,11 @@ class InkWidget extends WidgetType {
     const open=document.createElement('button');open.textContent='Open thread';open.setAttribute('aria-label','Open AI thought thread: '+this.body.slice(0,80));open.type='button';
     open.addEventListener('click',()=>el.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:this.id,thought:true}})));el.append(open);
     const bring=document.createElement('button');bring.type='button';bring.textContent='Bring to notebook';bring.disabled=!this.complete;bring.addEventListener('click',()=>el.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:this.id}})));el.append(bring);
-    const slot=document.createElement('div');slot.className='thought-diagram-slot';slot.setAttribute('aria-label','Diagram slot (not rendered)');el.append(slot);
+    const slot=document.createElement('div');slot.className='thought-diagram-slot';el.append(slot);
+    if(this.diagram&&this.complete){slot.textContent='Loading diagram...';let disposed=false,cleanup:(()=>void)|undefined;widgetCleanup.set(el,()=>{disposed=true;cleanup?.();});void import('../diagrams/view.ts').then(m=>{if(!disposed&&el.isConnected)cleanup=m.mountDiagram(slot,this.diagram!);}).catch(()=>{if(!disposed)slot.textContent='Diagram unavailable. The text answer is preserved.';});}else if(this.diagramIssue)slot.textContent='Diagram unavailable. The text answer is preserved.';
     return el;
   }
+  destroy(dom:HTMLElement){widgetCleanup.get(dom)?.();widgetCleanup.delete(dom);}
   ignoreEvent() { return true; }
 }
 
@@ -49,6 +53,7 @@ class InkGroupWidget extends WidgetType {
     if(this.answers.length>2){const more=document.createElement('details'),label=document.createElement('summary');label.textContent=`Show ${this.answers.length-2} more`;more.append(label,...this.answers.slice(2).map(answer=>answer.toDOM()));group.append(more);}
     return group;
   }
+  destroy(dom:HTMLElement){dom.querySelectorAll<HTMLElement>('.cm-ink-block').forEach(el=>{widgetCleanup.get(el)?.();widgetCleanup.delete(el);});}
   ignoreEvent() { return true; }
 }
 function decorations(state: EditorState, payload: InkPayload): DecorationSet {
@@ -61,7 +66,7 @@ function decorations(state: EditorState, payload: InkPayload): DecorationSet {
     if(payload.narrow){
       let line=state.doc.lineAt(r.to);
       while(line.number<state.doc.lines&&state.doc.line(line.number+1).text.trim())line=state.doc.line(line.number+1);
-      const answers=groups.get(line.to)??[];answers.push(new InkWidget(i.id,thoughtText(i),i.generation?.status==='complete',i.thread?.followups.filter(r=>r.generation.status==='complete').length??0));groups.set(line.to,answers);
+      const answers=groups.get(line.to)??[];answers.push(new InkWidget(i.id,thoughtText(i),i.generation?.status==='complete',i.thread?.followups.filter(r=>r.generation.status==='complete').length??0,i.diagram,i.diagramIssue));groups.set(line.to,answers);
     }
   }
   for(const [position,answers] of groups)marks.push(Decoration.widget({widget:new InkGroupWidget(answers),side:1,block:true}).range(position));

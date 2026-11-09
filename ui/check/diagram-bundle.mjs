@@ -1,0 +1,11 @@
+// Inspect emitted code, not just package presence. No provider/network access.
+import fs from 'node:fs';import z from 'node:zlib';import assert from 'node:assert/strict';
+const graph=JSON.parse(fs.readFileSync('check/out/diagram-build-graph.json','utf8')),byName=new Map(graph.map(c=>[c.file,c])),initial=new Set();
+function walk(name){if(initial.has(name))return;initial.add(name);for(const i of byName.get(name)?.imports??[])walk(i);}for(const c of graph)if(c.isEntry)walk(c.file);
+const elk=graph.filter(c=>c.modules.some(m=>m.replaceAll('\\','/').includes('/node_modules/elkjs/')));assert.equal(elk.length,1,'ELK must be emitted in exactly one shared chunk');assert(!initial.has(elk[0].file),'ELK must not be in initial static dependency closure');
+const mermaidElk=graph.find(c=>c.modules.some(m=>m.includes('/mermaid.core/elk-')));assert(mermaidElk,'Mermaid ELK entry must be identified');const reaches=(file,target,seen=new Set())=>file===target||(!seen.has(file)&&(seen.add(file),[...(byName.get(file)?.imports??[]),...(byName.get(file)?.dynamicImports??[])].some(i=>reaches(i,target,seen))));assert(reaches(mermaidElk.file,elk[0].file),'Mermaid must reference the same ELK chunk');
+const html=fs.readFileSync('dist/index.html','utf8'),css=[...html.matchAll(/href="([^"]+\.css)"/g)].map(m=>m[1].replace(/^\//,''));
+const rows=[...initial,...css].map(file=>({file,raw:fs.statSync('dist/'+file).size,gzip:z.gzipSync(fs.readFileSync('dist/'+file)).length}));
+const sum=rows=>rows.reduce((a,r)=>({raw:a.raw+r.raw,gzip:a.gzip+r.gzip}),{raw:0,gzip:0}),baseline=fs.existsSync('check/out/diagram-baseline.json')?JSON.parse(fs.readFileSync('check/out/diagram-baseline.json','utf8')):null,current=sum(rows),before=baseline?sum(baseline):null;
+const report={pass:true,initial:rows,before,current,delta:before?{raw:current.raw-before.raw,gzip:current.gzip-before.gzip}:null,elk:{file:elk[0].file,raw:fs.statSync('dist/'+elk[0].file).size,gzip:z.gzipSync(fs.readFileSync('dist/'+elk[0].file)).length,initial:false},mermaidElk:mermaidElk.file,sharedElkChunks:elk.map(c=>c.file)};
+fs.writeFileSync('check/out/diagram-bundle-report.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));

@@ -1,3 +1,4 @@
+import {DiagramSlot} from '../diagrams/DiagramSlot.tsx';
 import {useEffect,useRef,useState} from 'react';
 import type {InkItem} from '../../shared/ink.ts';
 import {newThread,questionPlaceholder,threadStatus,type ThreadFailure,type ThreadReply} from '../../shared/threads.ts';
@@ -18,7 +19,7 @@ export function TakeawayBox({value,onChange,onSubmit,onSkip,busy,skippedAt,onReo
 export function ReplyView({reply}:{reply:ThreadReply}){
  return <article className="thread-reply" data-reply-id={reply.id} data-generated-complete={reply.generation.status==='complete'?'true':undefined}>
   <div className="small muted">AI · {providerLabel(reply.generation.provider)} · {reply.generation.status}</div>
-  {reply.generation.status==='complete'?<div className="ai-answer">{reply.body}</div>:<p role="status">{reply.failure?failureLabels[reply.failure.code]:reply.generation.status==='pending'?'Waiting for a validated answer…':'Answer unavailable. No partial answer was accepted.'}</p>}
+  {reply.generation.status==='complete'?<div className="ai-answer">{reply.body}<DiagramSlot diagram={reply.diagram} invalid={reply.diagramIssue}/></div>:<p role="status">{reply.failure?failureLabels[reply.failure.code]:reply.generation.status==='pending'?'Waiting for a validated answer…':'Answer unavailable. No partial answer was accepted.'}</p>}
  </article>;
 }
 interface MemoryDraft {text:string;revision:string|null;loaded:boolean;dirty:boolean;enabled:boolean;sequence:number;queue:Promise<unknown>}
