@@ -40,6 +40,8 @@ export class NoteSession {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private retry: ReturnType<typeof setTimeout> | undefined;
   private retryMs = 1000;
+  private refreshRetry: ReturnType<typeof setTimeout> | undefined;
+  private refreshBackoff = 100;
   private inflight: Promise<unknown> | null = null;
   private inflightText: string | null = null;
   private queued: NoteFile | null = null; // disk change that arrived while a save was in flight
@@ -230,8 +232,10 @@ export class NoteSession {
    * ended after, one of our saves is thrown away and repeated, and we never read while a save is still in flight.
    */
   async refresh(): Promise<void> {
+    clearTimeout(this.refreshRetry);
+    this.refreshRetry = undefined;
     for (let attempt = 0; attempt < 5 && !this.disposed; attempt++) {
-      while (this.inflight) await this.inflight.catch(() => {});
+      if (this.inflight) { this.deferRefresh(); return; }
       const started = this.epoch;
       const f = await this.api.load(this.path);
       if (this.disposed) return;
@@ -239,8 +243,19 @@ export class NoteSession {
       if (!f) return this.setStatus("missing");
       if (this.status === "missing") this.setStatus(this.settledStatus());
       this.applyExternal(f);
+      this.refreshBackoff = 100;
       return;
     }
+    this.deferRefresh();
+  }
+
+  private deferRefresh(): void {
+    if (this.disposed || this.refreshRetry !== undefined) return;
+    this.refreshRetry = setTimeout(() => {
+      this.refreshRetry = undefined;
+      void this.refresh().catch(() => this.deferRefresh());
+    }, this.refreshBackoff);
+    this.refreshBackoff = Math.min(this.refreshBackoff * 2, 1600);
   }
 
   /** After an SSE reconnect: anything may have changed while we were not listening. */
@@ -255,5 +270,6 @@ export class NoteSession {
     this.disposed = true;
     clearTimeout(this.timer);
     clearTimeout(this.retry);
+    clearTimeout(this.refreshRetry);
   }
 }

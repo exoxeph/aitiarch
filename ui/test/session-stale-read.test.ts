@@ -3,7 +3,7 @@
 // be ordered and the session has to protect itself.
 import { createHash } from "node:crypto";
 import { EditorState, type TransactionSpec } from "@codemirror/state";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NoteFile, SaveResult } from "../src/api.ts";
 import { conflictsField } from "../src/editor/conflicts.ts";
 import { NoteSession, type Host } from "../src/editor/session.ts";
@@ -48,7 +48,7 @@ class Disk {
 }
 
 let session: NoteSession | undefined;
-afterEach(() => session?.dispose());
+afterEach(() => { session?.dispose(); vi.useRealTimers(); });
 
 function setup() {
   const disk = new Disk(ORIGINAL);
@@ -63,6 +63,49 @@ function setup() {
 }
 
 describe("a stale read of our own earlier save", () => {
+  it("bounds overlapping refreshes and picks up an outside edit after saving pauses", async () => {
+    vi.useFakeTimers();
+    const { disk, host, s, toggle, undo } = setup();
+    const load = disk.api.load;
+    let reads = 0;
+    disk.api.load = async () => {
+      reads++;
+      const snapshot = disk.file();
+      if (reads <= 5) {
+        (reads % 2 ? toggle : undo)();
+        await s.flush();
+        return snapshot;
+      }
+      return load();
+    };
+    await s.refresh();
+    expect(reads).toBe(5);
+    disk.text += "Outside edit after the saving burst.\n";
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(host.state.doc.toString()).toBe(disk.text);
+    expect(s.base.text).toBe(disk.text);
+    expect(reads).toBe(6);
+    expect(s.status).toBe("saved");
+  });
+
+  it("returns while a save is pending and cancels deferred refresh on disposal", async () => {
+    vi.useFakeTimers();
+    const { disk, s, toggle } = setup();
+    const save = disk.api.save;
+    let release!: () => void;
+    disk.api.save = async (...args) => { await new Promise<void>(r => { release = r; }); return save(...args); };
+    toggle();
+    const saving = s.flush();
+    let returned = false;
+    void s.refresh().then(() => { returned = true; });
+    await Promise.resolve(); await Promise.resolve();
+    expect(returned).toBe(true);
+    s.dispose();
+    release(); await saving;
+    const load = vi.spyOn(disk.api, "load");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(load).not.toHaveBeenCalled();
+  });
   it("never puts old text back over an undo (the bug)", async () => {
     const { disk, host, s, toggle, undo } = setup();
     toggle();
