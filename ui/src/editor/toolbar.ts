@@ -1,7 +1,8 @@
 // Formatting remains human-only. Invoked AI freezes the selection without editing it.
-import { EditorSelection, Facet, Prec, StateField, type EditorState, type TransactionSpec } from "@codemirror/state";
-import { keymap, showTooltip, tooltips, type EditorView, type Tooltip, type TooltipView, type ViewUpdate } from "@codemirror/view";
-import { failedMarkAt, indentLines, markFailed, restoreFailed, setHeading, toggleCodeBlock, toggleInline, toggleList } from "./format.ts";
+import { EditorSelection, Facet, Prec, type TransactionSpec } from "@codemirror/state";
+import { keymap, ViewPlugin, type EditorView, type TooltipView, type ViewUpdate } from "@codemirror/view";
+import {placeToolbar} from './toolbar-placement.ts';
+import { failedMarkAt, markFailed, restoreFailed, setHeading, toggleInline, toggleList } from "./format.ts";
 
 export type SelectedSource = { text: string; from: number; to: number };
 export const invocationHandlers = Facet.define<{ invoke: (action: "think" | "ask", source: SelectedSource) => void }, { invoke: (action: "think" | "ask", source: SelectedSource) => void } | null>({ combine: values => values[0] ?? null });
@@ -20,7 +21,7 @@ export const formattingKeys = keymap.of([
 
 function create(view: EditorView): TooltipView {
   const dom = document.createElement("div");
-  dom.className = "cm-sel-toolbar cm-sel-toolbar-a";
+  dom.className = "cm-tooltip cm-sel-toolbar cm-sel-toolbar-compact";
   dom.setAttribute("role", "toolbar");
   dom.setAttribute("aria-label", "Format selection");
   dom.setAttribute("aria-keyshortcuts", "Alt+F10");
@@ -30,9 +31,9 @@ function create(view: EditorView): TooltipView {
     if (reasonMode) return;
     const items = controls(), index = items.indexOf(document.activeElement as HTMLButtonElement);
     if (e.key === "Escape") { e.preventDefault(); view.focus(); }
-    else if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
+    else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(e.key) && !(document.activeElement instanceof HTMLSelectElement)) {
       e.preventDefault();
-      const next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (index + (e.key === "ArrowRight" ? 1 : -1) + items.length) % items.length;
+      const next = e.key === "Home" || (e.ctrlKey&&e.key==='ArrowLeft') ? 0 : e.key === "End" || (e.ctrlKey&&e.key==='ArrowRight') ? items.length - 1 : (index + (["ArrowRight","ArrowDown"].includes(e.key) ? 1 : -1) + items.length) % items.length;
       items.forEach((item, i) => item.tabIndex = i === next ? 0 : -1);
       items[next]?.focus();
     }
@@ -47,6 +48,7 @@ function create(view: EditorView): TooltipView {
     b.type = "button";
     b.textContent = label;
     b.title = title;
+    b.setAttribute('aria-label',label.length>2?label:title);
     b.className = extra;
     b.disabled = disabled;
     b.addEventListener("mousedown", (e) => e.preventDefault()); // keep the editor selection
@@ -116,17 +118,14 @@ function create(view: EditorView): TooltipView {
     const mark = failedMarkAt(view.state, sel.from, sel.to);
     const s = mark
       ? button("Restore", "Remove the strike-through and its reason", () => apply(restoreFailed(view.state, sel.from)), "failed-btn")
-      : button("Failed\u2026", multiLine ? "Select text on one line to mark it failed" : "Mark as failed (strike-through with a reason)", () => {
+      : button("Mark as failed\u2026", multiLine ? "Select one line to record a failed decision and your reason" : "Record a failed decision; you write the reason", () => {
           reasonMode = true;
           render();
         }, "failed-btn", multiLine);
-    // Variant A stays isolated here: one row, with secondary block actions in menus.
-    dom.replaceChildren(row(
-      ...(view.state.facet(invocationHandlers) ? [
-        button("Think on this", "Think on this (Ctrl+Enter)", () => { invoke(view, "think"); }),
-        button("Ask...", "Ask about the frozen selection", () => { invoke(view, "ask"); }),
-      ] : []),
-        menu("Text style", [0, 1, 2, 3, 4].map(n => [n ? `Heading ${n}` : "Plain paragraph", () => apply(setHeading(view.state, n))])),
+    dom.replaceChildren(
+      row(menu("Text style", [0, 1, 2, 3].map(n => [n ? `Heading ${n}` : "Plain paragraph", () => apply(setHeading(view.state, n))]))),
+      row(button('Bullets','Bulleted list',()=>apply(toggleList(view.state,'bullet'))),button('Numbers','Numbered list',()=>apply(toggleList(view.state,'ordered')))),
+      row(
         button("B", "Bold (Ctrl+B)", () => apply(toggleInline(view.state, "**")), "b"),
         button("I", "Italic (Ctrl+I)", () => apply(toggleInline(view.state, "*")), "i"),
         button("S", "Strikethrough (Ctrl+Shift+X)", () => apply(toggleInline(view.state, "~~")), "failed-btn"),
@@ -134,26 +133,19 @@ function create(view: EditorView): TooltipView {
         button("Link", "Link", () => {
           const r = view.state.selection.main, text = view.state.sliceDoc(r.from, r.to);
           apply({ changes: { from: r.from, to: r.to, insert: `[${text}]()` }, selection: EditorSelection.cursor(r.to + 3), userEvent: "input.format" });
-        }),
-        s,
-        menu("Lists", [["Bulleted list", () => apply(toggleList(view.state, "bullet"))], ["Numbered list", () => apply(toggleList(view.state, "ordered"))]]),
-        menu("More", [["Indent", () => apply(indentLines(view.state))], ["Code block", () => apply(toggleCodeBlock(view.state))]]),
-    ));
+        })),
+      row(s),
+      ...(view.state.facet(invocationHandlers) ? [row(
+        button("Think on this", "Think on this (Ctrl+Enter)", () => { invoke(view, "think"); },'primary'),
+        button("Ask...", "Ask about the frozen selection", () => { invoke(view, "ask"); },'primary'),
+      )] : []),
+    );
     controls().forEach((item, i) => item.tabIndex = i === 0 ? 0 : -1);
   }
 
   render();
   return {
     dom,
-    offset: {x:0,y:8},
-    getCoords() {
-      const r=view.state.selection.main;
-      const first=view.coordsAtPos(r.from)!,last=view.coordsAtPos(r.to)!;
-      const previous=view.coordsAtPos(Math.max(0,view.state.doc.lineAt(r.from).from-1))!;
-      // Protect the selection AND the preceding line. CM flips below this
-      // whole rectangle when there isn't room above it.
-      return {left:first.left,right:first.right,top:Math.min(first.top-view.defaultLineHeight,previous.top),bottom:last.bottom};
-    },
     update(u: ViewUpdate) {
       if (u.selectionSet || u.docChanged) {
         if (reasonMode && !u.state.selection.main.empty && !u.docChanged) return; // keep the reason box while you type in it
@@ -164,17 +156,29 @@ function create(view: EditorView): TooltipView {
   };
 }
 
-function toTooltip(state: EditorState): Tooltip | null {
-  const r = state.selection.main;
-  return r.empty ? null : { pos: r.from, above: true, strictSide: false, arrow: false, create };
-}
-
-const toolbarField = StateField.define<Tooltip | null>({
-  create: toTooltip,
-  update(v, tr) {
-    return tr.docChanged || tr.selection ? toTooltip(tr.state) : v;
-  },
-  provide: (f) => showTooltip.from(f),
+const panels=new WeakMap<EditorView,HTMLElement>();
+const compactPanel=ViewPlugin.fromClass(class {
+ readonly panel:TooltipView;
+ constructor(readonly view:EditorView){
+  this.panel=create(view);this.panel.dom.hidden=true;panels.set(view,this.panel.dom);
+  const surface=view.dom.closest('.ink-surface')??view.dom;
+  surface.insertBefore(this.panel.dom,surface.querySelector('.margin-rail'));this.place();
+ }
+ update(u:ViewUpdate){this.panel.update?.(u);this.place();}
+ place(){this.view.requestMeasure({key:this,read:view=>{
+  if(view.state.selection.main.empty)return null;
+  const first=view.coordsAtPos(view.state.selection.main.from);if(!first)return null;
+  const c=view.contentDOM.getBoundingClientRect(),css=getComputedStyle(view.contentDOM),size=this.panel.dom.getBoundingClientRect();
+  const space=toolbarSpace(view),rail=view.dom.closest('.ink-surface')?.querySelector('.margin-rail');
+  if(rail?.querySelector('.margin-card')&&getComputedStyle(rail).position==='absolute')space.right=Math.min(space.right,rail.getBoundingClientRect().left);
+  return placeToolbar({left:c.left+parseFloat(css.paddingLeft),right:c.right-parseFloat(css.paddingRight)},first.top,{width:212,height:size.height||240},space);
+ },write:p=>{
+  const dom=this.panel.dom,wasHidden=dom.hidden;dom.hidden=!p;if(!p)return;
+  dom.dataset.placement=p.side;
+  Object.assign(dom.style,p.side==='below'?{position:'relative',left:'',top:'',margin:'8px auto'}:{position:'fixed',left:`${p.left}px`,top:`${p.top}px`,margin:'0'});
+  if(wasHidden)this.place();
+ }});}
+ destroy(){this.panel.dom.remove();panels.delete(this.view);}
 });
 
 /**
@@ -182,7 +186,8 @@ const toolbarField = StateField.define<Tooltip | null>({
  * viewport except over it, otherwise it hides the rail's buttons (for example "Re-attach to selected text").
  */
 function toolbarSpace(view:EditorView) {
-  const space = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+  const area=view.dom.closest('.ink-surface')?.getBoundingClientRect();
+  const space = { left: Math.max(0,area?.left??0), top: 0, right: Math.min(window.innerWidth,area?.right??window.innerWidth), bottom: window.innerHeight };
   const pane=view.dom.closest('.pane')?.getBoundingClientRect();
   if(pane){space.top=Math.max(space.top,pane.top+8);space.bottom=Math.min(space.bottom,pane.bottom-8);}
   const rail = document.querySelector(".margin-rail");
@@ -193,10 +198,10 @@ function toolbarSpace(view:EditorView) {
   return space;
 }
 
-export const selectionToolbar = [toolbarField, tooltips({ tooltipSpace: toolbarSpace }), Prec.highest(keymap.of([{
+export const selectionToolbar = [compactPanel, Prec.highest(keymap.of([{
   key: "Alt-F10", run: view => {
     if (view.state.selection.main.empty) return false;
-    view.dom.querySelector<HTMLElement>('.cm-sel-toolbar button')?.focus();
+    panels.get(view)?.querySelector<HTMLElement>('button')?.focus();
     return true;
   },
 }]))];

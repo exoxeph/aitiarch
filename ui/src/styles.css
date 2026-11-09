@@ -179,6 +179,12 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .cm-sel-toolbar button.primary { background: var(--accent); color: var(--on-accent); font-weight: 600; }
 .cm-sel-toolbar button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 85%, black); }
 .cm-sel-toolbar input { width: 100%; font: inherit; padding: 5px 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: inherit; }
+.cm-tooltip.cm-sel-toolbar-compact { width: 212px; min-width: 0; max-height: min(280px, 40vh); white-space: normal; flex-shrink: 0; }
+.cm-sel-toolbar-compact[hidden] { display: none; }
+.cm-sel-toolbar-compact .cm-sel-row { display: flex; flex-wrap: wrap; gap: 3px; }
+.cm-sel-toolbar-compact select { width: 100%; font: inherit; color: var(--ink-text); background: var(--paper); border: 1px solid var(--control-border); border-radius: var(--radius-small); padding: 5px; }
+.cm-sel-toolbar-compact button { padding: 4px 6px; }
+.cm-sel-toolbar-compact .cm-sel-row:last-child { border-top: 1px solid var(--rule); padding-top: 5px; }
 .cm-sel-error { color: var(--danger); font-size: 12px; padding: 2px 6px; min-height: 0; }
 /* Invoked context is kept separate from the Markdown editor document. */
 .invocation-panel { position: relative; z-index: 5; grid-column: 1 / -1; }

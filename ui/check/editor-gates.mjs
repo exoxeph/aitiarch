@@ -239,12 +239,12 @@ await session('slash-fallback',slashNote,async({page,theme,root,bytes})=>{
 await session('toolbar-b',small,async({page,theme,root,bytes})=>{
  const d=await doc(page),from=d.indexOf('Intro'),to=from+15;
  await put(page,from,to);const toolbar=page.getByRole('toolbar',{name:'Format selection'});await toolbar.waitFor();
- assert.equal(await toolbar.locator('.cm-sel-row').count(),1,'variant A must be one row');
+ assert.equal(await toolbar.locator('.cm-sel-row').count(),5,'compact toolbar row order');
  for(const title of ['Bold (Ctrl+B)','Italic (Ctrl+I)','Strikethrough (Ctrl+Shift+X)','Inline code','Link','Text style'])assert.equal(await toolbar.locator(`[title="${title}"]`).count(),1);
  await toolbar.getByTitle('Bold (Ctrl+B)',{exact:true}).click();assert.equal(await doc(page),d.slice(0,from)+'**'+d.slice(from,to)+'**'+d.slice(to));
  await page.keyboard.press('Control+z');assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes);
  await put(page,from,to);await page.keyboard.press('Alt+F10');assert.equal(await page.evaluate(()=>document.activeElement?.closest('.cm-sel-toolbar')!==null),true,'keyboard cannot enter toolbar');
- await page.keyboard.press('ArrowRight');assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'Ask...');
+ await page.keyboard.press('ArrowRight');assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'Numbers');
  await page.keyboard.press('Escape');assert.equal(await page.evaluate(`${V}.hasFocus`),true);
  await toolbar.getByTitle('Link',{exact:true}).click();assert.equal(await doc(page),d.slice(0,from)+'['+d.slice(from,to)+']()'+d.slice(to));await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
  await put(page,from,to);await toolbar.getByRole('button',{name:'Ask...',exact:true}).click();
@@ -253,8 +253,8 @@ await session('toolbar-b',small,async({page,theme,root,bytes})=>{
  assert.equal(await page.locator('.invocation-review blockquote').textContent(),frozen,'frozen selection changed');assert.equal(frozen,d.slice(from,to));
  await page.getByRole('button',{name:'Cancel preview'}).click();await page.evaluate(()=>window.__aitiarch['n.md'].view.focus());await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
  await put(page,from,to);await page.locator('.editor-col').screenshot({path:path.join(output,`gate-toolbar-b-${theme}.png`)});
- await put(page,from);assert.equal(await toolbar.count(),0,'empty selection toolbar shown');
- report[`toolbar-b-${theme}`]={oneRow:true,keyboard:true,frozenSelection:true,byteExact:true};
+ await put(page,from);assert.equal(await toolbar.isHidden(),true,'empty selection toolbar shown');
+ report[`toolbar-b-${theme}`]={compact:true,keyboard:true,frozenSelection:true,byteExact:true};
 });
 await session('callouts','\uFEFFAway\r\n\r\n> [!note] Launch constraint\r\n> Keep it small.\r\n\r\n> [!tip] Test early\r\n> Use fixtures.\r\n\r\n> [!warning] No private data\r\n> Stay local.\r\n\r\nEnd\r\n',async({page,theme,root,bytes})=>{
  const d=await doc(page);await put(page,0);
