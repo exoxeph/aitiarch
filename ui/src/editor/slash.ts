@@ -6,6 +6,8 @@ import { syntaxTree } from "@codemirror/language";
 import { Prec, StateEffect, StateField, type ChangeSpec, type EditorState } from "@codemirror/state";
 import { keymap,ViewPlugin } from "@codemirror/view";
 import { frontmatterEnd } from "../frontmatter.ts";
+import { STARTER_TABLE } from "./table-edit.ts";
+import { requestTableFocus } from "./tables.ts";
 
 export interface SlashItem {
   label: string;
@@ -16,6 +18,8 @@ export interface SlashItem {
   aliases: string[];
   insert: string;
   caret?: number;
+  /** After inserting, put the cursor in the first cell of the new table. */
+  table?: boolean;
 }
 export const SLASH_ITEMS: readonly SlashItem[] = [
   {label:'Text',detail:'Start a plain paragraph',group:'Text',icon:'T',shortcut:'/text',aliases:['paragraph'],insert:''},
@@ -27,7 +31,7 @@ export const SLASH_ITEMS: readonly SlashItem[] = [
   ...(['note','tip','warning'] as const).map(kind=>({label:kind[0].toUpperCase()+kind.slice(1)+' callout',detail:`Highlight a ${kind}`,group:'Insert' as const,icon:kind==='warning'?'!':'i',shortcut:`/${kind}`,aliases:[kind],insert:`> [!${kind}]\n> `})),
   {label:'Code block',detail:'A fenced block of code',group:'Insert',icon:'<>',shortcut:'/code',aliases:['snippet'],insert:'```\n\n```',caret:4},
   {label:'Divider',detail:'Separate sections with a line',group:'Insert',icon:'—',shortcut:'/line',aliases:['line','rule','separator'],insert:'---\n'},
-  {label:'Table',detail:'A Markdown table, edit in source',group:'Insert',icon:'▦',shortcut:'/table',aliases:['grid'],insert:'| Column | Value |\n| --- | --- |\n|  |  |',caret:33},
+  {label:'Table',detail:'A table you edit right in place',group:'Insert',icon:'▦',shortcut:'/table',aliases:['grid'],insert:STARTER_TABLE,table:true},
   {label:'Link',detail:'Add link text and a destination',group:'Insert',icon:'↗',shortcut:'/link',aliases:['url'],insert:'[]()',caret:1},
   {label:'Image',detail:'Add alt text and an image path',group:'Insert',icon:'□',shortcut:'/image',aliases:['picture','photo'],insert:'![]()',caret:2},
   {label:'Footnote',detail:'Add a reference and its definition',group:'Advanced',icon:'¹',shortcut:'/footnote',aliases:['reference'],insert:'[^note]\n\n[^note]: ',caret:17},
@@ -64,6 +68,7 @@ export function slashSource(ctx: CompletionContext): CompletionResult | null {
     section: {name:item.group,rank:["Text","Lists","Insert","Advanced"].indexOf(item.group)},
     apply: (view, _c, f, t) => {
       const { changes, caret } = slashInsert(item, f - 1, t); // f - 1 includes the slash itself
+      if (item.table) requestTableFocus(f - 1, 0, 0, true);
       view.dispatch({ changes, selection: { anchor: caret }, userEvent: "input.complete", scrollIntoView: true });
     },
   }));
@@ -105,6 +110,7 @@ function enterWithoutMenu(view: import("@codemirror/view").EditorView): boolean 
   const item = slashPick(m.query);
   if (!item) return false;
   const { changes, caret } = slashInsert(item, line.from + m.offset, sel.head);
+  if (item.table) requestTableFocus(line.from + m.offset, 0, 0, true);
   view.dispatch({ changes, selection: { anchor: caret }, userEvent: "input.complete", scrollIntoView: true });
   return true;
 }

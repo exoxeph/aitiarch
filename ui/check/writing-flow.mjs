@@ -49,10 +49,40 @@ try{
   const got=await page.evaluate(`${V}.state.doc.toString()`);
   if(got!==c.want)failures.push({case:c.name,want:c.want,got});
  }
+ // ---- The table: inserted with /table, edited in place cell by cell.
+ const doc=()=>page.evaluate(`${V}.state.doc.toString()`);
+ const cellAt=()=>page.evaluate(()=>{const a=document.activeElement;return a?.dataset?.line!==undefined?{line:Number(a.dataset.line),col:Number(a.dataset.col)}:null;});
+ await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,to:v.state.doc.length,insert:''},selection:{anchor:0}});v.focus();});
+ await page.keyboard.type('/table',{delay:4});await page.keyboard.press('Enter');
+ await page.locator('.cm-table-widget td[contenteditable], .cm-table-widget th[contenteditable]').first().waitFor();await page.waitForTimeout(150);
+ const starter='| Column 1 | Column 2 | Column 3 |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |\n';
+ if(await doc()!==starter)failures.push({case:'/table inserts a starter table',want:starter,got:await doc()});
+ const first=await cellAt();if(!first||first.line!==0||first.col!==0)failures.push({case:'/table puts the cursor in the first heading cell',got:first});
+ const selected=await page.evaluate(()=>getSelection()?.toString());if(selected?.toLowerCase()!=='column 1')failures.push({case:'its text is selected so typing replaces it',want:'Column 1',got:selected});
+ await page.screenshot({path:path.join(output,'table-inserted.png')});
+ for(const k of ['Item','{Tab}','Qty','{Tab}','Note','{Tab}','A','{Tab}','B','{Tab}','C','{Enter}','D']){const m=/^\{(.+)\}$/.exec(k);if(m)await page.keyboard.press(m[1]);else await page.keyboard.type(k,{delay:4});await page.waitForTimeout(120);}
+ await page.keyboard.press('Tab');await page.waitForTimeout(200); // leaving the last cell adds a row
+ const afterTab=await doc();
+ const wantTable='| Item | Qty | Note |\n| --- | --- | --- |\n| A | B | C |\n|  |  | D |\n|  |  |  |\n';
+ if(afterTab!==wantTable)failures.push({case:'tabbing and typing through the table, a new row at the end',want:wantTable,got:afterTab});
+ const landed=await cellAt();if(!landed||landed.line!==4||landed.col!==0)failures.push({case:'the cursor lands in the new row',got:landed});
+ await page.screenshot({path:path.join(output,'table-edited.png')});
+ // Controls and keyboard exit.
+ await page.getByRole('button',{name:'+ Column',exact:true}).click();await page.waitForTimeout(200);
+ if(!(await doc()).startsWith('| Item | Qty | Note | Column 4 |\n| --- | --- | --- | --- |\n| A | B | C |  |'))failures.push({case:'+ Column',got:await doc()});
+ await page.getByRole('button',{name:'Delete column',exact:true}).click();await page.waitForTimeout(200);
+ if(!(await doc()).startsWith('| Qty | Note | Column 4 |')&&!(await doc()).startsWith('| Item | Qty | Note |'))failures.push({case:'Delete column removes the column you are in',got:await doc()});
+ await page.keyboard.press('Escape');await page.waitForTimeout(150);
+ if(!await page.evaluate(`${V}.hasFocus`))failures.push({case:'Escape returns the cursor to the note'});
+ // A mouse click puts the cursor in that cell without opening raw Markdown.
+ if(!await page.locator('.cm-table-widget td[contenteditable]').count())failures.push({case:'the table stays rendered after Escape',doc:await doc(),sel:await page.evaluate(V+'.state.selection.main.head')});
+ else{await page.locator('.cm-table-widget td[contenteditable]').first().click();await page.waitForTimeout(150);
+ const clicked=await cellAt();if(!clicked||clicked.line!==2)failures.push({case:'clicking a cell edits that cell',got:clicked});}
+ if(await page.locator('.cm-table-source, .cm-line:has-text("| ---")').count()>0)failures.push({case:'clicking a cell must not switch to raw Markdown'});
  // One undo reverts a whole Enter or Backspace step.
  await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,to:v.state.doc.length,insert:'- One'},selection:{anchor:5}});v.focus();});
  await page.keyboard.press('Enter');await page.keyboard.press('Control+z');
  const undone=await page.evaluate(`${V}.state.doc.toString()`);if(undone!=='- One')failures.push({case:'undo of Enter',want:'- One',got:undone});
  assert.deepEqual(failures,[],'writing flow failures:\n'+JSON.stringify(failures,null,1));
- console.log(JSON.stringify({pass:true,cases:cases.length+1,providerCalls:0}));
+ console.log(JSON.stringify({pass:true,cases:cases.length+7,providerCalls:0}));
 }finally{await browser.close();await app.close?.();await watcher.stop?.();await rm(root,{recursive:true,force:true});}

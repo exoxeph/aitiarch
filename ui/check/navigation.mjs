@@ -34,8 +34,8 @@ try{for(const theme of ['ember','moss']){
   R[name]={shiftX:after.x-p.x,shiftY:after.y-p.y,hit,selected,pass:selected.text===word};
   check(`${name} stable pointer`,after.x===p.x&&after.y===p.y);
  }
- // Inspect rendered table click separately: it intentionally reveals source.
- const table=page.locator('.cm-table-widget td').first();await table.click();await settle();R.table={source:await page.locator('.cm-table-source').count()>0};
+ // The rendered table is edited in place; its Edit source button is the way to the raw Markdown.
+ await page.locator('.cm-table-widget').first().getByRole('button',{name:'Edit source',exact:true}).click();await settle();R.table={source:await page.locator('.cm-table-source').count()>0};
  let p=await position('nested',2);await page.mouse.dblclick(p.x,p.y);await settle();check('table source word',(await select()).text==='nested');
  const click=async(needle,offset=0,count=1)=>{const p=await position(needle,offset);for(let i=1;i<=count;i++)await page.mouse.click(p.x,p.y,{clickCount:i});await settle();return select();};
  let s=await click('Plain paragraph',8,3);check('triple click paragraph',s.text==='Plain paragraph alpha bravo charlie.\nA second line in this paragraph.');

@@ -354,7 +354,9 @@ await session('tables','\uFEFFAway\r\n\r\n| Name | Status | Detail |\r\n| :---: 
  const d=await doc(page),start=d.indexOf('| Name'),end=d.indexOf('\n\nAfter'),pos=d.indexOf('nested');await put(page,0);
  const widget=page.locator('.cm-table-widget');await widget.waitFor();assert.equal(await widget.locator('strong em').textContent(),'nested');assert.equal(await widget.locator('code').textContent(),'code');assert.equal(await widget.locator('script').count(),0);assert.equal(await widget.getByText('a | b',{exact:true}).count(),1);
  const geometry=async()=>page.evaluate(()=>{const v=window.__aitiarch['n.md'].view,p=v.state.doc.toString().indexOf('After table.');const r=v.coordsAtPos(p);return [r.left,r.top,v.contentHeight];});const before=await geometry();
- await widget.locator('td').first().click();assert.equal(await widget.count(),0);assert.deepEqual(await geometry(),before,'table/source geometry changed');assert.equal(await doc(page),d);
+ // Clicking a cell edits it in place and keeps the table drawn; the raw Markdown is one button away.
+ await widget.locator('td').first().click();assert.equal(await widget.count(),1,'a click on a cell keeps the table rendered');assert(await page.evaluate(()=>document.activeElement?.dataset?.line!==undefined),'the clicked cell takes the cursor');assert.equal(await doc(page),d,'clicking must not change the note');
+ await widget.getByRole('button',{name:'Edit source',exact:true}).click();assert.equal(await widget.count(),0);assert.deepEqual(await geometry(),before,'table/source geometry changed');assert.equal(await doc(page),d);
  await put(page,pos);await page.keyboard.type('X');assert.equal(await doc(page),d.slice(0,pos)+'X'+d.slice(pos));
  const edited=await disk(page,root),byteOffset=bytes.indexOf(Buffer.from('nested'));
  assert(byteOffset>=0,'source-cell-byte-diff: fixture must contain nested');
@@ -368,7 +370,7 @@ await session('tables','\uFEFFAway\r\n\r\n| Name | Status | Detail |\r\n| :---: 
  await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes,'source-cell-undo-byte-exact');
  await page.keyboard.press('Control+y');assert.deepEqual(await disk(page,root),expectedEdited,'source-cell-redo-byte-exact');
  await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes,'source-cell-undo-byte-exact after saved redo');
- await page.keyboard.press('Escape');await widget.waitFor();await page.screenshot({path:path.join(output,`gate-table-${theme}.png`)});await widget.focus();await page.keyboard.press('Enter');assert.equal(await widget.count(),0);
+ await page.keyboard.press('Escape');await widget.waitFor();await page.screenshot({path:path.join(output,`gate-table-${theme}.png`)});await widget.getByRole('button',{name:'Edit source',exact:true}).focus();await page.keyboard.press('Enter');assert.equal(await widget.count(),0,'Edit source is reachable and works from the keyboard');
  await put(page,start,end);const copied=await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view,dt=new DataTransfer();v.contentDOM.dispatchEvent(new ClipboardEvent('copy',{clipboardData:dt,bubbles:true,cancelable:true}));return dt.getData('text/plain');});assert.equal(copied,d.slice(start,end));
  await put(page,start);const cdp=await page.context().newCDPSession(page);await cdp.send('Input.imeSetComposition',{text:'\u3042',selectionStart:1,selectionEnd:1});await cdp.send('Input.insertText',{text:'\u3042'});await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
  await put(page,0);await page.setViewportSize({width:700,height:1000});await settle(page);const narrow=await geometry();await put(page,pos);assert.deepEqual(await geometry(),narrow,'narrow table/source geometry changed');await put(page,0);await page.screenshot({path:path.join(output,`gate-table-narrow-${theme}.png`)});

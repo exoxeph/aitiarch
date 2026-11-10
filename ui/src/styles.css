@@ -168,6 +168,7 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .cm-line.cm-callout-warning { background: var(--paper-2); }
 .cm-callout-marker { position: relative; display: inline-block; font-family: var(--font-mono); font-size: .85em; }
 .cm-callout-off { color: transparent; }
+.cm-callout-off * { color: transparent !important; text-decoration: none !important; } /* the raw [!note] is parsed as a link; its highlight spans would otherwise show through the label */
 .cm-callout-off::after { content: attr(data-label); position: absolute; inset-inline-start: 0; color: var(--ink-text); font-family: var(--font-ui); font-weight: 600; text-transform: capitalize; pointer-events: none; }
 .cm-sel-toolbar-a > .cm-sel-row { flex-wrap: nowrap; align-items: center; }
 .cm-sel-toolbar-a > .cm-sel-row > * { flex-shrink: 0; }
@@ -407,10 +408,13 @@ summary { cursor: pointer; }
 .cm-fence-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .cm-bullet-off, .cm-task-off { position: relative; color: transparent; }
 .cm-bullet-off *, .cm-task-off * { color: transparent !important; } /* syntax-highlight spans inside would otherwise paint over it */
-.cm-bullet-off::before { content: "\2022"; position: absolute; left: 0; color: var(--muted); }
+.cm-bullet-off::before { content: "\2022"; position: absolute; left: -.02em; top: -.02em; font-size: 1.15em; line-height: 1; color: var(--accent); }
 .cm-task-off { cursor: pointer; }
-.cm-task-off::before { content: "\2610"; position: absolute; left: 0; color: var(--accent); font-family: var(--font-ui); }
-.cm-task-off.cm-task-done::before { content: "\2611"; }
+.cm-task-off::before { content: ""; position: absolute; left: 0; top: .1em; width: 1.05em; height: 1.05em; box-sizing: border-box; border: 2px solid var(--accent); border-radius: 6px; background: transparent; transition: background var(--motion-color); }
+.cm-task-off.cm-task-done::before { background: var(--accent); }
+.cm-task-off.cm-task-done::after { content: ""; position: absolute; left: .36em; top: .16em; width: .28em; height: .56em; border: solid var(--on-accent); border-width: 0 2.4px 2.4px 0; transform: rotate(40deg); }
+.cm-task-off:hover::before { background: var(--accent-soft); }
+.cm-task-off.cm-task-done:hover::before { background: var(--accent-hi); }
 
 /* Slash menu (slice C): the CodeMirror autocomplete list in Grove colours. */
 .cm-editor .cm-tooltip.cm-tooltip-autocomplete { background: var(--paper); border: 1px solid var(--control-border); border-radius: var(--radius-card); box-shadow: var(--shadow-floating); overflow: hidden; z-index: 100; }
@@ -677,3 +681,16 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
   .stream-caret { animation: none; }
   .diagram-reveal svg > * { animation: none; }
 }
+
+/* Editable tables: click a cell and type; the tools line under the table adds and removes rows and columns. */
+.cm-table-widget th[contenteditable], .cm-table-widget td[contenteditable] { cursor: text; outline: none; }
+.cm-table-widget { min-width: 0; }
+.cm-table-scroll { min-width: 0; }
+.cm-table-widget td[contenteditable]:hover, .cm-table-widget th[contenteditable]:hover { background: var(--accent-soft); }
+.cm-table-widget td[contenteditable]:focus, .cm-table-widget th[contenteditable]:focus { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+.cm-table-widget td:empty::before { content: "\00a0"; }
+.cm-table-tools { display: flex; align-items: center; gap: var(--space-2); height: var(--table-line); width: 0; min-width: 100%; box-sizing: border-box; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding: 0 var(--space-2); font: var(--text-meta) var(--font-ui); color: var(--muted); white-space: nowrap; }
+.cm-table-tools button { flex: none; border: 0; background: none; padding: 2px var(--space-2); color: var(--link); font: inherit; border-radius: var(--radius-small); cursor: pointer; }
+.cm-table-tools button:hover { background: var(--accent-soft); color: var(--ink-text); }
+.cm-table-tools .cm-table-hint { margin-inline-start: auto; padding: 0; }
+@media (max-width: 640px) { .cm-table-tools .cm-table-hint { display: none; } .cm-table-tools button { padding: 2px 4px; } }
