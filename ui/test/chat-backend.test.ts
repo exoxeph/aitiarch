@@ -12,6 +12,7 @@ import {InsertionStore} from '../server/insertion-store.ts';import {LedgerStore}
 import {EditorState} from '@codemirror/state';import {history,undo} from '@codemirror/commands';
 import {ProviderError} from '../server/providers/index.ts';
 import {contextModules} from '../server/chat/context.ts';
+import {sessionModules} from '../server/chat/ide-sessions.ts';
 // These integration tests spawn real local Git processes on Windows (never a model).
 // Browser-process startup can contend with them; this is not a performance assertion.
 vi.setConfig({testTimeout:15000,hookTimeout:15000});
@@ -27,6 +28,18 @@ async function fixture(ignore=true){
  const input:ChatInput={id:'chat-one',path:'fixture.md',question:'Explain the plan.',context:[{moduleId:'this-note',ids:['note']}]};
  return {root,store,ink,provider,chats,runtime,input};
 }
+it('session sources force preview on every send and keep replies, evidence and later history out of repository storage',async()=>{
+ const f=await fixture(),sessions=path.join(f.root,'sessions-fixture');await mkdir(sessions);
+ await writeFile(path.join(sessions,'synthetic.jsonl'),[{type:'user',cwd:f.root,message:{role:'user',content:'Synthetic session context'}},{type:'assistant',cwd:f.root,message:{role:'assistant',stop_reason:'end_turn',content:[{type:'text',text:'Synthetic final session reply'}]}}].map(x=>JSON.stringify(x)).join('\n')+'\n');
+ const modules=sessionModules({project:f.root,roots:{'claude-sessions':sessions,'codex-sessions':path.join(f.root,'absent')}});
+ const [entry]=await modules[0].list(),runtime=new ChatRuntime(f.store,f.ink,f.chats,f.provider,modules);
+ const input={...f.input,context:[{moduleId:'claude-sessions' as const,ids:[entry.id]}]},r=await runtime.review(input);
+ expect(r.requiresConfirmation).toBe(true);await expect(runtime.send({reviewId:r.reviewId},()=>{})).rejects.toMatchObject({code:'review_required'});
+ const events:ChatEvent[]=[];await runtime.send({reviewId:r.reviewId,confirmed:true,dontAskAgain:true},e=>events.push(e));expect(events.at(-1)).toMatchObject({type:'complete',persistence:'memory',message:{ephemeral:true,insertionBlocked:true}});
+ const later=await runtime.review({...f.input,id:'later',context:[]});expect(later.requiresConfirmation).toBe(true);await runtime.send({reviewId:later.reviewId,confirmed:true},()=>{});
+ expect((await f.chats.read(f.input.path)).messages).toHaveLength(0);await expect(readFile(path.join(f.root,'chat/fixture.md.chat.json'))).rejects.toMatchObject({code:'ENOENT'});
+ const ledger=await readFile(path.join(f.root,'ledger.json'),'utf8');expect(ledger).not.toMatch(/Synthetic session|Synthetic final|synthetic.jsonl/);expect(ledger).toContain('claude-sessions');await runtime.close();
+});
 it('fake stream: review first, frozen context, provisional tokens, accepted markdown, private replies only',async()=>{
  const f=await fixture(),events:ChatEvent[]=[];
  await expect(f.runtime.send({reviewId:'missing'},e=>events.push(e))).rejects.toMatchObject({code:'review_required'});

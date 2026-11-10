@@ -27,6 +27,7 @@ import type { Invocation } from "../shared/invocation.ts";
 import type { ChatGPTPlan } from "./providers/chatgpt-plan.ts";
 
 export interface AppOptions {
+  sessionModules?:import('../shared/chat.ts').ContextModule[];
   store: Store;
   watcher: NoteWatcher;
   distDir: string;
@@ -133,7 +134,7 @@ export function createApp(opts: AppOptions) {
   const investigator=new InvestigatorRuntime(investigatorPolicy,new Lookups(investigatorPolicy),new LedgerStore(store.rootReal),opts.investigator??{},undefined,store.rootReal);
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
   const chatStore=new ChatStore(store.rootReal);
-  const chatReady=inkReady.then(ink=>new ChatRuntime(store,ink,chatStore,opts.provider));
+  const chatReady=inkReady.then(ink=>new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules));
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
@@ -211,9 +212,10 @@ export function createApp(opts: AppOptions) {
     }
     if(url.pathname==='/api/chat'&&req.method==='GET'){
       const note=url.searchParams.get('path')??'';await store.read(note);
-      return json(res,200,{...(await chatStore.read(note)),persistence:await chatStore.status(),questionPlaceholder:'Question unavailable after reload.',usage:(await chatReady).usage().find(c=>c.note===note)??null});
+      const saved=await chatStore.read(note),runtime=await chatReady;
+      return json(res,200,{...saved,messages:[...saved.messages,...runtime.memoryMessages(note)],persistence:await chatStore.status(),questionPlaceholder:'Question unavailable after reload.',usage:runtime.usage().find(c=>c.note===note)??null});
     }
-    if(url.pathname==='/api/chat/modules'&&req.method==='GET')return json(res,200,await (await chatReady).modules(url.searchParams.get('path')??''));
+    if(url.pathname==='/api/chat/modules'&&req.method==='GET')return json(res,200,await (await chatReady).modules(url.searchParams.get('path')??'',url.searchParams.get('sessions')==='1'));
     if(url.pathname.startsWith('/api/chat/')&&req.method==='PUT'){
       const b=await readBody(req) as any,runtime=await chatReady;
       try{

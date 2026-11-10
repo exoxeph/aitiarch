@@ -5,6 +5,7 @@ import {applyInvestigatorEvent,emptyTrail,isInvestigatorCode} from './trail-mode
 import {secretKinds} from '../../server/chat/secrets.ts';
 import type {InvestigatorCode,InvestigatorEvent,Permission,Tier} from '../../shared/investigator.ts';
 import {CHAT_MESSAGES,type ChatErrorCode,type ChatReview,type ChatUsage} from '../../shared/chat.ts';
+import {SESSION_NOTICES,type SessionKind} from '../../shared/ide-sessions.ts';
 import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
 import {Thinking} from '../ink/streaming.tsx';
 import {DEFAULT_CONTEXT,SUGGESTED_PROMPTS,chatHeader,toggleChip,type ContextChip} from './chat-stub.ts';
@@ -35,13 +36,13 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
    {review.selection&&<><dt>Selection</dt><dd className="chat-review-quote">{previewText(review.selection,300)}</dd></>}
    <dt>Context</dt>
    <dd>{review.sources.length===0?<span className="chat-review-none">None. Only your question is sent.</span>:review.sources.map(s=>
-    <details key={s.id} className="chat-review-source"><summary>{s.label} <span className="chat-review-est">about {formatCount(s.estimatedTokens)} tokens</span></summary><pre>{previewText(s.text,2000)}</pre></details>)}</dd>
+    <details key={s.id} className="chat-review-source"><summary>{s.label} <span className="chat-review-est">about {formatCount(s.estimatedTokens)} tokens</span></summary><pre>{review.ephemeral?s.text:previewText(s.text,2000)}</pre></details>)}</dd>
    <dt>Earlier messages</dt>
    <dd>{review.historyPairs===0?'None yet.':`${review.historyPairs} earlier ${review.historyPairs===1?'exchange':'exchanges'} included${review.omittedPairs>0?`, ${review.omittedPairs} older left out`:''}.`}</dd>
   </dl>
   <details className="chat-review-source"><summary>Instructions Claude gets</summary><pre>{review.instruction}</pre></details>
   <p className="chat-review-total">About {formatCount(review.estimatedTokens)} tokens in all</p>
-  <label className="chat-review-ask"><input type="checkbox" checked={stopAsking} onChange={e=>setStopAsking(e.target.checked)}/> Don’t ask again this session</label>
+  {review.ephemeral?<><p>{SESSION_NOTICES.privacy}</p><details><summary>Recent messages included</summary>{review.history.map(t=><div key={t.id}><pre>{t.user}</pre><pre>{t.assistant}</pre></div>)}</details></>:<label className="chat-review-ask"><input type="checkbox" checked={stopAsking} onChange={e=>setStopAsking(e.target.checked)}/> Don’t ask again this session</label>}
   <div className="chat-review-actions"><button ref={send} type="button" className="chat-review-send" onClick={onSend}>Send</button><button type="button" className="ghost" onClick={onCancel}>Cancel</button></div>
  </section>;
 }
@@ -53,6 +54,10 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  const [usage,setUsage]=useState<ChatUsage|null>(null),[persistence,setPersistence]=useState<'private'|'memory'>('memory'),[notice,setNotice]=useState(''),[adding,setAdding]=useState<string|null>(null);
  const input=useRef<HTMLTextAreaElement>(null),log=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),alive=useRef(true);
  const [inv,setInv]=useState({enabled:false,claude:false,persistence:false}),[investigating,setInvestigating]=useState(false),[addingText,setAddingText]=useState<string|null>(null);
+ const [sessions,setSessions]=useState<{id:SessionKind;label:string;entries:{id:string;label:string}[];notice?:string}[]|null>(null),[pickedSessions,setPickedSessions]=useState<Record<string,string[]>>({});
+ const [sessionLoading,setSessionLoading]=useState(false);
+ useEffect(()=>{setSessions(null);setPickedSessions({});},[path]);
+ const loadSessions=async()=>{if(!path||sessionLoading)return;setSessionLoading(true);try{const list=await api.chatSessions(path);setSessions(list.filter(m=>m.id==='claude-sessions'||m.id==='codex-sessions'));}catch{setNotice(SESSION_NOTICES.format);}finally{setSessionLoading(false);}};
  const chatId=useRef(crypto.randomUUID()); // "this chat" for permissions lasts as long as this panel stays open
  useEffect(()=>{let off=false;api.investigator().then((s:any)=>{if(!off)setInv({enabled:!!s.policy?.enabled,claude:!!s.claudeConfigured,persistence:!!s.persistence});}).catch(()=>{});return()=>{off=true;};},[settingsVersion]);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;abort.current?.abort();};},[]);
@@ -113,7 +118,8 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
   if(investigating&&investigatorReady){const id=newTurnId();setNotice('');questions.set(id,question);setTurns(t=>[...t,{id,question,status:'streaming',text:'',trail:emptyTrail()}]);setDraft('');await runInvestigation(id,question);return;}
   const id=newTurnId(),{context,selection}=buildContext(chips,getSelection());setNotice('');setBusy(true);
   try{
-   const review=await api.chatCall<ChatReview>('review',{id,path,question,context,...(selection?{selection}:{})});
+   const sessionContext=(['claude-sessions','codex-sessions'] as const).filter(moduleId=>pickedSessions[moduleId]?.length).map(moduleId=>({moduleId,ids:pickedSessions[moduleId]}));
+   const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...sessionContext],...(selection?{selection}:{})});
    questions.set(id,question);setTurns(t=>[...t,{id,question,status:'review',text:''}]);setDraft('');
    if(review.requiresConfirmation){setPending(review);setBusy(false);return;}
    await send(review,false);
@@ -144,6 +150,11 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
     onClick={()=>{if(investigatorReady)setInvestigating(v=>!v);else onOpenSettings();}}>Investigate</button></span>
    <span className="chat-context-total">About {formatCount(total)} tokens of context</span>
   </div>
+  <details className="chat-review-source"><summary>IDE session context (optional)</summary>
+   <p>{SESSION_NOTICES.privacy} {SESSION_NOTICES.redaction}</p>
+   <button type="button" className="ghost" disabled={composing||sessionLoading} onClick={()=>void loadSessions()}>{sessionLoading?'Looking for local sessions…':'List sessions for this project'}</button>
+   {sessions?.map(m=><fieldset key={m.id} disabled={composing||investigating}><legend>{m.label}</legend>{m.notice?<p role="status">{m.notice}</p>:m.entries.length===0?<p>No matching sessions.</p>:m.entries.map(entry=><label key={entry.id}><input type="checkbox" checked={pickedSessions[m.id]?.includes(entry.id)??false} onChange={e=>setPickedSessions(p=>({...p,[m.id]:e.target.checked?[...(p[m.id]??[]),entry.id]:(p[m.id]??[]).filter(id=>id!==entry.id)}))}/>{entry.label}</label>)}</fieldset>)}
+  </details>
   {investigating&&investigatorReady&&<p className="chat-investigating">Investigating: agents may read files in your registered folders, read-only. Nothing is written.</p>}
   {peek&&<div className="chat-peek" role="region" aria-label={`Preview of ${chips.find(c=>c.id===peek)?.label}`}><pre>{previewText(peekText[peek],1200)}</pre></div>}
   <div className="chat-log" role="log" aria-label="Conversation" ref={log}>
@@ -159,7 +170,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
       {t.text?<p className="chat-stream">{t.text}<span className="chat-caret" aria-hidden="true"/></p>:<div className="chat-thinking"><Thinking/></div>}
       <div className="chat-message-tools"><button type="button" className="chat-stop" onClick={stop}>Stop</button></div></div>}
      {!t.trail&&t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span><ReplyMarkdown text={t.text}/>
-      {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{errorText('secrets_blocked')}</p>}
+      {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
       <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}>Add to note</button></div></div>}
      {!t.trail&&t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button></div>}
     </div>)}
@@ -175,7 +186,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
   </form>
   <footer className="chat-foot">
    <p className="chat-usage">{usage?usageLine(usage):'No calls yet'}</p>
-   {persistence==='memory'&&turns.some(t=>t.status==='complete')&&<p className="chat-persist">Kept in memory only. <button type="button" className="ghost" title="Adds an ignore rule so this chat can be saved privately beside the note" onClick={()=>void keep()}>Keep on disk privately</button></p>}
+   {persistence==='memory'&&turns.some(t=>t.status==='complete'&&!t.message?.ephemeral)&&<p className="chat-persist">Kept in memory only. <button type="button" className="ghost" title="Adds an ignore rule so this chat can be saved privately beside the note" onClick={()=>void keep()}>Keep on disk privately</button></p>}
   </footer>
  </aside>;
 }
