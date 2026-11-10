@@ -1,4 +1,5 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
+import {InvestigatorPanel} from './InvestigatorPanel.tsx';
 import {api,ApiError,streamChat} from '../api.ts';
 import {CHAT_MESSAGES,type ChatErrorCode,type ChatReview,type ChatUsage} from '../../shared/chat.ts';
 import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
@@ -100,6 +101,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose}
 
  return <aside id="chat-panel" className="chat-panel" aria-label="Aitiarch AI chat" onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();onClose();}}}>
   <header className="chat-head"><h2>{chatHeader(path)}</h2><button type="button" className="ghost chat-close" aria-label="Close chat" onClick={onClose}>×</button></header>
+  {path&&<InvestigatorPanel key={path} note={path}/>}
   <div className="chat-context" role="group" aria-label="What the chat can see">
    {chips.map(c=><span key={c.id} className="chat-chip-wrap">
     <button type="button" className="chat-chip" aria-pressed={c.on} onClick={()=>setChips(list=>toggleChip(list,c.id))}>{c.label}<span className="chat-chip-est"> · {formatCount(estimate[c.id])}</span></button>

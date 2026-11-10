@@ -97,6 +97,8 @@ export async function streamChat(body: { reviewId: string; confirmed?: boolean; 
 export const api = {
   chat:(path:string)=>ok<ChatSnapshot>('GET',`/api/chat?path=${encodeURIComponent(path)}`),
   chatCall:<T,>(action:string,body:unknown)=>ok<T>('PUT','/api/chat/'+action,body),
+  investigator:()=>ok<any>('GET','/api/investigator'),
+  investigatorCall:<T,>(action:string,body:unknown)=>ok<T>('PUT','/api/investigator/'+action,body),
   usage:()=>ok<import('../shared/usage.ts').UsageSummary>('GET','/api/usage'),
   insertionStatus:(path:string)=>ok<import('../server/insertion-store.ts').RepairStatus>('GET',`/api/insertions?path=${encodeURIComponent(path)}`),
   threads:(path:string)=>ok<InkSnapshot>('GET',`/api/threads?path=${encodeURIComponent(path)}`),

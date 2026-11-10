@@ -1,4 +1,6 @@
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
+import {InvestigatorError,type InvestigatorRunner,type AgentName} from '../shared/investigator.ts';
+import {InvestigatorRuntime} from './investigator/runtime.ts';import {PolicyGate} from './investigator/policy.ts';import {Lookups} from './investigator/lookups.ts';import {LedgerStore} from './ledger-store.ts';
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES} from '../shared/chat.ts';
 import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
@@ -30,6 +32,7 @@ export interface AppOptions {
   distDir: string;
   allowOrigins?: string[];
   provider?: Provider;
+  investigator?:Partial<Record<AgentName,InvestigatorRunner>>;
   plan?: ChatGPTPlan;
   usage?: {summary():Promise<import('../shared/usage.ts').UsageSummary>};
 }
@@ -126,6 +129,8 @@ export function createApp(opts: AppOptions) {
   };
 
   const uiStateStore = new UiStateStore(store.rootReal);
+  const investigatorPolicy=new PolicyGate(uiStateStore,path.dirname(store.rootReal));
+  const investigator=new InvestigatorRuntime(investigatorPolicy,new Lookups(investigatorPolicy),new LedgerStore(store.rootReal),opts.investigator??{},undefined,store.rootReal);
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
   const chatStore=new ChatStore(store.rootReal);
   const chatReady=inkReady.then(ink=>new ChatRuntime(store,ink,chatStore,opts.provider));
@@ -180,6 +185,27 @@ export function createApp(opts: AppOptions) {
     }
 
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await store.tree());
+    if(url.pathname==='/api/investigator'&&req.method==='GET')return json(res,200,{...await investigatorPolicy.status(),claudeConfigured:!!opts.investigator?.claude,codex:'Blocked: cannot verify root confinement or pattern denial.'});
+    if(url.pathname.startsWith('/api/investigator/')&&req.method==='PUT'){
+      const b=await readBody(req) as any;
+      try{
+        if(url.pathname==='/api/investigator/configure'){
+          if(b.enabled===true&&b.action!=='enable-investigator')throw new InvestigatorError('invalid_policy');const {action,...patch}=b;const status=await investigatorPolicy.configure(patch);if(b.enabled===false)investigator.stopAll();return json(res,200,status);
+        }
+        if(url.pathname==='/api/investigator/grant'){await investigatorPolicy.grant(b.chat,b.tier,b.duration);return json(res,200,{});}
+        if(url.pathname==='/api/investigator/enable-persistence'){if(b.action!=='add-ignore-line')throw new InvestigatorError('invalid_policy');return json(res,200,await uiStateStore.enableDrafts());}
+        if(url.pathname==='/api/investigator/cancel'){investigator.cancel(b.chat,b.id);return json(res,200,{});}
+        if(url.pathname==='/api/investigator/stop'){investigator.stopAll();return json(res,200,{});}
+        if(url.pathname==='/api/investigator/answer'){
+          const controller=new AbortController(),abort=()=>controller.abort();res.on('close',abort);let bytes=0;
+          try{await investigator.answer(b,event=>{
+            if(res.destroyed)throw new InvestigatorError('cancelled');const frame=`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;bytes+=Buffer.byteLength(frame);if(bytes>1000000||res.writableLength>262144)throw new InvestigatorError('budget');
+            if(!res.headersSent)res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store'});res.write(frame);
+          },controller.signal);res.end();}finally{res.off('close',abort);}return;
+        }
+        throw new InvestigatorError('invalid_envelope');
+      }catch(e){if(res.headersSent)return res.end();const code=e instanceof InvestigatorError?e.code:'invalid_policy';return json(res,409,{error:code,message:code==='blocked'?'Blocked: raise policy to retry':'Investigator: '+code+'. Nothing was retried.'});}
+    }
     if(url.pathname==='/api/usage'&&req.method==='GET'){
       const chats=(await chatReady).usage();return json(res,200,{...(opts.usage?await opts.usage.summary():{since:new Date().toISOString(),hourlyCap:2,providers:[]}),...(chats.length?{chats}:{})});
     }
@@ -432,6 +458,7 @@ export function createApp(opts: AppOptions) {
       });
     },
     async close(): Promise<void> {
+      await investigator.close();
       await (await chatReady).close();
       clearInterval(ka);
       for (const c of clients) c.end();

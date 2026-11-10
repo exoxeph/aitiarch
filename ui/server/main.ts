@@ -8,6 +8,7 @@ import { createApp } from "./http.ts";
 import { Store } from "./store.ts";
 import { NoteWatcher } from "./watch.ts";
 import { createProvider } from "./providers/index.ts";
+import {InvestigatorCli} from './investigator/cli.ts';
 import { ChatGPTPlan } from "./providers/chatgpt-plan.ts";
 import { sweepStaleProviderTemps } from "./providers/temp-cleanup.ts";
 
@@ -51,7 +52,7 @@ const {UsageLogs}=await import('./providers/usage.ts');
 const usage=new UsageLogs({notebookRoot:store!.rootReal});
 const provider = plan ?? (args.claude ? createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205",usageLog:usage }) : undefined);
 if (provider) for (const warning of (await provider.checkAvailability()).warnings ?? []) console.warn(warning);
-const app = createApp({ store: store!, watcher, distDir, allowOrigins: args.origins, provider, plan,usage });
+const app = createApp({ store: store!, watcher, distDir, allowOrigins: args.origins, provider, plan,usage,investigator:args.claude?{claude:new InvestigatorCli({command:args.claude})}:undefined });
 
 // Deterministic port per notebook folder, so the same project always opens at the same address.
 const h = parseInt(createHash("sha1").update(store!.rootReal.toLowerCase()).digest("hex").slice(0, 6), 16);
