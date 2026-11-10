@@ -68,4 +68,17 @@ export function connectorPath(end:{x:number;lineBottom:number;lineMid?:number;ri
  return [{x:startX,y:mid},{x:gutterX,y:mid},{x:gutterX,y:dot.y},{x:dot.x,y:dot.y}];
 }
 
-export const connectorVisible=(target:number,top:number,viewportHeight:number)=>target>=0&&target<=viewportHeight&&Math.abs(top-target)<=48;
+/**
+ * The same connector as one SVG path that flexes like a sticky cord. It leaves the sentence level with its line; if the blob is not
+ * level with it, a single smooth S-curve carries it across the empty gutter to the blob's dot. It is straight when level, follows
+ * the blob when it is pushed up or down, and never enters the writing column.
+ */
+export function connectorD(end:{x:number;lineBottom:number;lineMid?:number;rightX?:number;leftX?:number},dot:{x:number;y:number},column:{left:number;right:number},side:ThoughtSide){
+ const mid=end.lineMid??end.lineBottom-8,startX=side==='right'?Math.min(end.rightX??column.right+4,column.right+4):Math.max(end.leftX??column.left-4,column.left-4);
+ const r=(n:number)=>Math.round(n*10)/10;
+ if(Math.abs(dot.y-mid)<=10)return `M${r(startX)} ${r(dot.y)}L${r(dot.x)} ${r(dot.y)}`;
+ const edge=side==='right'?column.right+4:column.left-4,half=(dot.x-edge)/2;
+ return `M${r(startX)} ${r(mid)}`+(startX===edge?'':`L${r(edge)} ${r(mid)}`)+`C${r(edge+half)} ${r(mid)} ${r(dot.x-half)} ${r(dot.y)} ${r(dot.x)} ${r(dot.y)}`;
+}
+/** A connector shows while its sentence or its blob's dot is on screen, however far apart they are; it is never dropped because blobs were pushed down. */
+export const connectorVisible=(target:number,top:number,viewportHeight:number)=>(target>=0&&target<=viewportHeight)||(top+14>=0&&top+14<=viewportHeight);

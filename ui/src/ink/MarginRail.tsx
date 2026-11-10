@@ -4,7 +4,7 @@ import {ReplyMarkdown} from './ReplyMarkdown.tsx';
 import {DiagramReveal,Streamed,Thinking} from './streaming.tsx';
 import {useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import type {InkItem} from '../../shared/ink.ts';
-import {blobBox,connectorPath,connectorVisible,thoughtText,type ThoughtSide} from '../../shared/thoughts.ts';
+import {blobBox,connectorD,connectorVisible,thoughtText,type ThoughtSide} from '../../shared/thoughts.ts';
 export interface PlacedMargin {item:InkItem;top:number;target:number;side:ThoughtSide;height:number;end?:{x:number;lineBottom:number;lineMid?:number;rightX?:number;leftX?:number}}
 interface Geometry {width:number;left:number;right:number}
 export function MarginRail({placed,renderDraft}:{placed:PlacedMargin[];renderDraft?:(id:string)=>ReactNode}){
@@ -37,8 +37,8 @@ export function MarginRail({placed,renderDraft}:{placed:PlacedMargin[];renderDra
   {geometry&&<svg className="thought-connectors" aria-hidden="true" width={geometry.width} height="100%">
    <defs><filter id="thought-rough" filterUnits="userSpaceOnUse" x="-4000" y="-4000" width="12000" height="12000"><feTurbulence type="fractalNoise" baseFrequency="0.025 0.09" numOctaves="2" seed="7" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="3.4" xChannelSelector="R" yChannelSelector="G"/></filter></defs>
    {columns.filter(({p})=>p.end&&connectorVisible(p.target,p.top,rail.current?.clientHeight??0)).map(({p,box})=>{
-    const dotX=p.side==='right'?box.left:box.left+box.width,pts=connectorPath(p.end!,{x:dotX,y:p.top+14},{left:geometry.left,right:geometry.right},p.side);
-    return <path key={p.item.id} className={'thought-connector'+(active===p.item.id||focused===p.item.id?' thought-connector-on':'')} data-ink-id={p.item.id} d={pts.map((q,i)=>(i?'L':'M')+q.x+' '+q.y).join(' ')}/>;
+    const dotX=p.side==='right'?box.left:box.left+box.width;
+    return <path key={p.item.id} className={'thought-connector'+(active===p.item.id||focused===p.item.id?' thought-connector-on':'')} data-ink-id={p.item.id} d={connectorD(p.end!,{x:dotX,y:p.top+14},{left:geometry.left,right:geometry.right},p.side)}/>;
    })}
   </svg>}
   {placed.map(({item,top,side})=>{const box=geometry?blobBox(geometry.width,geometry.left,geometry.right,side):null;
