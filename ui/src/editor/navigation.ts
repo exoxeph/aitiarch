@@ -22,7 +22,8 @@ export const pointerPreview=StateField.define<readonly SelRange[]|null>({
  },
 });
 export function previewRanges(state:EditorState):readonly SelRange[]{
- return state.field(pointerPreview,false)??state.selection.ranges.map(r=>({from:r.from,to:r.to}));
+ // A selection that spans lines reveals nothing: selecting text never turns hidden syntax into visible raw Markdown.
+ return state.field(pointerPreview,false)??state.selection.ranges.filter(r=>r.empty||state.doc.lineAt(r.from).number===state.doc.lineAt(r.to).number).map(r=>({from:r.from,to:r.to}));
 }
 const pointerPolicy=EditorView.domEventObservers({
  mousedown(e,view){if(e.button===0)view.dispatch({effects:freezePreview.of(true)});},

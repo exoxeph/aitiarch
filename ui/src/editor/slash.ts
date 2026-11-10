@@ -94,7 +94,8 @@ export function slashSource(ctx: CompletionContext): CompletionResult | null {
   const options: Completion[] = (m.inline ? inlineItems(m.query) : slashItems(m.query)).map((item) => ({
     label: item.label,
     detail: item.detail,
-    section: {name:item.group,rank:["Text","Lists","Insert","Advanced"].indexOf(item.group)},
+    // Group headings only while browsing; once you type, the best match comes first and the headings go away.
+    ...(m.query ? {} : { section: {name:item.group,rank:["Text","Lists","Insert","Advanced"].indexOf(item.group)} }),
     apply: (view, _c, f, t) => {
       applySlash(view, item, f - 1, t); // f - 1 includes the slash itself
     },

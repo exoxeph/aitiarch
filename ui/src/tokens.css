@@ -104,7 +104,7 @@
   scrollbar-color: var(--rule) transparent;
   scrollbar-width: thin;
 }
-::selection { background: var(--selection); color: var(--ink-text); }
+::selection { background: var(--selection); } /* no colour: a colour here would make hidden (transparent) syntax visible when it is selected */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--control-border); background-clip: content-box; }

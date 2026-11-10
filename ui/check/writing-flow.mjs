@@ -84,10 +84,57 @@ try{
  else{await page.locator('.cm-table-widget td[contenteditable]').first().click();await page.waitForTimeout(150);
  const clicked=await cellAt();if(!clicked||clicked.line!==2)failures.push({case:'clicking a cell edits that cell',got:clicked});}
  if(await page.locator('.cm-table-source, .cm-line:has-text("| ---")').count()>0)failures.push({case:'clicking a cell must not switch to raw Markdown'});
+ // ---- Never raw: selecting text, or putting the cursor on a command, must not show callout headers, checkbox syntax, fences or table Markdown.
+ const rawDoc='# T\n\n> [!note]\n> Body\n\n- [ ] Todo\n- Bullet\n\n```js\ncode\n```\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nEnd\n';
+ await page.evaluate(d=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,to:v.state.doc.length,insert:d},selection:{anchor:v.state.doc.length}});v.focus();},rawDoc);
+ const rawState=()=>page.evaluate(()=>{
+  const transparent=c=>/^rgba\(\s*0,\s*0,\s*0,\s*0\)$|^transparent$/.test(c);
+  const hidden=sel=>[...document.querySelectorAll(sel)].every(el=>transparent(getComputedStyle(el).color)&&transparent(getComputedStyle(el,'::selection').color));
+  const count=s=>document.querySelectorAll(s).length;
+  return {calloutMarkers:count('.cm-callout-marker'),calloutShown:count('.cm-callout-marker:not(.cm-callout-off)'),calloutHidden:hidden('.cm-callout-off'),
+   tasks:count('.cm-task-off'),tasksHidden:hidden('.cm-task-off'),bullets:count('.cm-bullet-off'),bulletsHidden:hidden('.cm-bullet-off'),
+   fences:count('.cm-fence'),fencesHidden:hidden('.cm-fence'),tables:count('.cm-table-widget'),tableSource:count('.cm-table-source'),revealed:count('.cm-gm-on')};
+ });
+ const want=st=>st.calloutMarkers===1&&st.calloutShown===0&&st.calloutHidden&&st.tasks===1&&st.tasksHidden&&st.bullets===1&&st.bulletsHidden&&st.fences>=2&&st.fencesHidden&&st.tables===1&&st.tableSource===0;
+ await page.keyboard.press('Control+a');await page.waitForTimeout(250);
+ const allSelected=await rawState();if(!want(allSelected))failures.push({case:'Select all must not reveal raw syntax',got:allSelected});
+ await page.screenshot({path:path.join(output,'never-raw-selected.png')});
+ for(const [label,needle] of [['callout header','[!note]'],['todo line','- [ ] Todo'],['bullet line','- Bullet'],['code fence','```js']]){
+  await page.evaluate(([d,n,off])=>{const v=window.__aitiarch['n.md'].view,i=d.indexOf(n)+off;v.dispatch({selection:{anchor:i}});v.focus();},[rawDoc,needle,needle==='[!note]'?3:2]);await page.waitForTimeout(200);
+  const st=await rawState();if(!want(st))failures.push({case:`The cursor on the ${label} must not reveal raw syntax`,got:st});
+ }
+ // ---- Links: hover shows where they go (shortened when long); a click opens them; Alt+click edits.
+ const longUrl='https://example.com/'+'segment/'.repeat(14)+'final-page.html?x=1';
+ await page.evaluate(d=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,to:v.state.doc.length,insert:d},selection:{anchor:v.state.doc.length}});v.focus();},`[Docs](example.com) and [Long](${longUrl}).\n\nEnd\n`);
+ await page.waitForTimeout(250);
+ await page.context().route('https://example.com/**',r=>r.fulfill({status:200,contentType:'text/html',body:'<title>ok</title>'}));
+ const linkBox=async i=>{const b=await page.locator('.cm-link').nth(i).boundingBox();return {x:b.x+b.width/2,y:b.y+b.height/2};};
+ const tip=()=>page.evaluate(()=>{const t=document.querySelector('.cm-link-tip');return t?{url:t.querySelector('.cm-link-tip-url')?.textContent,hint:t.querySelector('.cm-link-tip-hint')?.textContent}:null;});
+ let pt=await linkBox(0);await page.mouse.move(pt.x,pt.y);await page.waitForSelector('.cm-link-tip',{timeout:4000}).catch(()=>{});
+ const t1=await tip();if(!t1||t1.url!=='https://example.com'||!/Click to open/.test(t1.hint))failures.push({case:'hovering a link shows its address and how to open it',got:t1});
+ await page.mouse.move(5,5);await page.waitForTimeout(300);
+ pt=await linkBox(1);await page.mouse.move(pt.x,pt.y);await page.waitForSelector('.cm-link-tip',{timeout:4000}).catch(()=>{});
+ const t2=await tip();if(!t2||!t2.url.startsWith('https://example.com/segment')||!t2.url.includes('…')||t2.url.length>64||!t2.url.endsWith('=1'))failures.push({case:'a long address is shown shortened, start and end visible',got:t2});
+ await page.mouse.move(5,5);await page.waitForTimeout(300);
+ pt=await linkBox(0);
+ const popup=page.waitForEvent('popup',{timeout:4000}).catch(()=>null);await page.mouse.click(pt.x,pt.y);const opened=await popup;
+ if(!opened)failures.push({case:'a plain click on a link opens it'});else{if(!/^https:\/\/example\.com\/?$/.test(opened.url()))failures.push({case:'the click opens the right address',got:opened.url()});await opened.close();}
+ const before=await page.evaluate(`${V}.state.doc.toString()`);const popup2=page.waitForEvent('popup',{timeout:1200}).catch(()=>null);
+ await page.keyboard.down('Alt');await page.mouse.click(pt.x,pt.y);await page.keyboard.up('Alt');if(await popup2)failures.push({case:'Alt+click edits the link instead of opening it'});
+ if(await page.evaluate(`${V}.state.doc.toString()`)!==before)failures.push({case:'Alt+click must not change the note'});
+ // ---- The slash menu searches as you type: the best match comes first, with no group headings in the way.
+ await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,to:v.state.doc.length,insert:''},selection:{anchor:0}});v.focus();});
+ await page.keyboard.type('/i',{delay:30});await page.waitForTimeout(300);
+ const firstFor=await page.evaluate(()=>[...document.querySelectorAll('.cm-tooltip-autocomplete li')].map(l=>l.textContent.replace(/\s+/g,' ').trim().split(' ')[0]));
+ if(!firstFor.length||!/Image/.test(firstFor[0]))failures.push({case:'typing /i puts Image first',got:firstFor.slice(0,4)});
+ if(await page.evaluate(()=>document.querySelectorAll('.cm-tooltip-autocomplete .cm-completionSection').length)>0)failures.push({case:'no group headings while searching'});
+ await page.keyboard.type('ma',{delay:30});await page.waitForTimeout(300);
+ const narrowed=await page.evaluate(()=>[...document.querySelectorAll('.cm-tooltip-autocomplete li')].length);if(narrowed!==1)failures.push({case:'typing /ima leaves only Image',got:narrowed});
+ await page.keyboard.press('Escape');
  // One undo reverts a whole Enter or Backspace step.
  await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,to:v.state.doc.length,insert:'- One'},selection:{anchor:5}});v.focus();});
  await page.keyboard.press('Enter');await page.keyboard.press('Control+z');
  const undone=await page.evaluate(`${V}.state.doc.toString()`);if(undone!=='- One')failures.push({case:'undo of Enter',want:'- One',got:undone});
  assert.deepEqual(failures,[],'writing flow failures:\n'+JSON.stringify(failures,null,1));
- console.log(JSON.stringify({pass:true,cases:cases.length+7,providerCalls:0}));
+ console.log(JSON.stringify({pass:true,cases:cases.length+19,providerCalls:0}));
 }finally{await browser.close();await app.close?.();await watcher.stop?.();await rm(root,{recursive:true,force:true});}

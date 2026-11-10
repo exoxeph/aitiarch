@@ -1,5 +1,5 @@
 // Display-only GFM tables. Edits always use the original Markdown, never a serializer.
-import {StateEffect,StateField,Prec,type ChangeSpec,type Text,type Range,type EditorState} from '@codemirror/state';
+import {EditorSelection,EditorState,StateEffect,StateField,Prec,type ChangeSpec,type Text,type Range} from '@codemirror/state';
 import {Decoration,EditorView,WidgetType,keymap,type DecorationSet} from '@codemirror/view';
 import {syntaxTree} from '@codemirror/language';
 import type {SyntaxNode} from '@lezer/common';
@@ -128,7 +128,6 @@ class TableWidget extends WidgetType{
    button('+ Column','Add a column on the right',edit((lines,at)=>({changes:[...pending(active,lines),...addColumn(lines)],focus:at}))),
    button('Delete row','Delete the row you are in',edit((lines,at)=>{const d=deleteRow(lines,at.line);return d?{changes:[...(active&&pos(active).line!==at.line?pending(active,lines):[]),d],focus:{line:Math.min(at.line,lines.length-2),col:at.col}}:null;})),
    button('Delete column','Delete the column you are in',edit((lines,at)=>{const d=deleteColumn(lines,at.col);return d?{changes:d,focus:{line:at.line,col:Math.max(0,Math.min(at.col,columnCount(lines)-2))}}:null;})),
-   button('Edit source','Edit the Markdown text of this table',()=>{view.dispatch({selection:{anchor:from},scrollIntoView:true});view.focus();}),
   );
   const hint=document.createElement('span');hint.className='cm-table-hint';hint.textContent='Tab next cell · Enter row below';tools.append(hint);
   scroll.append(table,tools);wrap.append(scroll);
@@ -139,22 +138,44 @@ class TableWidget extends WidgetType{
  destroy(dom:HTMLElement){observers.get(dom)?.disconnect();observers.delete(dom);}
 }
 function build(state:EditorState){
- const out:Range<Decoration>[]=[];const forced=state.field(closed);
+ const out:Range<Decoration>[]=[];
  const nodes:SyntaxNode[]=[];syntaxTree(state).iterate({enter:n=>{if(n.name==='Table'){nodes.push(n.node);return false;}}});
  for(const n of nodes){
   // A replacement must never swallow an existing inline answer widget inside the table.
   if(state.field(inkField,false)?.items.some(item=>item.kind==='answer'&&!item.generation?.dismissed&&!item.thread?.dismissed&&item.attachment.status==='attached'&&item.attachment.to>=n!.from&&item.attachment.to<=n!.to))continue;
   const a=state.doc.lineAt(n.from).number,b=state.doc.lineAt(n.to).number;
-  const active=state.selection.ranges.some(r=>state.doc.lineAt(r.from).number<=b&&state.doc.lineAt(r.to).number>=a);
-  if(active&&!(forced?.from===n.from&&forced.to===n.to))continue;
+  void a; // tables are always drawn as tables: selecting or moving through them never shows the Markdown
   out.push(Decoration.replace({block:true,widget:new TableWidget(n,state.doc,state.sliceDoc(n.from,n.to),b-a+1)}).range(state.doc.lineAt(n.from).from,n.to));
  }
  return Decoration.set(out,true);
 }
-const field=StateField.define<DecorationSet>({create:build,update(value,tr){return tr.docChanged||tr.selection||tr.effects.some(e=>e.is(closeTableSource))||tr.state.field(inkField,false)!==tr.startState.field(inkField,false)||syntaxTree(tr.state)!==syntaxTree(tr.startState)?build(tr.state):value;},provide:f=>EditorView.decorations.from(f)});
+const field=StateField.define<DecorationSet>({create:build,update(value,tr){return tr.docChanged||tr.selection||tr.effects.some(e=>e.is(closeTableSource))||tr.state.field(inkField,false)!==tr.startState.field(inkField,false)||syntaxTree(tr.state)!==syntaxTree(tr.startState)?build(tr.state):value;},provide:f=>[EditorView.decorations.from(f),EditorView.atomicRanges.of(view=>view.state.field(f))]});
 const keys=Prec.highest(keymap.of([{key:'Escape',run:view=>{
  let n:SyntaxNode|null=syntaxTree(view.state).resolveInner(view.state.selection.main.head,1);while(n&&n.name!=='Table')n=n.parent;
  if(!n)return false;
  view.dispatch({effects:closeTableSource.of({from:n.from,to:n.to})});view.dom.querySelector<HTMLElement>(`[data-table-from="${n.from}"]`)?.focus();return true;
 }}]));
-export const tablePreview=[closed,field,keys];
+/**
+ * A table is only ever drawn as a table, so the cursor can never rest inside its hidden Markdown (typing there would corrupt a
+ * row). A cursor or selection end that lands inside one is moved to the nearest line outside it.
+ */
+const keepOutside=EditorState.transactionFilter.of(tr=>{
+ if(!tr.selection||tr.docChanged)return tr;
+ const doc=tr.newDoc,tables:[number,number][]=[];
+ tr.startState.field(field).between(0,doc.length,(a,b)=>{tables.push([a,b]);});
+ if(!tables.length)return tr;
+ let moved=false;
+ const snap=(pos:number,edgesOk:boolean)=>{
+  for(const [a,b] of tables){
+   if(pos<a||pos>b||(edgesOk&&(pos===a||pos===b)))continue; // a range may start or end exactly on a table's edge
+   moved=true;
+   const after=b<doc.length?b+1:-1,before=a>0?a-1:-1;
+   if(before>=0&&(pos-a<=(b-a)/2||after<0))return before;
+   return after>=0?after:pos;
+  }
+  return pos;
+ };
+ const ranges=tr.selection.ranges.map(r=>EditorSelection.range(snap(r.anchor,!r.empty),snap(r.head,!r.empty)));
+ return moved?[tr,{selection:EditorSelection.create(ranges,tr.selection.mainIndex)}]:tr;
+});
+export const tablePreview=[closed,field,keys,keepOutside];

@@ -8,6 +8,7 @@ import { frontmatterEnd } from "../frontmatter.ts";
 import { findFailedMarks } from "./format.ts";
 import { FenceHeader, fenceLabel } from "./codeblocks.ts";
 import { ImageWidget, imageClicks, imageKeys, imageSrc } from "./images.ts";
+import { linkHref, linkTooltip } from "./links.ts";
 import { toggleTaskAt } from "./tasks.ts";
 import { autolinkHides, calloutHeader, hidesFor, quoteMarkGroups, touchesLines, touchesSpan } from "./reveal.ts";
 import {previewRanges} from './navigation.ts';
@@ -273,7 +274,7 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
             if (header) {
               lineDeco(n.from, n.to, `cm-callout cm-callout-${header.kind}`);
               if (header.kind === 'ai' && first.from >= rFrom) out.push(Decoration.widget({ widget: new AdoptButton(), side: 1 }).range(first.to));
-              if (first.from >= rFrom) out.push(Decoration.mark({class:`cm-callout-marker${lineIsActive(first.from, first.to) ? '' : ' cm-callout-off'}`,attributes:{'data-label':header.kind}}).range(first.from+header.from, first.from+header.to));
+              if (first.from >= rFrom) out.push(Decoration.mark({class:`cm-callout-marker cm-callout-off`,attributes:{'data-label':header.kind}}).range(first.from+header.from, first.from+header.to));
             }
             return;
           }
@@ -284,15 +285,15 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
             // Bullets and checkboxes are drawn over the original characters (transparent text + a pseudo-element), never
             // replaced, so the text does not move when the caret enters or leaves the line.
             const marker = n.node.parent?.getChild("Task")?.getChild("TaskMarker");
-            if (marker && !lineIsActive(n.from, n.to)) {
+            if (marker) {
               const done = /x/i.test(state.sliceDoc(marker.from, marker.to));
               out.push(Decoration.mark({ class: `cm-task-off${done ? " cm-task-done" : ""}`, attributes: { "data-task-pos": String(marker.from) } }).range(n.from, marker.to));
-            } else if (!marker && /^[-*+]$/.test(state.sliceDoc(n.from, n.to)) && !lineIsActive(n.from, n.to)) out.push(Decoration.mark({ class: "cm-bullet-off" }).range(n.from, n.to));
+            } else if (!marker && /^[-*+]$/.test(state.sliceDoc(n.from, n.to))) out.push(Decoration.mark({ class: "cm-bullet-off" }).range(n.from, n.to));
             else out.push(Decoration.mark({ class: "cm-list-mark" }).range(n.from, n.to));
             return;
           }
           case "HorizontalRule":
-            lineDeco(n.from, n.to, lineIsActive(n.from, n.to) ? "cm-hr" : "cm-hr cm-hr-off");
+            lineDeco(n.from, n.to, "cm-hr cm-hr-off");
             return;
           case "Image": {
             // `![alt](path)` draws as a picture (or an alt-text placeholder) unless the caret is on its line, which shows the
@@ -314,7 +315,7 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
           case "Autolink": {
             const url = n.node.getChild("URL");
             if (!url) return;
-            out.push(Decoration.mark({ class: "cm-link", attributes: { "data-href": state.sliceDoc(url.from, url.to), title: "Ctrl+click to open" } }).range(url.from, url.to));
+            out.push(Decoration.mark({ class: "cm-link", attributes: { "data-href": state.sliceDoc(url.from, url.to) } }).range(url.from, url.to));
             for (const h of autolinkHides({ name: n.name, from: n.from, to: n.to, children: kids() }, ctx)) out.push(hide.range(h.from, h.to));
             return false;
           }
@@ -323,7 +324,7 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
             const p = n.node.parent?.name;
             if (p === "Link" || p === "Image" || p === "Autolink" || p === "LinkReference") return;
             const raw = state.sliceDoc(n.from, n.to);
-            out.push(Decoration.mark({ class: "cm-link", attributes: { "data-href": /^www\./i.test(raw) ? `https://${raw}` : raw, title: "Ctrl+click to open" } }).range(n.from, n.to));
+            out.push(Decoration.mark({ class: "cm-link", attributes: { "data-href": /^www\./i.test(raw) ? `https://${raw}` : raw } }).range(n.from, n.to));
             return;
           }
           case "Link": {
@@ -336,7 +337,7 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
             if (marks.length >= 2 && url) {
               const [textFrom, textTo] = [marks[0][1], marks[1][0]];
               if (textTo > textFrom) {
-                out.push(Decoration.mark({ class: "cm-link", attributes: { "data-href": url, title: "Ctrl+click to open" } }).range(textFrom, textTo));
+                out.push(Decoration.mark({ class: "cm-link", attributes: { "data-href": url } }).range(textFrom, textTo));
                 if (!touchesSpan(ctx.sel, n.from, n.to)) {
                   out.push(hide.range(marks[0][0], marks[0][1]));
                   if (n.to > textTo) out.push(hide.range(textTo, n.to));
@@ -351,7 +352,7 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
 
     // Quote carets: one gutter group per line, depth class for nested quotes.
     for (const g of quoteMarkGroups(quoteMarks, ctx)) {
-      out.push(gutterMark(g.revealed, g.selected).range(g.from, g.to));
+      out.push(Decoration.mark({ class: g.revealed ? "cm-gm cm-gm-ghost" : "cm-gm cm-gm-off" }).range(g.from, g.to)); // quote carets are never visible; on the active line they keep their width (transparent) so typing beside them works
       const line = doc.lineAt(g.from);
       if (g.depth > 1 && !quoteLines.has(line.number)) {
         quoteLines.add(line.number);
@@ -456,19 +457,21 @@ const clicks = EditorView.domEventHandlers({
     return toggleTaskAt(view, Number(el.getAttribute("data-task-pos")));
   },
   click(e, view) {
-    if (!(e.ctrlKey || e.metaKey)) return false;
+    // A plain click opens a link (Ctrl+click too). Alt+click, or a drag that selected text, edits instead.
+    if (e.button !== 0 || e.altKey || e.shiftKey) return false;
     const el = (e.target as HTMLElement | null)?.closest?.("[data-wiki],[data-href]") as HTMLElement | null;
     if (!el) return false;
+    if (!(e.ctrlKey || e.metaKey) && !view.state.selection.main.empty) return false;
     const wiki = el.getAttribute("data-wiki");
     if (wiki) {
       view.state.facet(previewHandlers)?.openWiki(wiki);
     } else {
-      const href = el.getAttribute("data-href") ?? "";
-      if (SAFE_HREF.test(href)) window.open(href, "_blank", "noopener,noreferrer");
+      const href = linkHref(el.getAttribute("data-href") ?? "");
+      if (href) window.open(href, "_blank", "noopener,noreferrer");
     }
     e.preventDefault();
     return true;
   },
 });
 
-export const livePreview = [inlineLayer, blockField, clicks, imageKeys, imageClicks];
+export const livePreview = [inlineLayer, blockField, clicks, imageKeys, imageClicks, linkTooltip];

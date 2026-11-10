@@ -11,13 +11,13 @@ const make=(doc:string,anchor=0,head=anchor)=>EditorState.create({doc,selection:
 function decorations(s:EditorState){const rows:{from:number;to:number;spec:any}[]=[];const set:DecorationSet=buildInline(s,[[0,s.doc.length]],ensureSyntaxTree(s,s.doc.length,5000)!);set.between(0,s.doc.length,(from,to,v)=>{rows.push({from,to,spec:v.spec});});return rows;}
 const hidden=(s:EditorState)=>decorations(s).filter(r=>r.to>r.from&&!r.spec.class&&!r.spec.widget).map(r=>[r.from,r.to]);
 
-it.each(['note','tip','warning'])('renders %s callouts without changing source or offsets and reveals only the active header',kind=>{
+it.each(['note','tip','warning'])('renders %s callouts without changing source or offsets and never reveals the raw header',kind=>{
  const doc=`Away\n\n> [!${kind}] Launch constraint\n> Keep it small.\n\nEnd`;
  let s=make(doc,0);const from=doc.indexOf('[!');
  expect(decorations(s).filter(r=>r.spec.class?.includes(`cm-callout-${kind}`))).toHaveLength(2);
  expect(decorations(s).find(r=>r.from===from)?.spec.class).toContain('cm-callout-off');
  s=s.update({selection:{anchor:doc.indexOf('Launch')}}).state;
- expect(decorations(s).find(r=>r.from===from)?.spec.class).not.toContain('cm-callout-off');
+ expect(decorations(s).find(r=>r.from===from)?.spec.class).toContain('cm-callout-off'); // the raw [!kind] is never shown, even with the caret in the header
  expect(s.doc.toString()).toBe(doc);
 });
 it('ignores unknown callouts and callout-like text inside fences',()=>{
@@ -35,12 +35,12 @@ it('reveals intersecting spans for a selection, including nested emphasis',()=>{
  const from=doc.indexOf('inner');s=s.update({selection:EditorSelection.range(from,from+3)}).state;
  expect(hidden(s).filter(([a])=>a<doc.indexOf(' and'))).toEqual([]);expect(hidden(s).some(([a])=>a===doc.indexOf('`'))).toBe(true);
 });
-it('hides heading, bullet and checkbox syntax except on the active line',()=>{
+it('hides heading syntax except on the active line, and always draws bullets and checkboxes',()=>{
  const doc='Away\n\n# Heading\n\n- [ ] Task\n- [x] Done\n';let s=make(doc,0);
  expect(decorations(s).some(r=>r.from===doc.indexOf('#')&&r.spec.class==='cm-gm cm-gm-off')).toBe(true);
  expect(decorations(s).filter(r=>r.spec.class?.startsWith('cm-task-off'))).toHaveLength(2);
  const task=doc.indexOf('Task');s=s.update({selection:{anchor:task}}).state;
- expect(decorations(s).filter(r=>r.spec.class?.startsWith('cm-task-off'))).toHaveLength(1);
+ expect(decorations(s).filter(r=>r.spec.class?.startsWith('cm-task-off'))).toHaveLength(2); // still drawn with the caret on the line
  expect(hidden(s).some(([a,b])=>a<=task&&b>doc.indexOf('- [ ]'))).toBe(false);
 });
 it('does not interpret marks inside code or frontmatter as rich text',()=>{

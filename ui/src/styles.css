@@ -115,6 +115,7 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
    Away from the line they are hidden; on the line they show. The text itself never moves. */
 .cm-gm { position: absolute; right: 100%; margin-right: 6px; white-space: pre; font-family: var(--font-mono); font-size: 12px; font-weight: 400; font-style: normal; line-height: inherit; color: var(--muted); }
 .cm-gm-off { visibility: hidden; }
+.cm-gm-ghost, .cm-gm-ghost * { color: transparent !important; } /* occupies its width so the text cursor can sit beside it, but is never seen */
 .cm-gm { pointer-events: none; }
 .cm-editor .cm-cursorLayer .cm-cursor {
   border-left-color: var(--caret);
@@ -135,7 +136,7 @@ code { font-family: var(--font-mono); background: var(--code-bg); padding: 1px 4
 .cm-quote { padding-left: 12px !important; color: var(--muted); font-style: italic; }
 .cm-quote-mark, .cm-list-mark { color: var(--muted); }
 .cm-hr { border-bottom: 1px solid var(--rule); color: var(--muted); }
-.cm-link { color: var(--link); text-decoration: underline; text-underline-offset: 2px; cursor: text; }
+.cm-link { color: var(--link); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .cm-wikilink { color: var(--link); border-bottom: 1px solid color-mix(in srgb, var(--link) 40%, transparent); }
 .cm-wikilink-unresolved { color: var(--muted); border-bottom-style: dashed; }
 .cm-fm { font-family: var(--font-mono); font-size: .8em; color: var(--muted); background: var(--paper-2); padding: 0 10px !important; }
@@ -699,3 +700,9 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .cm-footnote-ref { font: 600 .68em/1 var(--font-ui); vertical-align: super; color: var(--accent); padding: 0 1px; }
 .cm-footnote-def { font: .88em/1.6 var(--font-ui); color: var(--muted); }
 .cm-footnote-label { color: var(--accent); font-weight: 600; margin-inline-end: .4em; }
+
+/* Link hover preview. */
+.cm-tooltip.cm-tooltip-hover { background: transparent; border: 0; box-shadow: none; }
+.cm-link-tip { display: flex; flex-direction: column; gap: 2px; max-width: min(520px, 90vw); padding: 7px 11px; background: var(--toolbar); color: var(--ink-text); border: 1px solid var(--control-border); border-radius: var(--radius-small); box-shadow: var(--shadow-floating); font: 13px/1.4 var(--font-ui); }
+.cm-link-tip-url { color: var(--link); overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12.5px; }
+.cm-link-tip-hint { color: var(--muted); font-size: 12px; }

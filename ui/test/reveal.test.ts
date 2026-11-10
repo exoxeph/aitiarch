@@ -109,7 +109,7 @@ describe("rendered output", () => {
   it("horizontal rule hides its source away from the line and shows it on the line", () => {
     const doc = "Away\n\n---\n\nEnd";
     expect(cls(make(doc, 0), "cm-hr-off")).toHaveLength(1);
-    expect(cls(make(doc, doc.indexOf("---") + 1), "cm-hr-off")).toHaveLength(0);
+    expect(cls(make(doc, doc.indexOf("---") + 1), "cm-hr-off")).toHaveLength(1); // never shown as raw dashes
     expect(cls(make(doc, doc.indexOf("---") + 1), "cm-hr")).toHaveLength(1);
   });
 });
@@ -191,7 +191,7 @@ describe("tasks (D1)", () => {
     expect(rows(s).filter((r) => r.spec.widget && r.spec.widget.constructor.name !== "Chip")).toEqual([]);
     expect(rows(s).filter((r) => !r.spec.class && !r.spec.widget && r.to > r.from)).toEqual([]);
     s = s.update({ selection: { anchor: doc.indexOf("task") } }).state;
-    expect(cls(s, "cm-task-off")).toHaveLength(1);
+    expect(cls(s, "cm-task-off")).toHaveLength(2); // still drawn with the caret on the line
   });
 });
 

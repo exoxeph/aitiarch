@@ -35,9 +35,9 @@ it('table source reveal and collapse do not change document bytes, ink or offset
 });
 function widgets(s:EditorState){let count=0;for(const value of s.facet(EditorView.decorations))if(typeof value!=='function')(value as DecorationSet).between(0,s.doc.length,(_a,_b,deco)=>{if(deco.spec.widget?.constructor.name==='TableWidget')count++;});return count;}
 it('Escape can render a standalone table even when there is no line outside it',()=>{
- let s=make('| A | B |\n| :---: | --- |\n| **bold** | b |'),n=table(s);expect(widgets(s)).toBe(0);
+ let s=make('| A | B |\n| :---: | --- |\n| **bold** | b |'),n=table(s);expect(widgets(s)).toBe(1); // a table is always drawn as a table
  s=s.update({effects:closeTableSource.of({from:n.from,to:n.to})}).state;expect(widgets(s)).toBe(1);
- s=s.update({selection:{anchor:3}}).state;expect(widgets(s)).toBe(0);
+ s=s.update({selection:{anchor:3}}).state;expect(widgets(s)).toBe(1); // moving the caret into it never shows the Markdown
 });
 it('keeps a table containing inline ink in source after Escape and caret movement',()=>{
  let s=make();expect(widgets(s)).toBe(1);const from=text.indexOf('nested'),anchor=captureAnchor(text,from,from+6);
@@ -58,7 +58,7 @@ function editTableSource(){
  let state=EditorState.create({doc:original.text,extensions:[markdown({extensions:[Table,Strikethrough]}),tablePreview,inkField,history()]});
  expect(widgets(state)).toBe(1);
  const pos=original.text.indexOf('nested');
- state=state.update({selection:{anchor:pos}}).state;expect(widgets(state)).toBe(0);
+ state=state.update({selection:{anchor:pos}}).state;expect(widgets(state)).toBe(1);
  state=state.update({changes:{from:pos,insert:'X'},userEvent:'input.type'}).state;
  return {original,state,bytes:encode(state.doc.toString(),original)};
 }
