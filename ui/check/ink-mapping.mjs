@@ -41,7 +41,7 @@ try {
   await enable.click();
   await page.getByText("Anchor snapshots enabled. Existing ignore rules were preserved.").waitFor();
   assert.equal(readFileSync(path.join(root, ".gitignore"), "utf8"), originalIgnore + "/.cache/\n");
-  await page.locator('[data-ink-id="answer"]').waitFor();
+  await page.locator('.thought-blob[data-ink-id="answer"]').waitFor();
   assert.equal(await page.locator('.orphan-card').count(), 1);
   const edit = async (kind) => page.evaluate(kind => {
     const { view } = window.__aitiarch["fixture.md"];
@@ -59,7 +59,7 @@ try {
   let saved = await ink.read("fixture.md");
   assert.equal(saved.document.items[0].anchor.position.from, from + quote.length + 2);
   await page.reload(); await page.waitForFunction(() => window.__aitiarch?.["fixture.md"]);
-  await page.locator('[data-ink-id="answer"]').waitFor();
+  await page.locator('.thought-blob[data-ink-id="answer"]').waitFor();
   await edit("small");
   await page.evaluate(() => window.__aitiarch["fixture.md"].session.flush());
   saved = await ink.read("fixture.md");
@@ -73,7 +73,7 @@ try {
   await page.waitForFunction(() => !document.body.textContent.includes("Ink mapping could not be saved"));
   await page.waitForTimeout(500);
   await page.reload(); await page.waitForFunction(() => window.__aitiarch?.["fixture.md"]);
-  await page.locator('[data-ink-id="answer"]').waitFor();
+  await page.locator('.thought-blob[data-ink-id="answer"]').waitFor();
   assert.equal(readFileSync(path.join(root, "fixture.md"), "utf8"), after);
   await page.close();
   const closedEdit = after.replace("reviewed checkpoint", "checked checkpoint");
@@ -82,7 +82,7 @@ try {
   page.on("pageerror", e => errors.push(String(e)));
   await page.goto(url);
   await page.waitForFunction(() => window.__aitiarch?.["fixture.md"]);
-  await page.locator('[data-ink-id="answer"]').waitFor();
+  await page.locator('.thought-blob[data-ink-id="answer"]').waitFor();
   saved = await ink.read("fixture.md");
   assert.equal(saved.document.items[0].anchor.quote, quote.replace("verified", "checked"));
   assert.equal(readFileSync(path.join(root, "fixture.md"), "utf8"), closedEdit);

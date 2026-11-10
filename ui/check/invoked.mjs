@@ -59,7 +59,7 @@ try {
     const from = t.indexOf(q); view.dispatch({ changes: { from, to: from + q.length, insert: '' } });
   });
   pending.shift()();
-  await page.getByRole('button', { name: /^Activity/ }).click();
+  await page.getByRole('button', { name: /^Note menu/ }).click();
   await page.getByRole('region', { name: 'Orphaned ink' }).getByText('Synthetic answer 2.', { exact: true }).waitFor();
   await page.waitForFunction(() => window.__aitiarch['fixture.md'].session.status === 'saved');
   ink = JSON.parse(await readFile(path.join(root, 'ink/fixture.ink.json'), 'utf8'));
@@ -67,7 +67,7 @@ try {
   assert.equal(ink.items[1].body, 'Synthetic answer 2.');
   await page.reload(); await page.waitForSelector('.cm-editor');
   console.log('invoked check: reload reached');
-  await page.getByRole('button', { name: /^Activity/ }).click();
+  await page.getByRole('button', { name: /^Note menu/ }).click();
   await page.getByRole('region', { name: 'Orphaned ink' }).getByText('Synthetic answer 2.', { exact: true }).waitFor();
   // The thread conversation now opens from its thought (here the orphaned one has no blob, so it opens as the floating panel).
   await page.evaluate(async () => { const s = await (await fetch('/api/threads?path=fixture.md')).json(); const id = s.document.items.find(i => i.generation)?.id; window.dispatchEvent(new CustomEvent('open-thread', { detail: { id, thought: true } })); });

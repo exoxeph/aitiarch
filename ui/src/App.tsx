@@ -14,6 +14,10 @@ import type { SyncStatus } from "./editor/session.ts";
 import { makeWikiResolver } from "./frontmatter.ts";
 import { ChatGPTSettings } from "./ChatGPTSettings.tsx";
 import { UsagePanel } from './UsagePanel.tsx';
+import {NotesMenu} from './menu/NotesMenu.tsx';
+import {NoteMenu} from './menu/NoteMenu.tsx';
+import {useEdgeMenu} from './menu/useEdgeMenu.ts';
+import {ChatPanel} from './chat/ChatPanel.tsx';
 import {ThreadPanel} from './threads/ThreadPanel.tsx';
 import {DismissedThoughts} from './ink/DismissedThoughts.tsx';
 import {calloutHeader} from './editor/reveal.ts';
@@ -36,7 +40,8 @@ type Boot = { state: "loading" } | { state: "error"; message: string } | { state
 export default function App() {
   const [boot, setBoot] = useState<Boot>({ state: "loading" });
   const [tree, setTree] = useState<TreeNode | null>(null);
-  const [treeCollapsed,setTreeCollapsed]=useState(false);
+  const menu=useEdgeMenu(),burgerRef=useRef<HTMLButtonElement>(null),noteMenuRef=useRef<HTMLButtonElement>(null),chatPillRef=useRef<HTMLButtonElement>(null);
+  const [noteMenuOpen,setNoteMenuOpen]=useState(false),[chatOpen,setChatOpen]=useState(false);
   const [treePersistence,setTreePersistence]=useState(false);
   const [treeNotice,setTreeNotice]=useState(false);
   const [theme,setTheme]=useState<'ember'|'moss'>('ember');
@@ -65,8 +70,6 @@ export default function App() {
   const [docs, setDocs] = useState<Record<string, string>>({});
   const [online, setOnline] = useState(true);
   const [overlay, setOverlay] = useState<null | "palette" | "switcher">(null);
-  const [showProps, setShowProps] = useState(true);
-  const [rightTab, setRightTab] = useState<"details" | "activity">("details");
   const [notice, setNotice] = useState<string | null>(null);
   const [cacheNotice, setCacheNotice] = useState<null | { file: string; line: string }>(null);
   const [cacheBusy, setCacheBusy] = useState(false);
@@ -148,7 +151,7 @@ export default function App() {
           sessionStorage.setItem(`anchor-cache-notice:${s.rootPath}`, "shown");
         }
         const [t, ui, persistence] = await Promise.all([api.tree(), api.uiState(),api.uiStatePersistence().catch(()=>({enabled:false}))]);
-        setTreeCollapsed(ui.treeCollapsed??false);setConfirmAdd(ui.confirmAdd??false);setTreePersistence(persistence.enabled);
+        setConfirmAdd(ui.confirmAdd??false);setTreePersistence(persistence.enabled);
         if(persistence.enabled){setTheme(ui.theme??'ember');setTypingHelpOn(ui.typingHelp??true);setDoubleSpacePeriod(ui.doubleSpacePeriod??true);setSmartCorrections(ui.smartCorrections??true);setNeverCorrect(ui.neverCorrect??[]);}
         setTree(t);
         const all = flattenTree(t);
@@ -194,9 +197,9 @@ export default function App() {
   // ---- persist open tabs (a small file in the notebook folder) ----
   useEffect(() => {
     if (!loaded.current) return;
-    const t = setTimeout(() => void api.putUiState({ v: 1, tabs, active, ...(treePersistence?{treeCollapsed,theme,confirmAdd,typingHelp:typingHelpOn,doubleSpacePeriod,smartCorrections,neverCorrect}:{}) }).catch(() => {if(treePersistence){setTreePersistence(false);setTreeNotice(true);}}), 300);
+    const t = setTimeout(() => void api.putUiState({ v: 1, tabs, active, ...(treePersistence?{theme,confirmAdd,typingHelp:typingHelpOn,doubleSpacePeriod,smartCorrections,neverCorrect}:{}) }).catch(() => {if(treePersistence){setTreePersistence(false);setTreeNotice(true);}}), 300);
     return () => clearTimeout(t);
-  }, [tabs, active, treeCollapsed,treePersistence,theme,confirmAdd,typingHelpOn,doubleSpacePeriod,smartCorrections,neverCorrect]);
+  }, [tabs, active, treePersistence,theme,confirmAdd,typingHelpOn,doubleSpacePeriod,smartCorrections,neverCorrect]);
 
   const closeTab = useCallback(
     async (path: string) => {
@@ -259,9 +262,6 @@ export default function App() {
       : item.attachment,
   })), [currentInk, mappedInk, active, status]);
   useEffect(()=>{if(thoughtChat&&!activeItems.some(i=>i.id===thoughtChat))setThoughtChat(null);},[thoughtChat,activeItems]);
-  useEffect(() => {
-    if (activeItems.some(i => i.attachment.status === "orphaned")) setRightTab("activity");
-  }, [active, currentInk]);
   const prepareAttach = async (item: InkItem, from: number, to: number) => {
     if (!active || !currentInk) return;
     const h = panes.current.get(active);
@@ -392,13 +392,14 @@ export default function App() {
       {id:'confirm-add',label:confirmAdd?'Add to note: add straight away (no confirmation)':'Add to note: confirm before adding',group:'AI',run:()=>{setConfirmAdd(v=>!v);if(!treePersistence)setTreeNotice(true);}},
       {id:'dismissed',label:'Show dismissed thoughts',group:'AI',run:()=>setShowDismissed(true)},
       {id:'visualize',label:'AI: Visualize selection as a diagram',group:'AI',run:withView(h=>{if(!invokeSelection(h.view,'visualize'))setNotice('Select some text first, then choose Visualize.');})},
-      {id:'tree',label:treeCollapsed?'Expand file tree':'Collapse file tree',group:'Workspace',run:()=>{setTreeCollapsed(v=>!v);if(!treePersistence)setTreeNotice(true);}},
+      {id:'tree',label:'Notes menu: open or close',group:'Workspace',run:()=>menu.toggle(false)},
       {id:'typing-help',label:`Typing help: ${typingHelpOn?'On':'Off'}`,group:'Typing',run:()=>{setTypingHelpOn(v=>!v);if(!treePersistence)setTreeNotice(true);}},
       {id:'smart-corrections',label:`Smart corrections: ${smartCorrections?'On':'Off'}`,group:'Typing',run:()=>{setSmartCorrections(v=>!v);if(!treePersistence)setTreeNotice(true);}},
       {id:'double-space',label:`Double-space period: ${doubleSpacePeriod?'On':'Off'}`,group:'Typing',run:()=>{setDoubleSpacePeriod(v=>!v);if(!treePersistence)setTreeNotice(true);}},
       ...(['ember','moss'] as const).map(value=>({id:`theme:${value}`,label:`Theme: ${value[0].toUpperCase()+value.slice(1)}`,group:'Appearance',run:()=>chooseTheme(value)})),
       { id: "open", label: "Open note…", hint: "Ctrl+O", run: () => setOverlay("switcher") },
-      { id: "props", label: showProps ? "Hide properties panel" : "Show properties panel", run: () => setShowProps((v) => !v) },
+      { id: "props", label: noteMenuOpen ? "Hide note details" : "Show note details", run: () => setNoteMenuOpen((v) => !v) },
+      { id: "chat", label: chatOpen ? "Close chat" : "Open chat", group: "Workspace", run: () => setChatOpen((v) => !v) },
       { id: "save", label: "Save now", run: withView((h) => void h.session.flush()) },
       { id: "reload", label: "Reload this note from disk", run: withView((h) => void h.session.resync()) },
       { id: "bold", label: "Format: Bold", hint: "Ctrl+B", run: fmt((s) => toggleInline(s, "**")) },
@@ -413,7 +414,7 @@ export default function App() {
     ];
     return list.map(item=>({...item,group:item.group??(['open','props','save','reload'].includes(item.id)?'Workspace':'Formatting')}));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, showProps,paths,treeCollapsed,treePersistence,openNote,confirmAdd,typingHelpOn,doubleSpacePeriod,smartCorrections,neverCorrect]);
+  }, [active, noteMenuOpen,chatOpen,paths,treePersistence,openNote,confirmAdd,typingHelpOn,doubleSpacePeriod,smartCorrections,neverCorrect]);
 
   if (boot.state === "loading") return <div className="boot">Opening notebook…</div>;
   if (boot.state === "error") {
@@ -427,24 +428,43 @@ export default function App() {
   }
 
   const activeFile = active ? files[active] : undefined;
+  const orphanCount = activeItems.filter(i => i.attachment.status === "orphaned").length;
+  const settingsPanel = <div className="menu-settings-body">
+    {([['Typing help',typingHelpOn,setTypingHelpOn],['Smart corrections',smartCorrections,setSmartCorrections],['Double-space period',doubleSpacePeriod,setDoubleSpacePeriod]] as const).map(([label,on,set])=>
+      <button key={label} type="button" role="switch" aria-checked={on} className="menu-switch" onClick={()=>{set(!on);if(!treePersistence)setTreeNotice(true);}}><span>{label}</span><i aria-hidden="true"/></button>)}
+    <ChatGPTSettings/>
+  </div>;
   return (
-    <div className={`app${treeCollapsed?' tree-collapsed':''}`}>
+    <div className="app">
       <header className="topbar">
-        <button className="ghost tree-toggle" aria-label={treeCollapsed?'Expand file tree':'Collapse file tree'} aria-controls="note-tree" aria-expanded={!treeCollapsed} onClick={()=>{setTreeCollapsed(v=>!v);if(!treePersistence)setTreeNotice(true);}} title={treeCollapsed?'Expand file tree':'Collapse file tree'}>☰</button>
+        <button ref={burgerRef} className="ghost tree-toggle" aria-label="Notes menu" aria-controls="note-tree" aria-expanded={menu.open} title="Notes menu" onClick={e=>menu.toggle(e.detail===0)}>☰</button>
         <Tabs tabs={tabs} active={active} status={status} onSelect={setActive} onClose={(p) => void closeTab(p)} />
         <span className="spacer" />
         <select className="theme-toggle" aria-label="Theme" value={theme} onChange={e=>chooseTheme(e.target.value as typeof theme)}><option value="ember">Ember</option><option value="moss">Moss</option></select>
         <button className="ghost" onClick={() => setOverlay("palette")} title="Command palette (Ctrl+K; Ctrl+P)">
           Commands
         </button>
+        <NoteMenu open={noteMenuOpen} setOpen={setNoteMenuOpen} count={orphanCount} buttonRef={noteMenuRef}>
+          <PropertiesPanel text={active ? (docs[active] ?? activeFile?.text) : undefined} />
+          {active && <OrphanList text={activeText} items={activeItems} onPick={(item, from, to) => void prepareAttach(item, from, to)}
+            onSelect={item => {
+              const h = activeHandle();
+              if (!h) return;
+              const sel = h.view.state.selection.main;
+              void prepareAttach(item, sel.from, sel.to);
+            }} />}
+          {insertPreview&&<section className="attach-preview" aria-label="Review takeaway insertion"><h2>Insert your takeaway</h2><p>This adds only your submitted text through the editor. Undo works normally.</p><pre>{insertPreview.preview.changes.insert}</pre><button onClick={()=>void applyInsert()}>Insert my takeaway</button><button onClick={()=>setInsertPreview(null)}>Cancel insertion</button></section>}
+          {attachDraft && <section className="attach-preview" aria-label="Review re-attachment">
+            <h2>Review re-attachment</h2>
+            <div className="small muted">Old quote</div><blockquote>{attachDraft.quote}</blockquote>
+            <div className="small muted">New selected text</div><blockquote>{attachDraft.target}</blockquote>
+            <div className="attach-actions"><button onClick={() => void saveAttach()}>Save re-attachment</button><button onClick={() => setAttachDraft(null)}>Cancel</button></div>
+          </section>}
+        </NoteMenu>
+        <button ref={chatPillRef} type="button" className="chat-pill" aria-expanded={chatOpen} aria-controls="chat-panel" onClick={() => setChatOpen(v => !v)}><span className="chat-pill-dot" aria-hidden="true" />Chat</button>
       </header>
-      <aside id="note-tree" className="sidebar" aria-label="Notes" hidden={treeCollapsed}>
-        <div className="side-title" title={boot.rootPath}>{boot.rootName}</div>
-        <Tree tree={tree} active={active} onOpen={(p) => void openNote(p)} />
-      </aside>
-      <main className="editor-col">
-        <ChatGPTSettings/>
-        <UsagePanel/>
+      <NotesMenu menu={menu} burger={burgerRef} rootName={boot.rootName} rootPath={boot.rootPath} tree={tree} active={active} onOpen={(p) => void openNote(p)} onSearch={() => setOverlay("palette")} usage={<UsagePanel />} settings={settingsPanel} />
+      <main className="editor-col" data-note-path={active ?? undefined}>
         {cacheNotice && <div className="notice" role="alert">
           Anchor snapshots are disabled. Add this exact line to <code>{cacheNotice.file}</code>: <code>{cacheNotice.line}</code>
           <button disabled={cacheBusy} onClick={async () => {
@@ -478,31 +498,11 @@ export default function App() {
           </div>
         )}
       </main>
-      {showProps && (
-        <aside className="rightpanel" aria-label="Note details and activity" data-note-path={active ?? undefined}>
-          <div className="right-tabs"><button className={rightTab === "details" ? "on" : ""} onClick={() => setRightTab("details")}>Details</button>
-            <button className={rightTab === "activity" ? "on" : ""} onClick={() => setRightTab("activity")}>Activity{activeItems.filter(i => i.attachment.status === "orphaned").length ? ` (${activeItems.filter(i => i.attachment.status === "orphaned").length})` : ""}</button></div>
-          {rightTab === "details" && <PropertiesPanel text={active ? (docs[active] ?? activeFile?.text) : undefined} />}
-          {rightTab === "activity" && active && <OrphanList text={activeText} items={activeItems} onPick={(item, from, to) => void prepareAttach(item, from, to)}
-            onSelect={item => {
-              const h = activeHandle();
-              if (!h) return;
-              const sel = h.view.state.selection.main;
-              void prepareAttach(item, sel.from, sel.to);
-            }} />}
-          {rightTab==='activity'&&insertPreview&&<section className="attach-preview" aria-label="Review takeaway insertion"><h2>Insert your takeaway</h2><p>This adds only your submitted text through the editor. Undo works normally.</p><pre>{insertPreview.preview.changes.insert}</pre><button onClick={()=>void applyInsert()}>Insert my takeaway</button><button onClick={()=>setInsertPreview(null)}>Cancel insertion</button></section>}
-          {rightTab === "activity" && attachDraft && <section className="attach-preview" aria-label="Review re-attachment">
-            <h2>Review re-attachment</h2>
-            <div className="small muted">Old quote</div><blockquote>{attachDraft.quote}</blockquote>
-            <div className="small muted">New selected text</div><blockquote>{attachDraft.target}</blockquote>
-            <div className="attach-actions"><button onClick={() => void saveAttach()}>Save re-attachment</button><button onClick={() => setAttachDraft(null)}>Cancel</button></div>
-          </section>}
-        </aside>
-      )}
+      {chatOpen && <ChatPanel path={active} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
       {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,toast.undo)}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
       {added&&<div className="thought-toast" role="status"><span>{added.text} · Undo (Ctrl+Z)</span><details className="added-detail"><summary>What was added</summary><pre>{added.detail}</pre></details><button onClick={()=>{const h=active?panes.current.get(active):undefined;if(h){undo(h.view);h.view.focus();}setAdded(null);}}>Undo</button><button aria-label="Close notice" onClick={()=>setAdded(null)}>Close</button></div>}
       {showDismissed&&<DismissedThoughts items={activeItems} restore={id=>void thoughtAction(id,'restore')} close={()=>setShowDismissed(false)}/>}
-      {active&&thoughtChat&&<ThoughtChat id={thoughtChat} close={()=>setThoughtChat(null)}><ThreadPanel path={active} items={activeItems} version={currentInk?.version??null} saved={s=>onInkSaved(active,s)} insert={async item=>{await prepareInsert(item);setShowProps(true);setRightTab('activity');}} openId={thoughtChat} onOpen={id=>{setThoughtChat(id);setThreadId(id);}} visible/></ThoughtChat>}
+      {active&&thoughtChat&&<ThoughtChat id={thoughtChat} close={()=>setThoughtChat(null)}><ThreadPanel path={active} items={activeItems} version={currentInk?.version??null} saved={s=>onInkSaved(active,s)} insert={async item=>{await prepareInsert(item);setNoteMenuOpen(true);}} openId={thoughtChat} onOpen={id=>{setThoughtChat(id);setThreadId(id);}} visible/></ThoughtChat>}
       {bringPreview&&<ThoughtInsertionPreview text={bringPreview.preview.changes.insert} insert={()=>void bringThought()} cancel={()=>setBringPreview(null)}/>}
       <footer className="statusbar">
         <span id="status-notice-slot" className="status-notice-slot">{treeNotice&&<span className="status-notice" role="note"><span className="status-notice-text" title="File tree and theme preferences stay in memory until ignore coverage for /ui-state.json* is verified.">File tree and theme preferences stay in memory until <code>/ui-state.json*</code> is ignored.</span>

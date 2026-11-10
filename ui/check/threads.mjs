@@ -68,12 +68,12 @@ try{
  await select('A removable selected sentence.');await page.getByRole('button',{name:'Ask...',exact:true}).click();await page.getByLabel('Question for Claude').fill('Memory-only test question.');await page.getByRole('button',{name:'Review request',exact:true}).click();await page.getByRole('button',{name:'Send to Claude',exact:true}).click();
  await waitPending();
  await page.evaluate(()=>{const {view}=window.__aitiarch['fixture.md'],q='A removable selected sentence.',from=view.state.doc.toString().indexOf(q);view.dispatch({changes:{from,to:from+q.length,insert:''}});});
- pending.shift()();await page.getByRole('region',{name:'Orphaned ink'}).getByText('Synthetic accepted answer 2.',{exact:true}).waitFor();
+ pending.shift()();await page.getByRole('button',{name:/^Note menu/}).evaluate(b=>b.getAttribute('aria-expanded')!=='true'&&b.click()); await page.getByRole('region',{name:'Orphaned ink'}).getByText('Synthetic accepted answer 2.',{exact:true}).waitFor();
  await page.waitForFunction(()=>window.__aitiarch['fixture.md'].session.status==='saved');
  for(let n=0;;n++){const saved=JSON.parse(await readFile(path.join(root,'ink/fixture.ink.json'),'utf8'));if(saved.items.at(-1).attachment.status==='orphaned')break;if(n>=100)throw new Error('Orphan sidecar did not finish saving');await new Promise(r=>setTimeout(r,30));}
  const parsed=JSON.parse(await readFile(path.join(root,'ink/fixture.ink.json'),'utf8'));assert(!JSON.stringify(parsed).includes('Memory-only test question.'));assert.equal(parsed.items.at(-1).attachment.status,'orphaned');
  // Re-attach the orphan to an explicit current selection; only sidecar metadata changes.
- await select('A unique selected sentence.');const candidates=page.getByRole('button',{name:/^Attach here\?/});if(await candidates.count())await candidates.first().click();else await page.getByRole('button',{name:'Re-attach to selected text',exact:true}).click();await page.getByRole('button',{name:'Save re-attachment',exact:true}).click();
+ await select('A unique selected sentence.');await page.getByRole('button',{name:/^Note menu/}).evaluate(b=>b.getAttribute('aria-expanded')!=='true'&&b.click()); const candidates=page.getByRole('button',{name:/^Attach here\?/});if(await candidates.count())await candidates.first().click();else await page.getByRole('button',{name:'Re-attach to selected text',exact:true}).click();await page.getByRole('button',{name:'Save re-attachment',exact:true}).click();
  await page.waitForFunction(()=>!document.querySelector('.orphan-choices')&&document.querySelector('.orphan-list')?.textContent.includes('No orphaned ink'));
  const attached=JSON.parse(await readFile(path.join(root,'ink/fixture.ink.json'),'utf8')).items.at(-1);assert.equal(attached.attachment.status,'attached');assert(attached.anchorHistory.length>0);
  // Failure labels for both providers, including interrupted and changed formats.
@@ -94,7 +94,7 @@ try{
  pending.shift()();await page.getByRole('button',{name:'Retry saving reply (no new call)',exact:true}).waitFor();await rm(lockFile);await page.getByRole('button',{name:'Retry saving reply (no new call)',exact:true}).click();if(await panel.locator('.extra-answers:not([open]) summary').count())await panel.locator('.extra-answers:not([open]) summary').click();await panel.getByText('Synthetic accepted answer 5.',{exact:true}).waitFor();assert.equal(calls.length,5);
  await page.reload();await page.waitForSelector('.cm-editor');await openIdx(0);
  await page.getByText('Question text was kept in memory only and is unavailable after reload.',{exact:true}).first().waitFor();await page.waitForFunction(()=>document.querySelector('textarea[aria-label="Your takeaway"]')?.value==='Human takeaway only.');
- await page.setViewportSize({width:620,height:900});await page.getByLabel('Your takeaway',{exact:true}).scrollIntoViewIfNeeded();await page.screenshot({path:path.join(screens,'thread-narrow.png'),fullPage:true});
+ await page.setViewportSize({width:620,height:900});await page.waitForFunction(()=>document.querySelector('.ink-surface')?.dataset.thoughtLayout==='narrow');await page.waitForTimeout(400);await page.getByLabel('Your takeaway',{exact:true}).scrollIntoViewIfNeeded();await page.screenshot({path:path.join(screens,'thread-narrow.png'),fullPage:true});
  await page.getByRole('button',{name:'Delete thread…',exact:true}).click();await page.getByRole('button',{name:'Confirm delete thread',exact:true}).click();
  await page.waitForFunction(()=>!document.querySelector('[data-thread-id="seed"]'));
  assert(!JSON.parse(await readFile(path.join(root,'ink/fixture.ink.json'),'utf8')).items.some(i=>i.id==='seed'));

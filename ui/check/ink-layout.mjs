@@ -57,6 +57,7 @@ try {
   if (await page.locator(".cm-ink-block").count() !== 0) throw new Error("Wide answers must use margins, never inline widgets.");
   await page.waitForFunction(() => document.querySelectorAll(".margin-card").length === 3);
   if (await page.locator(".orphan-card").count() !== 2) throw new Error("Expected two retained orphans.");
+  await page.getByRole("button",{name:/^Note menu/}).evaluate(b=>b.getAttribute("aria-expanded")!=="true"&&b.click());
   if (await page.getByRole("button", { name: /Attach here/i }).count() < 2) throw new Error("Candidate choices are missing.");
   if (!readFileSync(note).equals(unchanged)) throw new Error("Opening ink changed Markdown bytes.");
   const beforeScroll = await page.locator(".margin-card").count();
@@ -83,6 +84,7 @@ try {
   await page.locator(".thought-blob").first().waitFor({ timeout: 10000 });
   if (await page.locator(".orphan-card").count() !== 2) throw new Error("Orphans vanished after reload.");
   if (!readFileSync(note).equals(unchanged)) throw new Error("Reload changed Markdown bytes.");
+  await page.getByRole("button",{name:/^Note menu/}).evaluate(b=>b.getAttribute("aria-expanded")!=="true"&&b.click());
   const firstChoice = page.getByRole("button", { name: /Attach here\? 1/i });
   await firstChoice.click();
   await page.getByRole("button", { name: "Save re-attachment" }).click();
@@ -103,6 +105,7 @@ try {
   const toolbarClear=await page.evaluate(()=>{const t=document.querySelector('.cm-sel-toolbar').getBoundingClientRect(),rail=document.querySelector('.margin-rail'),r=rail.getBoundingClientRect();const bottom=getComputedStyle(rail).position==='static'&&r.top>120?Math.min(innerHeight,r.top):innerHeight;return t.left>=0&&t.right<=innerWidth&&t.top>=0&&t.bottom<=bottom+1;});
   if(!toolbarClear)throw new Error('Selection toolbar exceeds the narrow viewport or overlaps the margin rail.');
   await page.screenshot({path:path.join(out,'toolbar-narrow-rail.png')});
+  await page.getByRole("button",{name:/^Note menu/}).evaluate(b=>b.getAttribute("aria-expanded")!=="true"&&b.click());
   await page.getByRole("button", { name: "Re-attach to selected text" }).click();
   await page.getByRole("button", { name: "Save re-attachment" }).click();
   await page.waitForTimeout(250);

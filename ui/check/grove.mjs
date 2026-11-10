@@ -46,12 +46,12 @@ try{
    return route.continue();});
   // Thoughts open from their blob; a check opens one by id (the same event the blob's open button sends).
  const openThought=async note=>{const id=await page.evaluate(async n=>{const s=await (await fetch('/api/threads?path='+encodeURIComponent(n))).json();return s.document.items.find(i=>i.generation)?.id;},note+'.md');await page.evaluate(id=>window.dispatchEvent(new CustomEvent('open-thread',{detail:{id,thought:true}})),id);await page.locator('.thread-card').waitFor();};
- const openNote=async name=>{await page.setViewportSize({width:1440,height:1000});state=name;await page.goto(base+'/?debug=1');await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme); await page.locator('.tree-item').filter({hasText:new RegExp('^'+name+'$')}).click();await page.waitForFunction(p=>document.querySelector('.rightpanel')?.getAttribute('data-note-path')===p&&window.__aitiarch?.[p]?.view.dom.getClientRects().length>0,name+'.md');};
+ const openNote=async name=>{await page.setViewportSize({width:1440,height:1000});state=name;await page.goto(base+'/?debug=1');await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme); await page.getByRole('button',{name:'Notes menu',exact:true}).click();await page.locator('#note-tree[data-state="open"]').waitFor();await page.locator('.tree-item').filter({hasText:new RegExp('^'+name+'$')}).click();await page.waitForFunction(p=>document.querySelector('.editor-col')?.getAttribute('data-note-path')===p&&window.__aitiarch?.[p]?.view.dom.getClientRects().length>0,name+'.md');};
   for(const name of names){await openNote(name);await page.setViewportSize({width,height:1000});
    if(!['empty','settings','usage'].includes(name)){await openThought(name);}
    if(['thread','takeaway-pending','orphan','provider-failure'].includes(name)){assert.equal(await page.getByLabel('Your takeaway',{exact:true}).inputValue(),'');assert.equal(await page.getByText('Synthetic AI closing summary after the human action.',{exact:true}).count(),0);}
-   if(name==='usage')await page.getByText('My AI calls and tokens',{exact:true}).click();
-   if(name==='settings')await page.getByRole('region',{name:'ChatGPT plan connection'}).waitFor();
+   if(name==='usage'){await page.getByRole('button',{name:'Notes menu',exact:true}).click();await page.locator('#note-tree').getByText('My AI calls and tokens',{exact:true}).click();}
+   if(name==='settings'){await page.getByRole('button',{name:'Notes menu',exact:true}).click();await page.locator('#note-tree').getByText('Settings',{exact:true}).click();await page.getByRole('region',{name:'ChatGPT plan connection'}).waitFor();}
    if(name==='thread'){
     await page.evaluate(q=>{const d=window.__aitiarch['thread.md'].view,from=d.state.doc.toString().indexOf(q);d.dispatch({selection:{anchor:from,head:from+q.length},scrollIntoView:true});d.focus();},selection);
     const toolbar=page.getByRole('toolbar',{name:'Format selection'});await toolbar.waitFor();await page.waitForTimeout(100);
