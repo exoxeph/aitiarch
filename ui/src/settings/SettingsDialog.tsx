@@ -15,7 +15,7 @@ const explain=(e:unknown)=>e instanceof ApiError&&e.code==='invalid_policy'?'Tha
  :e instanceof ApiError&&e.code==='blocked'?'Blocked: raise policy to retry':'That change could not be saved. Nothing was retried.';
 
 function MeterBar({meter,label}:{meter:Meter;label:string}){
- return <div className="meter-row"><div className="meter" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={meter.percent} data-tone={meter.tone}><i style={{width:`${meter.percent}%`}}/></div><span className="meter-label">{meter.label}</span></div>;
+ return <div className="meter-row"><div className="meter" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={meter.percent} data-tone={meter.tone}><i style={{transform:`scaleX(${meter.percent/100})`}}/></div><span className="meter-label">{meter.label}</span></div>;
 }
 
 /** The provider consent screen. The investigator is separate from chat and off until this is read and chosen. */

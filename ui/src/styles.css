@@ -938,7 +938,7 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .meter-name { display: block; margin-bottom: 4px; font-size: var(--text-control); word-break: break-all; }
 .meter-row { display: flex; align-items: center; gap: 10px; }
 .meter { flex: 1; height: 8px; overflow: hidden; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); }
-.meter i { display: block; height: 100%; background: var(--accent); transition: width 400ms ease; }
+.meter i { display: block; width: 100%; height: 100%; background: var(--accent); transform-origin: left center; transition: transform 400ms ease; }
 .meter[data-tone="warn"] i { background: var(--danger); opacity: .7; }
 .meter[data-tone="full"] i { background: var(--danger); }
 .meter-label { min-width: 120px; color: var(--muted); font-size: var(--text-meta); font-variant-numeric: tabular-nums; text-align: right; }
