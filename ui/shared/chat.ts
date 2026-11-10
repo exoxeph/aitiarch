@@ -1,12 +1,12 @@
 /** Per-note chat protocol. Deltas are provisional; only complete messages are accepted. */
 export interface ContextChoice {moduleId:'this-note'|'other-notes'|'claude-sessions'|'codex-sessions'; ids:string[]}
-export interface ContextEntry {id:string;label:string}
+export interface ContextEntry {id:string;label:string;session?:import('./ide-sessions.ts').SessionDetails}
 export interface ContextSource {id:string;label:string;text:string;version:string;ephemeral?:true}
 export interface ContextLimits {maxCharacters:number;maxSources:number}
 export interface ContextPreview {id:string;label:string;characters:number;estimatedTokens:number}
 export interface ContextModule {
  readonly id:ContextChoice['moduleId']; readonly label:string;
- list():Promise<ContextEntry[]>;
+ list(options?:{otherProjects?:boolean}):Promise<ContextEntry[]>;
  read(ids:readonly string[],limits:ContextLimits):Promise<ContextSource[]>;
  redact(text:string):string;
  preview(sources:readonly ContextSource[]):ContextPreview[];

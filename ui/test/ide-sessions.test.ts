@@ -52,3 +52,15 @@ it('modules list only matching working directories with opaque handles; explicit
 it('selected session changing to an unsupported format rejects with a fixed notice, not private error text',async()=>{
  const f=await fixture(),m=f.modules[0],[entry]=await m.list();await writeFile(f.file,jsonl([{type:'new_format',text:'Synthetic secret'}]));await expect(m.read([entry.id],{maxSources:1,maxCharacters:20000})).rejects.toThrow(/^Session format changed/);
 });
+it('picker catalog exposes redacted first-prompt metadata, newest first, and other projects only on explicit request',async()=>{
+ const f=await fixture(),m=f.modules[0];await writeFile(path.join(f.sessions,'foreign.jsonl'),jsonl([cu()]));
+ const local=await m.list();expect(local).toHaveLength(1);expect(local[0].session).toMatchObject({projectMatch:true,messageCount:2,status:'ready'});expect(local[0].session?.title).not.toContain('synthetic-private');expect(local[0].session?.bytes).toBe(Buffer.byteLength(f.raw));
+ const all=await m.list({otherProjects:true});expect(all).toHaveLength(2);expect(all.some(e=>e.session?.projectMatch===false)).toBe(true);
+ expect(all.map(e=>e.session!.modifiedAt)).toEqual([...all.map(e=>e.session!.modifiedAt)].sort().reverse());
+ const foreign=all.find(e=>!e.session?.projectMatch)!;expect((await m.read([foreign.id],{maxSources:1,maxCharacters:20000}))[0].text).toContain('Synthetic question');
+});
+it('picker keeps unsupported and oversized sessions as disabled notices without cutting or sending text',async()=>{
+ const f=await fixture(),m=f.modules[0];await writeFile(f.file,jsonl([{...cu(),cwd:f.project},{type:'future_record'}]));
+ const invalid=await m.list();expect(invalid[0].session).toMatchObject({status:'format'});
+ await writeFile(f.file,jsonl([{...cu('x'.repeat(20001)),cwd:f.project}]));const large=await m.list();expect(large[0].session).toMatchObject({status:'limit'});expect(large[0].session?.notice).toContain('Nothing was cut');
+});

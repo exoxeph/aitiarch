@@ -2,8 +2,9 @@ import {open,lstat,readdir,realpath} from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {createHash} from 'node:crypto';
-import type {ContextModule,ContextSource} from '../../shared/chat.ts';
+import type {ContextModule,ContextSource,ContextEntry} from '../../shared/chat.ts';
 import {SESSION_LIMITS as L,SESSION_NOTICES as N,type SessionKind,type SessionTurn} from '../../shared/ide-sessions.ts';
+import {SESSION_PICKER_NOTICES as P,type SessionDetails} from '../../shared/ide-sessions.ts';
 import {redact} from '../providers/index.ts';
 const digest=(s:string)=>createHash('sha256').update(s).digest('hex');
 const obj=(v:unknown):v is Record<string,any>=>!!v&&typeof v==='object'&&!Array.isArray(v);
@@ -79,23 +80,35 @@ export interface SessionModuleOptions {project:string;roots?:Partial<Record<Sess
 export function sessionModules(options:SessionModuleOptions):ContextModule[]{
  return (['claude-sessions','codex-sessions'] as const).map(kind=>{
   const root=options.roots?.[kind]??path.join(os.homedir(),kind==='claude-sessions'?'.claude':'.codex',kind==='claude-sessions'?'projects':'sessions');
-  const label=kind==='claude-sessions'?'Claude Code sessions':'Codex sessions';const index=new Map<string,string>();
-  const list=async()=>{
+  const label=kind==='claude-sessions'?'Claude Code sessions':'Codex sessions';const index=new Map<string,{file:string;project:string}>();
+  const list=async(listOptions?:{otherProjects?:boolean})=>{
    index.clear();let files=0,dirs=0;const project=await realpath(options.project);
+   const entries:ContextEntry[]=[];
    async function walk(dir:string,depth:number):Promise<void>{if(depth>5)return;if(++dirs>L.directories)limit();await safePath(dir);for(const e of await readdir(dir,{withFileTypes:true})){if(e.isSymbolicLink()||kind==='claude-sessions'&&e.name==='subagents')continue;const file=path.join(dir,e.name);if(e.isDirectory())await walk(file,depth+1);else if(e.isFile()&&e.name.endsWith('.jsonl')){if(++files>L.files)limit();
       // Listing reveals only cwd membership, never prompts, names, titles or excerpts.
-      const rows=records(await readBounded(file,true));const working=kind==='claude-sessions'?rows.find(r=>['user','assistant'].includes(r.type))?.cwd:rows.find(r=>r.type==='session_meta')?.payload?.cwd;
-      if(typeof working==='string'&&same(working,project))index.set(digest(kind+'\0'+file),file);
+      const id=digest(kind+'\0'+file);let working:string|undefined,details:SessionDetails={title:'Unavailable session',modifiedAt:new Date(0).toISOString(),bytes:0,messageCount:0,estimatedTokens:0,projectMatch:false,status:'read',notice:P.read};
+      try{
+       const stat=await safePath(file);details.bytes=stat.size;details.modifiedAt=stat.mtime.toISOString();
+       const rows=records(await readBounded(file,true));working=kind==='claude-sessions'?rows.find(r=>['user','assistant'].includes(r.type))?.cwd:rows.find(r=>r.type==='session_meta')?.payload?.cwd;
+       if(typeof working!=='string'){if(!listOptions?.otherProjects)continue;throw new Error(N.format);}
+       details.projectMatch=same(working,project);if(!details.projectMatch&&!listOptions?.otherProjects)continue;
+       const turns=parseSession(kind,await readBounded(file),working),text=sessionText(turns);
+       details={...details,title:redactSession(turns.find(t=>t.role==='user')?.text??'No user prompt').replace(/\s+/g,' ').slice(0,160),messageCount:turns.length,estimatedTokens:Buffer.byteLength(text),status:'ready'};delete details.notice;
+       index.set(id,{file,project:working});
+      }catch(e){const reason=notice(e);details.status=reason===N.limit?'limit':reason===N.format?'format':'read';details.notice=P[details.status];}
+      entries.push({id,label:label+' '+(entries.length+1),session:details});
    }}}
    try{await walk(root,0);}catch(e){index.clear();if((e as NodeJS.ErrnoException).code==='ENOENT')return [];throw new Error(notice(e));}
-   return [...index.keys()].map((id,i)=>({id,label:label+' '+(i+1)}));
+   return entries.sort((a,b)=>b.session!.modifiedAt.localeCompare(a.session!.modifiedAt)||a.id.localeCompare(b.id));
   };
   return {id:kind,label,list,redact:redactSession,estimateTokens:text=>Buffer.byteLength(text),preview:sources=>sources.map(s=>({id:s.id,label:s.label,characters:s.text.length,estimatedTokens:Buffer.byteLength(s.text)})),
    read:async(ids,limits)=>{if(!ids.length)return [];if(ids.length>limits.maxSources||new Set(ids).size!==ids.length)limit();const sources:ContextSource[]=[];
-    for(const id of ids){const file=index.get(id);if(!file)throw new Error(N.selection);let raw;try{raw=await readBounded(file);}catch(e){throw new Error(notice(e));}
-     const turns=parseSession(kind,raw,await realpath(options.project));const text=redactSession(turns.map(t=>`${t.role==='user'?'User':'Assistant (final)'}:\n${t.text}`).join('\n\n'));
+    for(const id of ids){const entry=index.get(id);if(!entry)throw new Error(N.selection);let raw;try{raw=await readBounded(entry.file);}catch(e){throw new Error(notice(e));}
+     const turns=parseSession(kind,raw,entry.project);const text=sessionText(turns);
      if(sources.reduce((n,s)=>n+s.text.length,0)+text.length>limits.maxCharacters)limit();sources.push({id:(kind==='claude-sessions'?'C':'X')+(sources.length+1),label,version:digest(text),text,ephemeral:true});
     }return sources;
    }};
  });
 }
+/** Shared by listing estimates, picker previews and the sender's ContextModule.read. */
+export function sessionText(turns:readonly SessionTurn[]):string{return redactSession(turns.map(t=>`${t.role==='user'?'User':'Assistant (final)'}:\n${t.text}`).join('\n\n'));}
