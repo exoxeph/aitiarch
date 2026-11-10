@@ -86,7 +86,7 @@ export function sessionModules(options:SessionModuleOptions):ContextModule[]{
    index.clear();let files=0,dirs=0;const project=await realpath(options.project);
    const entries:ContextEntry[]=[];
    async function walk(dir:string,depth:number):Promise<void>{if(depth>5)return;if(++dirs>L.directories)limit();await safePath(dir);for(const e of await readdir(dir,{withFileTypes:true})){if(e.isSymbolicLink()||kind==='claude-sessions'&&e.name==='subagents')continue;const file=path.join(dir,e.name);if(e.isDirectory())await walk(file,depth+1);else if(e.isFile()&&e.name.endsWith('.jsonl')){if(++files>L.files)limit();
-      // Listing reveals only cwd membership, never prompts, names, titles or excerpts.
+      // Match cwd before extracting the bounded, redacted title and session metadata.
       const id=digest(kind+'\0'+file);let working:string|undefined,details:SessionDetails={title:'Unavailable session',modifiedAt:new Date(0).toISOString(),bytes:0,messageCount:0,estimatedTokens:0,projectMatch:false,status:'read',notice:P.read};
       try{
        const stat=await safePath(file);details.bytes=stat.size;details.modifiedAt=stat.mtime.toISOString();

@@ -5,7 +5,9 @@ import {applyInvestigatorEvent,emptyTrail,isInvestigatorCode} from './trail-mode
 import {secretKinds} from '../../server/chat/secrets.ts';
 import type {InvestigatorCode,InvestigatorEvent,Permission,Tier} from '../../shared/investigator.ts';
 import {CHAT_MESSAGES,type ChatErrorCode,type ChatReview,type ChatUsage} from '../../shared/chat.ts';
-import {SESSION_NOTICES,type SessionKind} from '../../shared/ide-sessions.ts';
+import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
+import {SessionPicker} from './SessionPicker.tsx';
+import {sessionChoices,type PickedSession} from './session-picker-model.ts';
 import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
 import {Thinking} from '../ink/streaming.tsx';
 import {DEFAULT_CONTEXT,SUGGESTED_PROMPTS,chatHeader,toggleChip,type ContextChip} from './chat-stub.ts';
@@ -54,10 +56,8 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  const [usage,setUsage]=useState<ChatUsage|null>(null),[persistence,setPersistence]=useState<'private'|'memory'>('memory'),[notice,setNotice]=useState(''),[adding,setAdding]=useState<string|null>(null);
  const input=useRef<HTMLTextAreaElement>(null),log=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),alive=useRef(true);
  const [inv,setInv]=useState({enabled:false,claude:false,persistence:false}),[investigating,setInvestigating]=useState(false),[addingText,setAddingText]=useState<string|null>(null);
- const [sessions,setSessions]=useState<{id:SessionKind;label:string;entries:{id:string;label:string}[];notice?:string}[]|null>(null),[pickedSessions,setPickedSessions]=useState<Record<string,string[]>>({});
- const [sessionLoading,setSessionLoading]=useState(false);
- useEffect(()=>{setSessions(null);setPickedSessions({});},[path]);
- const loadSessions=async()=>{if(!path||sessionLoading)return;setSessionLoading(true);try{const list=await api.chatSessions(path);setSessions(list.flatMap(m=>m.id==='claude-sessions'||m.id==='codex-sessions'?[{...m,id:m.id}]:[]));}catch{setNotice(SESSION_NOTICES.format);}finally{setSessionLoading(false);}};
+ const [pickedSessions,setPickedSessions]=useState<PickedSession[]>([]);
+ useEffect(()=>{setPickedSessions([]);},[path]);
  const chatId=useRef(crypto.randomUUID()); // "this chat" for permissions lasts as long as this panel stays open
  useEffect(()=>{let off=false;api.investigator().then((s:any)=>{if(!off)setInv({enabled:!!s.policy?.enabled,claude:!!s.claudeConfigured,persistence:!!s.persistence});}).catch(()=>{});return()=>{off=true;};},[settingsVersion]);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;abort.current?.abort();};},[]);
@@ -118,7 +118,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
   if(investigating&&investigatorReady){const id=newTurnId();setNotice('');questions.set(id,question);setTurns(t=>[...t,{id,question,status:'streaming',text:'',trail:emptyTrail()}]);setDraft('');await runInvestigation(id,question);return;}
   const id=newTurnId(),{context,selection}=buildContext(chips,getSelection());setNotice('');setBusy(true);
   try{
-   const sessionContext=(['claude-sessions','codex-sessions'] as const).filter(moduleId=>pickedSessions[moduleId]?.length).map(moduleId=>({moduleId,ids:pickedSessions[moduleId]}));
+   const sessionContext=sessionChoices(pickedSessions);
    const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...sessionContext],...(selection?{selection}:{})});
    questions.set(id,question);setTurns(t=>[...t,{id,question,status:'review',text:''}]);setDraft('');
    if(review.requiresConfirmation){setPending(review);setBusy(false);return;}
@@ -149,12 +149,8 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
     title={investigatorReady?'Let agents read files in your registered folders to answer (read-only)':'The investigator is off. Open AI settings to turn it on.'}
     onClick={()=>{if(investigatorReady)setInvestigating(v=>!v);else onOpenSettings();}}>Investigate</button></span>
    <span className="chat-context-total">About {formatCount(total)} tokens of context</span>
+   {path&&<SessionPicker key={path} path={path} selected={pickedSessions} onChange={setPickedSessions} disabled={composing||investigating} budget={usage?.tokenBudget??50000}/>}
   </div>
-  <details className="chat-review-source"><summary>IDE session context (optional)</summary>
-   <p>{SESSION_NOTICES.privacy} {SESSION_NOTICES.redaction}</p>
-   <button type="button" className="ghost" disabled={composing||sessionLoading} onClick={()=>void loadSessions()}>{sessionLoading?'Looking for local sessions…':'List sessions for this project'}</button>
-   {sessions?.map(m=><fieldset key={m.id} disabled={composing||investigating}><legend>{m.label}</legend>{m.notice?<p role="status">{m.notice}</p>:m.entries.length===0?<p>No matching sessions.</p>:m.entries.map(entry=><label key={entry.id}><input type="checkbox" checked={pickedSessions[m.id]?.includes(entry.id)??false} onChange={e=>setPickedSessions(p=>({...p,[m.id]:e.target.checked?[...(p[m.id]??[]),entry.id]:(p[m.id]??[]).filter(id=>id!==entry.id)}))}/>{entry.label}</label>)}</fieldset>)}
-  </details>
   {investigating&&investigatorReady&&<p className="chat-investigating">Investigating: agents may read files in your registered folders, read-only. Nothing is written.</p>}
   {peek&&<div className="chat-peek" role="region" aria-label={`Preview of ${chips.find(c=>c.id===peek)?.label}`}><pre>{previewText(peekText[peek],1200)}</pre></div>}
   <div className="chat-log" role="log" aria-label="Conversation" ref={log}>
