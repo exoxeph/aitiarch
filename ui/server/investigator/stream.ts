@@ -2,7 +2,7 @@ import {StringDecoder} from 'node:string_decoder';import {inspectClaudeCanary} f
 import {InvestigatorError,type RunEvent,type RunResult} from '../../shared/investigator.ts';import {clean} from './lookups.ts';
 /** No raw event persistence. Text waits for complete validation/redaction, so secrets split across deltas cannot leak. */
 export class InvestigatorStream {
- private decoder=new StringDecoder('utf8');private pending='';private bytes=0;private started=false;private message=false;private stopped=false;private block:{index:number;type:'text'|'thinking';text:string}|null=null;private answer='';private result:RunResult|null=null;private queued:RunEvent[]=[];private emit:(e:RunEvent)=>void;
+ private decoder=new StringDecoder('utf8');private pending='';private bytes=0;private events=0;private started=false;private message=false;private stopped=false;private block:{index:number;type:'text'|'thinking';text:string}|null=null;private answer='';private result:RunResult|null=null;private queued:RunEvent[]=[];private emit:(e:RunEvent)=>void;
  constructor(emit:(e:RunEvent)=>void){this.emit=emit;}
  push(bytes:Buffer){this.bytes+=bytes.length;if(this.bytes>512000)throw new InvestigatorError('budget');this.pending+=this.decoder.write(bytes);this.lines(false);}
  finish(){this.pending+=this.decoder.end();this.lines(true);if(!this.result||!this.started||!this.stopped)throw new InvestigatorError('format_changed');
@@ -13,7 +13,7 @@ export class InvestigatorStream {
  private parse(line:string){let e:any;try{e=JSON.parse(line);}catch{throw new InvestigatorError('format_changed');}const fail=()=>{throw new InvestigatorError('format_changed');};
   if(!e||typeof e!=='object'||this.result)fail();const checked=inspectClaudeCanary([e],[]);if(checked.toolAttempts||checked.hookEvents||checked.unknownEvents)throw new InvestigatorError('blocked');
   const name=e.type==='stream_event'?'stream_event_'+e.event?.type:e.type==='system'?'system_'+e.subtype:e.type;
-  if(typeof name!=='string'||!/^[a-z][a-z0-9_]{0,79}$/.test(name))fail();if(this.queued.length>=3000)throw new InvestigatorError('budget');this.queued.push({type:'status',name});
+  if(typeof name!=='string'||!/^[a-z][a-z0-9_]{0,79}$/.test(name))fail();if(++this.events>3000)throw new InvestigatorError('budget');this.emit({type:'status',name});
   if(!this.started){if(e.type!=='system'||e.subtype!=='init'||Object.values(checked.registries).some(n=>n!==0))fail();this.started=true;return;}
   if(e.type==='system'){if(e.subtype!=='thinking_tokens')fail();return;}
   if(e.type==='result'){
