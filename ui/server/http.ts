@@ -215,11 +215,12 @@ export function createApp(opts: AppOptions) {
       const saved=await chatStore.read(note),runtime=await chatReady;
       return json(res,200,{...saved,messages:[...saved.messages,...runtime.memoryMessages(note)],persistence:await chatStore.status(),questionPlaceholder:'Question unavailable after reload.',usage:runtime.usage().find(c=>c.note===note)??null});
     }
-    if(url.pathname==='/api/chat/modules'&&req.method==='GET')return json(res,200,await (await chatReady).modules(url.searchParams.get('path')??'',url.searchParams.get('sessions')==='1'));
+    if(url.pathname==='/api/chat/modules'&&req.method==='GET')return json(res,200,await (await chatReady).modules(url.searchParams.get('path')??'',url.searchParams.get('sessions')==='1',url.searchParams.get('otherProjects')==='1'));
     if(url.pathname.startsWith('/api/chat/')&&req.method==='PUT'){
       const b=await readBody(req) as any,runtime=await chatReady;
       try{
         if(url.pathname==='/api/chat/review')return json(res,200,await runtime.review(b));
+        if(url.pathname==='/api/chat/session-preview')return json(res,200,await runtime.sessionPreview(b.path,b.context));
         if(url.pathname==='/api/chat/settings')return json(res,200,await runtime.settings(b.path,b));
         if(url.pathname==='/api/chat/cancel'){runtime.cancel(b.path);return json(res,200,{});}
         if(url.pathname==='/api/chat/enable'){

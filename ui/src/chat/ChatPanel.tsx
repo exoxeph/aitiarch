@@ -57,7 +57,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  const [sessions,setSessions]=useState<{id:SessionKind;label:string;entries:{id:string;label:string}[];notice?:string}[]|null>(null),[pickedSessions,setPickedSessions]=useState<Record<string,string[]>>({});
  const [sessionLoading,setSessionLoading]=useState(false);
  useEffect(()=>{setSessions(null);setPickedSessions({});},[path]);
- const loadSessions=async()=>{if(!path||sessionLoading)return;setSessionLoading(true);try{const list=await api.chatSessions(path);setSessions(list.filter(m=>m.id==='claude-sessions'||m.id==='codex-sessions'));}catch{setNotice(SESSION_NOTICES.format);}finally{setSessionLoading(false);}};
+ const loadSessions=async()=>{if(!path||sessionLoading)return;setSessionLoading(true);try{const list=await api.chatSessions(path);setSessions(list.flatMap(m=>m.id==='claude-sessions'||m.id==='codex-sessions'?[{...m,id:m.id}]:[]));}catch{setNotice(SESSION_NOTICES.format);}finally{setSessionLoading(false);}};
  const chatId=useRef(crypto.randomUUID()); // "this chat" for permissions lasts as long as this panel stays open
  useEffect(()=>{let off=false;api.investigator().then((s:any)=>{if(!off)setInv({enabled:!!s.policy?.enabled,claude:!!s.claudeConfigured,persistence:!!s.persistence});}).catch(()=>{});return()=>{off=true;};},[settingsVersion]);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;abort.current?.abort();};},[]);

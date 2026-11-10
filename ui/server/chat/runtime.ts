@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import type {ChatEvent,ChatInput,ChatReview,ChatMessage,ChatUsage,ChatErrorCode,ContextSource,ContextModule} from '../../shared/chat.ts';
+import type {ChatEvent,ChatInput,ChatReview,ChatMessage,ChatUsage,ChatErrorCode,ContextSource,ContextModule,ContextChoice} from '../../shared/chat.ts';
 import path from 'node:path';
 import {sessionModules} from './ide-sessions.ts';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
@@ -37,7 +37,15 @@ export class ChatRuntime {
   await this.store.read(note);if(!Number.isSafeInteger(input.tokenBudget)||input.tokenBudget<1000||input.tokenBudget>1000000||!Number.isSafeInteger(input.rollingRequestCap)||input.rollingRequestCap<1||input.rollingRequestCap>60)throw new ChatError('invalid_chat');
   const s=this.state(note);s.usage.tokenBudget=input.tokenBudget;s.usage.rollingRequestCap=input.rollingRequestCap;return {...s.usage};
  }
- async modules(note:string,includeSessions=false){await this.store.read(note);return Promise.all([...contextModules(this.store,this.ink,note),...(includeSessions?this.sessions:[])].map(async m=>{try{return {id:m.id,label:m.label,entries:await m.list()};}catch{return {id:m.id,label:m.label,entries:[],notice:SESSION_NOTICES.format};}}));}
+ async modules(note:string,includeSessions=false,otherProjects=false){await this.store.read(note);return Promise.all([...contextModules(this.store,this.ink,note),...(includeSessions?this.sessions:[])].map(async m=>{try{return {id:m.id,label:m.label,entries:await m.list({otherProjects})};}catch{return {id:m.id,label:m.label,entries:[],notice:SESSION_NOTICES.format};}}));}
+ async sessionPreview(note:string,context:ContextChoice[]){
+  await this.store.read(note);if(!Array.isArray(context)||context.length>2)throw new ChatError('invalid_chat');const seen=new Set<string>(),sources:ContextSource[]=[];
+  for(const c of context){const module=this.sessions.find(m=>m.id===c?.moduleId);if(!module||seen.has(c.moduleId)||!Array.isArray(c.ids)||c.ids.length>CHAT_LIMITS.sources||c.ids.some(id=>typeof id!=='string')||new Set(c.ids).size!==c.ids.length)throw new ChatError('invalid_chat');seen.add(c.moduleId);
+   for(const id of c.ids)await this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(note),requestId:'session-preview',note,event:'context_read',moduleId:module.id,sourceHash:hash(id),at:new Date().toISOString()});
+   try{sources.push(...await module.read(c.ids,{maxSources:CHAT_LIMITS.sources-sources.length,maxCharacters:CHAT_LIMITS.otherCharacters-sources.reduce((n,s)=>n+s.text.length,0)}));}catch(e){throw new ChatError(e instanceof Error&&e.message===SESSION_NOTICES.limit?'session_limit':e instanceof Error&&e.message===SESSION_NOTICES.selection?'session_selection':'session_format');}
+  }
+  return {sources:sources.map(s=>({id:s.id,label:s.label,text:s.text})),estimatedTokens:sources.reduce((n,s)=>n+estimateTokens(s.text),0),budget:this.state(note).usage.tokenBudget};
+ }
  async review(input:ChatInput):Promise<ChatReview>{
   if(this.closed||!input||!/^[\w-]{1,100}$/.test(input.id)||typeof input.question!=='string'||!input.question.trim()||input.question.length>CHAT_LIMITS.questionCharacters||typeof input.path!=='string'||input.selection!==undefined&&(typeof input.selection!=='string'||input.selection.length>8000)||!Array.isArray(input.context)||input.context.length>4)throw new ChatError('invalid_chat');
   // Validate target even when no context module is selected. Never implicitly send it.

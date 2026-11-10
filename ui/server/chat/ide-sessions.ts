@@ -67,7 +67,8 @@ export function parseSession(kind:SessionKind,raw:string,project:string):Session
 export function redactSession(text:string):string {
  return redact(text).replace(/\bBearer\s+[A-Za-z0-9._~+\/-]{16,}/gi,'Bearer [SECRET]')
   .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,'[SECRET]')
-  .replace(/\b(?:AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{16,})\b/g,'[SECRET]');
+  .replace(/\b(?:AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{16,})\b/g,'[SECRET]')
+  .replaceAll('[SECRET]','[redacted: key-like token]').replaceAll('[PRIVATE KEY]','[redacted: private key]');
 }
 /** Reject links in every ancestor, not merely the leaf. No auth/config/history files are opened. */
 async function safePath(file:string){let current=path.parse(path.resolve(file)).root;for(const part of path.resolve(file).slice(current.length).split(path.sep).filter(Boolean)){current=path.join(current,part);const s=await lstat(current);if(s.isSymbolicLink())throw new Error(N.selection);}return lstat(file);}

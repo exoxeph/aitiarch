@@ -40,6 +40,14 @@ it('session sources force preview on every send and keep replies, evidence and l
  expect((await f.chats.read(f.input.path)).messages).toHaveLength(0);await expect(readFile(path.join(f.root,'chat/fixture.md.chat.json'))).rejects.toMatchObject({code:'ENOENT'});
  const ledger=await readFile(path.join(f.root,'ledger.json'),'utf8');expect(ledger).not.toMatch(/Synthetic session|Synthetic final|synthetic.jsonl/);expect(ledger).toContain('claude-sessions');await runtime.close();
 });
+it('session picker preview equals the sender context byte for byte and never invokes a provider',async()=>{
+ const f=await fixture(),dir=path.join(f.root,'sessions');await mkdir(dir);await writeFile(path.join(dir,'fake.jsonl'),JSON.stringify({type:'user',cwd:f.root,message:{role:'user',content:'Synthetic prompt token=synthetic-key'}})+'\n');
+ const modules=sessionModules({project:f.root,roots:{'claude-sessions':dir,'codex-sessions':path.join(f.root,'absent')}}),runtime=new ChatRuntime(f.store,f.ink,f.chats,f.provider,modules);
+ const [entry]=await modules[0].list(),context=[{moduleId:'claude-sessions' as const,ids:[entry.id]}];const preview=await runtime.sessionPreview(f.input.path,context);
+ expect(f.provider.requests).toHaveLength(0);expect(preview.sources[0].text).toContain('[redacted: key-like token]');
+ const review=await runtime.review({...f.input,context});expect(Buffer.from(preview.sources[0].text)).toEqual(Buffer.from(review.sources[0].text));
+ await runtime.send({reviewId:review.reviewId,confirmed:true},()=>{});expect(Buffer.from(f.provider.requests[0].decisions[0].text)).toEqual(Buffer.from(preview.sources[0].text));await runtime.close();
+});
 it('fake stream: review first, frozen context, provisional tokens, accepted markdown, private replies only',async()=>{
  const f=await fixture(),events:ChatEvent[]=[];
  await expect(f.runtime.send({reviewId:'missing'},e=>events.push(e))).rejects.toMatchObject({code:'review_required'});

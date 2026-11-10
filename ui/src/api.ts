@@ -120,7 +120,7 @@ export async function streamInvestigator(body: { chat: string; id: string; note:
 export const api = {
   chat:(path:string)=>ok<ChatSnapshot>('GET',`/api/chat?path=${encodeURIComponent(path)}`),
   chatCall:<T,>(action:string,body:unknown)=>ok<T>('PUT','/api/chat/'+action,body),
-  chatSessions:(path:string)=>ok<{id:import('../shared/ide-sessions.ts').SessionKind;label:string;entries:{id:string;label:string}[];notice?:string}[]>('GET',`/api/chat/modules?path=${encodeURIComponent(path)}&sessions=1`),
+  chatSessions:(path:string,otherProjects=false)=>ok<{id:import('../shared/chat.ts').ContextChoice['moduleId'];label:string;entries:import('../shared/chat.ts').ContextEntry[];notice?:string}[]>('GET',`/api/chat/modules?path=${encodeURIComponent(path)}&sessions=1&otherProjects=${otherProjects?'1':'0'}`),
   investigator:()=>ok<any>('GET','/api/investigator'),
   investigatorCall:<T,>(action:string,body:unknown)=>ok<T>('PUT','/api/investigator/'+action,body),
   usage:()=>ok<import('../shared/usage.ts').UsageSummary>('GET','/api/usage'),
