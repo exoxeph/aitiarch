@@ -26,6 +26,7 @@ if (args.includes('--version') || args.includes('--help')) {
       ['skills', '--disable-slash-commands Disable all skills'],
       ['output', '--output-format <format> text, json (single result), stream-json'],
       ['verbose', '--verbose Enable verbose output'],
+      ['partial', '--include-partial-messages Include partial messages as they arrive'],
       ['hook-events', '--include-hook-events Include all hook lifecycle events in the\n                                        output stream (only works with\n                                        --output-format=stream-json)'],
     ] : [
       ['sandbox', '--sandbox <mode> Sandbox policy: read-only, workspace-write'],
@@ -66,6 +67,18 @@ if (scenario.startsWith('verified-')) {
   if (scenario === 'verified-mcp') init.mcp_servers.push('unsafe');
   if (scenario === 'verified-plugin') init.plugins.push('unsafe');
   console.log(JSON.stringify(init));
+  if(scenario==='verified-chat-stream'){
+    if(!args.includes('--include-partial-messages'))process.exit(94);
+    const result=JSON.stringify({answer:'**Synthetic** streamed reply.',claims:[]});
+    const emit=event=>console.log(JSON.stringify({type:'stream_event',event}));
+    emit({type:'message_start',message:{role:'assistant'}});
+    emit({type:'content_block_start',index:0,content_block:{type:'text',text:''}});
+    emit({type:'content_block_delta',index:0,delta:{type:'text_delta',text:result.slice(0,20)}});
+    emit({type:'content_block_delta',index:0,delta:{type:'text_delta',text:result.slice(20)}});
+    emit({type:'content_block_stop',index:0});emit({type:'message_stop'});
+    console.log(JSON.stringify({type:'assistant',message:{content:[{type:'text',text:result}]}}));
+    console.log(JSON.stringify({type:'result',subtype:'success',result,usage:{input_tokens:20,output_tokens:10}}));process.exit(0);
+  }
   if(scenario==='verified-truncated'){process.stdout.write('{"type":"assistant","message":');process.exit(0);}
   if (scenario === 'verified-hook') console.log(JSON.stringify({ type: 'system', subtype: 'hook_started' }));
   if (scenario === 'verified-hook-prefixed') console.log(JSON.stringify({ type: 'system', subtype: 'hook_custom' }));

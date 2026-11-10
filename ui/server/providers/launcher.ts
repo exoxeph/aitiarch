@@ -12,8 +12,8 @@ export function assertLaunch(provider: ProviderName, mode: 'metadata' | 'isolate
     if (JSON.stringify(args) !== '["--version"]' && JSON.stringify(args) !== (provider === 'claude' ? '["--help"]' : '["exec","--help"]')) reject();
     return;
   }
-  if (provider === 'claude' && ![false, true].some(stream => [[], ['--max-turns', '1']].some(hardening =>
-    JSON.stringify(args) === JSON.stringify(claudeArguments({ stream, hardening }))))) reject();
+  if (provider === 'claude' && ![false, true].some(stream => [false,true].some(partial=>(!partial||stream)&&[[], ['--max-turns', '1']].some(hardening =>
+    JSON.stringify(args) === JSON.stringify(claudeArguments({ stream, hardening, partial })))))) reject();
   if (!cwd || !path.isAbsolute(cwd)) reject();
   const actual = realpathSync(cwd!), temp = realpathSync(os.tmpdir()), rel = path.relative(temp, actual);
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel) || readdirSync(actual).length) reject();

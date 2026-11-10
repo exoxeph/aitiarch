@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Configuration, ErrorCode, CLIProviderName } from './index.ts';
 
-export type Availability = { available: true; hardening?: string[]; warnings?: string[] } | {
+export type Availability = { available: true; hardening?: string[]; warnings?: string[]; textStreaming?:boolean } | {
   available: false; code: ErrorCode; message: string; version?: string; warnings?: string[];
 };
 type Requirement = readonly [flag: string, meaning: RegExp];
@@ -67,7 +67,7 @@ export function assessCapabilities(config: Pick<Configuration, 'provider' | 'con
     message: `Provider disabled (${config.provider} ${version}): live isolation has not been verified; canary approval required.` };
   const maxTurns = blocks.get('--max-turns') ?? '';
   return config.provider === 'claude'
-    ? { available: true, hardening: /(?:max(?:imum)?|limit)[\s\S]*\bturns?\b/i.test(maxTurns) ? ['--max-turns', '1'] : [] }
+    ? { available: true, textStreaming:/partial/i.test(blocks.get('--include-partial-messages')??''), hardening: /(?:max(?:imum)?|limit)[\s\S]*\bturns?\b/i.test(maxTurns) ? ['--max-turns', '1'] : [] }
     : { available: true };
 }
 
