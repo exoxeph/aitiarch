@@ -35,6 +35,7 @@ export function MarginRail({placed,renderDraft}:{placed:PlacedMargin[];renderDra
  const columns=geometry?placed.map(p=>({p,box:blobBox(geometry.width,geometry.left,geometry.right,p.side)})):[];
  return <aside className={'margin-rail thought-rails'+(scrolling?' thoughts-scrolling':'')} aria-label="AI thoughts" ref={rail}>
   {geometry&&<svg className="thought-connectors" aria-hidden="true" width={geometry.width} height="100%">
+   <defs><filter id="thought-rough" filterUnits="userSpaceOnUse" x="-4000" y="-4000" width="12000" height="12000"><feTurbulence type="fractalNoise" baseFrequency="0.025 0.09" numOctaves="2" seed="7" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="3.4" xChannelSelector="R" yChannelSelector="G"/></filter></defs>
    {columns.filter(({p})=>p.end&&connectorVisible(p.target,p.top,rail.current?.clientHeight??0)).map(({p,box})=>{
     const dotX=p.side==='right'?box.left:box.left+box.width,pts=connectorPath(p.end!,{x:dotX,y:p.top+14},{left:geometry.left,right:geometry.right},p.side);
     return <path key={p.item.id} className={'thought-connector'+(active===p.item.id||focused===p.item.id?' thought-connector-on':'')} data-ink-id={p.item.id} d={pts.map((q,i)=>(i?'L':'M')+q.x+' '+q.y).join(' ')}/>;

@@ -463,10 +463,11 @@ summary { cursor: pointer; }
 .thought-diagram-slot:empty {display:none;}
 /* Connector: a thin dotted line from the end of the anchored text to the blob dot; faint at rest, stronger on hover/focus. */
 .thought-connectors {position:absolute;left:0;top:0;height:100%;overflow:visible;pointer-events:none;}
-.thought-connector {fill:none;stroke:var(--control-border);stroke-width:1;stroke-dasharray:1 4;stroke-linecap:round;opacity:.45;transition:opacity 140ms,stroke 140ms;}
-.thought-connector-on {opacity:1;stroke:var(--ai-ink);stroke-width:1.5;}
+.thought-connector {fill:none;stroke:var(--accent);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;opacity:.55;filter:url(#thought-rough);transition:opacity 140ms,stroke 140ms;} /* a slightly wobbly pencil line, not dots */
+.thought-connector-on {opacity:1;stroke:var(--accent);stroke-width:1.9;}
 @media (prefers-reduced-motion: reduce) {.thought-connector {transition:none;}}
-.cm-thought-anchor {text-decoration:underline dotted var(--ai-ink);text-underline-offset:4px;}
+/* Text the AI is annotating is underlined with a hand-drawn brush stroke (a tapering line with a faint second pass), like a pencil annotation. */
+.cm-thought-anchor {background-image:var(--brush-underline);background-repeat:repeat-x;background-position:0 calc(100% + 4px);background-size:96px 9px;-webkit-box-decoration-break:clone;box-decoration-break:clone;}
 .cm-thought-anchor:hover,.cm-thought-anchor.thought-active {background:var(--ai-surface);}
 .thought-blob:hover,.thought-blob:focus-within,.thought-blob.thought-active {background:var(--ai-surface);}
 .ink-surface[data-thought-layout="wide"] .cm-editor .cm-content {max-width:min(760px,calc(100% - 656px));margin-left:auto;margin-right:auto;}
