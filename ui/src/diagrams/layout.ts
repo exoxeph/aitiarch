@@ -24,8 +24,12 @@ export async function layoutDiagram(input:Diagram,compact=false):Promise<Diagram
   const containers=new Map<string,{x:number;y:number}>([['root',{x:0,y:top}]]);
   const walk=(children:typeof graph.children,ox=0,oy=top)=>{for(const child of children??[]){const x=ox+(child.x??0),y=oy+(child.y??0);if(child.children){containers.set(child.id,{x,y});groupBoxes.push({id:child.id,x,y,width:child.width!,height:child.height!});walk(child.children,x,y);}else nodes.push({...prepared.find(n=>n.id===child.id)!,x,y});}};walk(graph.children);
   for(const e of graph.edges??[]){if(!visual.some(v=>v.id===e.id))continue;if(!e.sections?.length)throw new Error('Missing diagram route.');const offset=containers.get(e.container??'root');if(!offset)throw new Error('Unknown diagram container.');const points=e.sections.flatMap(s=>[s.startPoint,...(s.bendPoints??[]),s.endPoint]).map(p=>({x:p.x+offset.x,y:p.y+offset.y}));const label=e.labels?.[0];for(const id of visual.find(v=>v.id===e.id)!.ids){const original=d.edges.find(v=>v.id===id)!;edges.push({id,points:original.from===visual.find(v=>v.id===e.id)!.from?points:[...points].reverse(),...(label?{label:{x:label.x!+offset.x,y:label.y!+offset.y,width:label.width!,height:label.height!}}:{})});}}
-  width=(graph.width??0)+20;height=(graph.height??0)+(compact?top+8:100);
- width=Math.ceil(width);height=Math.ceil(height);if(width/height<.6)width=Math.ceil(height*.6);if(width/height>1.3)height=Math.ceil(width/1.3);
+  void graph;
+ // Crop the canvas to what is drawn (nodes, groups, routes, labels) plus a small margin. No aspect-ratio padding: a wide
+ // diagram used to sit in a corner of a tall blank canvas.
+ const xs=[...nodes.map(n=>n.x+n.width),...groupBoxes.map(g=>g.x+g.width),...edges.flatMap(e=>[...e.points.map(p=>p.x),...(e.label?[e.label.x+e.label.width]:[])])];
+ const ys=[...nodes.map(n=>n.y+n.height),...groupBoxes.map(g=>g.y+g.height),...edges.flatMap(e=>[...e.points.map(p=>p.y),...(e.label?[e.label.y+e.label.height]:[])])];
+ width=Math.ceil(Math.max(...xs)+20);height=Math.ceil(Math.max(...ys)+(compact?8:24));if(!compact)width=Math.max(width,360); // the title block needs some width
  const result={width,height,nodes,edges,groups:groupBoxes};
  if(!validateLayout(d,result))throw new Error('Invalid diagram layout.');
  return result;

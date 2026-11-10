@@ -27,12 +27,13 @@ export class ImageWidget extends WidgetType {
     fig.className = this.src ? "cm-image" : "cm-image cm-image-missing";
     fig.contentEditable = "false";
     const caption = document.createElement("figcaption");
+    let fitNow = () => {};
     if (this.src) {
       const img = document.createElement("img");
       img.src = this.src;
       img.alt = this.alt;
       img.draggable = false;
-      img.addEventListener("load", () => view.requestMeasure());
+      img.addEventListener("load", () => { fitNow(); view.requestMeasure(); });
       img.addEventListener("error", () => {
         img.remove();
         fig.classList.add("cm-image-missing");
@@ -41,17 +42,21 @@ export class ImageWidget extends WidgetType {
       });
       fig.append(img);
       caption.textContent = this.alt;
-      // An inserted diagram is exclusive: it takes the full width of the page, both margins included, scaled to fit, so it
-      // never needs horizontal scrolling. The figure is moved out of the text column with a negative left margin.
+      // An inserted diagram is shown at its natural size, centred on the text column. It may stick out into the side margins
+      // (where the AI thoughts live) but only up to halfway into each, and is scaled down to that limit, so it never needs
+      // horizontal scrolling and never takes the margins over outright.
       const fit = () => view.requestMeasure({
         key: fig,
         read: () => {
-          const sc = view.scrollDOM, c = view.contentDOM.getBoundingClientRect(), s = sc.getBoundingClientRect();
-          const inset = 20, padL = parseFloat(getComputedStyle(view.contentDOM).paddingLeft) || 0;
-          return { width: Math.max(240, sc.clientWidth - 2 * inset), shift: c.left + padL - (s.left + inset) };
+          const sc = view.scrollDOM, cs = getComputedStyle(view.contentDOM), c = view.contentDOM.getBoundingClientRect();
+          const column = c.width - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+          const marginEach = Math.max(0, (sc.clientWidth - column) / 2), limit = column + marginEach; // half of each margin
+          const natural = img.naturalWidth || limit;
+          return { width: Math.max(240, Math.min(natural, limit)), column };
         },
-        write: (m) => { const w = Math.round(m.width), sh = Math.round(m.shift); if (fig.dataset.fit === `${w}:${sh}`) return; fig.dataset.fit = `${w}:${sh}`; fig.style.width = `${w}px`; fig.style.marginLeft = `${-sh}px`; },
+        write: (m) => { const w = Math.round(m.width), left = Math.round((m.column - w) / 2); if (fig.dataset.fit === `${w}:${left}`) return; fig.dataset.fit = `${w}:${left}`; fig.style.width = `${w}px`; fig.style.marginLeft = `${left}px`; },
       });
+      fitNow = fit;
       const observer = new ResizeObserver(fit);
       observer.observe(view.scrollDOM);
       observers.set(fig, observer);

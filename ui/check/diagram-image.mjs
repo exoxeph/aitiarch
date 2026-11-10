@@ -25,8 +25,8 @@ try{
  const img=page.locator('.cm-image img');await img.waitFor();await page.waitForFunction(()=>{const i=document.querySelector('.cm-image img');return i&&i.complete&&i.naturalWidth>0;});
  await page.evaluate(`${V}.dispatch({selection:{anchor:0}})`);await page.waitForTimeout(300);
  // 1. Full width, no horizontal scroll.
- const fit=await page.evaluate(()=>{const fig=document.querySelector('.cm-image'),sc=document.querySelector('.cm-scroller'),c=document.querySelector('.cm-content');const f=fig.getBoundingClientRect(),s=sc.getBoundingClientRect(),cc=c.getBoundingClientRect();return{figWidth:f.width,contentWidth:cc.width,scrollerWidth:sc.clientWidth,leftGap:f.left-s.left,rightGap:s.left+sc.clientWidth-f.right,scrollX:sc.scrollWidth-sc.clientWidth,figScroll:fig.scrollWidth-fig.clientWidth};});
- assert(fit.figWidth>fit.contentWidth+100,'the diagram spans beyond the text column: '+JSON.stringify(fit));
+ const fit=await page.evaluate(()=>{const fig=document.querySelector('.cm-image'),sc=document.querySelector('.cm-scroller'),c=document.querySelector('.cm-content');const f=fig.getBoundingClientRect(),s=sc.getBoundingClientRect(),cc=c.getBoundingClientRect();const cs=getComputedStyle(c),column=cc.width-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);return{figWidth:f.width,contentWidth:cc.width,column,marginEach:(sc.clientWidth-column)/2,scrollerWidth:sc.clientWidth,leftGap:f.left-s.left,rightGap:s.left+sc.clientWidth-f.right,scrollX:sc.scrollWidth-sc.clientWidth,figScroll:fig.scrollWidth-fig.clientWidth};});
+ assert(fit.figWidth>fit.column+20,'the diagram protrudes beyond the text column: '+JSON.stringify(fit));assert(fit.figWidth<=fit.column+fit.marginEach+2,'but only up to halfway into each margin: '+JSON.stringify(fit));
  assert(fit.scrollX<=1&&fit.figScroll<=1,'no horizontal scrolling: '+JSON.stringify(fit));
  assert(fit.leftGap>=0&&fit.rightGap>=0,'inside the page: '+JSON.stringify(fit));
  // 2. The caret after the diagram is line sized and sits below it.
