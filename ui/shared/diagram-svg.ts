@@ -1,4 +1,5 @@
-import {readDiagram,type Diagram} from './diagram.ts';
+import {readDiagram,KIND_RULES,type Diagram} from './diagram.ts';
+import {kindArt} from './diagram-kinds.ts';
 export interface Point {x:number;y:number}
 export interface Box {x:number;y:number;width:number;height:number}
 export interface NodeLayout extends Box {id:string;labelLines:string[];detailLines:string[]}
@@ -32,6 +33,7 @@ export function diagramSvg(d:Diagram,l:DiagramLayout,theme:'light'|'dark',focus?
  // Title/caption remain readable without depending on page CSS in exports.
  if(!compact){out+=`<rect x="20" y="13" width="22" height="18" rx="2" fill="${p.ink}"/>`+text(23,26,'AI',13,p.paper);const titles=wrapText(d.title,l.width-70,s=>s.length*10);titles.forEach((line,i)=>{out+=text(48,27+i*22,line,18);});
  const cap=wrapText(d.caption,l.width-40,s=>s.length*7);cap.forEach((line,i)=>{out+=text(20,29+titles.length*22+i*17,line,13,p.muted);});}
+ if(KIND_RULES[d.type])out+=kindArt(d,l,{p,focus,compact,xml});else{
  for(const g of l.groups){out+=`<rect x="${g.x}" y="${g.y}" width="${g.width}" height="${g.height}" rx="6" fill="${compact?'none':p.surface}" stroke="${p.border}" stroke-width="${compact?1:1}" stroke-dasharray="3 4"/>`;wrapText(d.groups!.find(v=>v.id===g.id)!.label,g.width-24,s=>s.length*8).forEach((line,i)=>{out+=text(g.x+12,g.y+20+i*17,line,13,p.muted);});}
 
  for(const v of visualEdges(d)){const e=l.edges.find(e=>e.id===v.id)!;const active=v.ids.includes(focus??'');out+=`<path d="${e.points.map((v,i)=>(i?'L':'M')+v.x+' '+v.y).join(' ')}" fill="none" stroke="${active?p.accent:p.border}" stroke-width="${compact?(active?2:1):(active?2.5:1.5)}" ${v.both?'marker-start="url(#'+(active?'arrow-focus':'arrow')+')"':''} marker-end="url(#${active?'arrow-focus':'arrow'})"/>`;}
@@ -40,6 +42,7 @@ export function diagramSvg(d:Diagram,l:DiagramLayout,theme:'light'|'dark',focus?
   n.labelLines.forEach((line,i)=>{out+=text(n.x+14,n.y+23+i*19,line);});n.detailLines.forEach((line,i)=>{out+=text(n.x+14,n.y+27+n.labelLines.length*19+i*17,line,13,p.muted);});
  }
  for(const v of visualEdges(d)){const e=l.edges.find(e=>e.id===v.id)!;if(!v.label||!e.label)continue;const b=e.label;out+=`<rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" rx="2" fill="${p.paper}"/>`;wrapText(v.label,b.width-12,s=>s.length*8).forEach((line,i)=>{out+=text(b.x+6,b.y+17+i*17,line,13,v.ids.includes(focus??'')?p.accent:p.ink);});}
+ }
  if(adaptive){
   const from=diagramPalettes[theme],to=diagramPalettes[theme==='light'?'dark':'light'],rules=new Set<string>();
   for(const k of Object.keys(from) as Array<keyof typeof from>)if(from[k]!==to[k])rules.add(`[fill="${from[k]}"]{fill:${to[k]}}[stroke="${from[k]}"]{stroke:${to[k]}}`);

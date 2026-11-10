@@ -1,4 +1,5 @@
-import {readDiagram,type Diagram} from '../../shared/diagram.ts';
+import {readDiagram,KIND_RULES,type Diagram} from '../../shared/diagram.ts';
+import {layoutKind} from './kinds-layout.ts';
 import {wrapText,validateLayout,visualEdges,type DiagramLayout,type NodeLayout,type EdgeLayout} from '../../shared/diagram-svg.ts';
 import type {ELK,ElkNode} from 'elkjs/lib/elk.bundled.js';
 let engine:Promise<ELK>|undefined;
@@ -8,6 +9,8 @@ export async function layoutDiagram(input:Diagram,compact=false):Promise<Diagram
  const d=readDiagram(input);if(!d)throw new Error('Invalid diagram.');
  let measure=(s:string)=>s.length*8;
  if(typeof document!=='undefined'){const context=document.createElement('canvas').getContext('2d');if(context){context.font='14px Segoe UI, Arial, sans-serif';measure=s=>context.measureText(s).width;}}
+ // Cycle, timeline, matrix, hub and pyramid have their own geometry (no ELK): node order alone decides the picture.
+ if(KIND_RULES[d.type]){const r=layoutKind(d,compact,measure);if(!validateLayout(d,r))throw new Error('Invalid diagram layout.');return r;}
  const nodeWidth=compact?144:200;const top=compact?12:80;
  const prepared=d.nodes.map(n=>{const labelLines=wrapText(n.label,nodeWidth-28,measure),detailLines=wrapText(n.detail??'',nodeWidth-28,measure);return {id:n.id,width:nodeWidth,height:Math.max(54,20+labelLines.length*19+(detailLines.length?8+detailLines.length*17:0)),labelLines,detailLines};});
  const groupBoxes:DiagramLayout['groups']=[],nodes:NodeLayout[]=[],edges:EdgeLayout[]=[];

@@ -1,9 +1,12 @@
 /** Model data only. SVG/coordinates are exclusively generated locally. */
-export type DiagramType='flow'|'layers'|'sequence'|'comparison'|'tree';
+export type DiagramType='flow'|'layers'|'sequence'|'comparison'|'tree'|'cycle'|'timeline'|'matrix'|'hub'|'pyramid';
+export const DIAGRAM_TYPES:readonly DiagramType[]=['flow','layers','sequence','comparison','tree','cycle','timeline','matrix','hub','pyramid'];
+/** Kinds drawn from node order alone (no connections, no groups): the app lays them out and draws every line itself. */
+export const KIND_RULES:Partial<Record<DiagramType,{min:number;max:number}>>={cycle:{min:3,max:8},timeline:{min:2,max:8},matrix:{min:4,max:4},hub:{min:3,max:9},pyramid:{min:3,max:6}};
 export interface DiagramNode {id:string;label:string;kind?:'step'|'decision'|'actor'|'component'|'value';detail?:string}
 export interface DiagramEdge {id:string;from:string;to:string;label?:string}
 export interface DiagramGroup {id:string;label:string;nodeIds:string[]}
-export interface Diagram {version:1;type:DiagramType;title:string;caption:string;nodes:DiagramNode[];edges:DiagramEdge[];focus:string[];groups?:DiagramGroup[]}
+export interface Diagram {version:1;type:DiagramType;title:string;caption:string;nodes:DiagramNode[];edges:DiagramEdge[];focus:string[];groups?:DiagramGroup[];axes?:{x:string;y:string}}
 const record=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const keys=(v:unknown,required:string[],optional:string[]=[])=>record(v)&&required.every(k=>Object.hasOwn(v,k))&&Object.keys(v).every(k=>required.includes(k)||optional.includes(k));
 const id=(v:unknown):v is string=>typeof v==='string'&&/^[a-zA-Z][a-zA-Z0-9_-]{0,39}$/.test(v);
@@ -13,6 +16,7 @@ export const DIAGRAM_ISSUE_TEXT = {
   no_nodes: 'it has no nodes to draw', node_count: 'too many nodes', edge_count: 'too many connections', focus_count: 'too many steps', node: 'a node is malformed', node_label: 'a node label is too long or unsafe',
   node_detail: 'a node detail is too long or unsafe', node_kind: 'unknown node kind', edge: 'a connection is malformed', edge_label: 'a connection label is too long or unsafe',
   focus: 'bad step list', group: 'bad grouping', comparison: 'a comparison cannot have connections or more than 5 items', tree: 'the tree is not a tree', id: 'duplicate or invalid ids',
+  kind: 'this kind of diagram needs a different number of items and cannot have connections or groups', axes: 'the axis labels are malformed',
 } as const;
 export type DiagramIssueCode = keyof typeof DIAGRAM_ISSUE_TEXT;
 /** What is stored on an item when a diagram was rejected: the old generic value, or a specific code. */
@@ -27,10 +31,10 @@ export function checkDiagram(value: unknown): DiagramCheck {
  const no = (code: DiagramIssueCode, path: string): DiagramCheck => ({ ok: false, code, path });
  try {
   if (new TextEncoder().encode(JSON.stringify(value)).length > 16384) return no('too_large', '$');
-  if (!keys(value, ['version', 'type', 'title', 'caption', 'nodes', 'edges', 'focus'], ['groups'])) return no('shape', '$');
+  if (!keys(value, ['version', 'type', 'title', 'caption', 'nodes', 'edges', 'focus'], ['groups', 'axes'])) return no('shape', '$');
   const d = value as unknown as Diagram;
   if (d.version !== 1) return no('version', 'version');
-  if (!['flow', 'layers', 'sequence', 'comparison', 'tree'].includes(d.type)) return no('type', 'type');
+  if (!DIAGRAM_TYPES.includes(d.type)) return no('type', 'type');
   if (!text(d.title, 80)) return no('title', 'title');
   if (!text(d.caption, 160)) return no('caption', 'caption');
   if (!Array.isArray(d.nodes) || d.nodes.length > 15) return no('node_count', 'nodes');
@@ -62,6 +66,9 @@ export function checkDiagram(value: unknown): DiagramCheck {
    }
   }
   if (d.type === 'comparison' && (d.edges.length || d.nodes.length > 5)) return no('comparison', 'type');
+  const rule = KIND_RULES[d.type];
+  if (rule && (d.edges.length || d.groups || d.nodes.length < rule.min || d.nodes.length > rule.max)) return no('kind', 'type');
+  if (d.axes !== undefined && (d.type !== 'matrix' || !keys(d.axes, ['x', 'y']) || !text(d.axes.x, 32) || !text(d.axes.y, 32))) return no('axes', 'axes');
   if (d.type === 'tree') {
    if (d.edges.length !== d.nodes.length - 1) return no('tree', 'edges');
    const parents = new Map<string, string>();
@@ -83,7 +90,9 @@ export function readDiagram(value: unknown): Diagram | null {
 export interface NormalizeNotes { relabelled: number; dropped: number; renamed: number; clamped: number; retyped: boolean }
 const TYPE_WORDS: Record<string, DiagramType> = {
  flowchart: 'flow', graph: 'flow', process: 'flow', pipeline: 'flow', workflow: 'flow', architecture: 'layers', layer: 'layers', stack: 'layers',
- 'sequence-diagram': 'sequence', timeline: 'sequence', compare: 'comparison', table: 'comparison', hierarchy: 'tree',
+ 'sequence-diagram': 'sequence', compare: 'comparison', table: 'comparison', hierarchy: 'tree',
+ loop: 'cycle', circular: 'cycle', lifecycle: 'cycle', 'feedback-loop': 'cycle', 'time-line': 'timeline', roadmap: 'timeline', history: 'timeline',
+ quadrant: 'matrix', '2x2': 'matrix', grid: 'matrix', mindmap: 'hub', 'mind-map': 'hub', radial: 'hub', spoke: 'hub', 'hub-and-spoke': 'hub', funnel: 'pyramid', ranking: 'pyramid', levels: 'pyramid',
 };
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -175,9 +184,17 @@ export function normalizeDiagram(raw: unknown): { value: unknown; notes: Normali
   if (finalId && used.has(finalId) && !focus.includes(finalId)) { if (focus.length < 25) focus.push(finalId); else notes.clamped++; } else notes.dropped++;
  }
  const word = typeof raw.type === 'string' ? raw.type.trim().toLowerCase() : '';
- let type: DiagramType = (['flow', 'layers', 'sequence', 'comparison', 'tree'] as string[]).includes(word) ? (word as DiagramType) : TYPE_WORDS[word] ?? 'flow';
+ let type: DiagramType = (DIAGRAM_TYPES as readonly string[]).includes(word) ? (word as DiagramType) : TYPE_WORDS[word] ?? 'flow';
  if (type !== raw.type) notes.retyped = true;
  if (type === 'comparison' && (edges.length || nodes.length > 5)) { type = 'layers'; edges.length = 0; notes.retyped = true; }
+ // Cycle, timeline, matrix, hub and pyramid are drawn from node order: connections and groups are dropped, and a wrong item count becomes plain layers.
+ const rule = KIND_RULES[type];
+ if (rule) {
+  if (nodes.length < rule.min || nodes.length > rule.max) { type = 'layers'; notes.retyped = true; }
+  notes.dropped += edges.length; edges.length = 0; groups = undefined;
+ }
+ let axes: { x: string; y: string } | undefined;
+ if (type === 'matrix' && isObj(raw.axes)) { const x = text2(raw.axes.x, 32), y = text2(raw.axes.y, 32); if (x && y) axes = { x, y }; }
  if (type === 'tree') {
   const parents = new Map<string, string>();
   let ok = edges.length === nodes.length - 1;
@@ -187,7 +204,7 @@ export function normalizeDiagram(raw: unknown): { value: unknown; notes: Normali
  }
  const title = text2(raw.title, 80) ?? 'Diagram';
  const caption = text2(raw.caption, 160) ?? title;
- const value: Record<string, unknown> = { version: 1, type, title, caption, nodes, edges, focus, ...(groups ? { groups } : {}) };
+ const value: Record<string, unknown> = { version: 1, type, title, caption, nodes, edges, focus, ...(groups ? { groups } : {}), ...(axes ? { axes } : {}) };
  // Over 16 KiB: shed detail text first, then shorten labels, then drop trailing nodes.
  const size = () => new TextEncoder().encode(JSON.stringify(value)).length;
  if (size() > 16384) { for (const n of nodes) delete n.detail; notes.clamped++; }
@@ -213,11 +230,12 @@ export const DRAW_WORDS = /\b(draw|diagram|visuali[sz]e|visuali[sz]ation|sketch|
 export const wantsDiagram = (...texts: string[]): boolean => texts.some((t) => DRAW_WORDS.test(t));
 export const VISUALIZE_QUESTION = 'Visualize the selected text as a diagram.';
 
-const SCHEMA = `{"version":1,"type":"flow|layers|sequence|comparison|tree","title":"plain text","caption":"one line","nodes":[{"id":"n1","label":"plain text","kind":"step|decision|actor|component|value","detail":"optional plain text"}],"edges":[{"id":"e1","from":"n1","to":"n2","label":"optional plain text"}],"focus":["n1"],"groups":[{"id":"g1","label":"plain text","nodeIds":["n1"]}]}`;
+const SCHEMA = `{"version":1,"type":"flow|layers|sequence|comparison|tree|cycle|timeline|matrix|hub|pyramid","title":"plain text","caption":"one line","nodes":[{"id":"n1","label":"plain text","kind":"step|decision|actor|component|value","detail":"optional plain text"}],"edges":[{"id":"e1","from":"n1","to":"n2","label":"optional plain text"}],"focus":["n1"],"groups":[{"id":"g1","label":"plain text","nodeIds":["n1"]}],"axes":{"x":"matrix only","y":"matrix only"}}`;
 const RULES = `Diagram JSON uses exactly these fields and no others: ${SCHEMA}
 Make it small and readable: usually 4 to 8 nodes, never more than 12. Node labels are short plain phrases of at most 40 characters (the hard limit is 64); edge labels at most 30. Write labels as plain words: no < or > characters, no arrows such as -> or =>, no markdown, no links. A label that is a hypothesis, not something the note states, starts with "Maybe:".
 Ids are short ASCII like n1, e1, g1: they start with a letter, use only letters, digits, underscore or hyphen, and every id is unique across nodes, edges and groups. Edges refer to node ids that exist. Optional parts (kind, detail, edge label, groups) may be left out; focus may be empty. Hard limits: 15 nodes, 25 edges, 5 flat non-overlapping groups, 25 unique focus ids, title 80, caption 160, detail 120 characters, 16 KiB in total.
-Types: flow = steps with arrows; layers = stacked parts; sequence = actors with messages in order; comparison = at most 5 items and no edges; tree = one root, every other node has exactly one parent, no cycles (use flow if the structure is not a strict tree).`;
+Types: flow = steps with arrows; layers = stacked parts; sequence = actors with messages in order; comparison = at most 5 items and no edges; tree = one root, every other node has exactly one parent, no cycles (use flow if the structure is not a strict tree).
+Pick the shape that fits the idea, not always flow. These five need no edges and no groups: the app draws every line from the order of the nodes. cycle = 3 to 8 steps that repeat in a loop, in order; timeline = 2 to 8 events in time order (put the date or stage in the label, one line in detail); matrix = exactly 4 nodes in the order top-left, top-right, bottom-left, bottom-right, plus "axes":{"x":"label of the horizontal axis","y":"label of the vertical axis"}; hub = one central idea as the first node and 2 to 8 related ideas around it; pyramid = 3 to 6 levels from the top (smallest, most important) to the bottom (widest, foundation).`;
 export const diagramInstruction = `Diagram (optional). Add a diagram only when a process, system structure, comparison, tree or ordered sequence is hard to hold in words and a picture makes it clearer. A short list, a simple fact, an opinion or a wording request needs none: leave diagram out.
 Never output SVG, HTML, URLs, styles or coordinates. The diagram never replaces the short answer, and the claims stay verbatim as required above.
 ${RULES}`;
