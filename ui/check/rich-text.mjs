@@ -18,10 +18,10 @@ const store=await Store.open(root),watcher=new NoteWatcher(store,50,10);await wa
 const app=createApp({store,watcher,distDir:path.join(ui,'dist'),provider:{name:'claude',checkAvailability:async()=>({available:true}),invoke:async()=>{calls++;throw Error('Provider calls forbidden');}}});let browser;
 try{
  const base=`http://127.0.0.1:${await app.listen(0)}`;browser=await chromium.launch({channel:'msedge',headless:true});
- for(const theme of ['light','dark']){
-  const page=await browser.newPage({viewport:{width:1440,height:1000},colorScheme:theme});
+ for(const theme of ['ember','moss']){
+  const page=await browser.newPage({viewport:{width:1440,height:1000},});
   await page.route('**/*',route=>{if(new URL(route.request().url()).origin!==base){external++;return route.abort();}if(new URL(route.request().url()).pathname==='/api/usage')return route.fulfill({json:{providers:[],hourlyCap:2}});return route.continue();});page.on('pageerror',e=>errors.push(e.message));
-  await page.goto(base+'/?debug=1');await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);
+  await page.goto(base+'/?debug=1');await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme);
   const select=async(a,b=a)=>page.evaluate(([a,b])=>{const v=window.__aitiarch['fixture.md'].view;v.dispatch({selection:{anchor:a,head:b},scrollIntoView:true});v.focus();},[a,b]);
   const text=()=>page.evaluate(()=>window.__aitiarch['fixture.md'].view.state.doc.toString());
   await select(note.length);assert.equal(await page.locator('.cm-strong').innerText(),'bold');assert.equal(await page.locator('.cm-failed').innerText(),'strike');assert.equal(await page.locator('.cm-task-off').count(),2);
@@ -46,19 +46,19 @@ try{
   await select(start+3);await page.screenshot({path:path.join(output,`active-span-${theme}.png`),fullPage:true});
   if(full){
    const toggle=page.getByRole('button',{name:'Collapse file tree',exact:true});await toggle.click();await page.getByRole('button',{name:'Expand file tree',exact:true}).waitFor();await page.waitForTimeout(500);
-   const beforeLeft=await page.locator('.editor-col').evaluate(el=>el.getBoundingClientRect().left);await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);await page.getByRole('button',{name:'Expand file tree',exact:true}).waitFor();assert.equal(await page.locator('.sidebar').isVisible(),false);assert.equal(await page.locator('.editor-col').evaluate(el=>el.getBoundingClientRect().left),beforeLeft);
+   const beforeLeft=await page.locator('.editor-col').evaluate(el=>el.getBoundingClientRect().left);await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme);await page.getByRole('button',{name:'Expand file tree',exact:true}).waitFor();assert.equal(await page.locator('.sidebar').isVisible(),false);assert.equal(await page.locator('.editor-col').evaluate(el=>el.getBoundingClientRect().left),beforeLeft);
    await page.screenshot({path:path.join(output,`tree-collapsed-${theme}.png`),fullPage:true});await page.getByRole('button',{name:'Expand file tree',exact:true}).click();await page.getByRole('button',{name:'Collapse file tree',exact:true}).waitFor();
    await page.setViewportSize({width:620,height:900});await page.screenshot({path:path.join(output,`narrow-tree-${theme}.png`),fullPage:true});await page.getByRole('button',{name:'Collapse file tree',exact:true}).click();await page.waitForTimeout(500);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.join(output,`narrow-editor-${theme}.png`),fullPage:true});await page.getByRole('button',{name:'Expand file tree',exact:true}).click();await page.waitForTimeout(500);
    // No implicit .gitignore changes: an unignored preference stays in memory until an explicit click.
-   await writeFile(path.join(root,'.gitignore'),'');await rm(path.join(root,'ui-state.json'),{force:true});await page.setViewportSize({width:1440,height:1000});await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);
+   await writeFile(path.join(root,'.gitignore'),'');await rm(path.join(root,'ui-state.json'),{force:true});await page.setViewportSize({width:1440,height:1000});await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme);
    await page.getByRole('button',{name:'Collapse file tree',exact:true}).click();await page.getByText('File tree and theme preferences stay in memory',{exact:false}).waitFor();await page.waitForTimeout(500);
    assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).treeCollapsed,undefined);assert.equal(await readFile(path.join(root,'.gitignore'),'utf8'),'');
    await page.screenshot({path:path.join(output,`tree-memory-notice-${theme}.png`),fullPage:true});
    await page.getByRole('button',{name:'Dismiss tree preference notice',exact:true}).click();assert.equal(await readFile(path.join(root,'.gitignore'),'utf8'),'');
-   await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);await page.getByRole('button',{name:'Collapse file tree',exact:true}).click();
+   await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme);await page.getByRole('button',{name:'Collapse file tree',exact:true}).click();
    await page.getByRole('button',{name:'Add /ui-state.json* to root .gitignore',exact:true}).click();
    for(let attempt=0;;attempt++){const saved=JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8'));if(saved.treeCollapsed===true)break;if(attempt>=30){console.log(JSON.stringify({treePreferenceDebug:await page.evaluate(async()=>({state:await fetch('/api/ui-state').then(r=>r.json()),notice:document.querySelector('main .notice')?.textContent,expanded:document.querySelector('.tree-toggle')?.getAttribute('aria-expanded')})),savedKeys:Object.keys(saved)}));throw Error('Tree preference did not persist');}await page.waitForTimeout(100);}
-   await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);await page.getByRole('button',{name:'Expand file tree',exact:true}).click();await page.waitForTimeout(500);await writeFile(path.join(root,'.gitignore'),'/.cache/\n/ui-state.json*\n');
+   await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme);await page.getByRole('button',{name:'Expand file tree',exact:true}).click();await page.waitForTimeout(500);await writeFile(path.join(root,'.gitignore'),'/.cache/\n/ui-state.json*\n');
   }
   checks.push({theme,rendering:true,arrows:true,backspace:true,selection:true,copyMarkdown:true,pasteMarkdown:true,byteExact:true,anchors:true,formatAndTree:full});await page.close();
  }

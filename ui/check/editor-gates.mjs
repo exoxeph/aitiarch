@@ -20,11 +20,12 @@ async function session(name,content,fn,ignore=true){
  const app=createApp({store,watcher,distDir:path.join(ui,'dist'),provider:{name:'claude',checkAvailability:async()=>({available:true}),invoke:async()=>{calls++;throw Error('Provider calls forbidden');}}});
  const base=`http://127.0.0.1:${await app.listen(0)}`;const browser=await chromium.launch({channel:'msedge',headless:true});
  try{
-  for(const theme of ['light','dark']){
-   const page=await browser.newPage({viewport:{width:1440,height:1000},colorScheme:theme});
+  for(const theme of ['ember','moss']){
+   const page=await browser.newPage({viewport:{width:1440,height:1000}});
    await page.route('**/*',route=>{const u=new URL(route.request().url());if(u.origin!==base){external++;return route.abort();}if(u.pathname==='/api/usage')return route.fulfill({json:{providers:[],hourlyCap:2}});return route.continue();});
    page.on('pageerror',e=>errors.push(`${name}: ${e.message}`));
    await page.goto(base+'/?debug=1');await page.waitForFunction(()=>window.__aitiarch?.['n.md']);
+   await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme); // display only; the saved preference is untouched
    await fn({page,theme,root,bytes});await page.close();
   }
  }finally{await browser.close();await app.close?.();await watcher.stop?.();await rm(root,{recursive:true,force:true});}
@@ -42,12 +43,13 @@ const disk=async(p,root)=>{await p.evaluate(()=>window.__aitiarch['n.md'].sessio
 await session('caret','\uFEFFSynthetic typing fixture.\r\n',async({page,theme,root,bytes})=>{
  await put(page,5);
  const caret=()=>page.locator('.cm-cursor-primary').evaluate(e=>getComputedStyle(e).borderLeftColor);
- assert.equal(await caret(),theme==='dark'?'rgb(255, 255, 255)':'rgb(46, 102, 84)','system theme caret color');
- for(const mode of ['dark','light']){
+ const caretFor={ember:'rgb(240, 171, 103)',moss:'rgb(205, 219, 144)'};
+ assert.equal(await caret(),caretFor[theme],'theme caret color');
+ for(const mode of ['moss','ember']){
   await page.evaluate(m=>{document.documentElement.dataset.theme=m;},mode);
-  assert.equal(await caret(),mode==='dark'?'rgb(255, 255, 255)':'rgb(46, 102, 84)','manual theme caret color');
+  assert.equal(await caret(),caretFor[mode],'manual theme caret color');
  }
- await page.evaluate(()=>{delete document.documentElement.dataset.theme;});
+ await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme);
  assert.equal(await page.locator('.cm-content').evaluate(e=>getComputedStyle(e).caretColor),'rgba(0, 0, 0, 0)','native caret must remain hidden');
  await page.evaluate(()=>{
   window.__caretMoves=[];window.__caretFrameProbes=[];
@@ -327,11 +329,12 @@ await session('palette',small,async({page,theme,root,bytes})=>{
  const d=await doc(page),pos=d.indexOf('Intro');await put(page,pos);
  await page.keyboard.press('Control+k');const palette=page.getByRole('dialog',{name:'Command palette'});await palette.waitFor();
  const search=palette.getByRole('textbox');await search.fill('Insert: Quote');await search.press('Enter');await page.waitForFunction(expected=>window.__aitiarch['n.md'].view.state.doc.toString()===expected,d.slice(0,pos)+'> '+d.slice(pos));await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
- // Always exercise an actual light-to-dark change, even when restored preferences were dark.
- await page.getByLabel('Theme',{exact:true}).selectOption('light');await page.waitForFunction(()=>document.documentElement.dataset.theme==='light');
- await page.keyboard.press('Control+k');await palette.waitFor();await search.fill('Theme: Dark');const savedDark=uiStateSaved(page,'dark');await search.press('Enter');await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
- await savedDark;assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).theme,'dark');await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['n.md']&&document.documentElement.dataset.theme==='dark');
- const toggle=page.getByLabel('Theme',{exact:true});await toggle.selectOption('light');await page.waitForFunction(()=>getComputedStyle(document.documentElement).colorScheme==='light');await toggle.selectOption('system');
+ // Always exercise an actual Ember-to-Moss change, even when restored preferences were Moss.
+ await page.getByLabel('Theme',{exact:true}).selectOption('ember');await page.waitForFunction(()=>document.documentElement.dataset.theme==='ember');
+ await page.keyboard.press('Control+k');await palette.waitFor();await search.fill('Theme: Moss');const savedMoss=uiStateSaved(page,'moss');await search.press('Enter');await page.waitForFunction(()=>document.documentElement.dataset.theme==='moss');
+ await savedMoss;assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).theme,'moss');await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['n.md']&&document.documentElement.dataset.theme==='moss');
+ const toggle=page.getByLabel('Theme',{exact:true});await toggle.selectOption('ember');await page.waitForFunction(()=>document.documentElement.dataset.theme==='ember'&&getComputedStyle(document.documentElement).colorScheme==='dark');
+ assert.deepEqual(await toggle.locator('option').allTextContents(),['Ember','Moss'],'only the two dark themes are offered');
  const collapsed=await page.locator('.app').evaluate(e=>e.classList.contains('tree-collapsed'));await page.keyboard.press('Control+k');await palette.waitFor();await search.fill('file tree');await search.press('Enter');await page.waitForFunction(previous=>document.querySelector('.app').classList.contains('tree-collapsed')!==previous,collapsed);
  await page.keyboard.press('Control+k');await palette.waitFor();await search.fill('Jump to note: n.md');await search.press('Enter');assert.equal(await doc(page),d);
  await page.keyboard.press('Control+k');await palette.waitFor();for(let i=0;i<18;i++)await search.press('ArrowDown');assert.equal(await palette.locator('ul').evaluate(e=>{const a=e.querySelector('[aria-selected="true"]').getBoundingClientRect(),b=e.getBoundingClientRect();return a.top>=b.top&&a.bottom<=b.bottom;}),true,'active command scrolled out of view');
@@ -342,9 +345,9 @@ await session('theme-memory',small,async({page,theme,root})=>{
  await writeFile(path.join(root,'.gitignore'),'/.cache/\n');const bootSaved=uiStateSaved(page,undefined,false);await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['n.md']);
  await bootSaved;const previous=JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8'));
  // Unignored existing theme data may correctly refuse the write; wait for that response too.
- const memorySaved=uiStateSaved(page,undefined,false);await page.getByLabel('Theme',{exact:true}).selectOption('dark');await page.getByText('File tree and theme preferences stay in memory',{exact:false}).waitFor();await memorySaved;
+ const memorySaved=uiStateSaved(page,undefined,false);await page.getByLabel('Theme',{exact:true}).selectOption('moss');await page.getByText('File tree and theme preferences stay in memory',{exact:false}).waitFor();await memorySaved;
  const saved=JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8'));assert.equal(saved.theme,previous.theme);assert.equal((await readFile(path.join(root,'.gitignore'),'utf8')).includes('/ui-state'),false);
- const consentSaved=uiStateSaved(page,'dark');await page.getByRole('button',{name:'Add /ui-state.json* to root .gitignore',exact:true}).first().click();await consentSaved;assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).theme,'dark');
+ const chosen='moss';const consentSaved=uiStateSaved(page,chosen);await page.getByRole('button',{name:'Add /ui-state.json* to root .gitignore',exact:true}).first().click();await consentSaved;assert.equal(JSON.parse(await readFile(path.join(root,'ui-state.json'),'utf8')).theme,chosen);
  report[`theme-memory-${theme}`]={memoryBeforeConsent:true,persistAfterExplicitConsent:true};
 },false);
 await session('tables','\uFEFFAway\r\n\r\n| Name | Status | Detail |\r\n| :---:  | ---: |  :--- |\r\n| **bold *nested*** | `code` | ~~strike~~ |\r\n| a \\| b | <script>raw</script> | untouched |\r\n\r\nAfter table.\r\n',async({page,theme,root,bytes})=>{
@@ -378,15 +381,15 @@ await session('wide-table','\uFEFFAway\r\n\r\n| Column one | Column two | Column
 });
 await session('theme-diagram','\uFEFFAway\r\n\r\n```mermaid\r\nflowchart LR\r\n  A[Plan] --> B[Test]\r\n```\r\n\r\nEnd\r\n',async({page,theme,root,bytes})=>{
  await put(page,0);const diagram=page.locator('.cm-mermaid-ok');await diagram.waitFor();
- const toggle=page.getByLabel('Theme',{exact:true});await toggle.selectOption('dark');await page.waitForFunction(()=>document.querySelector('.cm-mermaid-ok')?.getAttribute('data-theme')==='dark',null,{timeout:4000});
- await toggle.selectOption('light');await page.waitForFunction(()=>document.querySelector('.cm-mermaid-ok')?.getAttribute('data-theme')==='light',null,{timeout:4000});
- await toggle.selectOption('system');await page.waitForFunction(expected=>document.querySelector('.cm-mermaid-ok')?.getAttribute('data-theme')===expected,theme,{timeout:4000});
+ // The app is dark-only: Mermaid renders its dark theme under both Ember and Moss.
+ const toggle=page.getByLabel('Theme',{exact:true});
+ for(const t of ['moss','ember']){await toggle.selectOption(t);await page.waitForFunction(x=>document.documentElement.dataset.theme===x&&document.querySelector('.cm-mermaid-ok')?.getAttribute('data-theme')==='dark',t,{timeout:4000});}
  assert.deepEqual(await disk(page,root),bytes);report[`theme-diagram-${theme}`]={manualAndSystem:true,byteExact:true};
 });
 // ---- 3. cost at about 5,000 and 50,000 lines (real app, ink and anchors on)
 for(const n of [455,4545]){
  await session(`big-${n}`,big(n),async({page,theme})=>{
-  if(theme!=='light')return;
+  if(theme!=='ember')return;
   const m=await page.evaluate(async()=>{const v=window.__aitiarch['n.md'].view,N=v.state.doc.lines,sl=()=>new Promise(r=>requestAnimationFrame(()=>r()));const st=a=>{a=[...a].sort((x,y)=>x-y);return{median:+a[a.length>>1].toFixed(1),p95:+a[Math.floor(a.length*.95)].toFixed(1)}};
    const mv=[],ty=[];for(let k=0;k<25;k++){const l=v.state.doc.line(1+Math.floor((N-1)*((k*37)%100)/100));const t=performance.now();v.dispatch({selection:{anchor:l.from}});mv.push(performance.now()-t);await sl();}
    const mid=v.state.doc.line(Math.floor(N/2)).from;for(let k=0;k<25;k++){const t=performance.now();v.dispatch({changes:{from:mid,insert:'x'},selection:{anchor:mid+1}});ty.push(performance.now()-t);await sl();v.dispatch({changes:{from:mid,to:mid+1}});}

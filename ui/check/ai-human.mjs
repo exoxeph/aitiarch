@@ -41,9 +41,9 @@ try {
   });
   browser = await chromium.launch({ channel: "msedge", headless: true });
   const report = {};
-  for (const theme of ["light", "dark"]) {
-    const page = await browser.newPage({ viewport: { width: 2200, height: 900 }, colorScheme: theme });
-    await page.goto(url + "?debug");
+  for (const theme of ["ember", "moss"]) {
+    const page = await browser.newPage({ viewport: { width: 2200, height: 900 } });
+    await page.goto(url + "?debug"); await page.evaluate((t) => { document.documentElement.dataset.theme = t; }, theme);
     for (const [layout, width, selector] of [["margin",2200,".margin-card.thought-blob"],["narrow",900,".cm-ink-block.thought-blob"]]) {
       await page.setViewportSize({width,height:900});
       await page.locator(selector).first().waitFor({timeout:10000});

@@ -17,9 +17,9 @@ const app=createApp({store,watcher,distDir:path.join(here,'../dist'),usage:{summ
 let browser;
 try{
  const port=await app.listen(0);browser=await chromium.launch({channel:'msedge',headless:true});
- for(const theme of ['light','dark'])for(const width of [1440,375]){
-  const page=await browser.newPage({viewport:{width,height:900},colorScheme:theme});const errors=[];page.on('pageerror',e=>errors.push(e.name));
-  await page.goto(`http://127.0.0.1:${port}/?debug=1`);await page.waitForSelector('.cm-editor');
+ for(const theme of ['ember','moss'])for(const width of [1440,375]){
+  const page=await browser.newPage({viewport:{width,height:900},});const errors=[];page.on('pageerror',e=>errors.push(e.name));
+  await page.goto(`http://127.0.0.1:${port}/?debug=1`);await page.waitForSelector('.cm-editor');await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme);
   await page.getByText('My AI calls and tokens',{exact:true}).click();await page.getByRole('cell',{name:'12',exact:true}).waitFor();await page.screenshot({path:path.join(screenshots,`usage-${theme}-${width}.png`)});await page.getByText('My AI calls and tokens',{exact:true}).click();
   const more=page.locator('.cm-ink-group summary');await more.waitFor();assert.equal(await more.textContent(),'Show 3 more');assert.equal(await page.locator('.cm-ink-block:visible').count(),2);await more.click();assert.equal(await page.locator('.cm-ink-block:visible').count(),5);await more.click();
   for(const phrase of ['Paragraph 5.','Synthetic trial']){
@@ -32,5 +32,5 @@ try{
   }
   assert.equal(errors.length,0);await page.close();
  }
- console.log(JSON.stringify({pass:true,screenshots,checks:['opaque toolbar','layering','viewport at body and top','light/dark','wide/narrow'],providerCalls:0}));
+ console.log(JSON.stringify({pass:true,screenshots,checks:['opaque toolbar','layering','viewport at body and top','ember/moss','wide/narrow'],providerCalls:0}));
 }finally{await browser?.close();watcher.stop();await app.close();await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:200});}

@@ -12,10 +12,10 @@ execFileSync('git',['init','-q'],{cwd:root,stdio:'pipe'});await writeFile(path.j
 let calls=0;const store=await Store.open(root),watcher=new NoteWatcher(store,50,10);await watcher.start();
 const app=createApp({store,watcher,distDir:path.join(ui,'dist'),provider:{name:'claude',checkAvailability:async()=>({available:true}),invoke:async()=>{calls++;throw Error('Provider forbidden');}}});
 const base=`http://127.0.0.1:${await app.listen(0)}`,browser=await chromium.launch({channel:'msedge',headless:true}),report={};
-try{for(const theme of ['light','dark']){
- const page=await browser.newPage({viewport:{width:1440,height:1100},colorScheme:theme});
+try{for(const theme of ['ember','moss']){
+ const page=await browser.newPage({viewport:{width:1440,height:1100},});
  await page.route('**/*',r=>{const u=new URL(r.request().url());if(u.origin!==base)return r.abort();if(u.pathname==='/api/usage')return r.fulfill({json:{providers:[],hourlyCap:2}});return r.continue();});
- await page.goto(base+'/?debug=1');await page.waitForFunction(()=>window.__aitiarch?.['plan.md']);
+ await page.goto(base+'/?debug=1');await page.waitForFunction(()=>window.__aitiarch?.['plan.md']);await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme);
  const settle=()=>page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));
  const position=async(needle,offset=0)=>{
   await page.evaluate(([n,o])=>{const v=window.__aitiarch['plan.md'].view,p=v.state.doc.toString().indexOf(n)+o,dom=v.domAtPos(p).node;(dom.nodeType===1?dom:dom.parentElement).closest('.cm-line')?.scrollIntoView({block:'nearest'});},[needle,offset]);await settle();
@@ -66,7 +66,7 @@ try{for(const theme of ['light','dark']){
  // Navigation after explicit save and after page reload must retain hit testing.
  const editCaret=await click('Last paragraph',4);assert.equal(editCaret.from,editCaret.to,'save check must start with a caret');await page.keyboard.type('X');await page.evaluate(()=>window.__aitiarch['plan.md'].session.flush());await page.keyboard.press('Control+z');await page.evaluate(()=>window.__aitiarch['plan.md'].session.flush());
  check('after save',(await click('Plain paragraph',8,2)).text==='paragraph');
- await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['plan.md']);R.afterReload=await click('Plain paragraph',8,2);check('after reload',R.afterReload.text==='paragraph');
+ await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['plan.md']);await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme);R.afterReload=await click('Plain paragraph',8,2);check('after reload',R.afterReload.text==='paragraph');
  const a=await position('Plain paragraph',6),b=await position('Some **bold',25);
  await page.mouse.click(a.x,a.y);await settle(); // a drag beginning inside an existing selection would move text natively
  await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y,{steps:15});await page.mouse.up();await settle();
@@ -80,7 +80,7 @@ try{for(const theme of ['light','dark']){
  // Color + vertical placement of the drawn caret, not just the underlying position.
  await click('Plain paragraph',10);await page.waitForTimeout(70);
  R.caret=await page.evaluate(()=>{const v=window.__aitiarch['plan.md'].view,a=v.coordsAtPos(v.state.selection.main.head),e=document.querySelector('.cm-cursor-primary'),r=e.getBoundingClientRect();return{color:getComputedStyle(e).borderLeftColor,dy:Math.abs(r.top-a.top),dx:Math.abs(r.left-a.left)};});
- check('caret aligned',R.caret.dy<2&&R.caret.dx<2);check('caret visible',R.caret.color===(theme==='dark'?'rgb(255, 255, 255)':'rgb(46, 102, 84)'));
+ check('caret aligned',R.caret.dy<2&&R.caret.dx<2);check('caret visible',R.caret.color===(theme==='moss'?'rgb(205, 219, 144)':'rgb(240, 171, 103)'));
  await page.screenshot({path:path.join(output,`navigation-${theme}.png`)});
  await page.setViewportSize({width:360,height:1100});await settle();
  await click('A wrapping paragraph',85);

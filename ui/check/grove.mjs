@@ -36,8 +36,8 @@ let calls=0;const app=createApp({store,watcher,distDir:path.join(ui,'dist'),prov
 let browser;const checks=[],external=[],errors=[],contrasts=[];
 try{
  const base=`http://127.0.0.1:${await app.listen(0)}`;browser=await chromium.launch({channel:'msedge',headless:true});
- for(const theme of ['light','dark'])for(const width of [1440,620]){
-  const page=await browser.newPage({viewport:{width,height:1000},colorScheme:theme,reducedMotion:'reduce'});page.setDefaultTimeout(12000);
+ for(const theme of ['ember','moss'])for(const width of [1440,620]){
+  const page=await browser.newPage({viewport:{width,height:1000},reducedMotion:'reduce'});page.setDefaultTimeout(12000);
   page.on('pageerror',e=>errors.push(e.message));
   let state='';await page.route('**/*',async route=>{const url=new URL(route.request().url());if(url.origin!==base){external.push(url.origin);return route.abort();}
    if(baselineCss&&url.pathname.endsWith('.css'))return route.fulfill({contentType:'text/css',body:baselineCss});
@@ -46,7 +46,7 @@ try{
    return route.continue();});
   // Thoughts open from their blob; a check opens one by id (the same event the blob's open button sends).
  const openThought=async note=>{const id=await page.evaluate(async n=>{const s=await (await fetch('/api/threads?path='+encodeURIComponent(n))).json();return s.document.items.find(i=>i.generation)?.id;},note+'.md');await page.evaluate(id=>window.dispatchEvent(new CustomEvent('open-thread',{detail:{id,thought:true}})),id);await page.locator('.thread-card').waitFor();};
- const openNote=async name=>{await page.setViewportSize({width:1440,height:1000});state=name;await page.goto(base+'/?debug=1');await page.locator('.tree-item').filter({hasText:new RegExp('^'+name+'$')}).click();await page.waitForFunction(p=>document.querySelector('.rightpanel')?.getAttribute('data-note-path')===p&&window.__aitiarch?.[p]?.view.dom.getClientRects().length>0,name+'.md');};
+ const openNote=async name=>{await page.setViewportSize({width:1440,height:1000});state=name;await page.goto(base+'/?debug=1');await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme); await page.locator('.tree-item').filter({hasText:new RegExp('^'+name+'$')}).click();await page.waitForFunction(p=>document.querySelector('.rightpanel')?.getAttribute('data-note-path')===p&&window.__aitiarch?.[p]?.view.dom.getClientRects().length>0,name+'.md');};
   for(const name of names){await openNote(name);await page.setViewportSize({width,height:1000});
    if(!['empty','settings','usage'].includes(name)){await openThought(name);}
    if(['thread','takeaway-pending','orphan','provider-failure'].includes(name)){assert.equal(await page.getByLabel('Your takeaway',{exact:true}).inputValue(),'');assert.equal(await page.getByText('Synthetic AI closing summary after the human action.',{exact:true}).count(),0);}
