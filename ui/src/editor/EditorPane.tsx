@@ -192,11 +192,16 @@ export function EditorPane(props: Props) {
           const scroll=host.current?.scrollTop??0;
           const block=view.lineBlockAt(anchor.from);const anchorTop=coords?.top??view.documentTop+block.top;
           const el=Array.from(surface.current!.querySelectorAll<HTMLElement>('.margin-card')).find(el=>el.dataset.inkId===item.id);
-          let last=view.coordsAtPos(anchor.to,-1)??coords; // end of the anchored text, for the connector
-          // A wrapped anchor starts the connector at the end of its first visual line, in the gap before the next line,
-          // so it points at the start of the thought instead of trailing under the whole sentence.
-          if(coords&&last&&last.top>coords.top+2){const first=view.coordsAtPos(view.moveToLineBoundary(EditorSelection.cursor(anchor.from),true).head,-1);if(first&&first.top<=coords.top+2)last=first;}
-          return [{id:item.id,item,target:anchorTop-bounds.top+scroll,side:thoughtSide(item.id),height:el?.getBoundingClientRect().height??160,...(last?{end:{x:last.right-bounds.left,lineBottom:last.bottom-bounds.top}}:{})}];
+          // The connector is straight and level with the first line of the anchored text. It stops just beside the sentence when
+          // nothing else is on that side of the line, and otherwise at the edge of the writing column, so it never crosses text.
+          let rightX:number|undefined,leftX:number|undefined;
+          if(coords){
+           const lineEnd=view.moveToLineBoundary(EditorSelection.cursor(anchor.from),true).head,lineStart=view.moveToLineBoundary(EditorSelection.cursor(anchor.from),false).head;
+           const endPos=Math.min(anchor.to,lineEnd),endBox=view.coordsAtPos(endPos,-1);
+           if(endBox&&view.state.sliceDoc(endPos,lineEnd).trim()==='')rightX=endBox.right-bounds.left+6;
+           if(view.state.sliceDoc(lineStart,anchor.from).trim()==='')leftX=coords.left-bounds.left-6;
+          }
+          return [{id:item.id,item,target:anchorTop-bounds.top+scroll,side:thoughtSide(item.id),height:el?.getBoundingClientRect().height??160,...(coords?{end:{x:coords.left-bounds.left,lineBottom:coords.bottom-bounds.top,lineMid:(coords.top+coords.bottom)/2-bounds.top,rightX,leftX}}:{})}];
         });
         const placed=layoutThoughts(rows),scroll=host.current?.scrollTop??0;
         setMargin(placed.map(p=>({...p,top:p.top-scroll,target:p.target-scroll})));

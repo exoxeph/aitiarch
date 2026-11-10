@@ -228,7 +228,7 @@ try {
   }
   await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);
   for(let i=0;i<4;i++){
-   const svg=page.locator(`.margin-card[data-ink-id="reference-${i}"] svg`);await svg.waitFor({state:'attached'});
+   const svg=page.locator(`.margin-card[data-ink-id="reference-${i}"] svg`);await svg.waitFor({state:'visible'});await page.waitForFunction(k=>{const s=document.querySelector('.margin-card[data-ink-id="'+k+'"] svg');return !!s&&s.getBoundingClientRect().width>20&&[...s.querySelectorAll('text')].every(x=>Number(x.getAttribute('font-size'))>0);},'reference-'+i);
    const geometry=await svg.evaluate(svg=>{const b=svg.viewBox.baseVal,scale=svg.getBoundingClientRect().width/b.width;return {ratio:b.width/b.height,min:Math.min(...[...svg.querySelectorAll('text')].map(t=>Number(t.getAttribute('font-size'))*scale)),inside:[...svg.querySelectorAll('text')].every(t=>{const r=t.getBBox();return r.x>=0&&r.y>=0&&r.x+r.width<=b.width+.5&&r.y+r.height<=b.height+.5;})};});
    assert(geometry.inside,'all label boxes inside viewBox');assert(geometry.min>=13,'minimum displayed diagram text 13px: '+JSON.stringify({i,...geometry}));assert(geometry.ratio>=.6&&geometry.ratio<=1.3,'bounded diagram aspect ratio');
   }

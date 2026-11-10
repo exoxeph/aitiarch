@@ -50,10 +50,14 @@ export function blobBox(surfaceWidth:number,noteLeft:number,noteRight:number,sid
  * Dotted connector from the end of the anchored text to the blob's dot. It leaves the end of the text downward into the
  * gap under that line, runs sideways under the line, then through the empty margin to the dot, so it never crosses text.
  */
-export function connectorPath(end:{x:number;lineBottom:number},dot:{x:number;y:number},column:{left:number;right:number},side:ThoughtSide){
+export function connectorPath(end:{x:number;lineBottom:number;lineMid?:number;rightX?:number;leftX?:number},dot:{x:number;y:number},column:{left:number;right:number},side:ThoughtSide){
+ // Starts just outside the writing column (never inside the note), level with the sentence, and is a single straight
+ // horizontal line to the dot whenever the blob sits within a few pixels of that line. Otherwise it steps once in the
+ // empty gutter, never over the text.
+ const mid=end.lineMid??end.lineBottom-8,startX=side==='right'?Math.min(end.rightX??column.right+4,column.right+4):Math.max(end.leftX??column.left-4,column.left-4);
+ if(Math.abs(dot.y-mid)<=10)return [{x:startX,y:dot.y},{x:dot.x,y:dot.y}];
  const gutterX=side==='right'?column.right+(dot.x-column.right)/2:column.left-(column.left-dot.x)/2;
- const y0=end.lineBottom-1;
- return [{x:end.x,y:y0},{x:gutterX,y:y0},{x:gutterX,y:dot.y},{x:dot.x,y:dot.y}];
+ return [{x:startX,y:mid},{x:gutterX,y:mid},{x:gutterX,y:dot.y},{x:dot.x,y:dot.y}];
 }
 
 export const connectorVisible=(target:number,top:number,viewportHeight:number)=>target>=0&&target<=viewportHeight&&Math.abs(top-target)<=48;
