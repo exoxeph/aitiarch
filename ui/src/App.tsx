@@ -429,6 +429,33 @@ export default function App() {
 
   const activeFile = active ? files[active] : undefined;
   const orphanCount = activeItems.filter(i => i.attachment.status === "orphaned").length;
+  // What the chat chips offer: the same validated AI replies the server's "Threads" module reads (never questions, drafts or summaries).
+  const chatThreadsText = activeItems.flatMap(i => [...(i.generation?.status === "complete" ? [i.body] : []), ...(i.thread?.followups ?? []).filter(r => r.generation.status === "complete").map(r => r.body)]).join("\n\n");
+  const chatSelection = () => { const h = active ? panes.current.get(active) : undefined; if (!h) return ""; const s = h.view.state.selection.main; return s.empty ? "" : h.view.state.sliceDoc(s.from, s.to).slice(0, 8000); };
+  // Add to note for a chat reply: the same journaled steps as an AI thought (preview, prepare, one editor dispatch, complete), then the same toast with Undo.
+  const addChatMessage = async (id: string) => {
+    if (!active) return;
+    let inserted = false, operationId: string | undefined;
+    try {
+      const h = panes.current.get(active); if (!h) throw new Error("Open the note first.");
+      await h.session.flush(); if (h.session.status !== "saved") throw new Error("Save or resolve the note before insertion.");
+      const disk = await api.file(active), unchanged = () => h.session.status === "saved" && h.session.base.version === disk.version && h.view.state.doc.toString() === disk.text;
+      if (!unchanged()) throw new Error("The note changed. Review a new preview.");
+      const head = h.view.state.selection.main.head, body = { path: active, id, noteVersion: disk.version, after: head > 0 ? Math.min(head, disk.text.length) : disk.text.length };
+      const preview = await api.chatCall<BringPreview>("bring-preview", body);
+      const prepared = await api.chatCall<{ operationId: string }>("bring-prepare", { ...body, preview }); operationId = prepared.operationId;
+      if (!unchanged()) throw new Error("The note changed. Review a new preview.");
+      h.view.dispatch({ changes: preview.changes, annotations: isolateHistory.of("full") }); inserted = true; setInsertionRepair({ pending: 1, unverified: 0 });
+      flashInserted(h.view, preview.changes.from, preview.changes.insert.length);
+      setAdded({ text: "Added from chat", detail: preview.changes.insert.trim() });
+      await h.session.flush(); if (h.session.status !== "saved") throw new Error("Insertion has a save conflict. Resolve it in the editor.");
+      setInsertionRepair(await api.chatCall<RepairStatus>("bring-complete", { path: active, operationId }));
+    } catch (e) {
+      if (operationId && !inserted) await api.chatCall("bring-cancel", { path: active, operationId }).catch(() => {});
+      if (!inserted) setAdded(null);
+      setNotice((inserted ? "The insertion is preserved in the editor. " : "") + (e instanceof Error ? e.message : "Adding to the note failed."));
+    }
+  };
   const settingsPanel = <div className="menu-settings-body">
     {([['Typing help',typingHelpOn,setTypingHelpOn],['Smart corrections',smartCorrections,setSmartCorrections],['Double-space period',doubleSpacePeriod,setDoubleSpacePeriod]] as const).map(([label,on,set])=>
       <button key={label} type="button" role="switch" aria-checked={on} className="menu-switch" onClick={()=>{set(!on);if(!treePersistence)setTreeNotice(true);}}><span>{label}</span><i aria-hidden="true"/></button>)}
@@ -498,7 +525,7 @@ export default function App() {
           </div>
         )}
       </main>
-      {chatOpen && <ChatPanel path={active} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
+      {chatOpen && <ChatPanel key={active ?? "none"} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} getSelection={chatSelection} onAdd={addChatMessage} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
       {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,toast.undo)}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
       {added&&<div className="thought-toast" role="status"><span>{added.text} · Undo (Ctrl+Z)</span><details className="added-detail"><summary>What was added</summary><pre>{added.detail}</pre></details><button onClick={()=>{const h=active?panes.current.get(active):undefined;if(h){undo(h.view);h.view.focus();}setAdded(null);}}>Undo</button><button aria-label="Close notice" onClick={()=>setAdded(null)}>Close</button></div>}
       {showDismissed&&<DismissedThoughts items={activeItems} restore={id=>void thoughtAction(id,'restore')} close={()=>setShowDismissed(false)}/>}

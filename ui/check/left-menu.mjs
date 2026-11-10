@@ -27,7 +27,7 @@ try{
  const providerCalls=[];
  const open=async(options={})=>{
   const context=await browser.newContext({viewport:{width:1440,height:900},...options}),page=await context.newPage();
-  page.on('request',r=>{if(/\/api\/assistance\/invoke|\/api\/chatgpt-plan\/(sign-in|models)/.test(r.url()))providerCalls.push(r.url());});
+  page.on('request',r=>{if(/\/api\/assistance\/invoke|\/api\/chat\/send|\/api\/chatgpt-plan\/(sign-in|models)/.test(r.url()))providerCalls.push(r.url());});
   await page.goto(url+'?debug=1');
   await page.locator('#note-tree').waitFor({state:'attached'});
   return {context,page};
@@ -112,15 +112,16 @@ try{
  const chat=page.getByRole('button',{name:/^Chat/});assert.equal(await chat.getAttribute('aria-expanded'),'false');
  await chat.click();const panel=page.locator('#chat-panel');await panel.waitFor();
  assert.match(await panel.getByRole('heading').first().innerText(),/^Aitiarch AI - On (notebook|sub)$/);
- assert.equal(await panel.getByRole('button',{name:'This note',exact:true}).getAttribute('aria-pressed'),'true');
- assert.equal(await panel.getByRole('button',{name:'Threads',exact:true}).getAttribute('aria-pressed'),'true');
- assert.equal(await panel.getByRole('button',{name:'Selection',exact:true}).getAttribute('aria-pressed'),'false');
+ assert.equal(await panel.getByRole('button',{name:/^This note/}).getAttribute('aria-pressed'),'true');
+ assert.equal(await panel.getByRole('button',{name:/^Threads/}).getAttribute('aria-pressed'),'true');
+ assert.equal(await panel.getByRole('button',{name:/^Selection/}).getAttribute('aria-pressed'),'false');
  assert.equal(await panel.locator('.chat-suggestion').count(),3);
  const send=panel.getByRole('button',{name:'Send message'});assert.equal(await send.isDisabled(),true);
  await panel.locator('.chat-suggestion').first().click();
  const composer=panel.getByRole('textbox',{name:'Message Aitiarch AI'});assert.ok((await composer.inputValue()).length>5);
  await composer.press('Enter');
- await panel.getByText(/nothing was sent/i).waitFor();assert.equal(await panel.locator('.chat-message').count(),2);
+ const reviewCard=panel.getByRole('region',{name:'What will be sent'});await reviewCard.waitFor(); // Enter prepares a review; nothing is sent until Send
+ await reviewCard.getByRole('button',{name:'Cancel'}).click();assert.ok((await composer.inputValue()).length>5,'cancelling a review gives the question back');
  await page.screenshot({path:path.join(output,'chat-open.png')});
  await page.keyboard.press('Escape');await panel.waitFor({state:'hidden'});assert.equal(await chat.getAttribute('aria-expanded'),'false');
  assert.equal(providerCalls.length,0,'the chat shell must not call a provider: '+providerCalls.join(','));

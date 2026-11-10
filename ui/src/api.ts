@@ -30,6 +30,8 @@ export interface UiState {
 }
 import type { InkDocument, InkItem } from "../shared/ink.ts";
 import type { Invocation } from "../shared/invocation.ts";
+import type { ChatEvent, ChatMessage, ChatUsage } from "../shared/chat.ts";
+import { sseFrames } from "./chat/chat-model.ts";
 export interface InkSnapshot { document: InkDocument; version: string | null }
 
 export type SaveResult =
@@ -70,7 +72,31 @@ async function ok<T>(method: "GET" | "PUT", url: string, body?: unknown): Promis
   throw new ApiError(status, data?.error ?? "error", data?.message ?? `Request failed (${status})`);
 }
 
+/** What GET /api/chat returns: accepted assistant messages only (questions are not stored), plus where the chat is kept. */
+export interface ChatSnapshot { v: 1; note: string; messages: ChatMessage[]; persistence: { enabled: boolean }; questionPlaceholder: string; usage: ChatUsage | null }
+/** PUT /api/chat/send as a server-sent-event stream. Rejects with ApiError when the server refuses before streaming starts. */
+export async function streamChat(body: { reviewId: string; confirmed?: boolean; dontAskAgain?: boolean }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal): Promise<void> {
+  const res = await fetch("/api/chat/send", { method: "PUT", credentials: "same-origin", signal, headers: { "Content-Type": "application/json", "X-Aitiarch": "1" }, body: JSON.stringify(body) });
+  if (!res.ok || !res.body) {
+    let data: any = null;
+    try { data = await res.json(); } catch { /* empty body */ }
+    throw new ApiError(res.status, data?.error ?? "error", data?.message ?? `Request failed (${res.status})`);
+  }
+  const reader = res.body.getReader(), decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parsed = sseFrames(buffer); buffer = parsed.rest;
+    for (const e of parsed.events) onEvent(e);
+  }
+  for (const e of sseFrames(buffer + decoder.decode() + "\n\n").events) onEvent(e);
+}
+
 export const api = {
+  chat:(path:string)=>ok<ChatSnapshot>('GET',`/api/chat?path=${encodeURIComponent(path)}`),
+  chatCall:<T,>(action:string,body:unknown)=>ok<T>('PUT','/api/chat/'+action,body),
   usage:()=>ok<import('../shared/usage.ts').UsageSummary>('GET','/api/usage'),
   insertionStatus:(path:string)=>ok<import('../server/insertion-store.ts').RepairStatus>('GET',`/api/insertions?path=${encodeURIComponent(path)}`),
   threads:(path:string)=>ok<InkSnapshot>('GET',`/api/threads?path=${encodeURIComponent(path)}`),
