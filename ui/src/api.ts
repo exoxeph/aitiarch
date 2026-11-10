@@ -32,6 +32,8 @@ import type { InkDocument, InkItem } from "../shared/ink.ts";
 import type { Invocation } from "../shared/invocation.ts";
 import type { ChatEvent, ChatMessage, ChatUsage } from "../shared/chat.ts";
 import { sseFrames } from "./chat/chat-model.ts";
+import type { InvestigatorEvent } from "../shared/investigator.ts";
+import { investigatorFrames } from "./chat/trail-model.ts";
 export interface InkSnapshot { document: InkDocument; version: string | null }
 
 export type SaveResult =
@@ -92,6 +94,27 @@ export async function streamChat(body: { reviewId: string; confirmed?: boolean; 
     for (const e of parsed.events) onEvent(e);
   }
   for (const e of sseFrames(buffer + decoder.decode() + "\n\n").events) onEvent(e);
+}
+
+/** PUT /api/investigator/answer as a server-sent-event stream of M4 investigator events. Rejects with ApiError when refused before streaming. */
+export async function streamInvestigator(body: { chat: string; id: string; note: string; question: string }, onEvent: (e: InvestigatorEvent) => void, signal?: AbortSignal): Promise<void> {
+  const res = await fetch("/api/investigator/answer", { method: "PUT", credentials: "same-origin", signal, headers: { "Content-Type": "application/json", "X-Aitiarch": "1" }, body: JSON.stringify(body) });
+  if (!res.ok || !res.body) {
+    let data: any = null;
+    try { data = await res.json(); } catch { /* empty body */ }
+    throw new ApiError(res.status, data?.error ?? "error", data?.message ?? `Request failed (${res.status})`);
+  }
+  const reader = res.body.getReader(), decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    if (buffer.length > 1_000_000) throw new ApiError(0, "budget", "The investigation sent too much at once and was stopped.");
+    const parsed = investigatorFrames(buffer); buffer = parsed.rest;
+    for (const e of parsed.events) onEvent(e);
+  }
+  for (const e of investigatorFrames(buffer + decoder.decode() + "\n\n").events) onEvent(e);
 }
 
 export const api = {

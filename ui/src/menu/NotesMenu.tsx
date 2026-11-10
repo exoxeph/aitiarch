@@ -7,9 +7,9 @@ import type {EdgeMenu} from './useEdgeMenu.ts';
  * The left menu: an 8 px hot zone at the window edge, a soft scrim, and a floating panel that overlays the note (it never reflows it).
  * It opens from the edge after a short dwell, pins from the hamburger, and closes on Escape or after the pointer leaves it.
  */
-export function NotesMenu({menu,burger,rootName,rootPath,tree,active,onOpen,onSearch,usage,settings}:{
+export function NotesMenu({menu,burger,rootName,rootPath,tree,active,onOpen,onSearch,onSettings,usage,settings}:{
  menu:EdgeMenu;burger:RefObject<HTMLElement|null>;rootName:string;rootPath:string;tree:TreeNode|null;active:string|null;
- onOpen:(path:string)=>void;onSearch:()=>void;usage:ReactNode;settings:ReactNode;
+ onOpen:(path:string)=>void;onSearch:()=>void;onSettings:()=>void;usage:ReactNode;settings:ReactNode;
 }){
  const el=useRef<HTMLElement>(null),{open,pinned,controller:c}=menu;
  // Closed means out of the tab order and the accessibility tree; a keyboard user reaches it through the hamburger.
@@ -36,7 +36,7 @@ export function NotesMenu({menu,burger,rootName,rootPath,tree,active,onOpen,onSe
     <button type="button" className="menu-row" aria-disabled="true" title="Creating folders from here arrives in a later milestone" onClick={notYet}><span>New folder</span></button>
    </div>
    <nav className="menu-tree" aria-label="Notes tree"><Tree tree={tree} active={active} onOpen={p=>{onOpen(p);c.close();}}/></nav>
-   <div className="menu-foot">{usage}<details className="menu-settings"><summary>Settings</summary>{settings}</details></div>
+   <div className="menu-foot"><button type="button" className="menu-row menu-ai-settings" onClick={()=>{c.close();onSettings();}}><span>AI settings</span></button>{usage}<details className="menu-settings"><summary>Settings</summary>{settings}</details></div>
   </aside>
  </>;
 }

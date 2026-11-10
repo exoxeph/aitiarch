@@ -1,10 +1,11 @@
 // Pure chat state for the panel: turns, streamed events, context chips and the one-line usage summary. No DOM and no network here.
 import {CHAT_MESSAGES,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatUsage,type ContextChoice} from '../../shared/chat.ts';
 import type {ContextChip} from './chat-stub.ts';
+import type {Trail} from './trail-model.ts';
 
 export type TurnStatus='review'|'streaming'|'complete'|'error';
 /** One question and its answer. `text` is provisional while streaming and the accepted message body once complete. */
-export interface Turn {id:string;question:string|null;status:TurnStatus;text:string;message?:ChatMessage;error?:{code:ChatErrorCode;rule?:string}}
+export interface Turn {id:string;question:string|null;status:TurnStatus;text:string;message?:ChatMessage;error?:{code:ChatErrorCode;rule?:string};/** Set when this turn is an investigation: the cards, steps and answer come from the M4 events. */trail?:Trail}
 
 export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
  if(!turns.some(t=>t.id===event.id))return [...turns];
