@@ -1,4 +1,5 @@
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
+import {validatePolicy,type InvestigatorPolicy} from '../shared/investigator.ts';
 import {lstat,readFile,open,rename,unlink,writeFile} from 'node:fs/promises';
 import {execFile} from 'node:child_process';import {promisify} from 'node:util';
 import {randomUUID,createHash} from 'node:crypto';import path from 'node:path';
@@ -6,7 +7,7 @@ import {normalizeRel,isNotePath} from './paths.ts';
 import {exactKeys,validAt,validId} from '../shared/threads.ts';
 const exec=promisify(execFile);
 export interface ThreadDraft {note:string;inkId:string;text:string;updatedAt:string;revision:string}
-export interface SavedUiState {v:1;tabs:string[];active:string|null;treeCollapsed?:boolean;theme?:'ember'|'moss';confirmAdd?:boolean;typingHelp?:boolean;doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];threadDrafts?:Record<string,ThreadDraft>}
+export interface SavedUiState {v:1;tabs:string[];active:string|null;treeCollapsed?:boolean;theme?:'ember'|'moss';confirmAdd?:boolean;typingHelp?:boolean;doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];threadDrafts?:Record<string,ThreadDraft>;investigator?:InvestigatorPolicy}
 const key=(note:string,id:string)=>createHash('sha256').update(note+'\0'+id).digest('hex');
 export class UiStateStore {
  private root:string;private file:string;
@@ -39,9 +40,15 @@ export class UiStateStore {
   if(d.threadDrafts!==undefined){if(!d.threadDrafts||typeof d.threadDrafts!=='object'||Array.isArray(d.threadDrafts)||Object.keys(d.threadDrafts).length>1000)throw new Error('Invalid thread drafts.');
    for(const [k,v] of Object.entries(d.threadDrafts) as [string,ThreadDraft][]){if(!exactKeys(v,['note','inkId','text','updatedAt','revision'])||!validId(v.inkId)||!validId(v.revision)||!validAt(v.updatedAt)||typeof v.text!=='string'||v.text.length>100000||normalizeRel(v.note)!==v.note||!isNotePath(v.note)||k!==key(v.note,v.inkId))throw new Error('Invalid thread draft.');}
    state.threadDrafts=d.threadDrafts;
-  }return state;
+  }
+  // A clone must never supply its own investigator permissions. Verify BEFORE inspecting this field.
+  if(Object.hasOwn(d,'investigator')&&await this.investigatorIgnored())state.investigator=validatePolicy(d.investigator);
+  return state;
  }
  private async ignored(temporary:string){try{await exec('git',['check-ignore','-q','--',this.file],{cwd:this.root,windowsHide:true,timeout:3000});await exec('git',['check-ignore','-q','--',temporary],{cwd:this.root,windowsHide:true,timeout:3000});}catch{throw new Error('Draft persistence disabled: ui-state.json must be git-ignored. Add /ui-state.json* explicitly (covers atomic temporary files too).');}}
+ private async investigatorIgnored(){try{const tracked=await exec('git',['ls-files','--','ui-state.json'],{cwd:this.root,windowsHide:true,timeout:3000});if(tracked.stdout.trim())return false;await this.ignored(this.file+'.ignore-probe.tmp');return true;}catch{return false;}}
+ async investigatorPolicy():Promise<InvestigatorPolicy|null>{if(!await this.investigatorIgnored())return null;return (await this.read()).investigator??null;}
+ async saveInvestigatorPolicy(value:InvestigatorPolicy){const policy=validatePolicy(value);if(!await this.investigatorIgnored())throw new Error('Investigator policy persistence requires untracked, git-ignored ui-state.json.');return this.mutate(s=>{s.investigator=policy;return policy;},true);}
  private mutate<T>(fn:(s:SavedUiState)=>T,requireIgnored=false):Promise<T>{
   const job=this.tail.catch(()=>{}).then(()=>this.mutateLocked(fn,requireIgnored));this.tail=job;return job;
  }
