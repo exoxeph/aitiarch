@@ -15,6 +15,43 @@ export function imageSrc(url: string): string | null {
 }
 
 const observers = new WeakMap<HTMLElement, ResizeObserver>();
+
+/**
+ * The picture to show for a diagram asset: the same drawing cropped to what is actually drawn, with the opaque full-size
+ * background of older exports removed. Display only; the file on disk (hash-named, never edited) is untouched. Diagrams made
+ * now are already cropped and transparent, so for them this is a no-op. Falls back to the original URL on any problem.
+ */
+const tight = new Map<string, Promise<string | null>>();
+function tightSvg(src: string): Promise<string | null> {
+  let p = tight.get(src);
+  if (!p) {
+    p = (async () => {
+      const res = await fetch(src);
+      if (!res.ok) return null;
+      const doc = new DOMParser().parseFromString(await res.text(), "image/svg+xml");
+      const svg = doc.documentElement;
+      if (svg.nodeName !== "svg" || doc.querySelector("parsererror")) return null;
+      svg.querySelectorAll(':scope > rect[width="100%"][height="100%"]').forEach((r) => r.remove());
+      const host = document.createElement("div");
+      host.style.cssText = "position:absolute;left:-99999px;top:0;width:0;height:0;overflow:hidden;visibility:hidden";
+      const live = document.importNode(svg, true) as unknown as SVGSVGElement;
+      host.append(live);
+      document.body.append(host);
+      let box: DOMRect | null = null;
+      try { box = live.getBBox(); } catch { box = null; }
+      host.remove();
+      if (!box || box.width < 8 || box.height < 8) return null;
+      const pad = 10, x = Math.max(0, box.x - pad), y = Math.max(0, box.y - pad);
+      const w = Math.ceil(box.x + box.width + pad - x), h = Math.ceil(box.y + box.height + pad - y);
+      svg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+      svg.setAttribute("width", String(w));
+      svg.setAttribute("height", String(h));
+      return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+    })().catch(() => null);
+    tight.set(src, p);
+  }
+  return p;
+}
 export class ImageWidget extends WidgetType {
   constructor(readonly alt: string, readonly src: string | null) {
     super();
@@ -30,7 +67,8 @@ export class ImageWidget extends WidgetType {
     let fitNow = () => {};
     if (this.src) {
       const img = document.createElement("img");
-      img.src = this.src;
+      const original = this.src;
+      void tightSvg(original).then((url) => { img.src = url ?? original; });
       img.alt = this.alt;
       img.draggable = false;
       img.addEventListener("load", () => { fitNow(); view.requestMeasure(); });
