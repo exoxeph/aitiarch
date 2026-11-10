@@ -203,7 +203,10 @@ export function EditorPane(props: Props) {
           }
           return [{id:item.id,item,target:anchorTop-bounds.top+scroll,side:thoughtSide(item.id),height:el?.getBoundingClientRect().height??160,...(coords?{end:{x:coords.left-bounds.left,lineBottom:coords.bottom-bounds.top,lineMid:(coords.top+coords.bottom)/2-bounds.top,rightX,leftX}}:{})}];
         });
-        const placed=layoutThoughts(rows),scroll=host.current?.scrollTop??0;
+        const scroll=host.current?.scrollTop??0;
+        // Inserted diagrams span the whole width, margins included, so the thoughts make room above or below them.
+        const blocked=Array.from(view.contentDOM.querySelectorAll<HTMLElement>('.cm-image')).map(fig=>{const r=fig.getBoundingClientRect();return {top:r.top-bounds.top+scroll,bottom:r.bottom-bounds.top+scroll};});
+        const placed=layoutThoughts(rows,blocked);
         setMargin(placed.map(p=>({...p,top:p.top-scroll,target:p.target-scroll})));
         const bottom=Math.max(0,...placed.map(p=>p.top+p.height+16));
         tail.style.height=Math.max(0,bottom-view.dom.offsetHeight)+'px';

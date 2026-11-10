@@ -17,3 +17,8 @@
 .diagram-stage {overscroll-behavior:contain;}
 .thought-blob .diagram-stage {max-height:none;overflow:visible;}
 .thought-blob .diagram-stage svg {max-width:100%;height:auto;}
+
+/* The blob shows the whole diagram scaled to its width (click or See it larger for reading size); the large view uses nearly the full window and scales to fit. */
+.diagram-large { width: min(1500px, 96vw); }
+.diagram-large .diagram-stage { max-height: 78vh; }
+.diagram-large .diagram-stage svg { max-width: 100%; height: auto; }

@@ -7,7 +7,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, typ
 import { frontmatterEnd } from "../frontmatter.ts";
 import { findFailedMarks } from "./format.ts";
 import { FenceHeader, fenceLabel } from "./codeblocks.ts";
-import { ImageWidget, imageSrc } from "./images.ts";
+import { ImageWidget, imageClicks, imageKeys, imageSrc } from "./images.ts";
 import { toggleTaskAt } from "./tasks.ts";
 import { autolinkHides, calloutHeader, hidesFor, quoteMarkGroups, touchesLines, touchesSpan } from "./reveal.ts";
 import {previewRanges} from './navigation.ts';
@@ -303,7 +303,10 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
               if (c.name === "LinkMark") marks.push([c.from, c.to]);
               else if (c.name === "URL") url = state.sliceDoc(c.from, c.to);
             }
-            if (marks.length >= 2 && !lineIsActive(n.from, n.to)) {
+            // The picture stays drawn with the caret before or after it (so you can click or type below a diagram); the source
+            // only shows when the caret is strictly inside the image text.
+            const caretInside = ctx.sel.some((r) => r.from === r.to && r.from > n.from && r.from < n.to);
+            if (marks.length >= 2 && !caretInside) {
               out.push(Decoration.replace({ widget: new ImageWidget(state.sliceDoc(marks[0][1], marks[1][0]), imageSrc(url)) }).range(n.from, n.to));
             }
             return false;
@@ -468,4 +471,4 @@ const clicks = EditorView.domEventHandlers({
   },
 });
 
-export const livePreview = [inlineLayer, blockField, clicks];
+export const livePreview = [inlineLayer, blockField, clicks, imageKeys, imageClicks];

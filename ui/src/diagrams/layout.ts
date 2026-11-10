@@ -8,14 +8,14 @@ export async function layoutDiagram(input:Diagram,compact=false):Promise<Diagram
  const d=readDiagram(input);if(!d)throw new Error('Invalid diagram.');
  let measure=(s:string)=>s.length*8;
  if(typeof document!=='undefined'){const context=document.createElement('canvas').getContext('2d');if(context){context.font='14px Segoe UI, Arial, sans-serif';measure=s=>context.measureText(s).width;}}
- const nodeWidth=compact?180:200;const top=compact?12:80;
+ const nodeWidth=compact?144:200;const top=compact?12:80;
  const prepared=d.nodes.map(n=>{const labelLines=wrapText(n.label,nodeWidth-28,measure),detailLines=wrapText(n.detail??'',nodeWidth-28,measure);return {id:n.id,width:nodeWidth,height:Math.max(54,20+labelLines.length*19+(detailLines.length?8+detailLines.length*17:0)),labelLines,detailLines};});
  const groupBoxes:DiagramLayout['groups']=[],nodes:NodeLayout[]=[],edges:EdgeLayout[]=[];
  let width=680,height=200;
  // One lazy engine/module shared with Mermaid, including explicit-layout types.
  const engine=await elk();
   const grouped=new Set(d.groups?.flatMap(g=>g.nodeIds)??[]);
-  const options={'elk.algorithm':'layered','elk.direction':'DOWN','elk.edgeRouting':'ORTHOGONAL','elk.hierarchyHandling':'INCLUDE_CHILDREN','elk.spacing.nodeNode':compact?'24':'36','elk.layered.spacing.nodeNodeBetweenLayers':compact?'44':'66','elk.padding':compact?'[top=12,left=12,bottom=12,right=12]':'[top=20,left=20,bottom=20,right=20]'};
+  const options={'elk.algorithm':'layered','elk.direction':'DOWN','elk.edgeRouting':'ORTHOGONAL','elk.hierarchyHandling':'INCLUDE_CHILDREN','elk.spacing.nodeNode':compact?'16':'36','elk.layered.spacing.nodeNodeBetweenLayers':compact?'36':'66','elk.padding':compact?'[top=12,left=12,bottom=12,right=12]':'[top=20,left=20,bottom=20,right=20]'};
   const visual=visualEdges(d);
   const graph:ElkNode=await engine.layout({id:'root',layoutOptions:options,children:[...prepared.filter(n=>!grouped.has(n.id)).map(({id,width,height})=>({id,width,height})),...(d.groups??[]).map(g=>({id:g.id,layoutOptions:{'elk.padding':`[top=${32+wrapText(g.label,nodeWidth-16,measure).length*17},left=16,bottom=16,right=16]`},children:prepared.filter(n=>g.nodeIds.includes(n.id)).map(({id,width,height})=>({id,width,height}))}))],edges:visual.map(e=>({id:e.id,sources:[e.from],targets:[e.to],...(e.label?{labels:[{text:e.label,width:Math.max(...wrapText(e.label,compact?120:184,s=>s.length*8).map(s=>s.length*8))+12,height:wrapText(e.label,compact?120:184,s=>s.length*8).length*17+10}]}:{})})).concat(visual.length?[]:prepared.slice(1).map((n,i)=>({id:'__stack-'+i,sources:[prepared[i].id],targets:[n.id]})))});
   const containers=new Map<string,{x:number;y:number}>([['root',{x:0,y:top}]]);

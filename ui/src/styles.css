@@ -562,8 +562,9 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .thoughts-scrolling .thought-connector-on {opacity:1;}
 
 /* Inserted local AI diagrams retain their natural text size rather than becoming strips. */
-.cm-image {overflow:auto;overscroll-behavior:contain;}
-.cm-image img {max-width:none;max-height:none;}
+/* Inserted AI diagrams are exclusive: they span the page, margins included (sized in images.ts), scaled to fit, with no scrolling. */
+.cm-image {overflow:visible;max-width:none;box-sizing:border-box;margin:14px 0 2.1em;}
+.cm-image img {width:100%;max-width:100%;max-height:none;height:auto;background:transparent;}
 
 /* ===== Remodel, Stage 2: components in the Ember and Moss worlds. Tokens only, no side stripes, AI marked by label + outline + sans + inset. ===== */
 

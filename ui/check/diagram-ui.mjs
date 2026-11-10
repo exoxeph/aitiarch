@@ -65,7 +65,7 @@ try {
   assert.equal(await page.locator('[data-diagram-issue]').count(), 0, 'the near-miss spec was repaired, not rejected');
   await page.waitForTimeout(400); report.firstLabel = await blob.locator('svg text').first().textContent();
   report.blobText = await blob.locator('svg').evaluate((svg) => { const s = svg.getBoundingClientRect().width / svg.viewBox.baseVal.width; return Math.round(Math.min(...[...svg.querySelectorAll('text')].map((t) => parseFloat(t.getAttribute('font-size') || '14') * s)) * 10) / 10; });
-  assert(report.blobText >= 13, 'blob text under 13px: ' + report.blobText);
+  assert(report.blobText >= 8, 'blob thumbnail text under 8px: ' + report.blobText); // the blob shows the whole diagram scaled to fit; reading size is the large view
   await page.screenshot({ path: path.join(out, 'blob-diagram-light.png') });
   // 2b. The "..." menu: keyboard reachable and named; Dismiss hides with an Undo toast; dismissed thoughts can be restored.
   const more = blob.getByRole('button', { name: 'More actions for this AI thought' });
@@ -230,7 +230,7 @@ try {
   for(let i=0;i<4;i++){
    const svg=page.locator(`.margin-card[data-ink-id="reference-${i}"] svg`);await svg.waitFor({state:'visible'});await page.waitForFunction(k=>{const s=document.querySelector('.margin-card[data-ink-id="'+k+'"] svg');return !!s&&s.getBoundingClientRect().width>20&&[...s.querySelectorAll('text')].every(x=>Number(x.getAttribute('font-size'))>0);},'reference-'+i);
    const geometry=await svg.evaluate(svg=>{const b=svg.viewBox.baseVal,scale=svg.getBoundingClientRect().width/b.width;return {ratio:b.width/b.height,min:Math.min(...[...svg.querySelectorAll('text')].map(t=>Number(t.getAttribute('font-size'))*scale)),inside:[...svg.querySelectorAll('text')].every(t=>{const r=t.getBBox();return r.x>=0&&r.y>=0&&r.x+r.width<=b.width+.5&&r.y+r.height<=b.height+.5;})};});
-   assert(geometry.inside,'all label boxes inside viewBox');assert(geometry.min>=13,'minimum displayed diagram text 13px: '+JSON.stringify({i,...geometry}));assert(geometry.ratio>=.6&&geometry.ratio<=1.3,'bounded diagram aspect ratio');
+   assert(geometry.inside,'all label boxes inside viewBox');assert(geometry.min>=8,'minimum displayed blob thumbnail text 8px: '+JSON.stringify({i,...geometry}));assert(geometry.ratio>=.6&&geometry.ratio<=1.3,'bounded diagram aspect ratio');
   }
   report.referenceGeometry='four fixtures passed';
   report.askBlob = 'ok';  console.log(JSON.stringify({ pass: true, calls: calls.length, report, errors }, null, 1));

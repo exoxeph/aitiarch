@@ -6,10 +6,18 @@ export function thoughtSide(id:string):ThoughtSide {
  let hash=0;for(const c of id)hash=(hash*31+c.charCodeAt(0))|0;
  return (hash&1)?'left':'right';
 }
-export function layoutThoughts<T extends {id:string;side:ThoughtSide;target:number;height:number}>(rows:T[]) {
+export function layoutThoughts<T extends {id:string;side:ThoughtSide;target:number;height:number}>(rows:T[],blocked:{top:number;bottom:number}[]=[]) {
  const next={left:8,right:8};
  return [...rows].sort((a,b)=>a.target-b.target||a.id.localeCompare(b.id)).map(row=>{
-  const top=Math.max(row.target,next[row.side]);next[row.side]=top+row.height+8;
+  let top=Math.max(row.target,next[row.side]);
+  // A full-width block (an inserted diagram) takes both margins: a blob never overlaps it. It goes just above when that
+  // is closer to its sentence and still fits, otherwise just below.
+  for(let guard=0;guard<=blocked.length;guard++){
+   const hit=blocked.find(b=>top<b.bottom+8&&top+row.height>b.top-8);if(!hit)break;
+   const above=hit.top-8-row.height;
+   top=above>=next[row.side]&&Math.abs(above-row.target)<=Math.abs(hit.bottom+8-row.target)?above:hit.bottom+8;
+  }
+  next[row.side]=top+row.height+8;
   return {...row,top};
  });
 }

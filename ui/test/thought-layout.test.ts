@@ -1,6 +1,6 @@
 // Position tests for margin blobs and their connectors (pure functions; no browser).
 import { describe, expect, it } from 'vitest';
-import { BLOB_EDGE, BLOB_GAP_MAX, BLOB_GAP_MIN, BLOB_MAX, BLOB_MIN, BLOB_RESERVE, blobBox, connectorPath, connectorVisible } from '../shared/thoughts.ts';
+import { BLOB_EDGE, BLOB_GAP_MAX, BLOB_GAP_MIN, BLOB_MAX, BLOB_MIN, BLOB_RESERVE, blobBox, connectorPath, connectorVisible, layoutThoughts } from '../shared/thoughts.ts';
 
 const column = (w: number) => { const col = Math.min(760, w - BLOB_RESERVE); return { left: (w - col) / 2, right: (w + col) / 2 }; };
 
@@ -59,5 +59,12 @@ it('connector starts just beside the sentence when nothing follows it, never bey
   expect(r).toHaveLength(2);
   const l = connectorPath({ x: c.left, lineBottom: 140, lineMid: 128, rightX: c.left + 300 }, { x: lb.left + lb.width, y: 130 }, c, 'left');
   expect(l[0].x).toBe(c.left - 4); // text may precede the sentence on the left: stops at the column edge
+});
+it('thought blobs make room for a full-width diagram instead of overlapping it', () => {
+  const rows = [{ id: 'a', side: 'right' as const, target: 300, height: 100 }, { id: 'b', side: 'left' as const, target: 700, height: 100 }];
+  const band = { top: 250, bottom: 800 }; // an inserted diagram spans both margins
+  const placed = layoutThoughts(rows, [band]);
+  for (const p of placed) expect(p.top + p.height <= band.top - 8 || p.top >= band.bottom + 8).toBe(true);
+  expect(layoutThoughts(rows).map(p => p.top)).toEqual([300, 700]); // no diagram: unchanged
 });
 it('connector hides displaced or offscreen anchors even when active',()=>{expect(connectorVisible(100,148,600)).toBe(true);expect(connectorVisible(100,149,600)).toBe(false);expect(connectorVisible(-1,0,600)).toBe(false);expect(connectorVisible(601,601,600)).toBe(false);});

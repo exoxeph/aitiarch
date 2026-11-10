@@ -265,12 +265,15 @@ describe("images (item 5)", () => {
     const w = widgets(make(doc, 0))[0];
     expect(doc.slice(w.from, w.to)).toBe(`![AI diagram: Flow](assets/${name})`);
   });
-  it("shows the source (no widget) when the caret or selection is on that line, and only that line", () => {
-    const onLine = doc.indexOf("![AI diagram") + 4;
-    const w = widgets(make(doc, onLine));
-    expect(w).toHaveLength(1);
-    expect(w[0].spec.widget.alt).toBe("Elsewhere");
-    expect(widgets(make(doc, 0, doc.length))).toHaveLength(0);
+  it("shows the source (no widget) only while the caret is strictly inside the image text", () => {
+    const start = doc.indexOf("![AI diagram"), end = start + `![AI diagram: Flow](assets/${name})`.length;
+    const inside = widgets(make(doc, start + 4));
+    expect(inside).toHaveLength(1);
+    expect(inside[0].spec.widget.alt).toBe("Elsewhere");
+    // Before it, after it, or selecting everything: the picture stays drawn, so you can click, type and delete around it.
+    expect(widgets(make(doc, start))).toHaveLength(2);
+    expect(widgets(make(doc, end))).toHaveLength(2);
+    expect(widgets(make(doc, 0, doc.length))).toHaveLength(2);
   });
   it("imageSrc only accepts local diagram assets: no remote, data: or arbitrary paths", () => {
     expect(imageSrc(`assets/${name}`)).toBe(`/api/diagram-asset?name=${name}`);
