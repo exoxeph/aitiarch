@@ -1,0 +1,22 @@
+import {afterEach,expect,it} from 'vitest';import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import path from 'node:path';import os from 'node:os';import {execFileSync} from 'node:child_process';
+import {createApp} from '../server/http.ts';import {Store} from '../server/store.ts';import {NoteWatcher} from '../server/watch.ts';import {FakeChatProvider} from '../server/chat/fake.ts';
+const clean:{root:string;app:ReturnType<typeof createApp>;watcher:NoteWatcher}[]=[];
+afterEach(async()=>{for(const f of clean.splice(0)){f.watcher.stop();await f.app.close();console.log('CLEANUP TARGET fixture',f.root);await rm(f.root,{recursive:true,force:true,maxRetries:5,retryDelay:100});}});
+it('authenticated chat review/send uses SSE; budget appears in usage; reload placeholder and explicit ignore action',async()=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'aitiarch-m2-http-'));execFileSync('git',['init','-q'],{cwd:root,stdio:'pipe'});await writeFile(path.join(root,'fixture.md'),'Synthetic note.');
+ const store=await Store.open(root),watcher=new NoteWatcher(store),app=createApp({store,watcher,distDir:root,provider:new FakeChatProvider()});clean.push({root,app,watcher});
+ const port=await app.listen(0),base='http://127.0.0.1:'+port,session=await fetch(base+'/api/session'),cookie=session.headers.get('set-cookie')!.split(';')[0];
+ const headers={cookie,origin:base,'content-type':'application/json','x-aitiarch':'1'};
+ const call=(url:string,body:unknown)=>fetch(base+url,{method:'PUT',headers,body:JSON.stringify(body)});
+ const input={id:'message-one',path:'fixture.md',question:'Synthetic question.',context:[{moduleId:'this-note',ids:['note']}]};
+ expect((await fetch(base+'/api/chat?path=fixture.md')).status).toBe(401);
+ const review=await (await call('/api/chat/review',input)).json();expect(review.requiresConfirmation).toBe(true);
+ expect((await call('/api/chat/send',{reviewId:review.reviewId})).status).toBe(409);
+ const response=await call('/api/chat/send',{reviewId:review.reviewId,confirmed:true});expect(response.headers.get('content-type')).toContain('text/event-stream');
+ const events=await response.text();expect(events).toContain('event: delta');expect(events).toContain('event: complete');
+ const snapshot=await (await fetch(base+'/api/chat?path=fixture.md',{headers:{cookie}})).json();expect(snapshot.questionPlaceholder).toBe('Question unavailable after reload.');expect(snapshot.persistence.enabled).toBe(false);
+ expect((await (await fetch(base+'/api/usage',{headers:{cookie}})).json()).chats[0]).toMatchObject({calls:1,input:20,output:10});
+ const status=await (await call('/api/chat/enable',{action:'add-ignore-line'})).json();expect(status.enabled).toBe(true);
+ expect((await call('/api/chat/settings',{path:'fixture.md',tokenBudget:20000,rollingRequestCap:3})).status).toBe(200);
+},20000);

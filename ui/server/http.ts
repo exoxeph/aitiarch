@@ -1,4 +1,7 @@
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
+import {ChatRuntime,ChatError} from './chat/runtime.ts';
+import {CHAT_MESSAGES} from '../shared/chat.ts';
+import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
 import {InsertionStore} from './insertion-store.ts';
 import { UiStateStore } from './ui-state-store.ts';
 import {ThreadStore} from './thread-store.ts';
@@ -124,6 +127,9 @@ export function createApp(opts: AppOptions) {
 
   const uiStateStore = new UiStateStore(store.rootReal);
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
+  const chatStore=new ChatStore(store.rootReal);
+  const chatReady=inkReady.then(ink=>new ChatRuntime(store,ink,chatStore,opts.provider));
+  const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
     name:'claude',checkAvailability:async()=>({available:false,code:'unsupported_cli',message:'Provider disabled. Enable it explicitly at server startup.'}),invoke:async()=>{throw new ProviderError('unsupported_cli');}
@@ -174,7 +180,45 @@ export function createApp(opts: AppOptions) {
     }
 
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await store.tree());
-    if(url.pathname==='/api/usage'&&req.method==='GET')return json(res,200,opts.usage?await opts.usage.summary():{since:new Date().toISOString(),hourlyCap:2,providers:[]});
+    if(url.pathname==='/api/usage'&&req.method==='GET'){
+      const chats=(await chatReady).usage();return json(res,200,{...(opts.usage?await opts.usage.summary():{since:new Date().toISOString(),hourlyCap:2,providers:[]}),...(chats.length?{chats}:{})});
+    }
+    if(url.pathname==='/api/chat'&&req.method==='GET'){
+      const note=url.searchParams.get('path')??'';await store.read(note);
+      return json(res,200,{...(await chatStore.read(note)),persistence:await chatStore.status(),questionPlaceholder:'Question unavailable after reload.',usage:(await chatReady).usage().find(c=>c.note===note)??null});
+    }
+    if(url.pathname==='/api/chat/modules'&&req.method==='GET')return json(res,200,await (await chatReady).modules(url.searchParams.get('path')??''));
+    if(url.pathname.startsWith('/api/chat/')&&req.method==='PUT'){
+      const b=await readBody(req) as any,runtime=await chatReady;
+      try{
+        if(url.pathname==='/api/chat/review')return json(res,200,await runtime.review(b));
+        if(url.pathname==='/api/chat/settings')return json(res,200,await runtime.settings(b.path,b));
+        if(url.pathname==='/api/chat/cancel'){runtime.cancel(b.path);return json(res,200,{});}
+        if(url.pathname==='/api/chat/enable'){
+          if(b.action!=='add-ignore-line')throw new ChatError('invalid_chat');return json(res,200,await chatStore.enablePersistence());
+        }
+        if(url.pathname==='/api/chat/bring-preview')return json(res,200,await (await chatInsertion).preview(b));
+        if(url.pathname==='/api/chat/bring-prepare')return json(res,200,await (await chatInsertion).prepare(b));
+        if(url.pathname==='/api/chat/bring-complete')return json(res,200,await (await chatInsertion).complete(b.path,b.operationId));
+        if(url.pathname==='/api/chat/bring-cancel')return json(res,200,await (await chatInsertion).cancel(b.path,b.operationId));
+        if(url.pathname==='/api/chat/send'){
+          const controller=new AbortController(),abort=()=>controller.abort();res.on('close',abort);
+          let emitted=0;
+          try{await runtime.send(b,event=>{
+            if(res.destroyed)throw new ChatError('cancelled');
+            if(!res.headersSent)res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'});
+            const frame=`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+            emitted+=Buffer.byteLength(frame);if(emitted>512000)throw new ChatError('cancelled');
+            res.write(frame);if(res.writableLength>262144)throw new ChatError('cancelled');
+          },controller.signal);res.end();}finally{res.off('close',abort);}return;
+        }
+      }catch(e){
+        if(res.headersSent)return res.end();
+        const code=e instanceof ChatError?e.code:e instanceof ProviderError?'provider_failed':'invalid_chat';
+        return json(res,409,{error:code,message:CHAT_MESSAGES[code]});
+      }
+      throw new PathError(400,'bad_body','Unknown chat action.');
+    }
 
     if(url.pathname==='/api/insertions'&&req.method==='GET')return json(res,200,await (await insertionsReady).reconcile(url.searchParams.get('path')??''));
     if(url.pathname==='/api/diagram-asset'&&req.method==='GET'){
@@ -388,6 +432,7 @@ export function createApp(opts: AppOptions) {
       });
     },
     async close(): Promise<void> {
+      await (await chatReady).close();
       clearInterval(ka);
       for (const c of clients) c.end();
       server.closeAllConnections();

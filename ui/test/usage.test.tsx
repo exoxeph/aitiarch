@@ -38,3 +38,7 @@ it('refuses usage storage inside a notebook or repo',async()=>{
  const {root}=await fixture();await expect(new UsageLogs({claude:path.join(root,'.aitiarch'),plan:path.join(root,'plan')}).write(claudeUsageRecord(null,1))).rejects.toThrow();
  await expect(new UsageLogs({claude:fileURLToPath(new URL('../',import.meta.url)),plan:path.join(root,'plan')}).write(claudeUsageRecord(null,1))).rejects.toThrow();
 });
+it('shows per-chat usage and budget without a remaining-requests or price estimate',()=>{
+ const html=renderToStaticMarkup(<UsageView summary={{since:new Date().toISOString(),hourlyCap:2,providers:[],chats:[{note:'fixture.md',calls:2,input:30,cached:4,output:12,unreportedCalls:0,tokenBudget:50000,spent:46,reserved:0,rollingRequestCap:12,windowMinutes:60}]}}/>);
+ expect(html).toContain('Per-note chat budgets');expect(html).toContain('46');expect(html).toContain('50000');expect(html).not.toMatch(/\$|remaining requests/i);
+});

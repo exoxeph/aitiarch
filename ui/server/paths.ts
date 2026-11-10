@@ -14,7 +14,7 @@ export class PathError extends Error {
 }
 
 /** Directories that hold private evidence or tooling output; never listed or served. */
-export const HIDDEN_DIRS = new Set(["ink", "runs", "measurements", "backups", "sketches", "node_modules", ".git"]);
+export const HIDDEN_DIRS = new Set(["ink", "chat", "runs", "measurements", "backups", "sketches", "node_modules", ".git"]);
 
 const RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
 

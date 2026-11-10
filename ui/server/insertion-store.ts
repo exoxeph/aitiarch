@@ -57,11 +57,18 @@ export class InsertionStore {
  }
  async preview(input:BringInput):Promise<BringPreview>{return (await this.build(input)).preview;}
  async prepare(input:BringInput&{preview:BringPreview}){return this.serial(async()=>{
-  const {preview,svg,note}=await this.build(input);if(JSON.stringify(preview)!==JSON.stringify(input.preview))throw new Error('The thought changed. Review a new preview.');const operations=await this.journal();if(operations.length>=1000)throw new Error('Insertion history limit reached.');
-  if(svg&&preview.assetName){const file=await this.confined('assets/'+preview.assetName,true);try{const f=await open(file,'wx',0o600);try{await f.writeFile(svg);await f.sync();}finally{await f.close();}}catch(e){if((e as NodeJS.ErrnoException).code!=='EEXIST'||await readFile(file,'utf8')!==svg)throw e;}}
-  const c=preview.changes,operation:Intent={id:randomUUID(),inkId:input.id,note:normalizeRel(input.path),at:new Date().toISOString(),beforeHash:hash(note.text),afterHash:hash(note.text.slice(0,c.from)+c.insert+note.text.slice(c.to)),insertHash:hash(c.insert),from:c.from,length:c.insert.length,state:'prepared'};
-  operations.push(operation);await this.save(operations);return {operationId:operation.id,preview};
+  const {preview,svg,note}=await this.build(input);if(JSON.stringify(preview)!==JSON.stringify(input.preview))throw new Error('The thought changed. Review a new preview.');return this.record(note,input.id,preview,svg);
  });}
+ /** Server-built preview only; shares the durable journal and subsequent ledger repair with thoughts. */
+ async prepareChat(note:{path:string;text:string;version:string},messageId:string,preview:BringPreview){return this.serial(async()=>{
+  if((await this.store.read(note.path)).version!==note.version)throw new Error('The note changed. Review a new preview.');return this.record(note,messageId,preview);
+ });}
+ private async record(note:{path:string;text:string;version:string},messageId:string,preview:BringPreview,svg?:string){
+  const operations=await this.journal();if(operations.length>=1000)throw new Error('Insertion history limit reached.');
+  if(svg&&preview.assetName){const file=await this.confined('assets/'+preview.assetName,true);try{const f=await open(file,'wx',0o600);try{await f.writeFile(svg);await f.sync();}finally{await f.close();}}catch(e){if((e as NodeJS.ErrnoException).code!=='EEXIST'||await readFile(file,'utf8')!==svg)throw e;}}
+  const c=preview.changes,operation:Intent={id:randomUUID(),inkId:messageId,note:normalizeRel(note.path),at:new Date().toISOString(),beforeHash:hash(note.text),afterHash:hash(note.text.slice(0,c.from)+c.insert+note.text.slice(c.to)),insertHash:hash(c.insert),from:c.from,length:c.insert.length,state:'prepared'};
+  operations.push(operation);await this.save(operations);return {operationId:operation.id,preview};
+ }
  private async reconcileLocked(note:string,completeId?:string):Promise<RepairStatus>{const operations=await this.journal();let current:string|null=null;try{current=(await this.store.read(note)).text;}catch{/* Missing/conflicting note stays pending; no invented ledger event. */}
   let changed=false,pending=0,unverified=0;
   for(const o of operations){if(o.note!==note||o.state!=='prepared')continue;

@@ -30,11 +30,16 @@ export function previewThoughtInsertion(note:{text:string;version:string},item:I
  const a=item.attachment;
  if(!thoughtVisible(item)||a.status!=='attached'||note.text.slice(a.from,a.to)!==item.anchor.quote)throw new Error('An attached anchor is required.');
  if(item.generation?.status!=='complete'||!item.body.trim())throw new Error('A validated answer is required.');
+ return previewAiCallout(note,item.body,a.to);
+}
+/** Explicit human insertion only; shared by thoughts and accepted per-note chat messages. */
+export function previewAiCallout(note:{text:string;version:string},body:string,after:number){
+ if(!body.trim()||!Number.isSafeInteger(after)||after<0||after>note.text.length)throw new Error('Invalid AI insertion target.');
  // Find the next blank line, including CRLF and whitespace-only paragraph separators.
- const tail=note.text.slice(a.to),boundary=/\r?\n[\t ]*\r?\n/.exec(tail);
- const from=boundary?a.to+boundary.index:note.text.length;
+ const tail=note.text.slice(after),boundary=/\r?\n[\t ]*\r?\n/.exec(tail);
+ const from=boundary?after+boundary.index:note.text.length;
  const newline=note.text.includes('\r\n')?'\r\n':'\n';
- const block='> [!ai]'+newline+item.body.split(/\r\n|\r|\n/).map(line=>'> '+line).join(newline);
+ const block='> [!ai]'+newline+body.split(/\r\n|\r|\n/).map(line=>'> '+line).join(newline);
  const insert=newline+newline+block+(boundary?'':newline);
  return {noteVersion:note.version,changes:{from,to:from,insert},authorship:'ai' as const,insertedBy:'human' as const};
 }
