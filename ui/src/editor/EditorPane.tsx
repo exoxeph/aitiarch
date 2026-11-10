@@ -14,6 +14,7 @@ import { externalChange, NoteSession, type SyncStatus } from "./session.ts";
 import { addInk, removeInk, inkField, setInk, setThoughtNarrow } from "./ink.ts";
 import {codeEditing} from "./code-editing.ts";
 import {writingKeys} from "./writing.ts";
+import {footnotes} from "./footnotes.ts";
 import { codeHighlight, codeLanguages } from "./codeblocks.ts";
 import { toggleTaskAtCaret } from "./tasks.ts";
 import { slashMenu } from "./slash.ts";
@@ -143,6 +144,7 @@ export function EditorPane(props: Props) {
           previewHandlers.of({ openWiki: (t) => live.current.onOpenWiki(t) }),
           resolverSlot.current.of(wikiResolver.of(props.resolver)),
           livePreview,
+          footnotes,
           tablePreview,
           codeHighlight,
           slashMenu,

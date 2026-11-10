@@ -694,3 +694,8 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .cm-table-tools button:hover { background: var(--accent-soft); color: var(--ink-text); }
 .cm-table-tools .cm-table-hint { margin-inline-start: auto; padding: 0; }
 @media (max-width: 640px) { .cm-table-tools .cm-table-hint { display: none; } .cm-table-tools button { padding: 2px 4px; } }
+
+/* Footnotes: references are small raised numbers, definitions small notes with their number. Display only. */
+.cm-footnote-ref { font: 600 .68em/1 var(--font-ui); vertical-align: super; color: var(--accent); padding: 0 1px; }
+.cm-footnote-def { font: .88em/1.6 var(--font-ui); color: var(--muted); }
+.cm-footnote-label { color: var(--accent); font-weight: 600; margin-inline-end: .4em; }

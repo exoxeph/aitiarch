@@ -1,13 +1,14 @@
 import {transient} from '../transient.ts';
 // Slash menu: type "/" at the start of a line to insert a block as plain Markdown. Nothing is inserted until you pick an
 // item (Enter, Tab or click); the insertion is one ordinary transaction, so Ctrl+Z restores the exact bytes.
-import { acceptCompletion, autocompletion, currentCompletions, setSelectedCompletion, closeCompletion, completionStatus, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { acceptCompletion, autocompletion, snippet, currentCompletions, setSelectedCompletion, closeCompletion, completionStatus, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { syntaxTree } from "@codemirror/language";
 import { Prec, StateEffect, StateField, type ChangeSpec, type EditorState } from "@codemirror/state";
 import { keymap,ViewPlugin } from "@codemirror/view";
 import { frontmatterEnd } from "../frontmatter.ts";
 import { STARTER_TABLE } from "./table-edit.ts";
 import { requestTableFocus } from "./tables.ts";
+import { footnoteInsertion } from "./footnotes.ts";
 
 export interface SlashItem {
   label: string;
@@ -20,6 +21,12 @@ export interface SlashItem {
   caret?: number;
   /** After inserting, put the cursor in the first cell of the new table. */
   table?: boolean;
+  /** An insertion with highlighted placeholders: typing replaces the first, Tab jumps to the next. */
+  snippet?: string;
+  /** Adds the next numbered footnote reference here and its definition at the end of the note. */
+  footnote?: boolean;
+  /** Also available in the middle of a line (after a space), not only at the start. */
+  inline?: boolean;
 }
 export const SLASH_ITEMS: readonly SlashItem[] = [
   {label:'Text',detail:'Start a plain paragraph',group:'Text',icon:'T',shortcut:'/text',aliases:['paragraph'],insert:''},
@@ -32,9 +39,9 @@ export const SLASH_ITEMS: readonly SlashItem[] = [
   {label:'Code block',detail:'A fenced block of code',group:'Insert',icon:'<>',shortcut:'/code',aliases:['snippet'],insert:'```\n\n```',caret:4},
   {label:'Divider',detail:'Separate sections with a line',group:'Insert',icon:'—',shortcut:'/line',aliases:['line','rule','separator'],insert:'---\n'},
   {label:'Table',detail:'A table you edit right in place',group:'Insert',icon:'▦',shortcut:'/table',aliases:['grid'],insert:STARTER_TABLE,table:true},
-  {label:'Link',detail:'Add link text and a destination',group:'Insert',icon:'↗',shortcut:'/link',aliases:['url'],insert:'[]()',caret:1},
-  {label:'Image',detail:'Add alt text and an image path',group:'Insert',icon:'□',shortcut:'/image',aliases:['picture','photo'],insert:'![]()',caret:2},
-  {label:'Footnote',detail:'Add a reference and its definition',group:'Advanced',icon:'¹',shortcut:'/footnote',aliases:['reference'],insert:'[^note]\n\n[^note]: ',caret:17},
+  {label:'Link',detail:'Type the link text, then Tab to the web address',group:'Insert',icon:'↗',shortcut:'/link',aliases:['url'],insert:'[link text](https://)',caret:1,snippet:'[${link text}](${https://})',inline:true},
+  {label:'Image',detail:'Describe the image, then Tab to its file name',group:'Insert',icon:'□',shortcut:'/image',aliases:['picture','photo'],insert:'![describe the image](image.png)',caret:2,snippet:'![${describe the image}](${image.png})',inline:true},
+  {label:'Footnote',detail:'A numbered note; you write it at the bottom',group:'Advanced',icon:'¹',shortcut:'/footnote',aliases:['reference'],insert:'[^1]\n\n[^1]: ',caret:11,footnote:true,inline:true},
 ];
 
 /** `/query` at the start of a line (leading spaces allowed). Returns where the slash is and what has been typed after it. */
@@ -49,6 +56,28 @@ export function slashInsert(item: SlashItem, from: number, to: number): { change
   return { changes: { from, to, insert: item.insert }, caret: from + (item.caret ?? item.insert.length) };
 }
 
+/** /link, /image and /footnote also work after a space in the middle of a line, once three letters are typed (so ordinary text is not interrupted). */
+export function inlineMatch(lineText: string, column: number): { offset: number; query: string; inline: true } | null {
+  const m = /(?:^|[\s(])\/([a-z]{3,})$/i.exec(lineText.slice(0, column));
+  return m ? { offset: m.index + m[0].length - m[1].length - 1, query: m[1], inline: true } : null;
+}
+export function inlineItems(query: string): SlashItem[] {
+  const q = query.toLowerCase();
+  return SLASH_ITEMS.filter((it) => it.inline && [it.label, ...it.aliases].some((s) => s.toLowerCase().replace(/[\s-]/g, '').startsWith(q)));
+}
+/** Applies a picked item in place of the typed /query (from..to). One transaction, so Ctrl+Z restores the exact text. */
+function applySlash(view: import("@codemirror/view").EditorView, item: SlashItem, from: number, to: number) {
+  if (item.table) requestTableFocus(from, 0, 0, true);
+  if (item.snippet) { snippet(item.snippet)(view, null, from, to); return; }
+  if (item.footnote) {
+    const { changes, caret } = footnoteInsertion(view.state.doc, from, to);
+    view.dispatch({ changes, selection: { anchor: caret }, userEvent: "input.complete", scrollIntoView: true });
+    return;
+  }
+  const { changes, caret } = slashInsert(item, from, to);
+  view.dispatch({ changes, selection: { anchor: caret }, userEvent: "input.complete", scrollIntoView: true });
+}
+
 const NOT_HERE = new Set(["FencedCode", "CodeBlock", "InlineCode", "CodeText", "HTMLBlock", "CommentBlock"]);
 
 function allowed(state: EditorState, pos: number): boolean {
@@ -59,17 +88,15 @@ function allowed(state: EditorState, pos: number): boolean {
 
 export function slashSource(ctx: CompletionContext): CompletionResult | null {
   const line = ctx.state.doc.lineAt(ctx.pos);
-  const m = slashMatch(line.text, ctx.pos - line.from);
+  const m: { offset: number; query: string; inline?: boolean } | null = slashMatch(line.text, ctx.pos - line.from) ?? inlineMatch(line.text, ctx.pos - line.from);
   if (!m || !allowed(ctx.state, line.from + m.offset)) return null;
   const from = line.from + m.offset + 1; // after the slash, so only what you type after it is matched
-  const options: Completion[] = slashItems(m.query).map((item) => ({
+  const options: Completion[] = (m.inline ? inlineItems(m.query) : slashItems(m.query)).map((item) => ({
     label: item.label,
     detail: item.detail,
     section: {name:item.group,rank:["Text","Lists","Insert","Advanced"].indexOf(item.group)},
     apply: (view, _c, f, t) => {
-      const { changes, caret } = slashInsert(item, f - 1, t); // f - 1 includes the slash itself
-      if (item.table) requestTableFocus(f - 1, 0, 0, true);
-      view.dispatch({ changes, selection: { anchor: caret }, userEvent: "input.complete", scrollIntoView: true });
+      applySlash(view, item, f - 1, t); // f - 1 includes the slash itself
     },
   }));
   return { from, options, filter:false, update:(_current,_from,_to,context)=>slashSource(context) };
@@ -105,13 +132,11 @@ function enterWithoutMenu(view: import("@codemirror/view").EditorView): boolean 
   const sel = view.state.selection.main;
   if (!sel.empty) return false;
   const line = view.state.doc.lineAt(sel.head);
-  const m = slashMatch(line.text, sel.head - line.from);
+  const m: { offset: number; query: string; inline?: boolean } | null = slashMatch(line.text, sel.head - line.from) ?? inlineMatch(line.text, sel.head - line.from);
   if (!m || m.query === "" || !allowed(view.state, line.from + m.offset)) return false;
-  const item = slashPick(m.query);
+  const item = m.inline ? inlineItems(m.query)[0] ?? null : slashPick(m.query);
   if (!item) return false;
-  const { changes, caret } = slashInsert(item, line.from + m.offset, sel.head);
-  if (item.table) requestTableFocus(line.from + m.offset, 0, 0, true);
-  view.dispatch({ changes, selection: { anchor: caret }, userEvent: "input.complete", scrollIntoView: true });
+  applySlash(view, item, line.from + m.offset, sel.head);
   return true;
 }
 

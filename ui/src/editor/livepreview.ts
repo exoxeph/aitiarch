@@ -305,7 +305,7 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
             }
             // The picture stays drawn with the caret before or after it (so you can click or type below a diagram); the source
             // only shows when the caret is strictly inside the image text.
-            const caretInside = ctx.sel.some((r) => r.from === r.to && r.from > n.from && r.from < n.to);
+            const caretInside = ctx.sel.some((r) => (r.from > n.from && r.from < n.to) || (r.to > n.from && r.to < n.to));
             if (marks.length >= 2 && !caretInside) {
               out.push(Decoration.replace({ widget: new ImageWidget(state.sliceDoc(marks[0][1], marks[1][0]), imageSrc(url)) }).range(n.from, n.to));
             }

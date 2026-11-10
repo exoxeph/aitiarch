@@ -35,6 +35,11 @@ const cases=[
  {name:'Backspace right after a quote marker removes the quote',start:'> Hello',caret:2,keys:['{Backspace}'],want:'Hello'},
  {name:'Enter in a code block adds a line; Enter on its empty last line leaves it',start:'',keys:['/code','{Enter}','a','{Enter}','b','{Enter}','{Enter}','After'],want:'```\na\nb\n```\nAfter'},
  {name:'Backspace on the empty line under a code block removes the whole block',start:'```\ncode\n```\n',keys:['{Backspace}'],want:''},
+ {name:'/link: type the text, Tab, type the address',start:'',keys:['/link','{Enter}','Docs','{Tab}','example.com'],want:'[Docs](example.com)'},
+ {name:'/image: describe it, Tab, type the file name',start:'',keys:['/image','{Enter}','Photo','{Tab}','a.png'],want:'![Photo](a.png)'},
+ {name:'/footnote adds the next numbered reference and a definition to type in',start:'Hello\n\n',keys:['/footnote','{Enter}','Source'],want:'Hello\n\n[^1]\n\n[^1]: Source'},
+ {name:'/footnote works in the middle of a sentence',start:'',keys:['See this /footnote','{Enter}','Note'],want:'See this [^1]\n\n[^1]: Note'},
+ {name:'/link works in the middle of a sentence',start:'',keys:['Read the /link','{Enter}','Guide','{Tab}','x.test'],want:'Read the [Guide](x.test)'},
  {name:'Backspace under a code block keeps the text before it',start:'Before\n\n```\ncode\n```\n',keys:['{Backspace}'],want:'Before\n\n'},
 ];
 const failures=[];
