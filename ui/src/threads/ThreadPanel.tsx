@@ -7,6 +7,7 @@ import {newThread,questionPlaceholder,threadStatus,type ThreadFailure,type Threa
 import {api,type InkSnapshot} from '../api.ts';
 import {rememberQuestion,recalledQuestion,forgetQuestion} from './questions.ts';
 /** The persistence notice lives in the one status spot at the bottom of the app; if that is not mounted it renders in place. */
+const statusLabel=(s:string)=>({open:'Open',resolved:'Resolved',dismissed:'Dismissed',orphaned:'Needs re-attaching',has_takeaway:'Takeaway written',skipped:'Takeaway skipped'} as Record<string,string>)[s]??s;
 const statusNotice=(node:ReactNode)=>{const slot=document.getElementById('status-notice-slot');return slot?createPortal(node,slot):node;};
 export const failureLabels:Record<ThreadFailure,string>={
  disabled:'Provider disabled. Enable it explicitly at server startup.',unavailable:'Provider unavailable. Check your CLI or connection.',
@@ -43,7 +44,7 @@ export function ThreadPanel(props:Props){
   const timer=setInterval(()=>{if(live.current.items.some(i=>i.generation?.status==='pending'||i.thread?.followups.some(r=>r.generation.status==='pending')||i.thread?.summary.reply?.generation.status==='pending'))void refresh();},700);
   return ()=>{off=true;clearInterval(timer);};},[props.path]);
  return <section className="thread-panel" aria-label="AI thought">
-  <nav aria-label="Thread list">{generated.map(i=><button key={i.id} aria-pressed={item?.id===i.id} onClick={()=>props.onOpen(i.id)}>{i.anchor.quote.slice(0,42)} · {threadStatus(i)}</button>)}</nav>
+  <nav aria-label="Thread list">{generated.map(i=><button key={i.id} aria-pressed={item?.id===i.id} onClick={()=>props.onOpen(i.id)}>{i.anchor.quote.slice(0,42)} · {statusLabel(threadStatus(i))}</button>)}</nav>
   {item&&<ThreadCard key={props.path+':'+item.id} {...props} item={item} memory={memory.current}/>}
  </section>;
 }
@@ -107,7 +108,7 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{
  if(t.dismissed)return <article className="thread-card"><p>Thread dismissed; replies and your work are preserved.</p><button disabled={busy} onClick={()=>void act({type:'restore'})}>Restore thread</button><button onClick={()=>setConfirmDelete(true)}>Delete thread…</button>{confirmDelete&&<DeleteConfirm busy={busy} cancel={()=>setConfirmDelete(false)} remove={()=>void act({type:'delete',confirmed:true})}/ >}</article>;
  return <article className="thread-card" data-thread-id={item.id} ref={card}>
   <blockquote>{item.anchor.quote}</blockquote>
-  <p className="small">{threadStatus(item)}{item.attachment.status==='orphaned'?' · Re-attach using the orphan list above. Your takeaway is preserved.':''}</p>
+  <p className="small muted">{statusLabel(threadStatus(item))}{item.attachment.status==='orphaned'?' · Re-attach using the orphan list above. Your takeaway is preserved.':''}</p>
   <ReplyStack replies={[initial,...t.followups]} question={id=>recalledQuestion(path,id)??questionPlaceholder} cancel={replyId=>void api.threadCall('cancel',{path,id:item.id,replyId})} onAdd={r=>card.current?.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id,...(r.id===item.id?{}:{replyId:r.id})}}))}/>
   {notice&&<p role="alert">{notice}</p>}
   {saveFailures.filter(id=>[...t.followups,...(t.summary.reply?[t.summary.reply]:[])].some(r=>r.id===id&&r.generation.status==='pending')).map(id=><p key={id} role="alert">{failureLabels.persistence}<button onClick={async()=>{try{update(await api.threadCall<InkSnapshot>('retry-save',{path,id:item.id,replyId:id}));setSaveFailures(all=>all.filter(x=>x!==id));}catch(e){fail(e);}}}>Retry saving reply (no new call)</button></p>)}
