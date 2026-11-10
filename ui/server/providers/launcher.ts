@@ -3,7 +3,7 @@ import { execFile, spawn, type SpawnOptionsWithoutStdio } from 'node:child_proce
 import { realpathSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { claudeArguments } from './claude-arguments.ts';
+import { claudeArguments,investigatorArguments } from './claude-arguments.ts';
 import type { Configuration, ProviderName } from './index.ts';
 
 export function assertLaunch(provider: ProviderName, mode: 'metadata' | 'isolated', args: readonly string[], cwd?: string): void {
@@ -39,6 +39,14 @@ export function spawnIsolated(config: Target, args: string[], options: SpawnOpti
   assertTarget(config);
   assertLaunch(config.provider, 'isolated', args, options.cwd);
   return spawn(config.command, [...(config.prefixArgs ?? []), ...args], { ...options, shell: false, windowsHide: true, stdio: 'pipe' });
+}
+/** Separate tools-off investigator profile. The policy gate supplies a registered working root.
+ * No permission bypass, tools, positional prompts or model-supplied CLI arguments. */
+export function spawnInvestigator(config:Target,args:string[],options:SpawnOptionsWithoutStdio&{cwd:string},registeredRoot:string){
+ assertTarget(config);
+ if(config.provider!=='claude'||JSON.stringify(args)!==JSON.stringify(investigatorArguments())||!path.isAbsolute(options.cwd)||realpathSync(options.cwd)!==realpathSync(registeredRoot))throw new Error('Investigator launch rejected.');
+ if(!path.isAbsolute(config.command)||/\.(?:cmd|bat|ps1)$/i.test(config.command))throw new Error('Native executable required.');
+ return spawn(config.command,[...(config.prefixArgs??[]),...args],{...options,shell:false,windowsHide:true,stdio:'pipe'});
 }
 export async function isolatedOutput(config: Target, args: string[], cwd: string, env: NodeJS.ProcessEnv, input: string): Promise<string> {
   assertTarget(config);

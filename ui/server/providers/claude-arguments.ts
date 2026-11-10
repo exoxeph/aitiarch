@@ -5,3 +5,4 @@ export function claudeArguments(options: { stream?: boolean; hardening?: readonl
     '--output-format', options.stream ? 'stream-json' : 'json',
     ...(options.stream ? ['--verbose', '--include-hook-events'] : []),...(options.partial?['--include-partial-messages']:[])];
 }
+export const investigatorArguments=()=>[...claudeArguments({stream:true,partial:true}),'--permission-mode','dontAsk'];
