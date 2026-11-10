@@ -650,5 +650,7 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .cm-sel-toolbar-compact button { padding: 5px 11px; }
 .thought-toast { border-radius: 18px; }
 /* Fallback (narrow) thoughts read in the AI voice too: sans type, and quiet text actions instead of default buttons. */
-.cm-ink-group .cm-ink-block.thought-blob { font-family: var(--font-ui); font-size: 14.5px; }
+.cm-ink-block.thought-blob, .cm-ink-group .cm-ink-block.thought-blob { font-family: var(--font-ui); font-size: 14.5px; }
+.cm-ink-block.thought-blob .cm-ink-body, .cm-ink-block.thought-blob .reply-markdown { font-family: var(--font-ui); }
+.thought-chat, .thought-chat[data-floating], .thought-rails .margin-card.thought-blob { scroll-padding-block: 16px; }
 .cm-ink-block.thought-blob button:not(.thought-open) { border: 0; background: none; padding: 2px 0; margin-right: 14px; color: var(--link); font: 12.5px var(--font-ui); text-decoration: underline; text-underline-offset: 4px; }
