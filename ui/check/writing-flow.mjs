@@ -131,10 +131,39 @@ try{
  await page.keyboard.type('ma',{delay:30});await page.waitForTimeout(300);
  const narrowed=await page.evaluate(()=>[...document.querySelectorAll('.cm-tooltip-autocomplete li')].length);if(narrowed!==1)failures.push({case:'typing /ima leaves only Image',got:narrowed});
  await page.keyboard.press('Escape');
+ // ---- A blank line feels like a page: a prompt on the empty line you are on, and a click anywhere below the text puts the cursor at the end.
+ const setDoc=async(d,caret)=>{await page.evaluate(([d,c])=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,to:v.state.doc.length,insert:d},selection:{anchor:c??d.length}});v.contentDOM.blur();document.activeElement?.blur?.();},[d,caret??null]);await page.waitForTimeout(150);};
+ const below=async()=>{const b=await page.locator('.ink-surface').boundingBox(),c=await page.locator('.cm-content').boundingBox();const y=Math.min(b.y+b.height-30,Math.max(c.y+c.height+40,b.y+b.height*0.8));await page.mouse.click(c.x+c.width/2,y);await page.waitForTimeout(200);return page.evaluate(()=>{const v=window.__aitiarch['n.md'].view;return {head:v.state.selection.main.head,doc:v.state.doc.toString(),focus:v.hasFocus,prompt:document.querySelectorAll('.cm-has-prompt').length};});};
+ let r=await (async()=>{await setDoc('Hello there');return below();})();
+ if(r.head!==r.doc.length||!r.focus)failures.push({case:'a click below plain text puts the cursor at the end of it',got:r});
+ r=await (async()=>{await setDoc('Intro\n\n```js\ncode\n```');return below();})();
+ if(r.doc!=='Intro\n\n```js\ncode\n```\n'||r.head!==r.doc.length||!r.focus||r.prompt!==1)failures.push({case:'a click below a code block adds one empty line to write on, with the prompt',got:r});
+ r=await (async()=>{await setDoc('Intro\n\n| A | B |\n| --- | --- |\n| 1 | 2 |');return below();})();
+ if(!r.doc.endsWith('| 1 | 2 |\n\n')||r.head!==r.doc.length||!r.focus)failures.push({case:'a click below a table leaves a blank line and a line to write on',got:r});
+ await page.keyboard.type('After');const typed=await page.evaluate(`${V}.state.doc.toString()`);if(!typed.endsWith('| 1 | 2 |\n\nAfter'))failures.push({case:'typing after a click below a block writes below it',got:typed});
+ // The prompt shows on an empty line you are on, and nowhere else.
+ const promptCount=async(d,caret,focus=true)=>{await setDoc(d,caret);if(focus)await page.evaluate(()=>window.__aitiarch['n.md'].view.focus());await page.waitForTimeout(150);return page.evaluate(()=>[...document.querySelectorAll('.cm-has-prompt')].map(e=>getComputedStyle(e,'::before').content));};
+ const onEmpty=await promptCount('Hello\n\n',7);if(onEmpty.length!==1||!/type \/ for commands/.test(onEmpty[0]))failures.push({case:'the prompt shows on an empty line',got:onEmpty});
+ const onText=await promptCount('Hello\n\nWorld',3);if(onText.length)failures.push({case:'no prompt on a line with text',got:onText});
+ const inCode=await promptCount('```\n\n```',4);if(inCode.length)failures.push({case:'no prompt inside a code block',got:inCode});
+ const unfocused=await promptCount('Hello\n\n',7,false);if(unfocused.length)failures.push({case:'no prompt while the editor is not focused',got:unfocused});
+ // ---- The cursor treats hidden syntax as one unit: Left and Right step over a checkbox, bullet, quote mark or callout header in one press.
+ const walk=async(d,caret,keys)=>{await page.evaluate(([d,c])=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,to:v.state.doc.length,insert:d},selection:{anchor:c}});v.focus();},[d,caret]);await page.waitForTimeout(150);const heads=[];for(const k of keys){await page.keyboard.press(k);await page.waitForTimeout(60);heads.push(await page.evaluate(()=>window.__aitiarch['n.md'].view.state.selection.main.head));}return heads;};
+ const expectHeads=async(name,d,caret,keys,want)=>{const got=await walk(d,caret,keys);if(JSON.stringify(got)!==JSON.stringify(want))failures.push({case:name,want,got});};
+ { const d='- [ ] One\n- [ ] Two';await expectHeads('Left from the text of a todo goes to the end of the line above, not through the checkbox',d,d.indexOf('Two'),['ArrowLeft','ArrowRight'],[9,d.indexOf('Two')]);
+   await expectHeads('Home on a todo lands on its text',d,d.length,['Home'],[d.indexOf('Two')]); }
+ { const d='- One\n- Two';await expectHeads('Left from the text of a bullet skips the bullet',d,d.indexOf('Two'),['ArrowLeft','ArrowRight'],[5,d.indexOf('Two')]); }
+ { const d='> One\n> Two';await expectHeads('Left from quoted text skips the quote mark',d,d.indexOf('Two'),['ArrowLeft','ArrowRight'],[5,d.indexOf('Two')]); }
+ { const d='> [!note] Hi\n> Body';await expectHeads('Left from a callout body skips the quote mark, and Right from the header end skips back over it',d,d.indexOf('Body'),['ArrowLeft','ArrowRight'],[12,d.indexOf('Body')]); }
+ { const d='a\n```\ncode\n```\nb';const code=d.indexOf('code'),b=d.indexOf('b',code+4);
+   const left=await walk(d,b,['ArrowLeft']);if(left[0]<code||left[0]>code+4)failures.push({case:'Left from the text under a code block lands in the code, not on the hidden fence',got:left});
+   const down=await walk(d,code+4,['ArrowDown']);if(down[0]<b)failures.push({case:'Down from the last code line leaves the block, not onto the hidden fence',got:down});
+   const up=await walk(d,b,['ArrowUp']);if(up[0]<code||up[0]>code+4)failures.push({case:'Up from the text under a code block lands in the code',got:up});
+   const into=await walk(d,0,['ArrowDown','ArrowDown']);if(into[0]<code-1||into[0]>code+4)failures.push({case:'Down from the line above a code block lands in the code, skipping the hidden fence',got:into}); }
  // One undo reverts a whole Enter or Backspace step.
  await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,to:v.state.doc.length,insert:'- One'},selection:{anchor:5}});v.focus();});
  await page.keyboard.press('Enter');await page.keyboard.press('Control+z');
  const undone=await page.evaluate(`${V}.state.doc.toString()`);if(undone!=='- One')failures.push({case:'undo of Enter',want:'- One',got:undone});
  assert.deepEqual(failures,[],'writing flow failures:\n'+JSON.stringify(failures,null,1));
- console.log(JSON.stringify({pass:true,cases:cases.length+19,providerCalls:0}));
+ console.log(JSON.stringify({pass:true,cases:cases.length+34,providerCalls:0}));
 }finally{await browser.close();await app.close?.();await watcher.stop?.();await rm(root,{recursive:true,force:true});}

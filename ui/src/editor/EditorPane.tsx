@@ -15,6 +15,8 @@ import { addInk, removeInk, inkField, setInk, setThoughtNarrow } from "./ink.ts"
 import {codeEditing} from "./code-editing.ts";
 import {writingKeys} from "./writing.ts";
 import {footnotes} from "./footnotes.ts";
+import {clickBelow,writingPrompt} from "./prompts.ts";
+import {hiddenMarkers} from "./markers.ts";
 import { codeHighlight, codeLanguages } from "./codeblocks.ts";
 import { toggleTaskAtCaret } from "./tasks.ts";
 import { slashMenu } from "./slash.ts";
@@ -145,6 +147,9 @@ export function EditorPane(props: Props) {
           resolverSlot.current.of(wikiResolver.of(props.resolver)),
           livePreview,
           footnotes,
+          writingPrompt,
+          clickBelow,
+          hiddenMarkers,
           tablePreview,
           codeHighlight,
           slashMenu,

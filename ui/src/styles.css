@@ -706,3 +706,12 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .cm-link-tip { display: flex; flex-direction: column; gap: 2px; max-width: min(520px, 90vw); padding: 7px 11px; background: var(--toolbar); color: var(--ink-text); border: 1px solid var(--control-border); border-radius: var(--radius-small); box-shadow: var(--shadow-floating); font: 13px/1.4 var(--font-ui); }
 .cm-link-tip-url { color: var(--link); overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12.5px; }
 .cm-link-tip-hint { color: var(--muted); font-size: 12px; }
+
+
+
+/* Hidden syntax stays hidden when it is selected: the selection colour is pinned to transparent on every class that hides raw characters. */
+.cm-callout-off::selection, .cm-callout-off *::selection, .cm-task-off::selection, .cm-task-off *::selection, .cm-bullet-off::selection, .cm-bullet-off *::selection, .cm-gm-ghost::selection, .cm-gm-ghost *::selection, .cm-gm-off::selection, .cm-gm-off *::selection, .cm-fence::selection, .cm-fence *::selection, .cm-hr-off::selection, .cm-code-quote-off::selection { color: transparent !important; }
+
+/* The prompt on the empty line where the cursor is: a pseudo-element, out of the flow, so it never changes a line height or moves the cursor. */
+.cm-line.cm-has-prompt { position: relative; }
+.cm-line.cm-has-prompt::before { content: "Write, or type / for commands…"; position: absolute; left: 0; top: 0; white-space: nowrap; pointer-events: none; user-select: none; color: var(--muted); opacity: .8; font-style: normal; }

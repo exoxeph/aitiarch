@@ -101,7 +101,7 @@ await session('small',small,async({page,theme,root,bytes})=>{
  const h2=d.indexOf('## Second');await put(page,h2+5);await page.keyboard.type('Z');assert.notEqual(await doc(page),d);await page.keyboard.press('Control+z');assert.equal(await doc(page),d);
  assert.deepEqual(await disk(page,root),bytes,'type+undo changed bytes');R.byteExactAfterTypeUndo=true;
  const cdp=await page.context().newCDPSession(page);R.ime={};
- for(const [label,needle,expect] of [['heading line start','## Second heading','\u3042## Second heading'],['quote line start','> quoted line','\u3042> quoted line']]){
+ for(const [label,needle,expect] of [['heading line start','## Second heading','\u3042## Second heading'],['quote line start','> quoted line','> \u3042quoted line']]){
   await put(page,d.length);await put(page,d.indexOf(needle));
   await cdp.send('Input.imeSetComposition',{text:'\u3042',selectionStart:1,selectionEnd:1});await cdp.send('Input.insertText',{text:'\u3042'});
   const after=(await doc(page)).split('\n').filter(l=>l.includes('\u3042'));R.ime[label]={ok:after.length===1&&after[0]===expect,after};assert.equal(after.length,1);assert.equal(after[0],expect);
