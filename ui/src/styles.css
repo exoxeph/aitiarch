@@ -654,3 +654,25 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .cm-ink-block.thought-blob .cm-ink-body, .cm-ink-block.thought-blob .reply-markdown { font-family: var(--font-ui); }
 .thought-chat, .thought-chat[data-floating], .thought-rails .margin-card.thought-blob { scroll-padding-block: 16px; }
 .cm-ink-block.thought-blob button:not(.thought-open) { border: 0; background: none; padding: 2px 0; margin-right: 14px; color: var(--link); font: 12.5px var(--font-ui); text-decoration: underline; text-underline-offset: 4px; }
+
+/* Thinking and reveal: presentation only. Shimmering "Thinking" with bouncing dots while waiting, then the validated answer is typed in and diagrams draw in piece by piece. */
+.thinking { display: inline-flex; align-items: baseline; gap: 2px; color: var(--muted); font: italic 500 15px/1.5 var(--font-title); }
+.thinking-label { background: linear-gradient(90deg, var(--muted) 0%, var(--ink-text) 45%, var(--muted) 90%); background-size: 220% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: thinking-shimmer 2.2s linear infinite; }
+.thinking-dots { display: inline-flex; gap: 3px; margin-left: 4px; }
+.thinking-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--muted); animation: thinking-dot 1.2s ease-in-out infinite both; }
+.thinking-dots i:nth-child(2) { animation-delay: .16s; }
+.thinking-dots i:nth-child(3) { animation-delay: .32s; }
+.thinking-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.streamed { margin: .4em 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.stream-caret { display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: text-bottom; background: var(--accent); animation: stream-caret 1s steps(2, start) infinite; }
+.diagram-reveal svg > :not(defs):not(title):not(desc):not(style) { animation: diagram-in .5s var(--ease) both; animation-delay: calc(min(var(--i, 0) * 55ms, 2400ms)); }
+@keyframes thinking-shimmer { from { background-position: 120% 0; } to { background-position: -100% 0; } }
+@keyframes thinking-dot { 0%, 80%, 100% { opacity: .3; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+@keyframes stream-caret { to { visibility: hidden; } }
+@keyframes diagram-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .thinking-label { animation: none; background: none; color: var(--muted); }
+  .thinking-dots i { animation: none; opacity: .7; }
+  .stream-caret { animation: none; }
+  .diagram-reveal svg > * { animation: none; }
+}

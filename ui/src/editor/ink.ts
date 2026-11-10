@@ -9,6 +9,8 @@ import type { InkItem } from "../../shared/ink.ts";
 import {createElement} from 'react';
 import {createRoot} from 'react-dom/client';
 import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
+import {Streamed,Thinking} from '../ink/streaming.tsx';
+const waitingIds=new Set<string>(); // ids whose inline blob was built while the answer was still pending
 
 export interface InkPayload { items: InkItem[]; trustedText: string | null; localIds?: string[]; narrow?:boolean }
 export const setThoughtNarrow = StateEffect.define<boolean>();
@@ -18,8 +20,8 @@ export const removeInk = StateEffect.define<string>();
 
 const widgetCleanup=new WeakMap<HTMLElement,()=>void>();
 class InkWidget extends WidgetType {
-  constructor(readonly id: string, readonly body: string, readonly complete: boolean, readonly replies:number,readonly diagram?:Diagram,readonly diagramIssue?:string) { super(); }
-  eq(other: InkWidget) { return other.id === this.id && other.body === this.body && other.complete === this.complete && other.replies===this.replies&&other.diagram===this.diagram&&other.diagramIssue===this.diagramIssue; }
+  constructor(readonly id: string, readonly body: string, readonly complete: boolean, readonly replies:number,readonly diagram?:Diagram,readonly diagramIssue?:string,readonly pending=false) { super(); }
+  eq(other: InkWidget) { return other.id === this.id && other.body === this.body && other.complete === this.complete && other.replies===this.replies&&other.diagram===this.diagram&&other.diagramIssue===this.diagramIssue&&other.pending===this.pending; }
   toDOM() {
     const el = document.createElement("aside");
     el.className = "cm-ink-block thought-blob";
@@ -31,7 +33,9 @@ class InkWidget extends WidgetType {
     const dot=document.createElement('span');dot.className='thought-dot';dot.setAttribute('aria-hidden','true');el.append(dot);
     const content = document.createElement("div");
     content.className = "cm-ink-body";
-    const root=createRoot(content);root.render(createElement(ReplyMarkdown,{text:this.body}));
+    // Waiting shows an animated "Thinking"; an answer that completes while this widget was waiting is revealed once, then shown normally.
+    if(this.pending)waitingIds.add(this.id);const fresh=this.complete&&waitingIds.delete(this.id);
+    const root=createRoot(content);root.render(this.pending?createElement(Thinking):createElement(Streamed,{text:this.body,fresh,children:createElement(ReplyMarkdown,{text:this.body})}));
     widgetCleanup.set(el,()=>{queueMicrotask(()=>root.unmount());});
     el.append(label, content);
     const replies=document.createElement('div');replies.className='thought-replies';replies.textContent=this.replies+' '+(this.replies===1?'reply':'replies');el.append(replies);
@@ -70,7 +74,7 @@ function decorations(state: EditorState, payload: InkPayload): DecorationSet {
     if(payload.narrow){
       let line=state.doc.lineAt(r.to);
       while(line.number<state.doc.lines&&state.doc.line(line.number+1).text.trim())line=state.doc.line(line.number+1);
-      const answers=groups.get(line.to)??[];answers.push(new InkWidget(i.id,thoughtText(i),i.generation?.status==='complete',i.thread?.followups.filter(r=>r.generation.status==='complete').length??0,i.diagram,i.diagramIssue));groups.set(line.to,answers);
+      const answers=groups.get(line.to)??[];answers.push(new InkWidget(i.id,thoughtText(i),i.generation?.status==='complete',i.thread?.followups.filter(r=>r.generation.status==='complete').length??0,i.diagram,i.diagramIssue,i.generation?.status==='pending'));groups.set(line.to,answers);
     }
   }
   for(const [position,answers] of groups)marks.push(Decoration.widget({widget:new InkGroupWidget(answers),side:1,block:true}).range(position));

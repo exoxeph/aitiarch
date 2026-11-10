@@ -1,5 +1,6 @@
 import {DiagramSlot} from '../diagrams/DiagramSlot.tsx';
 import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
+import {DiagramReveal,Streamed,Thinking} from '../ink/streaming.tsx';
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import type {InkItem} from '../../shared/ink.ts';
@@ -22,9 +23,12 @@ export function TakeawayBox({value,onChange,onSubmit,onSkip,busy,skippedAt,onReo
   <div className="attach-actions"><button disabled={busy||!value.trim()} onClick={onSubmit}>Submit my takeaway</button><button className="quiet-link" aria-label="Skip takeaway" disabled={busy} onClick={onSkip}>Skip</button></div></section>;
 }
 export function ReplyView({reply,onAdd}:{reply:ThreadReply;onAdd?:(r:ThreadReply)=>void}){
+ // Fresh only if this reply was seen waiting and then completed while mounted; reopening a finished thread never replays it.
+ const waited=useRef(reply.generation.status==='pending');if(reply.generation.status==='pending')waited.current=true;
+ const fresh=waited.current&&reply.generation.status==='complete';
  return <article className="thread-reply" data-reply-id={reply.id} data-generated-complete={reply.generation.status==='complete'?'true':undefined}>
   <div className="small muted">AI · {providerLabel(reply.generation.provider)} · {reply.generation.status}</div>
-  {reply.generation.status==='complete'?<div className="ai-answer"><ReplyMarkdown text={reply.body}/><DiagramSlot diagram={reply.diagram} invalid={reply.diagramIssue}/></div>:<p role="status">{reply.failure?failureLabels[reply.failure.code]:reply.generation.status==='pending'?'Waiting for a validated answer…':'Answer unavailable. No partial answer was accepted.'}</p>}
+  {reply.generation.status==='complete'?<div className="ai-answer"><Streamed text={reply.body} fresh={fresh}><ReplyMarkdown text={reply.body}/></Streamed><DiagramReveal fresh={fresh}><DiagramSlot diagram={reply.diagram} invalid={reply.diagramIssue}/></DiagramReveal></div>:reply.generation.status==='pending'&&!reply.failure?<p><Thinking/></p>:<p role="status">{reply.failure?failureLabels[reply.failure.code]:'Answer unavailable. No partial answer was accepted.'}</p>}
   {onAdd&&reply.generation.status==='complete'&&<button type="button" className="add-to-note" aria-label={'Add to note: '+reply.body.replace(/\s+/g,' ').slice(0,48)} onClick={()=>onAdd(reply)}>Add to note</button>}
  </article>;
 }

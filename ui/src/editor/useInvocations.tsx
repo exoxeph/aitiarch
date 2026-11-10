@@ -9,6 +9,7 @@ import type { InvokeAction, SelectedSource } from './toolbar.ts';
 import { VISUALIZE_QUESTION } from '../../shared/diagram.ts';
 import { addInk, removeInk, setInk } from './ink.ts';
 import {rememberQuestion} from '../threads/questions.ts';
+import {Thinking} from '../ink/streaming.tsx';
 
 interface Draft { input: Invocation; packet?: unknown; error?: string; warnings?: string[] }
 interface Running { id: string; status: string; error?: string }
@@ -126,7 +127,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   </section> : null;
   const panel = <div className="invocation-panel">
     {jobs.map(j => <div key={j.id} className="invocation-job" data-request-status={j.status}>
-      {providerLabel}: {j.status === 'persistence_error' ? 'Answer retained in memory; saving failed.' : j.status}
+      {providerLabel}: {j.status === 'persistence_error' ? 'Answer retained in memory; saving failed.' : ['pending', 'queued'].includes(j.status) ? <Thinking label={j.status === 'queued' ? 'Queued' : 'Thinking'} /> : j.status}
       {j.error && <span role="alert">{j.error}</span>}
       {['pending', 'queued'].includes(j.status) && <button onClick={() => void api.cancelRequest(j.id).catch(() => setJobs(all => all.map(k => k.id === j.id ? { ...k, error: 'Cancellation could not be confirmed.' } : k)))}>Cancel request</button>}
       {j.status === 'persistence_error' && <button onClick={() => void api.retryInkSave(j.id).then(async () => { merge(await api.ink(path)); setJobs(all => all.map(k => k.id === j.id ? { ...k, status: 'complete' } : k)); }).catch(() => {})}>Retry saving answer (no new call)</button>}
