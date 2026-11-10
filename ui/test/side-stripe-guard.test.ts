@@ -45,4 +45,7 @@ describe('no side stripes on AI or quote classes',()=>{
     expect(rules().length).toBeGreaterThan(200);
     expect(rules().some(r=>/margin-card/.test(r.selector))).toBe(true);
   });
+  it('has no stray control characters (a mangled CSS escape once rendered as tofu)',()=>{
+    expect(/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(css)).toBe(false);
+  });
 });
