@@ -9,7 +9,7 @@ import {execFileSync} from 'node:child_process';import {chromium} from 'playwrig
 import {Store} from '../server/store.ts';import {NoteWatcher} from '../server/watch.ts';import {createApp} from '../server/http.ts';
 const ui=fileURLToPath(new URL('../',import.meta.url)),repo=path.resolve(ui,'..');
 const output=path.resolve(process.env.BATCH2A_OUTPUT??'');assert(process.env.BATCH2A_OUTPUT&&!output.toLowerCase().startsWith(repo.toLowerCase()),'Output must be outside repo');await mkdir(output,{recursive:true});
-const svg='<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900"><rect width="100%" height="100%" fill="#1b150f"/><rect x="10" y="10" width="1180" height="500" rx="12" fill="none" stroke="#8a7a63"/><text x="40" y="80" font-size="28" fill="#efe6d3">Synthetic wide diagram</text></svg>';
+const svg='<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900" onload="window.__pwned=1"><script>window.__pwned=1</script><rect width="100%" height="100%" fill="#1b150f"/><rect x="10" y="10" width="1180" height="500" rx="12" fill="none" stroke="#8a7a63"/><text x="40" y="80" font-size="28" fill="#efe6d3">Synthetic wide diagram</text></svg>';
 const name='ai-diagram-'+createHash('sha256').update(svg).digest('hex')+'.svg';
 const image='![AI diagram: Synthetic wide diagram](assets/'+name+')';
 const note='# Diagram note\n\nBefore the diagram.\n\n'+image+'\n\nAfter the diagram.\n';
@@ -27,6 +27,8 @@ try{
  // 0. An older export has a padded canvas (1200x900) and an opaque background: it is shown cropped to what is drawn, transparent.
  const nat=await page.evaluate(()=>{const i=document.querySelector('.cm-image img');return{w:i.naturalWidth,h:i.naturalHeight,src:i.src.slice(0,30)};});
  assert(nat.src.startsWith('data:image/svg+xml'),'shown through the cropped copy: '+JSON.stringify(nat));assert(nat.h<=560&&nat.h>=500,'cropped to the drawing, not the padded canvas: '+JSON.stringify(nat));assert(nat.w>=1180&&nat.w<=1230,'width cropped to the drawing: '+JSON.stringify(nat));
+ // A hostile file (script and onload, named by its own hash) must never run: it is not attached to the page.
+ assert.equal(await page.evaluate(()=>window.__pwned),undefined,'untrusted SVG must not execute');
  // 1. Natural size, protruding at most halfway into the margins, no horizontal scroll.
  const fit=await page.evaluate(()=>{const fig=document.querySelector('.cm-image'),sc=document.querySelector('.cm-scroller'),c=document.querySelector('.cm-content');const f=fig.getBoundingClientRect(),s=sc.getBoundingClientRect(),cc=c.getBoundingClientRect();const cs=getComputedStyle(c),column=cc.width-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);return{figWidth:f.width,contentWidth:cc.width,column,marginEach:(sc.clientWidth-column)/2,scrollerWidth:sc.clientWidth,leftGap:f.left-s.left,rightGap:s.left+sc.clientWidth-f.right,scrollX:sc.scrollWidth-sc.clientWidth,figScroll:fig.scrollWidth-fig.clientWidth};});
  assert(fit.figWidth>fit.column+20,'the diagram protrudes beyond the text column: '+JSON.stringify(fit));assert(fit.figWidth<=fit.column+fit.marginEach+2,'but only up to halfway into each margin: '+JSON.stringify(fit));

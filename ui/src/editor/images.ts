@@ -1,6 +1,7 @@
 // Markdown images in live preview. Display only: the note keeps its `![alt](path)` text byte for byte.
 // Only the app's own diagram assets (ai-diagram-<64 hex>.svg, saved under .aitiarch/assets) are ever loaded, through the
 // existing local asset endpoint. Any other image shows its alt text as a placeholder and nothing is fetched.
+import DOMPurify from "dompurify";
 import { Prec } from "@codemirror/state";
 import { EditorView, keymap, WidgetType } from "@codemirror/view";
 
@@ -26,15 +27,27 @@ function tightSvg(src: string): Promise<string | null> {
   let p = tight.get(src);
   if (!p) {
     p = (async () => {
-      const res = await fetch(src);
+      // Only the app's own asset endpoint, same origin.
+      const url = new URL(src, location.href);
+      if (url.origin !== location.origin || url.pathname !== "/api/diagram-asset") return null;
+      const res = await fetch(url);
       if (!res.ok) return null;
-      const doc = new DOMParser().parseFromString(await res.text(), "image/svg+xml");
-      const svg = doc.documentElement;
+      const text = await res.text();
+      const parse = (s: string) => new DOMParser().parseFromString(s, "image/svg+xml");
+      // The file is untrusted (a hash name only proves it matches itself). The original document is never attached to the page:
+      // it is only edited as data and shown through an <img>, where nothing runs. Measuring needs layout, so a SANITISED copy
+      // (no scripts, event handlers, foreignObject or external references) is measured in an off-screen host.
+      const doc = parse(text), svg = doc.documentElement;
       if (svg.nodeName !== "svg" || doc.querySelector("parsererror")) return null;
-      svg.querySelectorAll(':scope > rect[width="100%"][height="100%"]').forEach((r) => r.remove());
+      const bg = ':scope > rect[width="100%"][height="100%"]';
+      svg.querySelectorAll(bg).forEach((r) => r.remove());
+      const safe = parse(DOMPurify.sanitize(text, { USE_PROFILES: { svg: true, svgFilters: true }, FORBID_TAGS: ["script", "foreignObject", "image", "use"] }));
+      const measured = safe.documentElement;
+      if (measured.nodeName !== "svg" || safe.querySelector("parsererror")) return null;
+      measured.querySelectorAll(bg).forEach((r) => r.remove());
       const host = document.createElement("div");
       host.style.cssText = "position:absolute;left:-99999px;top:0;width:0;height:0;overflow:hidden;visibility:hidden";
-      const live = document.importNode(svg, true) as unknown as SVGSVGElement;
+      const live = document.importNode(measured, true) as unknown as SVGSVGElement;
       host.append(live);
       document.body.append(host);
       let box: DOMRect | null = null;
