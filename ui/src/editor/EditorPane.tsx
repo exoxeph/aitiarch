@@ -1,7 +1,7 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { Autolink, Strikethrough, TaskList, Table } from '@lezer/markdown';
-import { Compartment, EditorState } from "@codemirror/state";
+import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
 import type { InkItem } from "../../shared/ink.ts";
@@ -192,7 +192,10 @@ export function EditorPane(props: Props) {
           const scroll=host.current?.scrollTop??0;
           const block=view.lineBlockAt(anchor.from);const anchorTop=coords?.top??view.documentTop+block.top;
           const el=Array.from(surface.current!.querySelectorAll<HTMLElement>('.margin-card')).find(el=>el.dataset.inkId===item.id);
-          const last=view.coordsAtPos(anchor.to,-1)??coords; // end of the anchored text, for the connector
+          let last=view.coordsAtPos(anchor.to,-1)??coords; // end of the anchored text, for the connector
+          // A wrapped anchor starts the connector at the end of its first visual line, in the gap before the next line,
+          // so it points at the start of the thought instead of trailing under the whole sentence.
+          if(coords&&last&&last.top>coords.top+2){const first=view.coordsAtPos(view.moveToLineBoundary(EditorSelection.cursor(anchor.from),true).head,-1);if(first&&first.top<=coords.top+2)last=first;}
           return [{id:item.id,item,target:anchorTop-bounds.top+scroll,side:thoughtSide(item.id),height:el?.getBoundingClientRect().height??160,...(last?{end:{x:last.right-bounds.left,lineBottom:last.bottom-bounds.top}}:{})}];
         });
         const placed=layoutThoughts(rows),scroll=host.current?.scrollTop??0;

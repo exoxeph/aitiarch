@@ -116,3 +116,19 @@
 @media (prefers-reduced-motion: reduce) {
   :root { --motion-color: 0s; --motion-panel: 0s; --motion-caret: 0s; }
 }
+
+/* Diagrams drawn in the app follow the active theme: the SVG carries the Ember export palette, and these rules remap it to the live tokens. The drawing has no background of its own. */
+svg[aria-label^="AI diagram"] [fill="#1b150f"] { fill: var(--paper); }
+svg[aria-label^="AI diagram"] [stroke="#1b150f"] { stroke: var(--paper); }
+svg[aria-label^="AI diagram"] [fill="#241c14"] { fill: var(--ai-surface); }
+svg[aria-label^="AI diagram"] [stroke="#241c14"] { stroke: var(--ai-surface); }
+svg[aria-label^="AI diagram"] [fill="#efe6d3"] { fill: var(--ink-text); }
+svg[aria-label^="AI diagram"] [stroke="#efe6d3"] { stroke: var(--ink-text); }
+svg[aria-label^="AI diagram"] [fill="#ab9f88"] { fill: var(--muted); }
+svg[aria-label^="AI diagram"] [stroke="#ab9f88"] { stroke: var(--muted); }
+svg[aria-label^="AI diagram"] [fill="#8a7a63"] { fill: var(--control-border); }
+svg[aria-label^="AI diagram"] [stroke="#8a7a63"] { stroke: var(--control-border); }
+svg[aria-label^="AI diagram"] [fill="#e39a52"] { fill: var(--accent); }
+svg[aria-label^="AI diagram"] [stroke="#e39a52"] { stroke: var(--accent); }
+svg[aria-label^="AI diagram"] [fill="#2e2216"] { fill: var(--accent-soft); }
+svg[aria-label^="AI diagram"] [stroke="#2e2216"] { stroke: var(--accent-soft); }
