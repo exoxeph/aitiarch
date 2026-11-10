@@ -13,6 +13,7 @@ import { livePreview, previewHandlers, wikiResolver } from "./livepreview.ts";
 import { externalChange, NoteSession, type SyncStatus } from "./session.ts";
 import { addInk, removeInk, inkField, setInk, setThoughtNarrow } from "./ink.ts";
 import {codeEditing} from "./code-editing.ts";
+import {writingKeys} from "./writing.ts";
 import { codeHighlight, codeLanguages } from "./codeblocks.ts";
 import { toggleTaskAtCaret } from "./tasks.ts";
 import { slashMenu } from "./slash.ts";
@@ -124,8 +125,9 @@ export function EditorPane(props: Props) {
           drawSelection(),
           EditorView.lineWrapping,
           wordNavigation,
-          markdown({ extensions: [Strikethrough, TaskList, Autolink, Table], codeLanguages, addKeymap: false }), // no auto-inserted list markers: the editor never writes text you didn't type
+          markdown({ extensions: [Strikethrough, TaskList, Autolink, Table], codeLanguages, addKeymap: false }), // the stock markdown keymap is off; writing.ts provides the list, quote and callout behaviour on Enter, Backspace and Tab
           codeEditing,
+          writingKeys, // Enter, Backspace and Tab in lists, checklists, quotes and callouts (each is a key you pressed; see writing.ts)
           typingHelp(()=>{const options=live.current.typingOptions??{enabled:true,doubleSpace:true};return {...options,dictionary:options.vocabulary?dictionaryRef.current:undefined};}),
           invokedKeys,
           formattingKeys,

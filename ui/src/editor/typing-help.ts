@@ -3,6 +3,7 @@ import {EditorView,keymap} from '@codemirror/view';
 import {syntaxTree} from '@codemirror/language';
 import {insertNewlineAndIndent,isolateHistory,undo} from '@codemirror/commands';
 import {wordsIn} from './smart-dictionary.ts';
+import {enterAt} from './writing.ts';
 
 export interface TypingOptions {enabled:boolean;doubleSpace:boolean;smart?:boolean;dictionary?:(word:string)=>string|null;vocabulary?:ReadonlySet<string>;neverCorrect?:readonly string[];onReject?:(word:string)=>void}
 export interface Correction {from:number;to:number;insert:string}
@@ -104,8 +105,9 @@ export function typingHelp(options:()=>TypingOptions){
   {key:'Mod-z',run:revert},
   {key:'Enter',run:view=>{
    if(view.composing||view.compositionStarted||view.state.readOnly||view.state.selection.ranges.length!==1||!view.state.selection.main.empty)return false;
-   // Reuse the normal newline/indent command; never append a period on Enter.
-   let tr:Transaction|undefined;insertNewlineAndIndent({state:view.state,dispatch:value=>{tr=value;}});
+   // Reuse the normal newline command (list, checklist, quote and callout continuation first, then newline and indent); never append a period on Enter.
+   let tr:Transaction|undefined;const spec=enterAt(view.state);
+   if(spec)tr=view.state.update(spec);else insertNewlineAndIndent({state:view.state,dispatch:value=>{tr=value;}});
    if(!tr||!correctionForState(tr.state,view.state.selection.main.head+1,options()))return false;
    const pos=view.state.selection.main.head+1;view.dispatch(tr);applyTypingCorrection(view,pos,options());return true;
   }}

@@ -27,6 +27,12 @@ export function codeAction(state:EditorState,action:'indent'|'outdent'|'enter'|'
  }
  if(action==='enter'){
   const line=state.doc.lineAt(s.from),indent=/^[ \t]*/.exec(line.text)![0];
+  // Enter on an empty last line of the block (after at least one line) steps out of it: that blank line is dropped and the
+  // caret lands on the line after the closing fence. The first Enter only adds a line, so blank lines inside code stay possible.
+  if(s.empty&&line.to===b.end&&!line.text.trim()&&line.from>b.start){
+   const removed=line.to-(line.from-1),append=b.to===state.doc.length;
+   return {changes:[{from:line.from-1,to:line.to},...(append?[{from:b.to,insert:'\n'}]:[])],selection:{anchor:b.to-removed+1},scrollIntoView:true,userEvent:'input'};
+  }
   return {changes:{from:s.from,to:s.to,insert:'\n'+indent},selection:{anchor:s.from+1+indent.length},userEvent:'input.type'};
  }
  if(action==='down'&&(!s.empty||s.head!==b.end))return null;
@@ -44,12 +50,24 @@ export function codePair(state:EditorState,text:string):TransactionSpec|null{
 const escapeTab=StateEffect.define<boolean>();
 const escaped=StateField.define<boolean>({create:()=>false,update(v,tr){if(tr.docChanged||tr.selection)v=false;for(const e of tr.effects)if(e.is(escapeTab))v=e.value;return v;}});
 const command=(action:Parameters<typeof codeAction>[1])=>(view:EditorView)=>{const tr=codeAction(view.state,action);if(!tr)return false;view.dispatch(tr);return true;};
+/** Backspace at the very start of the line right under a code block removes the whole block in one step (Ctrl+Z brings it back). */
+export function blockAbove(state:EditorState):TransactionSpec|null{
+ const s=state.selection.main;if(!s.empty)return null;
+ const line=state.doc.lineAt(s.head);if(s.head!==line.from||line.number<2)return null;
+ const prev=state.doc.line(line.number-1);if(!/^\s*(`{3,}|~{3,})\s*$/.test(prev.text))return null;
+ for(let n=syntaxTree(state).resolveInner(prev.from,1);n;n=n.parent!){
+  if(n.name!=='FencedCode'||n.to!==prev.to)continue;
+  const first=state.doc.lineAt(n.from);if(first.number>=prev.number)return null;
+  return {changes:{from:n.from,to:line.from},selection:{anchor:n.from},scrollIntoView:true,userEvent:'delete.backward'};
+ }
+ return null;
+}
 export const codeEditing=[escaped,Prec.highest(keymap.of([
  {key:'Escape',run:view=>{if(!codeBlockAt(view.state))return false;view.dispatch({effects:escapeTab.of(true)});return true;}},
  {key:'Tab',run:view=>!view.state.field(escaped)&&command('indent')(view)},
  {key:'Shift-Tab',run:view=>!view.state.field(escaped)&&command('outdent')(view)},
  {key:'Enter',run:command('enter')},{key:'Mod-Enter',run:command('exit')},
- {key:'ArrowDown',run:command('down')},{key:'Backspace',run:command('remove')},
+ {key:'ArrowDown',run:command('down')},{key:'Backspace',run:view=>command('remove')(view)||(()=>{const tr=blockAbove(view.state);if(!tr)return false;view.dispatch(tr);return true;})()},
 ])),EditorView.inputHandler.of((view,from,to,text)=>{
  if(view.compositionStarted||view.state.readOnly||from!==view.state.selection.main.from||to!==view.state.selection.main.to)return false;
  const tr=codePair(view.state,text);if(!tr)return false;view.dispatch(tr);return true;
