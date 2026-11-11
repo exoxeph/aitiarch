@@ -11,7 +11,7 @@ import {ThreadRuntime,type ThreadRequest} from './thread-runtime.ts';
 import {validId} from '../shared/threads.ts';
 // Local HTTP server: JSON API + SSE + static UI. Loopback only, with Host/Origin checks, a per-launch
 // cookie token, and a strict Content-Security-Policy, because this process can write to your notes.
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createSecurity } from "./security.ts";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import http from "node:http";
@@ -32,6 +32,10 @@ export interface AppOptions {
   watcher: NoteWatcher;
   distDir: string;
   allowOrigins?: string[];
+  /** Hand out a session only through the launcher's one-time link (the real app); tests keep the same-origin handshake. */
+  requireLaunch?: boolean;
+  /** Front-door rules shared with a multi-project host; when absent this app makes its own. */
+  security?: import("./security.ts").Security;
   provider?: Provider;
   investigator?:Partial<Record<AgentName,InvestigatorRunner>>;
   plan?: ChatGPTPlan;
@@ -80,17 +84,15 @@ interface UiState {
 export function createApp(opts: AppOptions) {
   const { store, watcher } = opts;
   const inkReady = InkStore.open(store.rootReal);
-  const token = randomBytes(24).toString("hex");
   const clients = new Set<http.ServerResponse>();
   const assistance = inkReady.then(ink => new Assistance(store, ink, opts.provider ?? {
     checkAvailability: async () => ({ available: false, code: "unsupported_cli", message: "Claude is not configured. Start with --claude and an absolute executable path. Codex is disabled." }),
     invoke: async () => { throw new ProviderError("unsupported_cli"); },
   }, path => { for (const c of clients) c.write(`event: ink\ndata: ${JSON.stringify({ type: "ink", path })}\n\n`); }));
   let port = 0;
-  const extraOrigins = new Set((opts.allowOrigins ?? []).map((o) => o.toLowerCase()));
-
-  const allowedHosts = () => new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
-  const allowedOrigins = () => new Set([`http://127.0.0.1:${port}`, `http://localhost:${port}`, ...extraOrigins]);
+  // Shared with the multi-project host when it embeds this app; otherwise this app is its own front door.
+  const security = opts.security ?? createSecurity({ port: () => port, extraOrigins: opts.allowOrigins, requireLaunch: opts.requireLaunch });
+  const token = security.token;
 
   const json = (res: http.ServerResponse, status: number, body: unknown) => {
     const data = JSON.stringify(body);
@@ -119,15 +121,7 @@ export function createApp(opts: AppOptions) {
       req.on("error", reject);
     });
 
-  const cookieToken = (req: http.IncomingMessage): string => {
-    const m = /(?:^|;\s*)aitiarch=([0-9a-f]+)/.exec(req.headers.cookie ?? "");
-    return m ? m[1] : "";
-  };
-  const tokenOk = (req: http.IncomingMessage): boolean => {
-    const a = Buffer.from(cookieToken(req));
-    const b = Buffer.from(token);
-    return a.length === b.length && timingSafeEqual(a, b);
-  };
+  const tokenOk = (req: http.IncomingMessage): boolean => security.tokenOk(req.headers.cookie);
 
   const uiStateStore = new UiStateStore(store.rootReal);
   const investigatorPolicy=new PolicyGate(uiStateStore,path.dirname(store.rootReal));
@@ -169,10 +163,13 @@ export function createApp(opts: AppOptions) {
   async function api(req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
     const origin = (req.headers.origin ?? "").toLowerCase();
     const site = req.headers["sec-fetch-site"];
-    if (origin && !allowedOrigins().has(origin)) return json(res, 403, { error: "forbidden_origin" });
+    if (origin && !security.originOk(origin)) return json(res, 403, { error: "forbidden_origin" });
     if (typeof site === "string" && site !== "same-origin" && site !== "none") return json(res, 403, { error: "forbidden_site" });
+    // A launcher asks this before reusing a busy port. It reveals only that the port is Aitiarch.
+    if (url.pathname === "/api/health" && req.method === "GET") return json(res, 200, { app: "aitiarch", v: 1 });
 
     if (url.pathname === "/api/session" && req.method === "GET") {
+      if (!security.sessionAllowed(req.headers.cookie)) return json(res, 401, { error: "no_session", message: "Open Aitiarch from its launcher. This address alone does not start a session." });
       res.setHeader("Set-Cookie", `aitiarch=${token}; Path=/; HttpOnly; SameSite=Strict`);
       return json(res, 200, { rootName: path.basename(path.dirname(store.rootReal)) || path.basename(store.rootReal), rootPath: store.rootReal, anchorCache: await (await inkReady).cache.status() });
     }
@@ -416,10 +413,9 @@ export function createApp(opts: AppOptions) {
     res.end(data);
   }
 
-  const server = http.createServer(async (req, res) => {
+  const handle = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     try {
-      const host = (req.headers.host ?? "").toLowerCase();
-      if (!allowedHosts().has(host) && !extraOrigins.has(`http://${host}`)) {
+      if (!security.hostOk(req.headers.host)) {
         res.writeHead(421, { "Content-Type": "text/plain" });
         return res.end("Misdirected request");
       }
@@ -428,6 +424,12 @@ export function createApp(opts: AppOptions) {
       res.setHeader("Referrer-Policy", "no-referrer");
       res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
       const url = new URL(req.url ?? "/", "http://localhost");
+      if (!url.pathname.startsWith("/api/")) {
+        // The launcher opens /?launch=<token>; the token becomes the cookie and leaves the address bar at once.
+        const launched = security.launch(url);
+        if (launched === "bad") { res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" }); return res.end("This launch link is not valid. Open Aitiarch from its launcher again."); }
+        if (launched === "ok") { url.searchParams.delete("launch"); const q = url.searchParams.toString(); res.writeHead(303, { "Set-Cookie": security.cookie(), Location: url.pathname + (q ? "?" + q : ""), "Cache-Control": "no-store" }); return res.end(); }
+      }
       if (url.pathname.startsWith("/api/")) await api(req, res, url);
       else await serveStatic(req, res, url);
     } catch (e) {
@@ -436,7 +438,8 @@ export function createApp(opts: AppOptions) {
       if (e instanceof ProviderError) return json(res, 400, { error: e.code, message: e.message });
       json(res, 500, { error: "internal" });
     }
-  });
+  };
+  const server = http.createServer(handle);
 
   watcher.on("event", (ev: WatchEvent) => {
     const frame = `event: ${ev.type}\ndata: ${JSON.stringify(ev)}\n\n`;
@@ -450,6 +453,8 @@ export function createApp(opts: AppOptions) {
   return {
     server,
     token,
+    /** The request handler, for a host that serves several projects from one port. */
+    handle,
     listen(wanted: number): Promise<number> {
       return new Promise((resolve, reject) => {
         server.once("error", reject);
