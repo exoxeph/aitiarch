@@ -159,6 +159,7 @@ export const slashMenu = [
     // Tab accepts too, but only while a slash menu is showing or pending, so it never traps focus elsewhere.
     { key: "Tab", run: (view) => (completionStatus(view.state) === "active" ? acceptCompletion(view) : enterWithoutMenu(view)) },
   ])),
-  autocompletion({ override: [slashSource, citeSource], icons: false, closeOnBlur: true, interactionDelay: 0, activateOnTypingDelay: 10,
+  // One source, not two: a second source is re-queried on every keystroke and would hold the slash menu's old list while it is pending.
+  autocompletion({ override: [(ctx: CompletionContext) => slashSource(ctx) ?? citeSource(ctx)], icons: false, closeOnBlur: true, interactionDelay: 0, activateOnTypingDelay: 10,
     addToOptions:[{position:10,render(completion){const item=SLASH_ITEMS.find(i=>i.label===completion.label);if(!item||completion.type==='note'||completion.type==='heading')return null;const span=document.createElement("span");span.className="cm-slash-icon";span.setAttribute("aria-hidden","true");span.textContent=item.icon;return span;}},{position:90,render(completion){const item=SLASH_ITEMS.find(i=>i.label===completion.label);if(!item||completion.type==='note'||completion.type==='heading')return null;const span=document.createElement("span");span.className="cm-slash-shortcut";span.setAttribute("aria-hidden","true");span.textContent=item.shortcut+" \u21b5";return span;}}] }),
 ];
