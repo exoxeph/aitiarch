@@ -6,7 +6,7 @@ export interface ResolvedHref {path:string;suffix:string}
 export interface Relocated {path:string;newPath:string;text:string;links:number}
 
 /** A copy of the text where code and escaped characters are blanked out, so link scanning never looks inside them. Indices are kept. */
-function masked(text:string):string{
+export function masked(text:string):string{
  const out=text.split('');
  const blank=(from:number,to:number)=>{for(let i=from;i<to;i++)if(out[i]!=='\n'&&out[i]!=='\r')out[i]=' ';};
  // Fenced code blocks, line by line.
