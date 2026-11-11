@@ -40,10 +40,10 @@ try {
   await ink.write("notebook.md", s.document, s.version);
   const unchanged = readFileSync(note);
 
-  proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"] });
+  proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_CONFIG_DIR: path.join(project, "config") } }); // a temp registry, never the user's
   const url = await new Promise((resolve, reject) => {
     let output = "";
-    proc.stdout.on("data", d => { output += d; const m = /AITIARCH_READY (.*)/.exec(output); if (m) resolve(JSON.parse(m[1]).url); });
+    proc.stdout.on("data", d => { output += d; const m = /AITIARCH_READY (.*)/.exec(output); if (m) resolve(JSON.parse(m[1]).launch); });
     proc.on("exit", code => reject(new Error(`Server exited early (${code}).`)));
     setTimeout(() => reject(new Error("Server startup timeout.")), 10000);
   });
@@ -52,7 +52,7 @@ try {
   }
   if (!browser) throw new Error("Edge or Chrome is required.");
   const page = await browser.newPage({ viewport: { width: 2000, height: 900 }, deviceScaleFactor: 1 });
-  await page.goto(url + "?debug");
+  await page.goto(url + "&debug"); // the launch link gives this browser its session
   await page.locator(".thought-blob").first().waitFor({ timeout: 10000 });
   if (await page.locator(".cm-ink-block").count() !== 0) throw new Error("Wide answers must use margins, never inline widgets.");
   await page.waitForFunction(() => document.querySelectorAll(".margin-card").length === 3);

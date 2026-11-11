@@ -9,6 +9,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +49,6 @@ if (!existsSync(path.join(uiDir, "dist", "index.html"))) {
 }
 console.log(`Practice notebook: ${root}`);
 console.log(`In a second terminal:  node check/external-edit.mjs\n`);
-const p = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "43999"], { cwd: uiDir, stdio: "inherit" });
+const p = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "43999"], { cwd: uiDir, stdio: "inherit", env: { ...process.env, AITIARCH_CONFIG_DIR: path.join(os.tmpdir(), "aitiarch-manual-config") } }); // keeps the fixture out of the user's registry
 p.on("exit", (c) => process.exit(c ?? 0));
 process.on("SIGINT", () => p.kill());

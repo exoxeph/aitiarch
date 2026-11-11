@@ -185,7 +185,7 @@ describe("polling fallback", () => {
 describe("the real server process (plain `node server/main.ts`, not vitest's transform)", () => {
   it("starts under Node's native TypeScript mode and serves the API", async () => {
     const { spawn } = await import("node:child_process");
-    const proc = spawn(process.execPath, [path.resolve(__dirname, "../server/main.ts"), "--root", root, "--port", "0", "--no-open"], { stdio: ["ignore", "pipe", "pipe"] });
+    const proc = spawn(process.execPath, [path.resolve(__dirname, "../server/main.ts"), "--root", root, "--port", "0", "--no-open"], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_CONFIG_DIR: path.join(tmp, "config-native") } }); // never the user's registry
     let err = "";
     proc.stderr.on("data", (d) => (err += d));
     try {
@@ -194,21 +194,27 @@ describe("the real server process (plain `node server/main.ts`, not vitest's tra
         proc.stdout.on("data", (d) => {
           out += d;
           const m = /AITIARCH_READY (.*)/.exec(out);
-          if (m) resolve(JSON.parse(m[1]).url);
+          if (m) resolve(JSON.parse(m[1]).launch);
         });
         proc.on("exit", (c) => reject(new Error(`server exited ${c}: ${err}`)));
         setTimeout(() => reject(new Error(`no READY line: ${err}`)), 8000);
       });
-      const res = await fetch(`${url}api/session`);
+      // The session comes only through the launch link: the bare address is refused, the link sets an HttpOnly cookie.
+      const base = new URL(url).origin + "/";
+      expect((await fetch(`${base}api/session`)).status).toBe(401);
+      const launched = await fetch(url, { redirect: "manual" });
+      expect(launched.status).toBe(303);
+      const cookie = launched.headers.get("set-cookie") ?? "";
+      expect(cookie).toContain("HttpOnly");
+      const res = await fetch(`${base}api/session`, { headers: { cookie: cookie.split(";")[0] } });
       expect(res.status).toBe(200);
-      expect(res.headers.get("set-cookie")).toContain("HttpOnly");
     } finally {
       proc.kill();
     }
   });
   it("refuses to start without a notebook folder, with a helpful message", async () => {
     const { spawnSync } = await import("node:child_process");
-    const r = spawnSync(process.execPath, [path.resolve(__dirname, "../server/main.ts"), "--root", path.join(tmp, "does-not-exist"), "--no-open"], { encoding: "utf8" });
+    const r = spawnSync(process.execPath, [path.resolve(__dirname, "../server/main.ts"), "--root", path.join(tmp, "does-not-exist"), "--port", "0", "--no-open"], { encoding: "utf8", env: { ...process.env, AITIARCH_CONFIG_DIR: path.join(tmp, "config-missing") } });
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("No notebook folder");
   });

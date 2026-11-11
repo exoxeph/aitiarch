@@ -43,12 +43,12 @@ function makeFixture(eol, bom) {
 
 function startServer(root) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"] });
+    const proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_CONFIG_DIR: path.join(path.dirname(root), "config") } }); // a temp registry, never the user's
     let buf = "";
     proc.stdout.on("data", (d) => {
       buf += d;
       const m = /AITIARCH_READY (.*)/.exec(buf);
-      if (m) resolve({ url: JSON.parse(m[1]).url, proc });
+      if (m) resolve({ url: JSON.parse(m[1]).launch, proc }); // the launch link gives each browser its session
     });
     proc.stderr.on("data", (d) => {
       const s = String(d);
@@ -101,7 +101,7 @@ async function openPage(browser, url) {
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => m.type() === "error" && errors.push(`${m.text()} ${m.location()?.url ?? ""}`.trim()));
-  await page.goto(`${url}?debug=1`);
+  await page.goto(`${url}&debug=1`);
   await page.waitForSelector(".cm-content", { timeout: 10000 });
   await page.waitForFunction(() => window.__aitiarch && window.__aitiarch["check.md"], null, { timeout: 10000 });
   return { ctx, page, errors };

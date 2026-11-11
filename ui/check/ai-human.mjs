@@ -32,10 +32,10 @@ try {
   s.document.items.push(item("answer", "answer", "A fixture AI answer shown as a thought.", original.indexOf(alpha), alpha.length));
   s.document.items.push(item("margin-1", "margin", "A fixture AI margin note.", original.indexOf(beta), beta.length));
   await ink.write("notebook.md", s.document, s.version);
-  proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"] });
+  proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_CONFIG_DIR: path.join(project, "config") } }); // a temp registry, never the user's
   const url = await new Promise((resolve, reject) => {
     let out = "";
-    proc.stdout.on("data", (d) => { out += d; const m = /AITIARCH_READY (.*)/.exec(out); if (m) resolve(JSON.parse(m[1]).url); });
+    proc.stdout.on("data", (d) => { out += d; const m = /AITIARCH_READY (.*)/.exec(out); if (m) resolve(JSON.parse(m[1]).launch); });
     proc.on("exit", (c) => reject(new Error(`Server exited early (${c}).`)));
     setTimeout(() => reject(new Error("Server startup timeout.")), 10000);
   });
@@ -43,7 +43,7 @@ try {
   const report = {};
   for (const theme of ["ember", "moss"]) {
     const page = await browser.newPage({ viewport: { width: 2200, height: 900 } });
-    await page.goto(url + "?debug"); await page.evaluate((t) => { document.documentElement.dataset.theme = t; }, theme);
+    await page.goto(url + "&debug"); // the launch link gives this browser its session await page.evaluate((t) => { document.documentElement.dataset.theme = t; }, theme);
     for (const [layout, width, selector] of [["margin",2200,".margin-card.thought-blob"],["narrow",900,".cm-ink-block.thought-blob"]]) {
       await page.setViewportSize({width,height:900});
       await page.locator(selector).first().waitFor({timeout:10000});
