@@ -17,7 +17,7 @@ import { ChatGPTPlan } from "./providers/chatgpt-plan.ts";
 import { sweepStaleProviderTemps } from "./providers/temp-cleanup.ts";
 
 function parseArgs(argv: string[]) {
-  const o = { root: undefined as string | undefined, port: undefined as number | undefined, open: true, origins: [] as string[], claude: undefined as string | undefined, chatgptPlan:false };
+  const o = { root: undefined as string | undefined, port: undefined as number | undefined, open: true, origins: [] as string[], claude: undefined as string | undefined, chatgptPlan:false, devSession:false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--root") o.root = argv[++i] ?? "";
@@ -26,6 +26,7 @@ function parseArgs(argv: string[]) {
     else if (a === "--claude") o.claude = argv[++i] ?? "";
     else if (a === "--chatgpt-plan") o.chatgptPlan = true;
     else if (a === "--no-open") o.open = false;
+    else if (a === "--dev-session") o.devSession = true; // contributors only: Vite on another port never sees the launch link
     else if (a === "--help" || a === "-h") {
       console.log("usage: aitiarch [--root <folder>] [--port N] [--no-open] [--claude <absolute native executable> | --chatgpt-plan]\nDefault root: ./.aitiarch in the current directory. ChatGPT plan is disabled unless --chatgpt-plan is supplied. Each provider requires an explicit action per call.");
       process.exit(0);
@@ -61,7 +62,7 @@ if (args.claude) {
 
 let boundPort = 0;
 let defaultId: string | undefined;
-const security = createSecurity({ port: () => boundPort, extraOrigins: args.origins, requireLaunch: true });
+const security = createSecurity({ port: () => boundPort, extraOrigins: args.origins, requireLaunch: !args.devSession });
 const plans = new Set<ChatGPTPlan>();
 // Each project gets its own app: its own Store (path confinement), watcher, ink, chat, usage log and provider wiring.
 const openProject = async (entry: ProjectEntry) => {

@@ -13,7 +13,7 @@ const root = await resolveRoot({ root: ri >= 0 ? args[ri + 1] ?? "" : undefined 
 
 const server = spawn(
   process.execPath,
-  [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "43117", "--no-open", "--allow-origin", "http://localhost:5173", "--allow-origin", "http://127.0.0.1:5173"],
+  [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "43117", "--no-open", "--dev-session", "--allow-origin", "http://localhost:5173", "--allow-origin", "http://127.0.0.1:5173"],
   { cwd: uiDir, stdio: "inherit" },
 );
 const vite = spawn(process.execPath, [path.join(uiDir, "node_modules", "vite", "bin", "vite.js"), ...(args.includes("--no-open") ? [] : ["--open"])], {
