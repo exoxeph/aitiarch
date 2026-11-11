@@ -4,7 +4,7 @@ import http from "node:http";
 import { spawn } from "node:child_process";
 import { createSecurity } from "./security.ts";
 import { createHost } from "./host.ts";
-import { Registry, RegistryError, configDir, type ProjectEntry } from "./registry.ts";
+import { Registry, RegistryError, resolveConfigFolder, type ProjectEntry } from "./registry.ts";
 import { DEFAULT_PORT, clearInstance, listenOrReuse, readInstance, writeInstance } from "./launch.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,7 +42,7 @@ function parseArgs(argv: string[]) {
 const args = parseArgs(process.argv.slice(2));
 await sweepStaleProviderTemps();
 // The registry and the running-instance file live in the user's config folder. AITIARCH_CONFIG_DIR points checks at a temp folder.
-const configFolder = process.env.AITIARCH_CONFIG_DIR || configDir();
+const configFolder = resolveConfigFolder(); // throws under tests unless AITIARCH_CONFIG_DIR is set
 let registry: Registry;
 try {
   registry = await Registry.open(configFolder);

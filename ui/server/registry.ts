@@ -5,7 +5,7 @@ import {lstat,mkdir,readFile,realpath,rename,rm,writeFile} from 'node:fs/promise
 import os from 'node:os';
 import path from 'node:path';
 
-export type RegistryCode='not_absolute'|'missing'|'not_initialized'|'unknown'|'corrupt';
+export type RegistryCode='not_absolute'|'missing'|'not_initialized'|'unknown'|'corrupt'|'test_guard';
 export class RegistryError extends Error {code:RegistryCode;constructor(code:RegistryCode,message:string){super(message);this.code=code;}}
 export interface ProjectEntry {id:string;name:string;root:string;notes:string;addedAt:string;lastOpened:string|null;pinned:boolean}
 
@@ -15,6 +15,16 @@ export function configDir(env:NodeJS.ProcessEnv=process.env,platform:NodeJS.Plat
  if(platform==='darwin')return path.posix.join(home,'Library','Application Support','aitiarch');
  return path.posix.join(env.XDG_CONFIG_HOME||path.posix.join(home,'.config'),'aitiarch');
 }
+/** True while a test runner is driving this process (or a CLI a test spawned, which inherits the variables). */
+export const underTest=(env:NodeJS.ProcessEnv=process.env)=>!!(env.VITEST||env.NODE_ENV==='test'||env.AITIARCH_TEST);
+const TEST_GUARD='Tests must set AITIARCH_CONFIG_DIR to a temp folder; refusing to use the real config folder.';
+/** The folder the launcher uses: AITIARCH_CONFIG_DIR when set; the real config folder otherwise, but never under tests. */
+export function resolveConfigFolder(env:NodeJS.ProcessEnv=process.env,platform:NodeJS.Platform=process.platform,home=os.homedir()):string{
+ if(env.AITIARCH_CONFIG_DIR)return path.resolve(env.AITIARCH_CONFIG_DIR);
+ if(underTest(env))throw new RegistryError('test_guard',TEST_GUARD);
+ return configDir(env,platform,home);
+}
+const samePath=(a:string,b:string)=>process.platform==='win32'?path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase():path.resolve(a)===path.resolve(b);
 /** Stable per folder: the same project gets the same id on every machine start. Windows paths compare case-insensitively. */
 export const projectId=(rootReal:string)=>createHash('sha256').update(process.platform==='win32'?rootReal.toLowerCase():rootReal).digest('hex').slice(0,12);
 
@@ -28,6 +38,7 @@ export class Registry {
  private readonly dir:string;private projects:ProjectEntry[];
  private constructor(dir:string,projects:ProjectEntry[]){this.dir=dir;this.projects=projects;}
  static async open(dir:string):Promise<Registry>{
+  if(underTest()&&samePath(dir,configDir()))throw new RegistryError('test_guard',TEST_GUARD);
   let raw:string;
   try{raw=await readFile(path.join(dir,'projects.json'),'utf8');}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return new Registry(dir,[]);throw e;}
   let d:any;try{d=JSON.parse(raw);}catch{throw new RegistryError('corrupt','The project list could not be read. It was left unchanged.');}

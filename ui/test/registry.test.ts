@@ -1,7 +1,7 @@
 import {afterEach,describe,expect,it} from 'vitest';
 import {mkdtemp,mkdir,readFile,rm,writeFile,readdir} from 'node:fs/promises';
 import os from 'node:os';import path from 'node:path';
-import {Registry,RegistryError,configDir,projectId} from '../server/registry.ts';
+import {Registry,RegistryError,configDir,projectId,resolveConfigFolder} from '../server/registry.ts';
 
 // The projects registry: one JSON file in the user's config folder, never inside a repository.
 const temps:string[]=[];
@@ -16,6 +16,14 @@ describe('where the registry lives',()=>{
   expect(configDir({},'darwin','/Users/a')).toBe(path.posix.join('/Users/a','Library','Application Support','aitiarch'));
   expect(configDir({},'linux','/home/a')).toBe(path.posix.join('/home/a','.config','aitiarch'));
   expect(configDir({XDG_CONFIG_HOME:'/x/cfg'},'linux','/home/a')).toBe(path.posix.join('/x/cfg','aitiarch'));
+ });
+ it('refuses the real config folder under tests unless AITIARCH_CONFIG_DIR overrides it',async()=>{
+  expect(()=>resolveConfigFolder({VITEST:'true'},'win32','C:\\Users\\a')).toThrow(/AITIARCH_CONFIG_DIR/);
+  expect(()=>resolveConfigFolder({NODE_ENV:'test'},'linux','/home/a')).toThrow(RegistryError);
+  expect(resolveConfigFolder({VITEST:'true',AITIARCH_CONFIG_DIR:path.resolve('cfg-x')},'win32','C:\\Users\\a')).toBe(path.resolve('cfg-x'));
+  expect(resolveConfigFolder({},'linux','/home/a')).toBe(path.posix.join('/home/a','.config','aitiarch'));
+  // And the registry itself will not open the real folder while tests run, so nothing can be written there.
+  await expect(Registry.open(configDir())).rejects.toMatchObject({code:'test_guard'});
  });
 });
 
