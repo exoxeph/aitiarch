@@ -152,7 +152,7 @@ export const api = {
   session: () => ok<{ rootName: string; rootPath: string; anchorCache: { enabled: boolean; ignoreFile: string; ignoreLine: string } }>("GET", "/api/session"),
   tree: () => ok<TreeNode>("GET", "/api/tree"),
   // The projects home: the registry, the folder browser, Initialize, and the per-card summary. All unprefixed host routes.
-  projects: (sort: "recent" | "name" = "recent") => ok<{ projects: ProjectEntry[] }>("GET", `/api/projects?sort=${sort}`),
+  projects: (sort: "recent" | "name" = "recent") => ok<{ projects: ProjectEntry[]; home: string }>("GET", `/api/projects?sort=${sort}`),
   folders: (path?: string) => ok<FolderListing>("GET", `/api/projects/folders${path ? `?path=${encodeURIComponent(path)}` : ""}`),
   initPreview: (path: string) => ok<InitPlan>("GET", `/api/projects/preview?path=${encodeURIComponent(path)}`),
   projectSummary: (id: string) => ok<ProjectSummary>("GET", `/api/projects/summary?id=${id}`),

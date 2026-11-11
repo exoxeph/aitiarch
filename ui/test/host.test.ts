@@ -34,6 +34,7 @@ describe('the session and the project list',()=>{
   expect((await req(port,'/api/projects')).status).toBe(401);
   const s=await req(port,'/api/session');expect(s.status).toBe(200);expect(String(s.headers['set-cookie'])).toContain('HttpOnly');
   const list=JSON.parse((await req(port,'/api/projects',{headers:auth(security,port)})).body);expect(list.projects.map((p:{name:string})=>p.name).sort()).toEqual(['alpha','beta']);
+  expect(list.home).toBe(os.homedir()); // lets the home screen print ~ instead of a long path
  });
  it('adds, pins, opens and removes projects; removing deletes nothing',async()=>{
   const {port,security,c}=await setup(),w=auth(security,port,true);

@@ -2,6 +2,7 @@
 // hands /api/p/<id>/... to that project's own app, whose Store confines every path to that project's .aitiarch folder.
 // The old unprefixed /api/... routes go to the project opened with --root, so a single-project launch keeps working.
 import http from 'node:http';
+import os from 'node:os';
 import type {AddressInfo} from 'node:net';
 import {CSP,serveDist} from './http.ts';
 import {RegistryError,type ProjectEntry,type Registry} from './registry.ts';
@@ -36,7 +37,7 @@ export function createHost(o:HostOptions){
    if(req.method==='GET'){
     const q=url.searchParams;
     switch(url.pathname){
-     case '/api/projects':return json(res,200,{projects:registry.list(q.get('sort')==='name'?'name':'recent')});
+     case '/api/projects':return json(res,200,{projects:registry.list(q.get('sort')==='name'?'name':'recent'),home:os.homedir()});
      case '/api/projects/folders':return json(res,200,await listFolders(q.get('path')||undefined));
      case '/api/projects/preview':return json(res,200,await initPlan(q.get('path')??''));
      case '/api/projects/summary':{const e=entryOf(q.get('id'));if(!e)return json(res,404,{error:'unknown_project'});return json(res,200,await summarize(e.notes));}

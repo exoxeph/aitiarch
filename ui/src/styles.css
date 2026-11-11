@@ -991,3 +991,84 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 /* 2.11: Firefox has no thumb hover, so a scroller brightens its own thumb while the pointer is over it. Inner scrollers keep their scroll. */
 .pane:hover, .chat-log:hover, .thought-rails .margin-card.thought-blob:hover, .menu-tree:hover, .menu-foot:hover, .note-menu:hover, .settings-pane:hover, .session-picker-list:hover, .thought-chat:hover, .overlay-box ul:hover { scrollbar-color: var(--scroll-thumb-hover) transparent; }
 .chat-log, .thought-chat, .note-menu, .settings-pane, .menu-tree { overscroll-behavior: contain; }
+
+/* Phase 2: the projects home and the Add project dialog. Tokens only; dark themes only. */
+.home { height: 100%; overflow: auto; padding: 56px max(24px, calc((100% - 1040px) / 2)) 72px; background: radial-gradient(120% 55% at 50% -12%, var(--glow), transparent 62%), var(--canvas); overscroll-behavior: contain; }
+.home-loading { margin: 30vh auto; text-align: center; color: var(--muted); }
+.home-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-6); margin-bottom: var(--space-9); }
+.home-head h1 { margin: 0; font-family: var(--font-title); font-weight: var(--title-weight); font-size: var(--text-title); line-height: 1.15; text-wrap: balance; }
+.home-head p { margin: var(--space-2) 0 0; max-width: 52ch; color: var(--muted); font-size: var(--text-control); line-height: 1.5; }
+.home-tools { display: flex; align-items: center; gap: var(--space-3); }
+.seg { display: inline-flex; padding: 2px; border: 1px solid var(--control-border); border-radius: 999px; }
+.seg button { padding: 5px 14px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font-size: var(--text-control); cursor: pointer; }
+.seg button:hover { color: var(--ink-text); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--ink-text); }
+.home .primary, .dialog .primary { padding: 8px 18px; border: 1px solid var(--accent); border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: var(--text-control); font-weight: 600; cursor: pointer; }
+.home .primary:hover:not(:disabled), .dialog .primary:hover:not(:disabled) { background: var(--accent-hi); }
+.dialog .primary:disabled { opacity: .5; cursor: not-allowed; }
+.home :focus-visible, .dialog :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.home-problem { padding: var(--space-3) var(--space-4); border: 1px solid var(--danger); border-radius: var(--radius-small); color: var(--danger); font-size: var(--text-control); }
+.home-empty { max-width: 44ch; margin: 12vh auto 0; text-align: center; }
+.home-empty p { margin: 0 0 var(--space-3); font-family: var(--font-title); font-size: var(--text-panel-title); }
+.home-empty .muted { color: var(--muted); font: var(--text-control)/1.5 var(--font-ui); margin-bottom: var(--space-5); }
+
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-5); }
+.project-card { position: relative; display: grid; gap: 4px; align-content: start; padding: var(--space-4); border: 1px solid var(--rule); border-radius: var(--radius-card); background: var(--paper-2); box-shadow: var(--shadow-small); transition: transform 180ms cubic-bezier(.16, 1, .3, 1), border-color var(--motion-color), box-shadow 180ms; }
+.project-card:hover, .project-card:focus-within { transform: translateY(-2px); border-color: var(--control-border); box-shadow: var(--shadow-floating); }
+.card-thumb { display: block; width: 100%; height: 76px; margin-bottom: var(--space-3); border-radius: var(--radius-small); background: var(--canvas); }
+.card-thumb line { stroke: var(--control-border); stroke-width: .8; opacity: .55; }
+.card-thumb circle { fill: var(--accent); opacity: .9; }
+.project-card[data-pinned="true"] .card-thumb circle { fill: var(--accent-hi); opacity: 1; }
+.card-name { margin: 0; font-family: var(--font-title); font-weight: var(--title-weight); font-size: var(--text-panel-title); line-height: 1.25; overflow-wrap: anywhere; }
+.card-name a { color: var(--ink-text); text-decoration: none; }
+.card-name a::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.card-name a:focus-visible { outline: none; }
+.card-name a:focus-visible::after { outline: 2px solid var(--focus); outline-offset: 2px; }
+.card-path, .card-meta { margin: 0; color: var(--muted); font-size: var(--text-meta); overflow-wrap: anywhere; }
+.card-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: var(--space-2) 0 0; font-size: var(--text-control); }
+.card-loading { color: var(--muted); }
+.card-waiting { padding: 1px 10px; border: 1px solid var(--accent); border-radius: 999px; background: var(--accent-soft); }
+.card-problem { margin: var(--space-2) 0 0; color: var(--danger); font-size: var(--text-control); }
+.card-actions { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; margin-top: var(--space-2); }
+.icon-btn { display: grid; padding: 6px; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--muted); cursor: pointer; }
+.icon-btn:hover { color: var(--ink-text); background: var(--accent-soft); }
+.icon-btn[aria-pressed="true"] { color: var(--accent); }
+.text-btn { padding: 4px 6px; border: 0; background: transparent; color: var(--muted); font-size: var(--text-meta); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.text-btn:hover { color: var(--ink-text); }
+.card-confirm { position: relative; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); padding-top: var(--space-3); border-top: 1px solid var(--rule); font-size: var(--text-meta); }
+.card-confirm p { flex-basis: 100%; margin: 0; color: var(--muted); }
+.card-confirm button { padding: 5px 12px; border: 1px solid var(--control-border); border-radius: 999px; background: transparent; color: var(--ink-text); font-size: var(--text-meta); cursor: pointer; }
+.card-confirm button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.card-confirm .ghost { border-color: transparent; color: var(--muted); }
+
+.dialog-scrim { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--canvas) 72%, transparent); }
+.dialog { display: flex; flex-direction: column; width: min(640px, 100%); max-height: min(720px, 100%); overflow: hidden; border: 1px solid var(--rule); border-radius: var(--radius-page); background: var(--paper-2); box-shadow: var(--shadow-page); }
+.dialog-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--rule); }
+.dialog-head h2 { margin: 0; font-family: var(--font-title); font-weight: var(--title-weight); font-size: 20px; line-height: 1.3; }
+.dialog-close { font-size: 22px; line-height: 1; }
+.path-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); padding: var(--space-3) 20px 0; }
+.path-row label { color: var(--muted); font-size: var(--text-meta); }
+.dialog input { padding: 6px 10px; border: 1px solid var(--control-border); border-radius: var(--radius-small); background: var(--paper); color: var(--ink-text); font: inherit; font-size: var(--text-control); }
+.dialog button:not(.ghost):not(.primary) { padding: 6px 14px; border: 1px solid var(--control-border); border-radius: 999px; background: transparent; color: var(--ink-text); font-size: var(--text-control); cursor: pointer; }
+.dialog button:not(.ghost):not(.primary):hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.browse-bar { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) 20px var(--space-2); }
+.browse-here { min-width: 0; overflow: hidden; color: var(--muted); font-size: var(--text-meta); text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.folder-list { flex: 1; min-height: 140px; max-height: 260px; margin: 0; padding: 4px 12px; overflow: auto; list-style: none; border-block: 1px solid var(--rule); overscroll-behavior: contain; }
+.folder-list .folder-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dialog .folder-list button { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); width: 100%; padding: 7px 10px; border: 0; border-radius: var(--radius-small); text-align: left; }
+.dialog .folder-list button:hover { background: var(--accent-soft); }
+.folder-tag { flex: none; padding: 0 8px; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-size: 11px; }
+.folder-empty { padding: var(--space-4) 10px; color: var(--muted); font-size: var(--text-control); }
+.add-detail { padding: var(--space-4) 20px; font-size: var(--text-control); line-height: 1.5; }
+.add-detail p { margin: 0 0 var(--space-3); }
+.plan-list { display: grid; gap: var(--space-2); margin: 0 0 var(--space-4); padding: 0; list-style: none; }
+.plan-list li { display: grid; gap: 2px; padding: var(--space-2) var(--space-3); border: 1px solid var(--rule); border-radius: var(--radius-small); background: var(--paper); }
+.plan-list code { font: 12px/1.4 var(--font-mono); }
+.plan-list span { color: var(--muted); font-size: var(--text-meta); }
+.dialog-problem { margin: 0; padding: var(--space-2) 20px var(--space-4); color: var(--danger); font-size: var(--text-control); }
+
+@media (prefers-reduced-motion: reduce) {
+  .project-card { transition: border-color var(--motion-color); }
+  .project-card:hover, .project-card:focus-within { transform: none; }
+}
