@@ -13,6 +13,8 @@
   --ink-text: #efe6d3;
   --muted: #ab9f88;
   --rule: #3a2f23;
+  --scroll-thumb: #4a3c2d; /* faint at rest */
+  --scroll-thumb-hover: #8a7a63; /* on hover and while scrolling */
   --control-border: #8a7a63;
   --accent: #e39a52;
   --accent-hi: #f0ab67;
@@ -51,6 +53,8 @@
   --ink-text: #e9e7d6;
   --muted: #a1a68c;
   --rule: #343c2b;
+  --scroll-thumb: #444e38;
+  --scroll-thumb-hover: #7d8868;
   --control-border: #7d8868;
   --accent: #bccc7a;
   --accent-hi: #cddb90;
@@ -103,13 +107,17 @@
   --motion-caret: 32ms;
   --ease-caret: cubic-bezier(0, 0, 0, 1);
   --ease: ease-out;
-  scrollbar-color: var(--rule) transparent;
+  scrollbar-color: var(--scroll-thumb) transparent;
   scrollbar-width: thin;
 }
 ::selection { background: var(--selection); } /* no colour: a colour here would make hidden (transparent) syntax visible when it is selected */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
-::-webkit-scrollbar-thumb:hover { background: var(--control-border); background-clip: content-box; }
+::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+/* While an element scrolls (src/scrolling.ts marks it), its thumb brightens in both engines. */
+[data-scrolling] { scrollbar-color: var(--scroll-thumb-hover) transparent; }
+[data-scrolling]::-webkit-scrollbar-thumb { background: var(--scroll-thumb-hover); background-clip: content-box; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 @media (max-width: 720px) {

@@ -987,3 +987,7 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
   .tier-row { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) { .agent-status[data-status="running"] i, .permission-card { animation: none; } .meter i { transition: none; } }
+
+/* 2.11: Firefox has no thumb hover, so a scroller brightens its own thumb while the pointer is over it. Inner scrollers keep their scroll. */
+.pane:hover, .chat-log:hover, .thought-rails .margin-card.thought-blob:hover, .menu-tree:hover, .menu-foot:hover, .note-menu:hover, .settings-pane:hover, .session-picker-list:hover, .thought-chat:hover, .overlay-box ul:hover { scrollbar-color: var(--scroll-thumb-hover) transparent; }
+.chat-log, .thought-chat, .note-menu, .settings-pane, .menu-tree { overscroll-behavior: contain; }
