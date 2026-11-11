@@ -1,28 +1,12 @@
 // Citing a note with @: when the picker opens, how notes are ranked, and the exact link text inserted. Pure and DOM-free.
 // The inserted text is a standard relative markdown link, so notes stay plain markdown that GitHub and agents read.
-import {masked,relativePath} from '../../shared/links.ts';
+import {masked,relativePath,resolveHref} from '../../shared/links.ts';
 
-export interface Heading {text:string;slug:string;level:number}
+import {slugify,headingsOf,titleOf,type Heading} from '../../shared/headings.ts';
+export {slugify,headingsOf,titleOf};
+export type {Heading};
 export interface CiteNote {path:string;title:string;headings:Heading[]}
 export interface CiteChoice {path:string;title:string;folder:string;heading?:Heading}
-
-/** GitHub's heading anchor: lower case, punctuation dropped, each space a hyphen. */
-export const slugify=(text:string)=>text.trim().toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu,'').replace(/ /g,'-');
-
-/** ATX headings outside fenced code, in order; a repeated heading gets -1, -2 ... like GitHub. */
-export function headingsOf(text:string):Heading[]{
- const out:Heading[]=[],seen=new Map<string,number>();let fence:{ch:string;len:number}|null=null;
- for(const raw of text.replace(/^﻿/,'').split('\n')){
-  const line=raw.replace(/\r$/,''),f=/^ {0,3}(`{3,}|~{3,})/.exec(line);
-  if(fence){if(f&&f[1][0]===fence.ch&&f[1].length>=fence.len&&/^ {0,3}[`~]+\s*$/.test(line))fence=null;continue;}
-  if(f&&!(f[1][0]==='`'&&line.slice(f[0].length).includes('`'))){fence={ch:f[1][0],len:f[1].length};continue;}
-  const h=/^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/.exec(line);if(!h||!h[2])continue;
-  const base=slugify(h[2]),n=seen.get(base)??0;seen.set(base,n+1);
-  out.push({text:h[2],slug:n?`${base}-${n}`:base,level:h[1].length});
- }
- return out;
-}
-export const titleOf=(text:string,path:string)=>headingsOf(text).find(h=>h.level===1)?.text??path.slice(path.lastIndexOf('/')+1).replace(/\.md$/i,'');
 
 /** `@query` just before `pos`, or null. Only at the start of a word, never in code, an email address or a URL. */
 export function citeTrigger(text:string,pos:number):{from:number;to:number;query:string}|null{
@@ -60,6 +44,13 @@ export function rankCitations(notes:CiteNote[],query:string):CiteChoice[]{
   else for(const h of n.headings)if(fuzzy(h.text,headPart)!==null)out.push({...base,heading:h});
  }
  return out.slice(0,12);
+}
+
+/** Is this link in the note a citation (an @ label pointing at a note), and does that note exist? Null for any other link. */
+export function classifyCitation(fromPath:string,label:string,href:string,has:(path:string)=>boolean):{path:string;heading:string|null;broken:boolean}|null{
+ if(!/^@./.test(label.trim()))return null;
+ const r=resolveHref(fromPath,href);if(!r)return null;
+ return {path:r.path,heading:r.suffix.startsWith('#')?r.suffix.slice(1):null,broken:!has(r.path)};
 }
 
 const encode=(p:string)=>p.replace(/%/g,'%25').replace(/ /g,'%20').replace(/</g,'%3C').replace(/>/g,'%3E').replace(/\(/g,'%28').replace(/\)/g,'%29');

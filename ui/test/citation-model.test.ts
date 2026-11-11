@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {slugify,headingsOf,titleOf,citeTrigger,rankCitations,citationInsert,type CiteNote} from '../src/citations/citation-model.ts';
+import {slugify,headingsOf,titleOf,citeTrigger,rankCitations,citationInsert,classifyCitation,type CiteNote} from '../src/citations/citation-model.ts';
 
 // Typing @ cites a note as a plain relative markdown link (2.3). Pure, so every rule is tested without a browser.
 describe('heading slugs and titles',()=>{
@@ -57,6 +57,20 @@ describe('ranking',()=>{
  });
  it('caps the list',()=>{
   const many=Array.from({length:40},(_,i)=>({path:`n${i}.md`,title:`Note ${i}`,headings:[]}));expect(rankCitations(many,'note')).toHaveLength(12);
+ });
+});
+
+describe('classifying a link in the note',()=>{
+ const has=(p:string)=>p==='auth/plan.md'||p==='index.md';
+ it('a link whose text starts with @ and points at a note is a citation; missing notes are broken',()=>{
+  expect(classifyCitation('index.md','@Auth plan','auth/plan.md',has)).toEqual({path:'auth/plan.md',heading:null,broken:false});
+  expect(classifyCitation('ops/run.md','@Auth plan#Token refresh','../auth/plan.md#token-refresh',has)).toEqual({path:'auth/plan.md',heading:'token-refresh',broken:false});
+  expect(classifyCitation('index.md','@Gone','gone.md',has)).toEqual({path:'gone.md',heading:null,broken:true});
+  expect(classifyCitation('index.md','@Home','<index.md>',has)).toMatchObject({path:'index.md',broken:false});
+  expect(classifyCitation('my notes/a.md','@Big','Big%20idea.md',()=>true)).toMatchObject({path:'my notes/Big idea.md'});
+ });
+ it('ordinary links, web links and anchors are not citations',()=>{
+  for(const [label,href] of [['plan','auth/plan.md'],['@x','https://e.com/a.md'],['@x','#top'],['@x','image.png'],['@x','../../outside.md'],['@','plan.md']])expect(classifyCitation('index.md',label,href,has)).toBeNull();
  });
 });
 

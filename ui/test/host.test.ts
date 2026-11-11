@@ -112,6 +112,19 @@ describe('adding a project from the home screen',()=>{
  });
 });
 
+describe('citations through a project',()=>{
+ it('serves the note index and backlinks for that project only',async()=>{
+  const {port,security,ea,a}=await setup(),r=(p:string)=>req(port,`/api/p/${ea.id}/${p}`,{headers:auth(security,port)});
+  await writeFile(path.join(a,'.aitiarch','index.md'),'# Home\nSee [@Alpha](a.md)\n');
+  const idx=JSON.parse((await r('citations')).body);
+  expect(idx.map((n:{path:string;title:string})=>[n.path,n.title])).toEqual([['a.md','alpha'],['index.md','Home']]);
+  const b=JSON.parse((await r('backlinks?path=a.md')).body);
+  expect(b).toEqual([{path:'index.md',title:'Home',count:1,snippet:'See [@Alpha](a.md)'}]);
+  expect((await r('backlinks?path=..%2Fx.md')).status).toBe(400);
+  expect((await req(port,`/api/p/${ea.id}/citations`)).status).toBe(401);
+ });
+});
+
 describe('the explorer through a project',()=>{
  it('creates, previews and applies a move inside that project only',async()=>{
   const {port,security,ea,a}=await setup(),w=auth(security,port,true),p=(s:string)=>`/api/p/${ea.id}/explorer/${s}`;

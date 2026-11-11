@@ -19,6 +19,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { normalizeRel, isNotePath, PathError } from "./paths.ts";
 import { Explorer } from "./explorer.ts";
+import { backlinks, noteIndex } from "./citations.ts";
 import type { Store } from "./store.ts";
 import { InkStore } from "./ink-store.ts";
 import type { NoteWatcher, WatchEvent } from "./watch.ts";
@@ -215,6 +216,8 @@ export function createApp(opts: AppOptions) {
     }
 
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await (await explorerReady).tree());
+    if (url.pathname === "/api/citations" && req.method === "GET") return json(res, 200, await noteIndex(await explorerReady));
+    if (url.pathname === "/api/backlinks" && req.method === "GET") return json(res, 200, await backlinks(await explorerReady, url.searchParams.get("path")));
     if (url.pathname.startsWith("/api/explorer/") && req.method === "PUT") {
       const b = (await readBody(req)) as Record<string, unknown>, ex = await explorerReady;
       switch (url.pathname) {
