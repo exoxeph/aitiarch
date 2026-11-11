@@ -8,6 +8,9 @@ const tokens=readFileSync(new URL('../src/tokens.css',import.meta.url),'utf8'),s
 const rule=(selector:RegExp)=>[...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(m=>m[1].split(',').some(s=>selector.test(s.trim()))).map(m=>m[2]).join(';');
 
 describe('scrollbar styles',()=>{
+ it('are thin on every scroller, not only the page: scrollbar-width is not inherited',()=>{
+  expect(rule(/^\*$/)).toMatch(/scrollbar-width:\s*thin/);
+ });
  it('are thin in Firefox and Chromium, coloured only through variables',()=>{
   expect(css).toMatch(/scrollbar-width:\s*thin/);expect(css).toMatch(/scrollbar-color:\s*var\(--scroll-thumb\)\s+transparent/);
   expect(rule(/^::-webkit-scrollbar$/)).toMatch(/width:\s*([0-9]|10)px/);

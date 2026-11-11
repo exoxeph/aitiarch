@@ -111,6 +111,8 @@
   scrollbar-width: thin;
 }
 ::selection { background: var(--selection); } /* no colour: a colour here would make hidden (transparent) syntax visible when it is selected */
+/* scrollbar-width is not inherited: without this only the page scrollbar is thin, and Chromium then ignores the rules below. */
+* { scrollbar-width: thin; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); background-clip: content-box; }
