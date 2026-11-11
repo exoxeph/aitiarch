@@ -24,7 +24,9 @@ const isEntry=(e:any):e is ProjectEntry=>!!e&&typeof e==='object'&&!Array.isArra
  &&typeof e.addedAt==='string'&&(e.lastOpened===null||typeof e.lastOpened==='string')&&typeof e.pinned==='boolean';
 
 export class Registry {
- private constructor(private readonly dir:string,private projects:ProjectEntry[]){}
+ // Plain fields, not constructor parameter properties: Node runs this file by stripping types, which does not support them.
+ private readonly dir:string;private projects:ProjectEntry[];
+ private constructor(dir:string,projects:ProjectEntry[]){this.dir=dir;this.projects=projects;}
  static async open(dir:string):Promise<Registry>{
   let raw:string;
   try{raw=await readFile(path.join(dir,'projects.json'),'utf8');}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return new Registry(dir,[]);throw e;}

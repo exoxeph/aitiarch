@@ -1,7 +1,11 @@
-// CLI entry:  node server/main.ts [--root <.aitiarch folder>] [--port N] [--allow-origin URL] [--no-open]
-// Default root is ./.aitiarch under the current working directory (run it inside your project).
-import { createHash } from "node:crypto";
+// CLI entry:  node server/main.ts [--root <project or .aitiarch folder>] [--port N] [--allow-origin URL] [--no-open]
+// One server on port 4317 serves every registered project. The browser gets its session only through the launch link this prints and opens.
+import http from "node:http";
 import { spawn } from "node:child_process";
+import { createSecurity } from "./security.ts";
+import { createHost } from "./host.ts";
+import { Registry, RegistryError, configDir, type ProjectEntry } from "./registry.ts";
+import { DEFAULT_PORT, clearInstance, listenOrReuse, readInstance, writeInstance } from "./launch.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./http.ts";
@@ -36,50 +40,102 @@ function parseArgs(argv: string[]) {
 
 const args = parseArgs(process.argv.slice(2));
 await sweepStaleProviderTemps();
-let store: Store;
+// The registry and the running-instance file live in the user's config folder. AITIARCH_CONFIG_DIR points checks at a temp folder.
+const configFolder = process.env.AITIARCH_CONFIG_DIR || configDir();
+let registry: Registry;
 try {
-  store = await Store.open(args.root);
-} catch {
-  console.error(`No notebook folder at ${args.root ?? "./.aitiarch"}\nRun this inside a project that has a .aitiarch folder, or pass --root <folder>.`);
+  registry = await Registry.open(configFolder);
+} catch (e) {
+  console.error(e instanceof Error ? e.message : String(e));
   process.exit(2);
 }
-
-const watcher = new NoteWatcher(store!);
-await watcher.start();
+// --root may name the project folder or its .aitiarch folder. Without it, the current folder is used when it has a notebook.
+const rootArg = path.resolve(args.root ?? path.join(process.cwd(), ".aitiarch"));
+const projectFolder = path.basename(rootArg).toLowerCase() === ".aitiarch" ? path.dirname(rootArg) : rootArg;
 const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
-const plan = args.chatgptPlan ? new ChatGPTPlan({enabled:true,notebookRoot:store!.rootReal}) : undefined;
-const {UsageLogs}=await import('./providers/usage.ts');
-const usage=new UsageLogs({notebookRoot:store!.rootReal});
-const provider = plan ?? (args.claude ? createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205",usageLog:usage }) : undefined);
-if (provider) for (const warning of (await provider.checkAvailability()).warnings ?? []) console.warn(warning);
-const app = createApp({ store: store!, watcher, distDir, allowOrigins: args.origins, provider, plan,usage,investigator:args.claude?{claude:new InvestigatorCli({command:args.claude})}:undefined });
-
-// Deterministic port per notebook folder, so the same project always opens at the same address.
-const h = parseInt(createHash("sha1").update(store!.rootReal.toLowerCase()).digest("hex").slice(0, 6), 16);
-const preferred = args.port ?? 43000 + (h % 1000);
-let port = -1;
-for (let i = 0; i < (args.port === undefined ? 20 : 1); i++) {
-  try {
-    port = await app.listen(preferred === 0 ? 0 : preferred + i);
-    break;
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "EADDRINUSE") throw e;
-  }
+const { UsageLogs } = await import("./providers/usage.ts");
+if (args.claude) {
+  const probe = createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205" });
+  for (const warning of (await probe.checkAvailability()).warnings ?? []) console.warn(warning);
 }
-if (port < 0) {
-  console.error("Could not find a free port.");
+
+let boundPort = 0;
+let defaultId: string | undefined;
+const security = createSecurity({ port: () => boundPort, extraOrigins: args.origins, requireLaunch: true });
+const plans = new Set<ChatGPTPlan>();
+// Each project gets its own app: its own Store (path confinement), watcher, ink, chat, usage log and provider wiring.
+const openProject = async (entry: ProjectEntry) => {
+  const store = await Store.open(entry.notes);
+  const watcher = new NoteWatcher(store);
+  await watcher.start();
+  const plan = args.chatgptPlan ? new ChatGPTPlan({ enabled: true, notebookRoot: store.rootReal }) : undefined;
+  if (plan) plans.add(plan);
+  const usage = new UsageLogs({ notebookRoot: store.rootReal });
+  const provider = plan ?? (args.claude ? createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205", usageLog: usage }) : undefined);
+  const app = createApp({ store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, investigator: args.claude ? { claude: new InvestigatorCli({ command: args.claude }) } : undefined });
+  return { handle: app.handle, close: async () => { watcher.stop(); await plan?.close(); await app.close(); } };
+};
+const host = createHost({ registry: registry!, security, distDir, openProject, defaultProject: () => defaultId });
+
+const openBrowser = (target: string) => {
+  const [cmd, a] = process.platform === "win32" ? ["cmd", ["/c", "start", "", target.replace(/&/g, "^&")]] : process.platform === "darwin" ? ["open", [target]] : ["xdg-open", [target]];
+  spawn(cmd, a as string[], { detached: true, stdio: "ignore" }).unref();
+};
+const notebookMissing = () => {
+  console.error(`No notebook folder at ${path.join(projectFolder, ".aitiarch")}\nRun this inside a project that has a .aitiarch folder, or pass --root <folder>.`);
+  process.exit(2);
+};
+
+let choice: Awaited<ReturnType<typeof listenOrReuse>>;
+try {
+  choice = await listenOrReuse((p) => host.listen(p), args.port ?? DEFAULT_PORT);
+} catch (e) {
+  console.error(e instanceof Error ? e.message : String(e));
   process.exit(1);
 }
-const url = `http://127.0.0.1:${port}/`;
-console.log(`AITIARCH_READY ${JSON.stringify({ url, root: store!.rootReal, port })}`);
-if (args.open) {
-  const [cmd, a] = process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : process.platform === "darwin" ? ["open", [url]] : ["xdg-open", [url]];
-  spawn(cmd, a as string[], { detached: true, stdio: "ignore" }).unref();
+
+if (choice!.kind === "reuse") {
+  // Aitiarch already runs on this port: hand it this project through its own API, then open it there. Our copy of the registry is
+  // never written, so the running server's list stays the one truth.
+  const port = choice!.port, inst = await readInstance(configFolder);
+  if (!inst || inst.port !== port) {
+    console.error(`Aitiarch is already running on port ${port}, but its launch details are missing. Close it and start again.`);
+    process.exit(1);
+  }
+  const added = await new Promise<{ status: number; body: string }>((resolve) => {
+    const body = JSON.stringify({ path: projectFolder });
+    const req = http.request({ host: "127.0.0.1", port, path: "/api/projects/add", method: "PUT", headers: { host: `127.0.0.1:${port}`, origin: `http://127.0.0.1:${port}`, cookie: `aitiarch=${inst.token}`, "x-aitiarch": "1", "content-type": "application/json" } }, (res) => {
+      let b = ""; res.on("data", (c) => (b += c)); res.on("end", () => resolve({ status: res.statusCode ?? 0, body: b }));
+    });
+    req.on("error", () => resolve({ status: 0, body: "" })); req.end(body);
+  });
+  let id: string | undefined;
+  try { if (added.status === 200) id = JSON.parse(added.body).id; } catch { /* opened without a project */ }
+  if (!id && args.root) notebookMissing();
+  const launch = `http://127.0.0.1:${port}/?launch=${inst.token}${id ? `&project=${id}` : ""}`;
+  console.log(`AITIARCH_READY ${JSON.stringify({ url: `http://127.0.0.1:${port}/`, launch, port, project: id ?? null, reused: true })}`);
+  if (args.open) openBrowser(launch);
+  process.exit(0);
 }
+
+boundPort = choice!.port;
+try {
+  const entry = await registry!.add(projectFolder);
+  await registry!.touch(entry.id);
+  defaultId = entry.id;
+} catch (e) {
+  if (!(e instanceof RegistryError)) throw e;
+  if (args.root) notebookMissing(); // without --root, a folder with no notebook simply opens the projects home
+}
+await writeInstance(configFolder, { v: 1, port: boundPort, pid: process.pid, token: security.token });
+const url = `http://127.0.0.1:${boundPort}/`;
+const launch = `${url}?launch=${security.token}${defaultId ? `&project=${defaultId}` : ""}`;
+console.log(`AITIARCH_READY ${JSON.stringify({ url, launch, root: defaultId ? registry!.get(defaultId)?.notes : null, port: boundPort, project: defaultId ?? null })}`);
+if (args.open) openBrowser(launch);
 const shutdown = async () => {
-  watcher.stop();
-  await plan?.close();
-  await app.close();
+  await clearInstance(configFolder, process.pid);
+  await host.close();
+  for (const plan of plans) await plan.close();
   process.exit(0);
 };
 process.on("SIGINT", shutdown);

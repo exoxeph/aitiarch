@@ -20,15 +20,15 @@ const unchanged=readFileSync(note);
 let browser,proc;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 try{
- proc=spawn(process.execPath,[path.join(uiDir,'server','main.ts'),'--root',root,'--port','0','--no-open'],{cwd:uiDir,stdio:['ignore','pipe','pipe']});
- const url=await new Promise((resolve,reject)=>{let o='';proc.stdout.on('data',d=>{o+=d;const m=/AITIARCH_READY (.*)/.exec(o);if(m)resolve(JSON.parse(m[1]).url);});proc.on('exit',c=>reject(new Error('Server exited early '+c)));setTimeout(()=>reject(new Error('Server startup timeout')),10000);});
+ proc=spawn(process.execPath,[path.join(uiDir,'server','main.ts'),'--root',root,'--port','0','--no-open'],{cwd:uiDir,env:{...process.env,AITIARCH_CONFIG_DIR:path.join(project,'config')},stdio:['ignore','pipe','pipe']}); // a temp registry, never the user's
+ const url=await new Promise((resolve,reject)=>{let o='';proc.stdout.on('data',d=>{o+=d;const m=/AITIARCH_READY (.*)/.exec(o);if(m)resolve(JSON.parse(m[1]).launch);});proc.on('exit',c=>reject(new Error('Server exited early '+c)));setTimeout(()=>reject(new Error('Server startup timeout')),10000);});
  for(const channel of ['msedge','chrome']){try{browser=await chromium.launch({channel,headless:true});break;}catch{/* next */}}
  if(!browser)throw new Error('Edge or Chrome is required.');
  const providerCalls=[];
  const open=async(options={})=>{
   const context=await browser.newContext({viewport:{width:1440,height:900},...options}),page=await context.newPage();
   page.on('request',r=>{if(/\/api\/assistance\/invoke|\/api\/chat\/send|\/api\/chatgpt-plan\/(sign-in|models)/.test(r.url()))providerCalls.push(r.url());});
-  await page.goto(url+'?debug=1');
+  await page.goto(url+'&debug=1'); // the launch link hands this browser its session
   await page.locator('#note-tree').waitFor({state:'attached'});
   return {context,page};
  };
