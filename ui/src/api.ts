@@ -28,6 +28,13 @@ export interface UiState {
   theme?: 'ember' | 'moss';
   confirmAdd?: boolean;
 }
+import { scoped } from "./project-base.ts";
+import type { ProjectEntry } from "../server/registry.ts";
+import type { FolderListing } from "../server/folders.ts";
+import type { InitPlan } from "../server/project-init.ts";
+import type { ProjectSummary } from "../server/project-summary.ts";
+import type { MovePlan } from "../server/explorer.ts";
+export type { ProjectEntry, FolderListing, InitPlan, ProjectSummary, MovePlan };
 import type { InkDocument, InkItem } from "../shared/ink.ts";
 import type { Invocation } from "../shared/invocation.ts";
 import type { ChatEvent, ChatMessage, ChatUsage } from "../shared/chat.ts";
@@ -52,7 +59,7 @@ export class ApiError extends Error {
 }
 
 async function call(method: "GET" | "PUT", url: string, body?: unknown, keepalive = false): Promise<{ status: number; data: any }> {
-  const res = await fetch(url, {
+  const res = await fetch(scoped(url), {
     method,
     credentials: "same-origin",
     keepalive,
@@ -78,7 +85,7 @@ async function ok<T>(method: "GET" | "PUT", url: string, body?: unknown): Promis
 export interface ChatSnapshot { v: 1; note: string; messages: ChatMessage[]; persistence: { enabled: boolean }; questionPlaceholder: string; usage: ChatUsage | null }
 /** PUT /api/chat/send as a server-sent-event stream. Rejects with ApiError when the server refuses before streaming starts. */
 export async function streamChat(body: { reviewId: string; confirmed?: boolean; dontAskAgain?: boolean }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal): Promise<void> {
-  const res = await fetch("/api/chat/send", { method: "PUT", credentials: "same-origin", signal, headers: { "Content-Type": "application/json", "X-Aitiarch": "1" }, body: JSON.stringify(body) });
+  const res = await fetch(scoped("/api/chat/send"), { method: "PUT", credentials: "same-origin", signal, headers: { "Content-Type": "application/json", "X-Aitiarch": "1" }, body: JSON.stringify(body) });
   if (!res.ok || !res.body) {
     let data: any = null;
     try { data = await res.json(); } catch { /* empty body */ }
@@ -98,7 +105,7 @@ export async function streamChat(body: { reviewId: string; confirmed?: boolean; 
 
 /** PUT /api/investigator/answer as a server-sent-event stream of M4 investigator events. Rejects with ApiError when refused before streaming. */
 export async function streamInvestigator(body: { chat: string; id: string; note: string; question: string }, onEvent: (e: InvestigatorEvent) => void, signal?: AbortSignal): Promise<void> {
-  const res = await fetch("/api/investigator/answer", { method: "PUT", credentials: "same-origin", signal, headers: { "Content-Type": "application/json", "X-Aitiarch": "1" }, body: JSON.stringify(body) });
+  const res = await fetch(scoped("/api/investigator/answer"), { method: "PUT", credentials: "same-origin", signal, headers: { "Content-Type": "application/json", "X-Aitiarch": "1" }, body: JSON.stringify(body) });
   if (!res.ok || !res.body) {
     let data: any = null;
     try { data = await res.json(); } catch { /* empty body */ }
@@ -144,6 +151,21 @@ export const api = {
   enableAnchorCache: () => ok<{ enabled: boolean }>("PUT", "/api/anchor-cache/enable", { action: "add-ignore-line" }),
   session: () => ok<{ rootName: string; rootPath: string; anchorCache: { enabled: boolean; ignoreFile: string; ignoreLine: string } }>("GET", "/api/session"),
   tree: () => ok<TreeNode>("GET", "/api/tree"),
+  // The projects home: the registry, the folder browser, Initialize, and the per-card summary. All unprefixed host routes.
+  projects: (sort: "recent" | "name" = "recent") => ok<{ projects: ProjectEntry[] }>("GET", `/api/projects?sort=${sort}`),
+  folders: (path?: string) => ok<FolderListing>("GET", `/api/projects/folders${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+  initPreview: (path: string) => ok<InitPlan>("GET", `/api/projects/preview?path=${encodeURIComponent(path)}`),
+  projectSummary: (id: string) => ok<ProjectSummary>("GET", `/api/projects/summary?id=${id}`),
+  addProject: (path: string) => ok<ProjectEntry>("PUT", "/api/projects/add", { path }),
+  initProject: (path: string) => ok<ProjectEntry>("PUT", "/api/projects/init", { path }),
+  openProject: (id: string) => ok<ProjectEntry>("PUT", "/api/projects/open", { id }),
+  pinProject: (id: string, pinned: boolean) => ok<ProjectEntry>("PUT", "/api/projects/pin", { id, pinned }),
+  removeProject: (id: string) => ok<unknown>("PUT", "/api/projects/remove", { id }),
+  // The explorer inside one project.
+  newNote: (path: string) => ok<{ path: string }>("PUT", "/api/explorer/new-note", { path }),
+  newFolder: (path: string) => ok<{ path: string }>("PUT", "/api/explorer/new-folder", { path }),
+  movePreview: (from: string, to: string) => ok<MovePlan>("PUT", "/api/explorer/move-preview", { from, to }),
+  move: (from: string, to: string) => ok<MovePlan>("PUT", "/api/explorer/move", { from, to }),
   file: (path: string) => ok<NoteFile>("GET", `/api/file?path=${encodeURIComponent(path)}`),
   ink: (path: string, resolve = false) => ok<InkSnapshot>("GET", `/api/ink?path=${encodeURIComponent(path)}${resolve ? "&resolve=1" : ""}`),
   checkpointInk: (body: { path: string; inkVersion: string | null; noteVersion: string; items: Pick<InkItem, "id" | "anchor" | "attachment">[] }) => ok<InkSnapshot>("PUT", "/api/ink/checkpoint", body),
@@ -182,7 +204,7 @@ export type ServerEvent =
 
 /** Subscribe to server-sent events. EventSource reconnects by itself; 'open' fires on every (re)connect so callers can resync. */
 export function connectEvents(onEvent: (e: ServerEvent) => void): () => void {
-  const es = new EventSource("/api/events");
+  const es = new EventSource(scoped("/api/events"));
   es.onopen = () => onEvent({ type: "open" });
   es.onerror = () => onEvent({ type: "closed" });
   for (const t of ["changed", "removed", "tree", "ink"] as const) {

@@ -4,6 +4,7 @@
 import DOMPurify from "dompurify";
 import { Prec } from "@codemirror/state";
 import { EditorView, keymap, WidgetType } from "@codemirror/view";
+import { scoped } from "../project-base.ts";
 
 const ASSET = /^ai-diagram-[a-f0-9]{64}\.svg$/;
 
@@ -12,7 +13,7 @@ export function imageSrc(url: string): string | null {
   const clean = url.trim().replace(/^<|>$/g, "");
   const name = clean.split(/[\\/]/).pop() ?? "";
   if (/^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("//")) return null; // never a remote or data: URL
-  return ASSET.test(name) ? `/api/diagram-asset?name=${name}` : null;
+  return ASSET.test(name) ? scoped(`/api/diagram-asset?name=${name}`) : null;
 }
 
 const observers = new WeakMap<HTMLElement, ResizeObserver>();
@@ -29,7 +30,7 @@ function tightSvg(src: string): Promise<string | null> {
     p = (async () => {
       // Only the app's own asset endpoint, same origin.
       const url = new URL(src, location.href);
-      if (url.origin !== location.origin || url.pathname !== "/api/diagram-asset") return null;
+      if (url.origin !== location.origin || url.pathname !== scoped("/api/diagram-asset")) return null;
       const res = await fetch(url);
       if (!res.ok) return null;
       const text = await res.text();
