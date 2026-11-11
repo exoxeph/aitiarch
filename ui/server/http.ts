@@ -70,6 +70,36 @@ const MIME: Record<string, string> = {
 
 const MAX_BODY = 6 * 1024 * 1024;
 
+/** The built UI. Unknown paths without an extension fall back to index.html; nothing outside distDir is ever served. */
+export async function serveDist(distDir: string, res: http.ServerResponse, url: URL) {
+  const dist = path.resolve(distDir);
+  if (!existsSync(path.join(dist, "index.html"))) {
+    res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+    return res.end("Aitiarch UI is not built yet. Run `npm run build` in the ui folder, then start again.\n");
+  }
+  let rel: string;
+  try {
+    rel = decodeURIComponent(url.pathname);
+  } catch {
+    res.writeHead(400);
+    return res.end();
+  }
+  let file = path.join(dist, rel === "/" ? "index.html" : rel);
+  if (path.relative(dist, file).startsWith("..") || !existsSync(file)) {
+    if (path.extname(rel)) {
+      res.writeHead(404);
+      return res.end();
+    }
+    file = path.join(dist, "index.html");
+  }
+  const data = await readFile(file);
+  res.writeHead(200, {
+    "Content-Type": MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream",
+    "Cache-Control": "no-cache",
+  });
+  res.end(data);
+}
+
 interface UiState {
   v: 1;
   tabs: string[];
@@ -385,32 +415,7 @@ export function createApp(opts: AppOptions) {
   }
 
   async function serveStatic(_req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
-    const dist = path.resolve(opts.distDir);
-    if (!existsSync(path.join(dist, "index.html"))) {
-      res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
-      return res.end("Aitiarch UI is not built yet. Run `npm run build` in the ui folder, then start again.\n");
-    }
-    let rel: string;
-    try {
-      rel = decodeURIComponent(url.pathname);
-    } catch {
-      res.writeHead(400);
-      return res.end();
-    }
-    let file = path.join(dist, rel === "/" ? "index.html" : rel);
-    if (path.relative(dist, file).startsWith("..") || !existsSync(file)) {
-      if (path.extname(rel)) {
-        res.writeHead(404);
-        return res.end();
-      }
-      file = path.join(dist, "index.html");
-    }
-    const data = await readFile(file);
-    res.writeHead(200, {
-      "Content-Type": MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream",
-      "Cache-Control": "no-cache",
-    });
-    res.end(data);
+    return serveDist(opts.distDir, res, url);
   }
 
   const handle = async (req: http.IncomingMessage, res: http.ServerResponse) => {
