@@ -9,6 +9,7 @@ import { frontmatterEnd } from "../frontmatter.ts";
 import { STARTER_TABLE } from "./table-edit.ts";
 import { requestTableFocus } from "./tables.ts";
 import { footnoteInsertion } from "./footnotes.ts";
+import { citeSource } from "../citations/cite-editor.ts";
 
 export interface SlashItem {
   label: string;
@@ -158,6 +159,6 @@ export const slashMenu = [
     // Tab accepts too, but only while a slash menu is showing or pending, so it never traps focus elsewhere.
     { key: "Tab", run: (view) => (completionStatus(view.state) === "active" ? acceptCompletion(view) : enterWithoutMenu(view)) },
   ])),
-  autocompletion({ override: [slashSource], icons: false, closeOnBlur: true, interactionDelay: 0, activateOnTypingDelay: 10,
-    addToOptions:[{position:10,render(completion){const item=SLASH_ITEMS.find(i=>i.label===completion.label)!;const span=document.createElement("span");span.className="cm-slash-icon";span.setAttribute("aria-hidden","true");span.textContent=item.icon;return span;}},{position:90,render(completion){const span=document.createElement("span");span.className="cm-slash-shortcut";span.setAttribute("aria-hidden","true");span.textContent=SLASH_ITEMS.find(i=>i.label===completion.label)!.shortcut+" \u21b5";return span;}}] }),
+  autocompletion({ override: [slashSource, citeSource], icons: false, closeOnBlur: true, interactionDelay: 0, activateOnTypingDelay: 10,
+    addToOptions:[{position:10,render(completion){const item=SLASH_ITEMS.find(i=>i.label===completion.label);if(!item||completion.type==='note'||completion.type==='heading')return null;const span=document.createElement("span");span.className="cm-slash-icon";span.setAttribute("aria-hidden","true");span.textContent=item.icon;return span;}},{position:90,render(completion){const item=SLASH_ITEMS.find(i=>i.label===completion.label);if(!item||completion.type==='note'||completion.type==='heading')return null;const span=document.createElement("span");span.className="cm-slash-shortcut";span.setAttribute("aria-hidden","true");span.textContent=item.shortcut+" \u21b5";return span;}}] }),
 ];

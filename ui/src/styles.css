@@ -1102,6 +1102,27 @@ a.menu-row { text-decoration: none; }
 .ex-menu kbd { color: var(--muted); font-size: 11px; border-color: var(--rule); background: transparent; }
 @media (prefers-reduced-motion: reduce) { .ex-caret { transition: none; } }
 
+/* Citations: an @ link to a note reads as a chip; the text underneath is the plain markdown link. */
+.cm-cite { padding: 0 7px; border-radius: 999px; background: var(--accent-soft); color: var(--link); box-shadow: inset 0 0 0 1px var(--rule); cursor: pointer; transition: box-shadow var(--motion-color); }
+.cm-cite:hover { box-shadow: inset 0 0 0 1px var(--accent); }
+.cm-cite-broken { padding: 0 7px; background: transparent; color: var(--muted); box-shadow: none; border: 1px dashed var(--control-border); cursor: default; }
+.cm-cite-broken::after { content: " · note not found"; font-size: .8em; }
+.cm-cite-tip { display: grid; gap: 4px; max-width: 40ch; }
+.cm-cite-tip-body { color: var(--ink-text); white-space: normal; line-height: 1.45; }
+.backlinks-pill { font-size: var(--text-control); color: var(--muted); }
+.backlinks-pill:hover { color: var(--accent); }
+.backlinks { padding: var(--space-3) 0; border-bottom: 1px solid var(--rule); }
+.backlinks h2 { margin: 0 0 var(--space-2); font: 600 var(--text-meta)/1.3 var(--font-ui); color: var(--muted); letter-spacing: .02em; }
+.backlinks-count { margin-inline-start: 4px; padding: 0 7px; border: 1px solid var(--rule); border-radius: 999px; color: var(--ink-text); }
+.backlinks ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.backlinks li button { display: grid; gap: 2px; width: 100%; padding: 7px 8px; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--ink-text); font-size: var(--text-control); text-align: left; cursor: pointer; }
+.backlinks li button:hover, .backlinks li button:focus-visible { background: var(--accent-soft); outline: none; }
+.backlinks li button:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); }
+.backlink-meta { color: var(--muted); font-size: var(--text-meta); overflow-wrap: anywhere; }
+.backlink-snippet { color: var(--muted); font-size: var(--text-meta); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.backlinks-empty { margin: 0; color: var(--muted); font-size: var(--text-control); line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) { .cm-cite { transition: none; } }
+
 @media (prefers-reduced-motion: reduce) {
   .project-card { transition: border-color var(--motion-color); }
   .project-card:hover, .project-card:focus-within { transform: none; }

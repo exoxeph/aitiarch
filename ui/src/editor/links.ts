@@ -28,6 +28,7 @@ export const linkTooltip=hoverTooltip((view,pos,side)=>{
   if(n.name==='Image')return null;
   if(n.name!=='Link'&&n.name!=='Autolink'&&n.name!=='URL')continue;
   const url=n.name==='URL'?n:n.getChild('URL');if(!url)return null;
+  if(n.name==='Link'&&view.state.sliceDoc(n.from,n.from+2)==='[@'&&!linkHref(view.state.sliceDoc(url.from,url.to)))return null; // a citation: its own tooltip
   const raw=view.state.sliceDoc(url.from,url.to),href=linkHref(raw);
   return {pos:n.from,end:n.to,above:true,create(){
    const dom=document.createElement('div');dom.className='cm-link-tip';

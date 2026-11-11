@@ -2,6 +2,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { Autolink, Strikethrough, TaskList, Table } from '@lezer/markdown';
 import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
+import { citeEnv, type CiteEnv } from "../citations/cite-env.ts";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
 import type { InkItem } from "../../shared/ink.ts";
@@ -39,6 +40,8 @@ interface Props {
   visible: boolean;
   resolver: (target: string) => string | null;
   onOpenWiki: (target: string) => void;
+  /** What @ citations need: which notes exist, how to open and preview one, and the note index for the picker. */
+  cite?: Omit<CiteEnv, "from">;
   onStatus: (path: string, s: SyncStatus) => void;
   onDoc: (path: string, text: string) => void;
   subscribe: (fn: (e: ServerEvent) => void) => () => void;
@@ -58,6 +61,7 @@ export function EditorPane(props: Props) {
   const live = useRef(props);
   live.current = props;
   const resolverSlot = useRef(new Compartment());
+  const citeSlot = useRef(new Compartment());
   const viewRef = useRef<EditorView | null>(null);
   const inkVersionRef = useRef(props.inkVersion ?? null);
   const knownIds = useRef(new Set((props.inkItems ?? []).map(i => i.id)));
@@ -145,6 +149,7 @@ export function EditorPane(props: Props) {
           conflictHandlers.of({ resolve: (id, choice) => session.resolve(id, choice) }),
           previewHandlers.of({ openWiki: (t) => live.current.onOpenWiki(t) }),
           resolverSlot.current.of(wikiResolver.of(props.resolver)),
+          citeSlot.current.of(props.cite ? citeEnv.of({ from: props.file.path, ...props.cite }) : []),
           livePreview,
           footnotes,
           writingPrompt,
@@ -289,6 +294,10 @@ export function EditorPane(props: Props) {
   useEffect(() => {
     viewRef.current?.dispatch({ effects: resolverSlot.current.reconfigure(wikiResolver.of(props.resolver)) });
   }, [props.resolver]);
+  // A new note list (or open handler) gives the pane a fresh citation environment, so chips and the picker see the current notes.
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: citeSlot.current.reconfigure(props.cite ? citeEnv.of({ from: props.file.path, ...props.cite }) : []) });
+  }, [props.cite, props.file.path]);
 
   useEffect(() => {
     if (props.visible) viewRef.current?.focus();

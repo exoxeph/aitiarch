@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {slugify,headingsOf,titleOf,citeTrigger,rankCitations,citationInsert,classifyCitation,type CiteNote} from '../src/citations/citation-model.ts';
+import {slugify,headingsOf,titleOf,citeTrigger,rankCitations,citationInsert,classifyCitation,previewText,type CiteNote} from '../src/citations/citation-model.ts';
 
 // Typing @ cites a note as a plain relative markdown link (2.3). Pure, so every rule is tested without a browser.
 describe('heading slugs and titles',()=>{
@@ -71,6 +71,15 @@ describe('classifying a link in the note',()=>{
  });
  it('ordinary links, web links and anchors are not citations',()=>{
   for(const [label,href] of [['plan','auth/plan.md'],['@x','https://e.com/a.md'],['@x','#top'],['@x','image.png'],['@x','../../outside.md'],['@','plan.md']])expect(classifyCitation('index.md',label,href,has)).toBeNull();
+ });
+});
+
+describe('the hover preview',()=>{
+ it('is the first paragraph, without frontmatter, headings or markup noise, and short',()=>{
+  expect(previewText('﻿---\ntitle: x\n---\n# Auth plan\n\nWe refresh **tokens** with [rotation](rot.md).\n\nSecond paragraph.\n')).toBe('We refresh tokens with rotation.');
+  expect(previewText('# Only a title\n')).toBe('');
+  expect(previewText('# T\n\n'+'word '.repeat(80))).toMatch(/^word( word)+…$/);
+  expect(previewText('# T\n\n```\ncode\n```\n\nAfter code.')).toBe('After code.');
  });
 });
 

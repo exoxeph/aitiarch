@@ -2,7 +2,9 @@ import {notebookWords} from './editor/smart-dictionary.ts';
 import type {BringPreview,RepairStatus} from '../server/insertion-store.ts';
 import type {DiagramLayout} from '../shared/diagram-svg.ts';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, connectEvents, type InkSnapshot, type NoteFile, type ServerEvent, type TreeNode } from "./api.ts";
+import { api, ApiError, connectEvents, type Backlink, type InkSnapshot, type NoteFile, type ServerEvent, type TreeNode } from "./api.ts";
+import { previewText, type CiteNote } from "./citations/citation-model.ts";
+import { BacklinksPanel } from "./citations/BacklinksPanel.tsx";
 import type { InkItem } from "../shared/ink.ts";
 import { OrphanList } from "./ink/OrphanList.tsx";
 import {inkField} from './editor/ink.ts';
@@ -159,6 +161,33 @@ export default function App() {
     setActive(path);
     void refreshInk(path, true);
   }, [files, refreshInk]);
+
+  // @ citations: which notes exist, opening one, a short preview, and the note index the picker searches (cached for a moment while typing).
+  const openRef = useRef(openNote); openRef.current = openNote;
+  const notesCache = useRef<{ at: number; p: Promise<CiteNote[]> } | null>(null);
+  const cite = useMemo(() => {
+    const have = new Set(paths);
+    return {
+      has: (p: string) => have.has(p),
+      open: (p: string) => void openRef.current(p),
+      notes: () => {
+        const c = notesCache.current; if (c && Date.now() - c.at < 1500) return c.p;
+        const p = api.citations(); notesCache.current = { at: Date.now(), p }; p.catch(() => { notesCache.current = null; }); return p;
+      },
+      preview: async (p: string) => { try { return previewText((await api.file(p)).text) || null; } catch { return null; } },
+    };
+  }, [paths]);
+  // Backlinks for the open note: read again when it changes, and (briefly after) when any note or the tree changes on disk.
+  const [backlinks, setBacklinks] = useState<Backlink[]>([]);
+  useEffect(() => {
+    if (!active) { setBacklinks([]); return; }
+    let live = true, timer: ReturnType<typeof setTimeout> | undefined;
+    const load = () => void api.backlinks(active).then(b => { if (live) setBacklinks(b); }).catch(() => {});
+    load();
+    const on = (e: ServerEvent) => { if (e.type === "changed" || e.type === "tree" || e.type === "removed") { clearTimeout(timer); timer = setTimeout(load, 500); } };
+    listeners.current.add(on);
+    return () => { live = false; clearTimeout(timer); listeners.current.delete(on); };
+  }, [active]);
 
   // ---- boot: session, tree, restore tabs ----
   useEffect(() => {
@@ -508,7 +537,9 @@ export default function App() {
         <button className="ghost" onClick={() => setOverlay("palette")} title="Command palette (Ctrl+K; Ctrl+P)">
           Commands
         </button>
+        {backlinks.length > 0 && <button type="button" className="ghost backlinks-pill" aria-label={`${backlinks.length} ${backlinks.length === 1 ? "note links" : "notes link"} here. Show backlinks`} title="Backlinks" onClick={() => setNoteMenuOpen(true)}>↩ {backlinks.length}</button>}
         <NoteMenu open={noteMenuOpen} setOpen={setNoteMenuOpen} count={orphanCount} buttonRef={noteMenuRef}>
+          <BacklinksPanel items={backlinks} onOpen={p => { setNoteMenuOpen(false); void openNote(p); }} />
           <PropertiesPanel text={active ? (docs[active] ?? activeFile?.text) : undefined} />
           {active && <OrphanList text={activeText} items={activeItems} onPick={(item, from, to) => void prepareAttach(item, from, to)}
             onSelect={item => {
@@ -549,7 +580,7 @@ export default function App() {
         )}
         {tabs.map((p) =>
           files[p] ? (
-            <EditorPane key={p} file={files[p]} visible={p === active} resolver={resolver} onOpenWiki={onOpenWiki} onStatus={onStatus} onDoc={onDoc} subscribe={subscribe} register={register}
+            <EditorPane key={p} file={files[p]} visible={p === active} resolver={resolver} onOpenWiki={onOpenWiki} cite={cite} onStatus={onStatus} onDoc={onDoc} subscribe={subscribe} register={register}
               inkItems={inkFiles[p]?.document.items} trustedText={p === active ? trustedText : null}
               typingOptions={{enabled:typingHelpOn,doubleSpace:doubleSpacePeriod,smart:smartCorrections,vocabulary:vocabulary??undefined,neverCorrect,onReject:rejectCorrection}}
               inkVersion={inkFiles[p]?.version} onInk={onInk} onInkSaved={onInkSaved} onInkError={setNotice} />

@@ -34,7 +34,8 @@ import type { FolderListing } from "../server/folders.ts";
 import type { InitPlan } from "../server/project-init.ts";
 import type { ProjectSummary } from "../server/project-summary.ts";
 import type { MovePlan } from "../server/explorer.ts";
-export type { ProjectEntry, FolderListing, InitPlan, ProjectSummary, MovePlan };
+import type { Backlink, NoteSummary } from "../server/citations.ts";
+export type { ProjectEntry, FolderListing, InitPlan, ProjectSummary, MovePlan, Backlink, NoteSummary };
 import type { InkDocument, InkItem } from "../shared/ink.ts";
 import type { Invocation } from "../shared/invocation.ts";
 import type { ChatEvent, ChatMessage, ChatUsage } from "../shared/chat.ts";
@@ -151,6 +152,8 @@ export const api = {
   enableAnchorCache: () => ok<{ enabled: boolean }>("PUT", "/api/anchor-cache/enable", { action: "add-ignore-line" }),
   session: () => ok<{ rootName: string; rootPath: string; anchorCache: { enabled: boolean; ignoreFile: string; ignoreLine: string } }>("GET", "/api/session"),
   tree: () => ok<TreeNode>("GET", "/api/tree"),
+  citations: () => ok<NoteSummary[]>("GET", "/api/citations"),
+  backlinks: (path: string) => ok<Backlink[]>("GET", `/api/backlinks?path=${encodeURIComponent(path)}`),
   // The projects home: the registry, the folder browser, Initialize, and the per-card summary. All unprefixed host routes.
   projects: (sort: "recent" | "name" = "recent") => ok<{ projects: ProjectEntry[]; home: string }>("GET", `/api/projects?sort=${sort}`),
   folders: (path?: string) => ok<FolderListing>("GET", `/api/projects/folders${path ? `?path=${encodeURIComponent(path)}` : ""}`),

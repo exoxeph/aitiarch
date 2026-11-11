@@ -12,6 +12,9 @@ import { linkHref, linkTooltip } from "./links.ts";
 import { toggleTaskAt } from "./tasks.ts";
 import { autolinkHides, calloutHeader, hidesFor, quoteMarkGroups, touchesLines, touchesSpan } from "./reveal.ts";
 import {previewRanges} from './navigation.ts';
+import { citeEnv } from "../citations/cite-env.ts";
+import { classifyCitation } from "../citations/citation-model.ts";
+import { citeKeys, citeTooltip } from "../citations/cite-editor.ts";
 
 export interface PreviewHandlers {
   openWiki(target: string): void;
@@ -337,7 +340,10 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
             if (marks.length >= 2 && url) {
               const [textFrom, textTo] = [marks[0][1], marks[1][0]];
               if (textTo > textFrom) {
-                out.push(Decoration.mark({ class: "cm-link", attributes: { "data-href": url } }).range(textFrom, textTo));
+                // An @ link to a note is a citation: a chip, drawn by a mark so the text itself is never touched. A missing note shows muted.
+                const env = state.facet(citeEnv), cite = env && classifyCitation(env.from, state.sliceDoc(textFrom, textTo), url, env.has);
+                if (cite) out.push(Decoration.mark({ class: cite.broken ? "cm-cite cm-cite-broken" : "cm-cite", attributes: { "data-cite": cite.path, "data-cite-heading": cite.heading ?? "", "data-cite-broken": cite.broken ? "1" : "0" } }).range(textFrom, textTo));
+                else out.push(Decoration.mark({ class: "cm-link", attributes: { "data-href": url } }).range(textFrom, textTo));
                 if (!touchesSpan(ctx.sel, n.from, n.to)) {
                   out.push(hide.range(marks[0][0], marks[0][1]));
                   if (n.to > textTo) out.push(hide.range(textTo, n.to));
@@ -410,7 +416,8 @@ const inlineLayer = ViewPlugin.fromClass(
         u.selectionSet ||
         u.transactions.some((t) => t.reconfigured) ||
         syntaxTree(u.state) !== syntaxTree(u.startState) ||
-        u.state.facet(wikiResolver) !== u.startState.facet(wikiResolver)
+        u.state.facet(wikiResolver) !== u.startState.facet(wikiResolver) ||
+        u.state.facet(citeEnv) !== u.startState.facet(citeEnv)
       ) {
         this.deco = this.make(u.view);
       }
@@ -459,9 +466,16 @@ const clicks = EditorView.domEventHandlers({
   click(e, view) {
     // A plain click opens a link (Ctrl+click too). Alt+click, or a drag that selected text, edits instead.
     if (e.button !== 0 || e.altKey || e.shiftKey) return false;
-    const el = (e.target as HTMLElement | null)?.closest?.("[data-wiki],[data-href]") as HTMLElement | null;
+    const el = (e.target as HTMLElement | null)?.closest?.("[data-wiki],[data-href],[data-cite]") as HTMLElement | null;
     if (!el) return false;
     if (!(e.ctrlKey || e.metaKey) && !view.state.selection.main.empty) return false;
+    const cited = el.getAttribute("data-cite");
+    if (cited) {
+      if (el.getAttribute("data-cite-broken") === "1") return false; // a missing note opens nothing; the cursor goes there so the link can be fixed
+      view.state.facet(citeEnv)?.open(cited, el.getAttribute("data-cite-heading") || null);
+      e.preventDefault();
+      return true;
+    }
     const wiki = el.getAttribute("data-wiki");
     if (wiki) {
       view.state.facet(previewHandlers)?.openWiki(wiki);
@@ -474,4 +488,4 @@ const clicks = EditorView.domEventHandlers({
   },
 });
 
-export const livePreview = [inlineLayer, blockField, clicks, imageKeys, imageClicks, linkTooltip];
+export const livePreview = [inlineLayer, blockField, clicks, imageKeys, imageClicks, linkTooltip, citeTooltip, citeKeys];

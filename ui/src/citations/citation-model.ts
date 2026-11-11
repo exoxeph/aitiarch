@@ -53,6 +53,21 @@ export function classifyCitation(fromPath:string,label:string,href:string,has:(p
  return {path:r.path,heading:r.suffix.startsWith('#')?r.suffix.slice(1):null,broken:!has(r.path)};
 }
 
+/** A short preview for hovering a citation: the first paragraph of prose, links and emphasis flattened, at most ~170 characters. */
+export function previewText(text:string,max=170):string{
+ let t=text.replace(/^﻿/,'').replace(/\r\n?/g,'\n');
+ if(t.startsWith('---\n')){const end=t.indexOf('\n---',4);if(end>0)t=t.slice(t.indexOf('\n',end+1)+1);}
+ t=t.replace(/^ {0,3}(`{3,}|~{3,})[\s\S]*?^ {0,3}\1[`~]*[ \t]*$/gm,'');
+ for(const block of t.split(/\n{2,}/)){
+  const para=block.split('\n').filter(l=>!/^\s{0,3}#{1,6}\s/.test(l)).join(' ').trim();
+  if(!para)continue;
+  const flat=para.replace(/!?\[([^\]]*)\]\([^)]*\)/g,'$1').replace(/(\*\*|__|\*|_|`|~~)/g,'').replace(/\s+/g,' ').trim();
+  if(!flat)continue;
+  return flat.length>max?flat.slice(0,max).replace(/\s+\S*$/,'')+'…':flat;
+ }
+ return '';
+}
+
 const encode=(p:string)=>p.replace(/%/g,'%25').replace(/ /g,'%20').replace(/</g,'%3C').replace(/>/g,'%3E').replace(/\(/g,'%28').replace(/\)/g,'%29');
 const bare=(s:string)=>s.replace(/[[\]]/g,'').replace(/\s+/g,' ').trim();
 
