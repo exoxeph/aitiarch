@@ -15,7 +15,7 @@ interface MenuAt {x:number;y:number;row:Row|null}
 
 /** The notes as a real folder tree: keyboard-first, right-click menu, drag to move, and a link-update preview before anything that rewrites other notes. */
 export function Explorer({tree,active,onOpen,onTreeChanged,onMoved,blocked,onHold}:{
- tree:TreeNode|null;active:string|null;onOpen:(path:string)=>void;onTreeChanged:()=>void;onMoved:(moves:MovePlan['moves'])=>void;blocked:(paths:string[])=>string|null;onHold:(on:boolean)=>void;
+ tree:TreeNode|null;active:string|null;onOpen:(path:string)=>void;onTreeChanged:()=>void|Promise<unknown>;onMoved:(moves:MovePlan['moves'])=>void;blocked:(paths:string[])=>string|null;onHold:(on:boolean)=>void;
 }){
  const [open,setOpen]=useState<Set<string>>(()=>new Set(ancestors(active))),[focus,setFocus]=useState<string>(active??''),[dialog,setDialog]=useState<Dialog>(null);
  const [dialogProblem,setDialogProblem]=useState(''),[busy,setBusy]=useState(false),[plan,setPlan]=useState<(MovePlan&{from:string;to:string})|null>(null),[notice,setNotice]=useState('');
@@ -33,8 +33,9 @@ export function Explorer({tree,active,onOpen,onTreeChanged,onMoved,blocked,onHol
 
  const finishMove=async(from:string,to:string)=>{
   try{
-   const done=await api.move(from,to);closeDialog();onMoved(done.moves);onTreeChanged();
-   setOpen(o=>{const n=new Set<string>();for(const p of o)n.add(p===from||p.startsWith(from+'/')?to+p.slice(from.length):p);return n;});focusRow(to);
+   const done=await api.move(from,to);closeDialog();onMoved(done.moves);await onTreeChanged(); // the new row exists before it is focused
+   // Folders that moved keep their open state at the new path, and the destination opens so the moved note is in view.
+   setOpen(o=>{const n=new Set<string>();for(const p of o)n.add(p===from||p.startsWith(from+'/')?to+p.slice(from.length):p);ancestors(to).forEach(a=>n.add(a));return n;});focusRow(to);
   }catch(e){setDialogProblem(e instanceof ApiError?e.message:'The move failed. Nothing was lost.');setBusy(false);}
  };
  /** Preview a move; apply it straight away when no other note changes, otherwise ask first. */
@@ -53,8 +54,8 @@ export function Explorer({tree,active,onOpen,onTreeChanged,onMoved,blocked,onHol
   try{
    if(dialog.kind==='new-note'||dialog.kind==='new-folder'){
     const t=nameTarget(dialog.path,v,dialog.kind==='new-note'?'file':'dir');if('problem' in t){setDialogProblem(t.problem);setBusy(false);return;}
-    if(dialog.kind==='new-note'){await api.newNote(t.path);closeDialog();onTreeChanged();onOpen(t.path);}
-    else{await api.newFolder(t.path);closeDialog();onTreeChanged();if(dialog.path)toggle(dialog.path,true);toggle(t.path,true);focusRow(t.path);}
+    if(dialog.kind==='new-note'){await api.newNote(t.path);closeDialog();await onTreeChanged();onOpen(t.path);}
+    else{await api.newFolder(t.path);closeDialog();await onTreeChanged();if(dialog.path)toggle(dialog.path,true);toggle(t.path,true);focusRow(t.path);}
    }else if(dialog.kind==='rename'){
     const t=nameTarget(parentOf(dialog.path),v,dialog.type==='dir'?'dir':'file');if('problem' in t){setDialogProblem(t.problem);setBusy(false);return;}
     if(t.path===dialog.path){closeDialog();return;}

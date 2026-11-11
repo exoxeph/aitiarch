@@ -18,6 +18,7 @@
     "test:anchors:sweep": "node scripts/anchoring-sweep.mjs",
     "typecheck": "tsc --noEmit && tsc --project tsconfig.server.json",
     "check:phase1": "vite build && node check/phase1.mjs",
+    "check:projects-home": "vite build && node check/projects-home.mjs",
     "check:invoked": "vite build && node check/invoked.mjs",
     "check:threads": "vite build && node check/threads.mjs",
     "fixture": "node check/manual-fixture.mjs"

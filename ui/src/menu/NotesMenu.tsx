@@ -10,7 +10,7 @@ import type {EdgeMenu} from './useEdgeMenu.ts';
 export function NotesMenu({menu,burger,rootName,rootPath,tree,active,onOpen,onSearch,onSettings,usage,settings,onTreeChanged,onMoved,blocked}:{
  menu:EdgeMenu;burger:RefObject<HTMLElement|null>;rootName:string;rootPath:string;tree:TreeNode|null;active:string|null;
  onOpen:(path:string)=>void;onSearch:()=>void;onSettings:()=>void;usage:ReactNode;settings:ReactNode;
- onTreeChanged:()=>void;onMoved:(moves:MovePlan['moves'])=>void;blocked:(paths:string[])=>string|null;
+ onTreeChanged:()=>void|Promise<unknown>;onMoved:(moves:MovePlan['moves'])=>void;blocked:(paths:string[])=>string|null;
 }){
  const el=useRef<HTMLElement>(null),{open,pinned,controller:c}=menu;
  // Closed means out of the tab order and the accessibility tree; a keyboard user reaches it through the hamburger.

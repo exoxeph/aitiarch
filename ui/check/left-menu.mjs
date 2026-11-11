@@ -40,7 +40,7 @@ try{
  const {context,page}=await open();
  // The notebook opens through the menu: pin it, click the note, close.
  await burger(page).click();await waitState(page,'open');
- await page.locator('.tree-item').filter({hasText:/^notebook$/}).click();
+ await page.locator('[role="treeitem"]').filter({hasText:/^notebook$/}).click();
  await page.locator('.cm-content').waitFor();await waitState(page,'closed'); // choosing a note closes the menu
  assert.equal(await burger(page).getAttribute('aria-expanded'),'false');
 
@@ -88,9 +88,9 @@ try{
  await burger(page).click();await waitState(page,'open');
  const menu=page.locator('#note-tree');
  await menu.getByRole('button',{name:/^Search/}).waitFor();
- assert.equal(await menu.getByRole('button',{name:/^New note/}).getAttribute('aria-disabled'),'true');
- assert.equal(await menu.getByRole('button',{name:/^New folder/}).getAttribute('aria-disabled'),'true');
- const dir=menu.locator('.tree-dir').first();assert.equal(await dir.getAttribute('aria-expanded'),'true');await dir.click();assert.equal(await dir.getAttribute('aria-expanded'),'false');await dir.click();
+ assert.equal(await menu.getByRole('button',{name:/^New note/}).getAttribute('aria-disabled'),null,'New note works now (Phase 2)');
+ assert.equal(await menu.getByRole('button',{name:/^New folder/}).getAttribute('aria-disabled'),null,'New folder works now (Phase 2)');
+ const dir=menu.locator('[role="treeitem"][data-type="dir"]').first(),was0=await dir.getAttribute('aria-expanded');await dir.click();assert.notEqual(await dir.getAttribute('aria-expanded'),was0,'a folder row toggles');await dir.click();assert.equal(await dir.getAttribute('aria-expanded'),was0);
  await menu.getByText('My AI calls and tokens',{exact:true}).waitFor();await menu.getByText('Settings',{exact:true}).click();
  const typing=menu.getByRole('switch',{name:/Typing help/});await typing.waitFor();
  const was=await typing.getAttribute('aria-checked');await typing.click();assert.notEqual(await typing.getAttribute('aria-checked'),was,'a settings switch must flip');await typing.click();
@@ -98,7 +98,8 @@ try{
  // Search closes the menu and opens the command palette (Ctrl+K); choosing a note closes it too.
  await menu.getByRole('button',{name:/^Search/}).click();await waitState(page,'closed');await page.getByRole('dialog').or(page.locator('.overlay')).first().waitFor();await page.keyboard.press('Escape');
  await burger(page).click();await waitState(page,'open');
- await menu.locator('.tree-item').filter({hasText:/^sub$/}).click();await waitState(page,'closed');
+ const folderRow=menu.locator('[role="treeitem"][data-path="folder"]');if((await folderRow.getAttribute('aria-expanded'))!=='true')await folderRow.click(); // the explorer starts folders closed
+ await menu.locator('[role="treeitem"]').filter({hasText:/^sub$/}).click();await waitState(page,'closed');
  await page.getByRole('tab',{name:/sub/}).or(page.locator('.tab',{hasText:'sub'})).first().waitFor();
 
  // The right-hand Details and Activity tabs are gone; nothing was lost (details live in the note menu).

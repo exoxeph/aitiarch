@@ -9,19 +9,20 @@ const explain=(e:unknown)=>e instanceof ApiError?e.message:'Something went wrong
 export function AddProject({onClose,onAdded}:{onClose:()=>void;onAdded:(p:ProjectEntry)=>void}){
  const box=useRef<HTMLElement>(null),list=useRef<HTMLUListElement>(null);
  const [listing,setListing]=useState<FolderListing|null>(null),[typed,setTyped]=useState(''),[plan,setPlan]=useState<InitPlan|null>(null);
- const [problem,setProblem]=useState(''),[busy,setBusy]=useState(false);
+ const [problem,setProblem]=useState(''),[busy,setBusy]=useState(false),[chosen,setChosen]=useState<string|null>(null),seq=useRef(0),typedByUser=useRef(false);
  useDialog(box,onClose);
  const go=useCallback(async(path?:string)=>{
-  setProblem('');
-  try{const l=await api.folders(path);setListing(l);setTyped(l.path);}catch(e){setProblem(explain(e));}
+  setProblem('');setChosen(null);const n=++seq.current; // only the newest request may change what is shown
+  if(path!==undefined)typedByUser.current=false; // navigating on purpose hands the field back to the listing
+  try{const l=await api.folders(path);if(n!==seq.current)return;setListing(l);if(!typedByUser.current)setTyped(l.path);}catch(e){if(n===seq.current)setProblem(explain(e));}
  },[]);
  useEffect(()=>{void go();},[go]);
  // What Initialize would do here, shown before anything is written.
  useEffect(()=>{
-  setPlan(null);if(!listing||listing.initialized)return;let live=true;
+  setPlan(null);if(!listing||listing.initialized||chosen!==listing.path)return;let live=true;
   api.initPreview(listing.path).then(p=>{if(live)setPlan(p);}).catch(e=>{if(live)setProblem(explain(e));});
   return()=>{live=false;};
- },[listing]);
+ },[listing,chosen]);
  const finish=async(run:()=>Promise<ProjectEntry>)=>{setBusy(true);setProblem('');try{onAdded(await run());}catch(e){setProblem(explain(e));setBusy(false);}};
  const arrows=(e:KeyboardEvent)=>{
   if(e.key!=='ArrowDown'&&e.key!=='ArrowUp')return;e.preventDefault();
@@ -34,7 +35,7 @@ export function AddProject({onClose,onAdded}:{onClose:()=>void;onAdded:(p:Projec
    <header className="dialog-head"><h2 id="add-project-title">Add a project</h2><button type="button" className="ghost dialog-close" aria-label="Close" onClick={onClose}>×</button></header>
    <form className="path-row" onSubmit={e=>{e.preventDefault();if(typed.trim())void go(typed.trim());}}>
     <label htmlFor="project-path">Folder</label>
-    <input id="project-path" data-autofocus value={typed} onChange={e=>setTyped(e.target.value)} spellCheck={false} autoComplete="off" placeholder="Type or paste a folder path"/>
+    <input id="project-path" data-autofocus value={typed} onChange={e=>{typedByUser.current=true;setTyped(e.target.value);}} spellCheck={false} autoComplete="off" placeholder="Type or paste a folder path"/>
     <button type="submit">Go</button>
    </form>
    <div className="browse-bar">
@@ -48,7 +49,9 @@ export function AddProject({onClose,onAdded}:{onClose:()=>void;onAdded:(p:Projec
    <div className="add-detail">
     {listing?.initialized&&<><p>This folder is already an Aitiarch notebook. Adding it only puts it on your list.</p>
      <button type="button" className="primary" disabled={busy} onClick={()=>void finish(()=>api.addProject(listing.path))}>Add this project</button></>}
-    {listing&&!listing.initialized&&plan&&<><p><strong>{plan.name}</strong> is not a notebook yet. Initialize creates exactly this, and nothing else:</p>
+    {listing&&!listing.initialized&&chosen!==listing.path&&<><p>This folder is not an Aitiarch notebook yet. Browse to the folder you want, then choose it.</p>
+     <button type="button" onClick={()=>setChosen(listing.path)}>Use this folder</button></>}
+    {listing&&!listing.initialized&&chosen===listing.path&&plan&&plan.folder===listing.path&&<><p><strong>{plan.name}</strong> is not a notebook yet. Initialize creates exactly this, and nothing else:</p>
      <ul className="plan-list">{plan.creates.map(c=><li key={c.path}><code>{c.path}</code><span>{c.path.endsWith('.gitignore')?`Keeps private files out of git: ${c.lines.join(', ')}`:`Your main note, starting as “${c.lines[0]}”`}</span></li>)}</ul>
      <button type="button" className="primary" disabled={busy} onClick={()=>void finish(()=>api.initProject(listing.path))}>Initialize and add</button></>}
    </div>
