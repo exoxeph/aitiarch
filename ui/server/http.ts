@@ -18,6 +18,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { normalizeRel, isNotePath, PathError } from "./paths.ts";
+import { Explorer } from "./explorer.ts";
 import type { Store } from "./store.ts";
 import { InkStore } from "./ink-store.ts";
 import type { NoteWatcher, WatchEvent } from "./watch.ts";
@@ -153,6 +154,7 @@ export function createApp(opts: AppOptions) {
 
   const tokenOk = (req: http.IncomingMessage): boolean => security.tokenOk(req.headers.cookie);
 
+  const explorerReady = Explorer.open(store.rootReal);
   const uiStateStore = new UiStateStore(store.rootReal);
   const investigatorPolicy=new PolicyGate(uiStateStore,path.dirname(store.rootReal));
   const investigator=new InvestigatorRuntime(investigatorPolicy,new Lookups(investigatorPolicy),new LedgerStore(store.rootReal),opts.investigator??{},undefined,store.rootReal);
@@ -212,7 +214,17 @@ export function createApp(opts: AppOptions) {
       }
     }
 
-    if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await store.tree());
+    if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await (await explorerReady).tree());
+    if (url.pathname.startsWith("/api/explorer/") && req.method === "PUT") {
+      const b = (await readBody(req)) as Record<string, unknown>, ex = await explorerReady;
+      switch (url.pathname) {
+        case "/api/explorer/new-note": return json(res, 200, await ex.createNote(b?.path));
+        case "/api/explorer/new-folder": return json(res, 200, await ex.createFolder(b?.path));
+        case "/api/explorer/move-preview": return json(res, 200, await ex.planMove(b?.from, b?.to));
+        case "/api/explorer/move": { const done = await ex.move(b?.from, b?.to); for (const c of clients) c.write(`event: tree\ndata: ${JSON.stringify({ type: "tree" })}\n\n`); return json(res, 200, done); }
+      }
+      return json(res, 404, { error: "not_found" });
+    }
     if(url.pathname==='/api/investigator'&&req.method==='GET')return json(res,200,{...await investigatorPolicy.status(),claudeConfigured:!!opts.investigator?.claude,codex:'Blocked: cannot verify root confinement or pattern denial.'});
     if(url.pathname.startsWith('/api/investigator/')&&req.method==='PUT'){
       const b=await readBody(req) as any;

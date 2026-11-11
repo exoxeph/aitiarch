@@ -86,3 +86,42 @@ describe('the default project and the app shell',()=>{
   const {port}=await setup();expect((await req(port,'/')).body).toContain('<title>Aitiarch</title>');expect(JSON.parse((await req(port,'/api/health')).body)).toEqual({app:'aitiarch',v:1});
  });
 });
+
+describe('adding a project from the home screen',()=>{
+ it('browses folders, previews Initialize without writing, then initializes and registers on request',async()=>{
+  const {port,security,a}=await setup(),w=auth(security,port,true),base=path.dirname(a);
+  expect((await req(port,`/api/projects/folders?path=${encodeURIComponent(base)}`)).status).toBe(401);
+  const list=JSON.parse((await req(port,`/api/projects/folders?path=${encodeURIComponent(base)}`,{headers:auth(security,port)})).body);
+  expect(list.entries.filter((e:{initialized:boolean})=>e.initialized).map((e:{name:string})=>e.name)).toEqual(['alpha','beta','gamma']);
+  const fresh=path.join(base,'delta');await mkdir(fresh);
+  const preview=JSON.parse((await req(port,`/api/projects/preview?path=${encodeURIComponent(fresh)}`,{headers:auth(security,port)})).body);
+  expect(preview.creates.map((c:{path:string})=>c.path)).toEqual(['.aitiarch/index.md','.aitiarch/.gitignore']);
+  expect(await readdir(fresh)).toEqual([]);
+  expect((await req(port,'/api/projects/init',{method:'PUT',headers:auth(security,port),body:{path:fresh}})).status).toBe(403); // a write needs the write headers
+  const made=await req(port,'/api/projects/init',{method:'PUT',headers:w,body:{path:fresh}});expect(made.status).toBe(200);
+  expect(JSON.parse(made.body)).toMatchObject({name:'delta'});expect((await readdir(path.join(fresh,'.aitiarch'))).sort()).toEqual(['.gitignore','index.md']);
+  expect((await req(port,'/api/projects/init',{method:'PUT',headers:w,body:{path:fresh}})).status).toBe(409);
+ });
+ it('summarizes a project for its card: notes, open threads and the link graph',async()=>{
+  const {port,security,ea,a}=await setup();
+  await writeFile(path.join(a,'.aitiarch','index.md'),'[a](a.md) [gone](gone.md)\n');
+  const s=JSON.parse((await req(port,`/api/projects/summary?id=${ea.id}`,{headers:auth(security,port)})).body);
+  expect(s).toMatchObject({notes:2,openDecisions:0,waiting:0,graph:{nodes:['a.md','index.md'],edges:[[1,0]]}});
+  expect((await req(port,'/api/projects/summary?id=000000000000',{headers:auth(security,port)})).status).toBe(404);
+ });
+});
+
+describe('the explorer through a project',()=>{
+ it('creates, previews and applies a move inside that project only',async()=>{
+  const {port,security,ea,a}=await setup(),w=auth(security,port,true),p=(s:string)=>`/api/p/${ea.id}/explorer/${s}`;
+  expect((await req(port,p('new-folder'),{method:'PUT',headers:w,body:{path:'auth'}})).status).toBe(200);
+  expect((await req(port,p('new-note'),{method:'PUT',headers:w,body:{path:'auth/plan.md'}})).status).toBe(200);
+  await writeFile(path.join(a,'.aitiarch','index.md'),'[p](auth/plan.md)\n');
+  const prev=JSON.parse((await req(port,p('move-preview'),{method:'PUT',headers:w,body:{from:'auth/plan.md',to:'plan.md'}})).body);
+  expect(prev.changes).toEqual([{path:'index.md',newPath:'index.md',links:1}]);
+  expect((await req(port,p('move'),{method:'PUT',headers:w,body:{from:'auth/plan.md',to:'plan.md'}})).status).toBe(200);
+  const tree=JSON.parse((await req(port,`/api/p/${ea.id}/tree`,{headers:auth(security,port)})).body);
+  expect(tree.children.map((c:{path:string})=>c.path)).toEqual(['auth','a.md','index.md','plan.md']);
+  expect((await req(port,p('move'),{method:'PUT',headers:w,body:{from:'plan.md',to:'../escape.md'}})).status).toBe(400);
+ });
+});

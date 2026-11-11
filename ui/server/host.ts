@@ -6,6 +6,9 @@ import type {AddressInfo} from 'node:net';
 import {CSP,serveDist} from './http.ts';
 import {RegistryError,type ProjectEntry,type Registry} from './registry.ts';
 import type {Security} from './security.ts';
+import {listFolders} from './folders.ts';
+import {InitError,initPlan,initialize} from './project-init.ts';
+import {summarize} from './project-summary.ts';
 
 export interface ProjectApp {handle(req:http.IncomingMessage,res:http.ServerResponse):unknown;close():Promise<void>}
 export interface HostOptions {
@@ -29,18 +32,33 @@ export function createHost(o:HostOptions){
  const entryOf=(id:unknown)=>typeof id==='string'&&ID.test(id)?registry.get(id):undefined;
 
  async function projects(req:http.IncomingMessage,res:http.ServerResponse,url:URL){
-  if(req.method==='GET'&&url.pathname==='/api/projects')return json(res,200,{projects:registry.list(url.searchParams.get('sort')==='name'?'name':'recent')});
+  try{
+   if(req.method==='GET'){
+    const q=url.searchParams;
+    switch(url.pathname){
+     case '/api/projects':return json(res,200,{projects:registry.list(q.get('sort')==='name'?'name':'recent')});
+     case '/api/projects/folders':return json(res,200,await listFolders(q.get('path')||undefined));
+     case '/api/projects/preview':return json(res,200,await initPlan(q.get('path')??''));
+     case '/api/projects/summary':{const e=entryOf(q.get('id'));if(!e)return json(res,404,{error:'unknown_project'});return json(res,200,await summarize(e.notes));}
+    }
+    return json(res,404,{error:'not_found'});
+   }
+  }catch(e){if(e instanceof RegistryError)return json(res,400,{error:e.code,message:e.message});throw e;}
   if(req.method!=='PUT')return json(res,405,{error:'method'});
   let b:any;try{b=await readBody(req);}catch(e){return json(res,400,{error:(e as Error).message});}
   try{
    switch(url.pathname){
     case '/api/projects/add':if(typeof b?.path!=='string')return json(res,400,{error:'bad_body'});return json(res,200,await registry.add(b.path));
+    case '/api/projects/init':{if(typeof b?.path!=='string')return json(res,400,{error:'bad_body'});const plan=await initialize(b.path);return json(res,200,await registry.add(plan.folder));}
     case '/api/projects/open':{const e=entryOf(b?.id);if(!e)return json(res,404,{error:'unknown_project'});await registry.touch(e.id);return json(res,200,registry.get(e.id));}
     case '/api/projects/pin':{const e=entryOf(b?.id);if(!e||typeof b.pinned!=='boolean')return json(res,404,{error:'unknown_project'});await registry.pin(e.id,b.pinned);return json(res,200,registry.get(e.id));}
     case '/api/projects/remove':{const e=entryOf(b?.id);if(!e)return json(res,404,{error:'unknown_project'});await registry.remove(e.id);
      const app=apps.get(e.id);apps.delete(e.id);if(app)await (await app).close().catch(()=>{});return json(res,200,{});} // forgets only; never deletes a file
    }
-  }catch(e){if(e instanceof RegistryError)return json(res,e.code==='unknown'?404:400,{error:e.code,message:e.message});throw e;}
+  }catch(e){
+   if(e instanceof RegistryError)return json(res,e.code==='unknown'?404:400,{error:e.code,message:e.message});
+   if(e instanceof InitError)return json(res,409,{error:e.code,message:e.message});throw e;
+  }
   return json(res,404,{error:'not_found'});
  }
 
