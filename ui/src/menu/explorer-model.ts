@@ -29,6 +29,28 @@ export function visibleRows(tree:TreeNode|null,open:ReadonlySet<string>):Row[]{
  return rows;
 }
 
+/** What opens when no tabs were restored: the main note, then the old notebook.md, then the first note. */
+export const defaultNote=(paths:string[]):string|null=>paths.find(p=>p.toLowerCase()==='index.md')??paths.find(p=>p.toLowerCase()==='notebook.md')??paths[0]??null;
+
+const RESERVED=/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
+const SIDECAR=new Set(['ink','chat','runs','measurements','backups','sketches','node_modules']);
+/** The path a typed name makes inside `dir`, or why it cannot be used. Notes get .md added; the server checks again. */
+export function nameTarget(dir:string,raw:string,type:'file'|'dir'):{path:string}|{problem:string}{
+ const name=raw.trim();
+ if(!name)return {problem:'Type a name.'};
+ if(/[\\/:*?"<>|\0]/.test(name))return {problem:'A name cannot contain / \\ : * ? " < > |'};
+ if(name.startsWith('.')||/[. ]$/.test(name))return {problem:'A name cannot start with a dot or end with a dot or space.'};
+ if(RESERVED.test(name)||SIDECAR.has(name.toLowerCase()))return {problem:'That name is reserved.'};
+ return {path:childPath(dir,type==='file'&&!/\.md$/i.test(name)?`${name}.md`:name)};
+}
+
+/** Where dragging `from` onto a row puts it: inside a folder, or beside a note. Null when nothing would change or it would go into itself. */
+export function dropTarget(from:string,over:string,overType:'dir'|'file'|'root'):{to:string}|null{
+ const dest=overType==='file'?parentOf(over):over,base=from.slice(from.lastIndexOf('/')+1),to=childPath(dest,base);
+ if(to===from||dest===from||dest.startsWith(from+'/'))return null;
+ return {to};
+}
+
 /** What a key does on the row at `current`; null means the key is not the tree's. */
 export function treeKey(rows:Row[],open:ReadonlySet<string>,current:string,key:string):KeyResult|null{
  const i=rows.findIndex(r=>r.path===current);if(i<0)return rows[0]?{focus:rows[0].path}:null;

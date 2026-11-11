@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {visibleRows,treeKey,parentOf,childPath,isMainNote,entryNote} from '../src/menu/explorer-model.ts';
+import {visibleRows,treeKey,parentOf,childPath,isMainNote,entryNote,nameTarget,dropTarget,defaultNote} from '../src/menu/explorer-model.ts';
 import type {TreeNode} from '../src/api.ts';
 
 // The explorer is a keyboard-first ARIA tree: these are the moves the arrow keys make.
@@ -48,6 +48,37 @@ describe('arrow keys',()=>{
   expect(treeKey(r,open,'a.md','F2')).toEqual({focus:'a.md',rename:'a.md'});
   expect(treeKey(r,open,'auth','e')).toEqual({focus:'empty'});
   expect(treeKey(r,open,'auth','q')).toBeNull();
+ });
+});
+
+describe('names typed into New and Rename',()=>{
+ it('adds .md to notes, rejects slashes and empty or reserved names, and builds the new path',()=>{
+  expect(nameTarget('auth','Token plan','file')).toEqual({path:'auth/Token plan.md'});
+  expect(nameTarget('','x.md','file')).toEqual({path:'x.md'});
+  expect(nameTarget('a','Docs','dir')).toEqual({path:'a/Docs'});
+  for(const bad of ['','  ','a/b','a\\b','.hidden','..','CON','x?','name.','ink','chat']){expect(nameTarget('a',bad,'dir')).toHaveProperty('problem');}
+  expect(nameTarget('a','x','file')).toEqual({path:'a/x.md'});
+ });
+});
+
+describe('dropping a row onto another',()=>{
+ it('moves into the folder it lands on, or beside the note it lands on',()=>{
+  expect(dropTarget('a.md','auth','dir')).toEqual({to:'auth/a.md'});
+  expect(dropTarget('a.md','auth/plan.md','file')).toEqual({to:'auth/a.md'});
+  expect(dropTarget('auth/plan.md','','root')).toEqual({to:'plan.md'});
+  expect(dropTarget('auth/plan.md','auth','dir')).toBeNull(); // already there
+  expect(dropTarget('auth','auth','dir')).toBeNull();
+  expect(dropTarget('auth','auth/sub','dir')).toBeNull(); // into itself
+  expect(dropTarget('a.md','a.md','file')).toBeNull();
+ });
+});
+
+describe('the note that opens by default',()=>{
+ it('prefers the root index.md, then notebook.md, then the first note',()=>{
+  expect(defaultNote(['a.md','notebook.md','Index.md','x/index.md'])).toBe('Index.md');
+  expect(defaultNote(['a.md','Notebook.md'])).toBe('Notebook.md');
+  expect(defaultNote(['b.md','a.md'])).toBe('b.md');
+  expect(defaultNote([])).toBeNull();
  });
 });
 

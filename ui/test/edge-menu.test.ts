@@ -38,6 +38,10 @@ describe('closing',()=>{
  it('moving back to the edge zone keeps it open too',()=>{
   const {c}=opened();c.leaveMenu();vi.advanceTimersByTime(100);c.enterZone(0);vi.advanceTimersByTime(5000);expect(c.open).toBe(true);
  });
+ it('stays open while something inside it (a dialog, a context menu) holds it, and closes a grace period after the hold ends',()=>{
+  const {c}=opened();c.hold(true);c.leaveMenu();vi.advanceTimersByTime(5000);expect(c.open).toBe(true);
+  c.hold(false);vi.advanceTimersByTime(LEAVE_MS-1);expect(c.open).toBe(true);vi.advanceTimersByTime(1);expect(c.open).toBe(false);
+ });
 });
 
 describe('pinning and Escape',()=>{

@@ -7,17 +7,19 @@ export interface EdgeMenuState {open:boolean;pinned:boolean}
 
 export class EdgeMenuController {
  open=false;pinned=false;
- private zone=false;private menu=false;private down=false;
+ private zone=false;private menu=false;private down=false;private held=false;
  private dwell:ReturnType<typeof setTimeout>|undefined;private leave:ReturnType<typeof setTimeout>|undefined;
  constructor(private readonly onChange:(state:EdgeMenuState)=>void){}
  private emit(){this.onChange({open:this.open,pinned:this.pinned});}
  private cancelDwell(){if(this.dwell!==undefined){clearTimeout(this.dwell);this.dwell=undefined;}}
  private cancelLeave(){if(this.leave!==undefined){clearTimeout(this.leave);this.leave=undefined;}}
  private scheduleLeave(){
-  if(!this.open||this.pinned||this.zone||this.menu)return;
+  if(!this.open||this.pinned||this.zone||this.menu||this.held)return;
   this.cancelLeave();
-  this.leave=setTimeout(()=>{this.leave=undefined;if(this.open&&!this.pinned&&!this.zone&&!this.menu){this.open=false;this.emit();}},LEAVE_MS);
+  this.leave=setTimeout(()=>{this.leave=undefined;if(this.open&&!this.pinned&&!this.zone&&!this.menu&&!this.held){this.open=false;this.emit();}},LEAVE_MS);
  }
+ /** Something inside the menu (a dialog, a context menu) is open: the pointer leaving must not close the menu under it. */
+ hold(on:boolean){this.held=on;if(on)this.cancelLeave();else this.scheduleLeave();}
  /** The pointer entered the edge zone. `buttons` is the pointer event's button mask: any held button means a drag, not a request for the menu. */
  enterZone(buttons=0){
   this.zone=true;this.cancelLeave();

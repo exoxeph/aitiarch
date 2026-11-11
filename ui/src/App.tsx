@@ -15,6 +15,7 @@ import { makeWikiResolver } from "./frontmatter.ts";
 import { ChatGPTSettings } from "./ChatGPTSettings.tsx";
 import { UsagePanel } from './UsagePanel.tsx';
 import {NotesMenu} from './menu/NotesMenu.tsx';
+import {defaultNote} from './menu/explorer-model.ts';
 import {NoteMenu} from './menu/NoteMenu.tsx';
 import {useEdgeMenu} from './menu/useEdgeMenu.ts';
 import {ChatPanel} from './chat/ChatPanel.tsx';
@@ -121,6 +122,23 @@ export default function App() {
   const refreshInk = useCallback((path: string, resolve = false) => api.ink(path, resolve).then(s => setInkFiles(m => ({ ...m, [path]: s }))).catch(() => {
     setNotice(`Ink for ${path} could not be loaded. Its sidecar is preserved.`);
   }), []);
+  // Moving or renaming: a note with unsaved work is never moved out from under its editor.
+  const moveBlocked = useCallback((moving: string[]) => {
+    const hit = tabs.filter(t => moving.some(m => t === m || t.startsWith(m + "/")) && status[t] && status[t] !== "saved");
+    return hit.length ? `Save ${hit[0]}${hit.length > 1 ? ` and ${hit.length - 1} more` : ""} before moving it.` : null;
+  }, [tabs, status]);
+  // After a move the open tabs follow their notes to the new paths (their text, ink and links already moved on disk).
+  const afterMove = useCallback(async (moves: { from: string; to: string }[]) => {
+    const map = new Map(moves.map(m => [m.from, m.to])), moved = tabs.filter(t => map.has(t));
+    if (!moved.length) return;
+    const fresh: Record<string, NoteFile> = {};
+    for (const t of moved) { const to = map.get(t)!; try { fresh[to] = await api.file(to); } catch { /* that tab simply closes */ } }
+    setFiles(f => { const n = { ...f }; for (const t of moved) delete n[t]; return { ...n, ...fresh }; });
+    setInkFiles(f => { const n = { ...f }; for (const t of moved) delete n[t]; return n; });
+    setTabs(ts => ts.flatMap(t => !map.has(t) ? [t] : fresh[map.get(t)!] ? [map.get(t)!] : []));
+    setActive(a => a && map.has(a) ? (fresh[map.get(a)!] ? map.get(a)! : null) : a);
+    for (const p of Object.keys(fresh)) void refreshInk(p, true);
+  }, [tabs, refreshInk]);
   const paths = useMemo(() => flattenTree(tree), [tree]);
   // Read only local note APIs. Failed reads disable dictionary guesses conservatively.
   useEffect(()=>{let current=true;setVocabulary(null);void (async()=>{const notes=new Map<string,string>();for(const p of paths)notes.set(p,(await api.file(p)).text);if(current){vocabularyNotes.current=notes;setVocabulary(notebookWords(notes));}})().catch(()=>{});return()=>{current=false;};},[paths]);
@@ -159,7 +177,7 @@ export default function App() {
         const all = flattenTree(t);
         let want = ui.tabs.filter((p) => all.includes(p));
         if (want.length === 0) {
-          const first = all.find((p) => p.toLowerCase() === "notebook.md") ?? all[0];
+          const first = defaultNote(all);
           if (first) want = [first];
         }
         const loadedFiles: Record<string, NoteFile> = {};
@@ -509,7 +527,7 @@ export default function App() {
         </NoteMenu>
         <button ref={chatPillRef} type="button" className="chat-pill" aria-expanded={chatOpen} aria-controls="chat-panel" onClick={() => setChatOpen(v => !v)}><span className="chat-pill-dot" aria-hidden="true" />Chat</button>
       </header>
-      <NotesMenu menu={menu} burger={burgerRef} rootName={boot.rootName} rootPath={boot.rootPath} tree={tree} active={active} onOpen={(p) => void openNote(p)} onSearch={() => setOverlay("palette")} onSettings={() => setSettingsOpen(true)} usage={<UsagePanel />} settings={settingsPanel} />
+      <NotesMenu menu={menu} burger={burgerRef} rootName={boot.rootName} rootPath={boot.rootPath} tree={tree} active={active} onOpen={(p) => void openNote(p)} onSearch={() => setOverlay("palette")} onSettings={() => setSettingsOpen(true)} usage={<UsagePanel />} settings={settingsPanel} onTreeChanged={() => void refreshTree()} onMoved={m => void afterMove(m)} blocked={moveBlocked} />
       <main className="editor-col" data-note-path={active ?? undefined}>
         {cacheNotice && <div className="notice" role="alert">
           Anchor snapshots are disabled. Add this exact line to <code>{cacheNotice.file}</code>: <code>{cacheNotice.line}</code>
