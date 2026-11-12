@@ -30,6 +30,8 @@ import type { Invocation } from "../shared/invocation.ts";
 import type { ChatGPTPlan } from "./providers/chatgpt-plan.ts";
 import { defaultRoots, discoverSkills, type SkillInfo, type SkillRoot } from "./skills.ts";
 import { skillLibrary } from "./skill-library.ts";
+import { NodeSettingsService } from "./node-settings.ts";
+import { validSavedNodes } from "../shared/node-settings.ts";
 import { homedir } from "node:os";
 
 export interface AppOptions {
@@ -169,6 +171,7 @@ export function createApp(opts: AppOptions) {
     if (refresh || !skillsCache || Date.now() - skillsCache.at > 30_000) skillsCache = { at: Date.now(), list: discoverSkills(opts.skillRoots ?? defaultRoots(homedir(), path.dirname(store.rootReal))) };
     return skillsCache.list;
   };
+  const nodeSettings = new NodeSettingsService(uiStateStore, () => discoveredSkills(false));
   const investigatorPolicy=new PolicyGate(uiStateStore,path.dirname(store.rootReal));
   const investigator=new InvestigatorRuntime(investigatorPolicy,new Lookups(investigatorPolicy),new LedgerStore(store.rootReal),opts.investigator??{},undefined,store.rootReal);
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
@@ -273,6 +276,12 @@ export function createApp(opts: AppOptions) {
         }
         throw new InvestigatorError('invalid_envelope');
       }catch(e){if(res.headersSent)return res.end();const code=e instanceof InvestigatorError?e.code:'invalid_policy';return json(res,409,{error:code,message:code==='blocked'?'Blocked: raise policy to retry':'Investigator: '+code+'. Nothing was retried.'});}
+    }
+    if(url.pathname==='/api/nodes'&&req.method==='GET')return json(res,200,{nodes:await nodeSettings.get()});
+    if(url.pathname==='/api/nodes'&&req.method==='PUT'){
+      const body=await readBody(req);
+      if(!validSavedNodes(body))return json(res,400,{error:'invalid_nodes',message:'Those settings are not valid. Nothing was changed.'});
+      const {persisted}=await nodeSettings.save(body);return json(res,200,{nodes:await nodeSettings.get(),persisted});
     }
     if(url.pathname==='/api/skills'&&req.method==='GET'){
       const ids=(url.searchParams.get('ids')??'').split(',').filter(Boolean);
