@@ -5,9 +5,10 @@ import {execFile} from 'node:child_process';import {promisify} from 'node:util';
 import {randomUUID,createHash} from 'node:crypto';import path from 'node:path';
 import {normalizeRel,isNotePath} from './paths.ts';
 import {exactKeys,validAt,validId} from '../shared/threads.ts';
+import {validSavedNodes,type SavedNodeSettings} from '../shared/node-settings.ts';
 const exec=promisify(execFile);
 export interface ThreadDraft {note:string;inkId:string;text:string;updatedAt:string;revision:string}
-export interface SavedUiState {v:1;tabs:string[];active:string|null;treeCollapsed?:boolean;theme?:'ember'|'moss';confirmAdd?:boolean;typingHelp?:boolean;doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];threadDrafts?:Record<string,ThreadDraft>;investigator?:InvestigatorPolicy;starPositions?:Record<string,[number,number]>}
+export interface SavedUiState {v:1;tabs:string[];active:string|null;treeCollapsed?:boolean;theme?:'ember'|'moss';confirmAdd?:boolean;typingHelp?:boolean;doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];threadDrafts?:Record<string,ThreadDraft>;investigator?:InvestigatorPolicy;starPositions?:Record<string,[number,number]>;nodes?:SavedNodeSettings}
 export type StarPositions=Record<string,[number,number]>;
 const validStarPositions=(v:unknown):v is StarPositions=>{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;
@@ -49,6 +50,8 @@ export class UiStateStore {
    state.threadDrafts=d.threadDrafts;
   }
   if(d.starPositions!==undefined){if(!validStarPositions(d.starPositions))throw new Error('Invalid star positions.');state.starPositions=d.starPositions;}
+  // A bad nodes block must not make the whole file unreadable: drop it, use defaults, say so.
+  if(d.nodes!==undefined){if(validSavedNodes(d.nodes))state.nodes=d.nodes;else console.warn('ui-state.json: ignoring an invalid "nodes" block; using the default persona and no skills.');}
   // A clone must never supply its own investigator permissions. Verify BEFORE inspecting this field.
   if(Object.hasOwn(d,'investigator')&&await this.investigatorIgnored())state.investigator=validatePolicy(d.investigator);
   return state;
@@ -62,7 +65,7 @@ export class UiStateStore {
  }
  private async mutateLocked<T>(fn:(s:SavedUiState)=>T,requireIgnored=false){
   await this.safe();const lock=await open(this.file+'.lock','wx',0o600),temp=this.file+'.'+randomUUID()+'.tmp';
-  try{const s=await this.read();if(requireIgnored||s.treeCollapsed!==undefined||s.theme!==undefined||s.confirmAdd!==undefined||s.typingHelp!==undefined||s.doubleSpacePeriod!==undefined||s.smartCorrections!==undefined||s.neverCorrect!==undefined||Object.keys(s.threadDrafts??{}).length)await this.ignored(temp);const result=fn(s),data=JSON.stringify(s,null,2)+'\n';if(Buffer.byteLength(data)>2*1024*1024)throw new Error('UI state too large.');
+  try{const s=await this.read();if(requireIgnored||s.treeCollapsed!==undefined||s.theme!==undefined||s.confirmAdd!==undefined||s.typingHelp!==undefined||s.doubleSpacePeriod!==undefined||s.smartCorrections!==undefined||s.neverCorrect!==undefined||s.nodes!==undefined||Object.keys(s.threadDrafts??{}).length)await this.ignored(temp);const result=fn(s),data=JSON.stringify(s,null,2)+'\n';if(Buffer.byteLength(data)>2*1024*1024)throw new Error('UI state too large.');
    const f=await open(temp,'wx',0o600);try{await f.writeFile(data);await f.sync();}finally{await f.close();}await this.safe();await rename(temp,this.file);return result;
   }finally{await unlink(temp).catch(()=>{});await lock.close();await unlink(this.file+'.lock');}
  }
@@ -81,6 +84,18 @@ export class UiStateStore {
  async saveStarPositions(positions:StarPositions){
   if(!validStarPositions(positions))throw new Error('Invalid star positions.');
   return this.mutate(s=>{s.starPositions={...positions};return s.starPositions;},true);
+ }
+ private nodesMemory:SavedNodeSettings|undefined;
+ /** Each node's persona and attached skill ids. This session's latest save wins; otherwise what is on disk; otherwise nothing (defaults). */
+ async nodes():Promise<SavedNodeSettings>{
+  if(this.nodesMemory)return structuredClone(this.nodesMemory);
+  try{return structuredClone((await this.read()).nodes??{});}catch{return {};}
+ }
+ /** Kept for this session always; written to ui-state.json only when that file is git-ignored (like other preferences). */
+ async saveNodes(value:SavedNodeSettings):Promise<{persisted:boolean}>{
+  if(!validSavedNodes(value))throw new Error('Invalid node settings.');
+  this.nodesMemory=structuredClone(value);
+  try{await this.mutate(s=>{s.nodes=structuredClone(value);},true);return {persisted:true};}catch{return {persisted:false};}
  }
  async draft(note:string,id:string){return (await this.read()).threadDrafts?.[key(note,id)]??null;}
  async saveDraft(note:string,id:string,text:string,revision:string|null){if(normalizeRel(note)!==note||!isNotePath(note)||!validId(id)||typeof text!=='string'||text.length>100000)throw new Error('Invalid human draft.');
