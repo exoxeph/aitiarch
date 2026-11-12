@@ -1,4 +1,6 @@
 import {unavailableText,type Diagram} from '../../shared/diagram.ts';
+import type {SkillDiagramRef} from '../../shared/skill-diagram.ts';
+import {mountSkillDiagram} from '../diagrams/skill-frame.ts';
 import { StateEffect, StateField, type EditorState } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 import { resolveAnchor } from "../../shared/anchors.ts";
@@ -20,8 +22,8 @@ export const removeInk = StateEffect.define<string>();
 
 const widgetCleanup=new WeakMap<HTMLElement,()=>void>();
 class InkWidget extends WidgetType {
-  constructor(readonly id: string, readonly body: string, readonly complete: boolean, readonly replies:number,readonly diagram?:Diagram,readonly diagramIssue?:string,readonly pending=false) { super(); }
-  eq(other: InkWidget) { return other.id === this.id && other.body === this.body && other.complete === this.complete && other.replies===this.replies&&other.diagram===this.diagram&&other.diagramIssue===this.diagramIssue&&other.pending===this.pending; }
+  constructor(readonly id: string, readonly body: string, readonly complete: boolean, readonly replies:number,readonly diagram?:Diagram,readonly diagramIssue?:string,readonly pending=false,readonly skillDiagram?:SkillDiagramRef,readonly skills?:readonly string[]) { super(); }
+  eq(other: InkWidget) { return other.id === this.id && other.body === this.body && other.complete === this.complete && other.replies===this.replies&&other.diagram===this.diagram&&other.diagramIssue===this.diagramIssue&&other.pending===this.pending&&other.skillDiagram?.asset===this.skillDiagram?.asset; }
   toDOM() {
     const el = document.createElement("aside");
     el.className = "cm-ink-block thought-blob";
@@ -45,7 +47,8 @@ class InkWidget extends WidgetType {
     open.addEventListener('click',()=>el.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:this.id,thought:true}})));el.append(open);
     const bring=document.createElement('button');bring.type='button';bring.textContent='Bring to notebook';bring.disabled=!this.complete;bring.addEventListener('click',()=>el.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:this.id}})));el.append(bring);
     const slot=document.createElement('div');slot.className='thought-diagram-slot';el.append(slot);
-    if(this.diagram&&this.complete){slot.textContent='Loading diagram...';let disposed=false,cleanup:(()=>void)|undefined;const previous=widgetCleanup.get(el);widgetCleanup.set(el,()=>{previous?.();disposed=true;cleanup?.();});void import('../diagrams/view.ts').then(m=>{if(!disposed&&el.isConnected)cleanup=m.mountDiagram(slot,this.diagram!);}).catch(()=>{if(!disposed)slot.textContent=unavailableText('layout');});}else if(this.diagramIssue){const note=document.createElement('span');note.textContent=unavailableText(this.diagramIssue);note.dataset.diagramIssue=this.diagramIssue;const again=document.createElement('button');again.type='button';again.className='diagram-retry';again.textContent='Try diagram again';again.addEventListener('click',()=>again.dispatchEvent(new CustomEvent('visualize-again',{bubbles:true,detail:{id:this.id}})));slot.replaceChildren(note,again);}
+    if(this.skillDiagram&&this.complete){const previous=widgetCleanup.get(el),dispose=mountSkillDiagram(slot,this.skillDiagram,{itemId:this.id,skills:this.skills});widgetCleanup.set(el,()=>{previous?.();dispose();});}
+    else if(this.diagram&&this.complete){slot.textContent='Loading diagram...';let disposed=false,cleanup:(()=>void)|undefined;const previous=widgetCleanup.get(el);widgetCleanup.set(el,()=>{previous?.();disposed=true;cleanup?.();});void import('../diagrams/view.ts').then(m=>{if(!disposed&&el.isConnected)cleanup=m.mountDiagram(slot,this.diagram!);}).catch(()=>{if(!disposed)slot.textContent=unavailableText('layout');});}else if(this.diagramIssue){const note=document.createElement('span');note.textContent=unavailableText(this.diagramIssue);note.dataset.diagramIssue=this.diagramIssue;const again=document.createElement('button');again.type='button';again.className='diagram-retry';again.textContent='Try diagram again';again.addEventListener('click',()=>again.dispatchEvent(new CustomEvent('visualize-again',{bubbles:true,detail:{id:this.id}})));slot.replaceChildren(note,again);}
     return el;
   }
   destroy(dom:HTMLElement){widgetCleanup.get(dom)?.();widgetCleanup.delete(dom);}
@@ -74,7 +77,7 @@ function decorations(state: EditorState, payload: InkPayload): DecorationSet {
     if(payload.narrow){
       let line=state.doc.lineAt(r.to);
       while(line.number<state.doc.lines&&state.doc.line(line.number+1).text.trim())line=state.doc.line(line.number+1);
-      const answers=groups.get(line.to)??[];answers.push(new InkWidget(i.id,thoughtText(i),i.generation?.status==='complete',i.thread?.followups.filter(r=>r.generation.status==='complete').length??0,i.diagram,i.diagramIssue,i.generation?.status==='pending'));groups.set(line.to,answers);
+      const answers=groups.get(line.to)??[];answers.push(new InkWidget(i.id,thoughtText(i),i.generation?.status==='complete',i.thread?.followups.filter(r=>r.generation.status==='complete').length??0,i.diagram,i.diagramIssue,i.generation?.status==='pending',i.skillDiagram,i.generation?.skills));groups.set(line.to,answers);
     }
   }
   for(const [position,answers] of groups)marks.push(Decoration.widget({widget:new InkGroupWidget(answers),side:1,block:true}).range(position));

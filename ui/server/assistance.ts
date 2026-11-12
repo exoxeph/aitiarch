@@ -6,7 +6,9 @@ import type { InkItem, Generation } from '../shared/ink.ts';
 import { InkStore, type InkSnapshot } from './ink-store.ts';
 import { textHash } from './anchor-cache.ts';
 import { Store } from './store.ts';
-import { normalizeRel } from './paths.ts';
+import { normalizeRel, PathError } from './paths.ts';
+import { SkillDiagramStore } from './skill-diagram-store.ts';
+import { SKILL_DIAGRAM_FAILED_BODY, SKILL_DIAGRAM_MAX_BYTES, extractDocument, skillDiagramBody, type SkillDiagramRef } from '../shared/skill-diagram.ts';
 import { LedgerStore } from './ledger-store.ts';
 import { prepareRequest, ProviderError, redact, type Provider, type Request } from './providers/index.ts';
 import { ProductValidationError, validateProductResult, validationCounts, type ValidationLog, type ValidationRecord } from './product-validation.ts';
@@ -17,6 +19,8 @@ import { nodeFor, type SkillsReview } from '../shared/node-settings.ts';
 interface Job { path: string; controller: AbortController; done: Promise<void>; run: () => Promise<void>; status: 'queued' | 'pending' | 'complete' | 'error' | 'cancelled' | 'persistence_error'; retry?: () => Promise<void> }
 export class Assistance {
   readonly ledger: LedgerStore;
+  /** Saved skill diagrams (the Skill renderer). */
+  readonly skillDiagrams: SkillDiagramStore;
   private jobs = new Map<string, Job>();
   private starting = new Set<string>();
   private active = 0;
@@ -30,6 +34,23 @@ export class Assistance {
     this.validationLog=validationLog;this.extras=extras;
     this.store = store; this.ink = ink; this.provider = provider; this.notify = notify;
     this.ledger = new LedgerStore(store.rootReal);
+    this.skillDiagrams = new SkillDiagramStore(store.rootReal);
+  }
+  /** The Skill renderer needs Claude, and a skill attached to Visualize that actually loaded. Refused before anything is sent. */
+  private checkSkillRenderer(renderer: string | undefined, request: Request) {
+    if (renderer !== 'skill') return;
+    if (this.provider.name === 'chatgpt-plan') throw new PathError(409, 'skill_renderer', 'The Skill renderer works with Claude only for now. Use the Built-in renderer.');
+    if (!request.skills) throw new PathError(409, 'skill_renderer', 'Attach a skill to Visualize in Settings first, then choose Skill.');
+  }
+  /** What the model's reply becomes: a saved document, or a fixed reason. None of the model's own words are kept. */
+  private async acceptSkillDiagram(result: Awaited<ReturnType<Provider['invoke']>>, id: string, skills: string[]) {
+    if (result.id !== id || typeof result.answer !== 'string') throw new ProviderError('invalid_response');
+    const model = result.model === null || (typeof result.model === 'string' && /^[\w.:-]{1,100}$/.test(result.model)) ? result.model : null;
+    const failed = (code: DiagramIssue) => ({ body: SKILL_DIAGRAM_FAILED_BODY, model, skillDiagram: undefined as SkillDiagramRef | undefined, diagramIssue: code as DiagramIssue | undefined });
+    const document = extractDocument(redact(result.answer));
+    if (!document) return failed('skill_no_document');
+    if (Buffer.byteLength(document) > SKILL_DIAGRAM_MAX_BYTES) return failed('skill_too_large');
+    return { body: skillDiagramBody(skills), model, skillDiagram: await this.skillDiagrams.saveHtml(document) as SkillDiagramRef | undefined, diagramIssue: undefined as DiagramIssue | undefined };
   }
   async availability() { return { ...await this.provider.checkAvailability(), provider:this.provider.name??'claude' }; }
   private extras?: ExtrasFor;
@@ -42,7 +63,8 @@ export class Assistance {
   async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview }> {
     const frozen = freezeInvocation(input);
     const { request, review } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question,
-      selection: frozen.selection, note: frozen.text, decisions: [], turns: [] });
+      selection: frozen.selection, note: frozen.text, decisions: [], turns: [], ...(frozen.renderer === 'skill' ? { render: 'skill' as const } : {}) });
+    this.checkSkillRenderer(frozen.renderer, request);
     const packet = prepareRequest(request);
     // The instruction in the packet is the exact text; "skills" beside it says what was loaded, skipped or not installed.
     return review ? { ...packet, skills: review } : packet;
@@ -72,7 +94,8 @@ export class Assistance {
     const availability = await this.provider.checkAvailability();
     if (!availability.available) throw new ProviderError(availability.code, availability.message);
     const { request, names } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question, selection: frozen.selection,
-      note: frozen.text, decisions: [], turns: [] });
+      note: frozen.text, decisions: [], turns: [], ...(frozen.renderer === 'skill' ? { render: 'skill' as const } : {}) });
+    this.checkSkillRenderer(frozen.renderer, request);
     // Transcript context stays none. Optional source selection is a later slice;
     // never discover a user's global sessions or transmit one implicitly.
     const packet = prepareRequest(request);
@@ -92,14 +115,15 @@ export class Assistance {
     let finish!: () => void;
     const job: Job = { path, controller, status: 'queued', done: new Promise(resolve => { finish = resolve; }), run: async () => {
       let body = '', status: Generation['status'] = 'complete', model: string | null = null, evidence: Generation['evidence'] = [];
-      let diagram:Diagram|undefined,diagramIssue:DiagramIssue|undefined;
+      let diagram:Diagram|undefined,diagramIssue:DiagramIssue|undefined,skillDiagram:SkillDiagramRef|undefined;
       let resultReceived=false,result:Awaited<ReturnType<Provider['invoke']>>|undefined;
       const record=async(row:ValidationRecord)=>{try{await this.validationLog.write(row);}catch{/* Metrics never change acceptance or persistence. */}};
       try {
         if (controller.signal.aborted) throw new ProviderError('cancelled');
         result = await this.provider.invoke(request, { signal: controller.signal });resultReceived=true;
         if (controller.signal.aborted) throw new ProviderError('cancelled');
-        ({body,model,evidence,diagram,diagramIssue}=validateProductResult(result,frozen.id,packet.data,redact,textHash,this.provider.name??'claude'));
+        if (request.render === 'skill') ({ body, model, skillDiagram, diagramIssue } = await this.acceptSkillDiagram(result, frozen.id, names));
+        else ({body,model,evidence,diagram,diagramIssue}=validateProductResult(result,frozen.id,packet.data,redact,textHash,this.provider.name??'claude'));
       } catch (e) {
         if(e instanceof ProductValidationError)await record(e.record);
         else if(e instanceof ProviderError&&e.validation)await record(e.validation);
@@ -111,7 +135,7 @@ export class Assistance {
       const persist = async () => {
         try {
           await this.mutate(path, frozen.text, items => items.map(i => i.id === frozen.id ? { ...i, body,
-            ...(diagram?{diagram}:{}),...(diagramIssue?{diagramIssue}:{}), generation: { ...i.generation!, status, model, evidence } } : i));
+            ...(diagram?{diagram}:{}),...(skillDiagram?{skillDiagram}:{}),...(diagramIssue?{diagramIssue}:{}), generation: { ...i.generation!, status, model, evidence } } : i));
         }catch(error){await record({rule:'ink_persist',counts:validationCounts(result)});throw error;}
         job.status = status; job.retry = undefined;
       };

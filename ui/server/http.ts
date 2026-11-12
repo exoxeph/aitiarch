@@ -5,6 +5,7 @@ import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES} from '../shared/chat.ts';
 import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
 import {InsertionStore} from './insertion-store.ts';
+import {SKILL_DIAGRAM_CSP_HEADER} from '../shared/skill-diagram.ts';
 import { UiStateStore } from './ui-state-store.ts';
 import {ThreadStore} from './thread-store.ts';
 import {ThreadRuntime,type ThreadRequest} from './thread-runtime.ts';
@@ -330,6 +331,10 @@ export function createApp(opts: AppOptions) {
     }
 
     if(url.pathname==='/api/insertions'&&req.method==='GET')return json(res,200,await (await insertionsReady).reconcile(url.searchParams.get('path')??''));
+    // A skill's diagram: served only to be framed by this app, under a CSP that blocks all network (also injected in the document itself).
+    if(url.pathname==='/api/skill-diagram'&&req.method==='GET'){
+      try{const bytes=await (await assistance).skillDiagrams.read(url.searchParams.get('name')??'');res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':SKILL_DIAGRAM_CSP_HEADER,'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Cache-Control':'private, max-age=31536000, immutable'});return res.end(bytes);}catch{return json(res,404,{error:'not_found'});}
+    }
     if(url.pathname==='/api/diagram-asset'&&req.method==='GET'){
       try{const bytes=await (await insertionsReady).asset(url.searchParams.get('name')??'');res.writeHead(200,{'Content-Type':'image/svg+xml','Content-Security-Policy':"default-src 'none'; sandbox",'X-Content-Type-Options':'nosniff','Cache-Control':'private, max-age=31536000, immutable'});return res.end(bytes);}catch{return json(res,404,{error:'not_found'});}
     }
@@ -394,7 +399,7 @@ export function createApp(opts: AppOptions) {
     if (url.pathname.startsWith("/api/assistance/") && req.method === "PUT") {
       const b = await readBody(req) as Record<string, unknown>, service = await assistance;
       if (url.pathname === "/api/assistance/preview" || url.pathname === "/api/assistance/invoke") {
-        const input = { id: b.id, path: b.path, action: b.action, question: b.question, text: b.text, from: b.from, to: b.to } as Invocation;
+        const input = { id: b.id, path: b.path, action: b.action, question: b.question, text: b.text, from: b.from, to: b.to, ...(b.renderer === undefined ? {} : { renderer: b.renderer }) } as Invocation;
         if (url.pathname.endsWith("preview")) return json(res, 200, await service.preview(input));
         return json(res, 202, await service.start(input));
       }

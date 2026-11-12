@@ -109,6 +109,11 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   // only shows it as a fallback when that blob is not on screen (narrow layout), plus the job status lines.
   const sendRef = useRef<HTMLButtonElement>(null), hasPacket = draft?.packet !== undefined;
   const stepNode = draft ? nodeFor(draft.input.action, draft.input.question) : 'ask', persona = useNodeSettings(stepNode);
+  // Visualize only: who draws the diagram. Skill needs a skill attached to the Visualize step (Settings); Built-in is always there and the default.
+  const isVisualize = !!draft && draft.input.question === VISUALIZE_QUESTION, renderer = draft?.input.renderer ?? 'builtin';
+  const [visualizeSkills, setVisualizeSkills] = useState(0);
+  useEffect(() => { if (!isVisualize) return; let off = false; void api.nodes().then(r => { if (!off) setVisualizeSkills(r.nodes.visualize.skills.length); }).catch(() => {}); return () => { off = true; }; }, [isVisualize, draft?.input.id]);
+  const chooseRenderer = (next: 'builtin' | 'skill') => { if (!draft || busy || next === renderer) return; const input = { ...draft.input, renderer: next }; setDraft({ input }); void review(input); };
   useEffect(() => { if (hasPacket) sendRef.current?.focus(); }, [hasPacket]);
   const asking = !!draft && draft.input.action === 'ask' && !hasPacket && draft.input.question !== VISUALIZE_QUESTION;
   const draftSection = draft ? <section aria-label={`Review ${providerLabel} request`} className="invocation-review" data-frozen-selection={draft.input.text.slice(draft.input.from, draft.input.to)}
@@ -124,8 +129,16 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
     <p role="status" className="sr-only">{hasPacket ? 'Review ready. Press Enter to send, Escape to cancel.' : asking ? 'Type your question, then press Enter to review it. Escape cancels.' : ''}</p>
     {asking && <label>Question for {providerLabel}<input aria-label={`Question for ${providerLabel}`} placeholder="Ask about this selection…" maxLength={8000} autoFocus
       value={draft.input.question} onChange={e => setDraft({ input: { ...draft.input, question: e.target.value } })} /></label>}
-    <PersonaSwitch id={'step-' + stepNode} label={`How ${NODE_LABEL[stepNode]} works with you`} value={persona.persona} kept={persona.kept} disabled={busy}
-      onChange={p => void persona.choose(p).then(saved => { if (saved && hasPacket) void review(draft.input); })} />
+    {isVisualize && <fieldset className="persona-switch renderer-switch" disabled={busy}>
+      <legend className="persona-legend">Who draws it</legend>
+      <div className="persona-options">
+        <label className="persona-option"><input type="radio" name="renderer" value="builtin" checked={renderer === 'builtin'} onChange={() => chooseRenderer('builtin')} aria-describedby="renderer-line" /><span className="persona-seg">Built-in</span></label>
+        <label className="persona-option"><input type="radio" name="renderer" value="skill" checked={renderer === 'skill'} disabled={visualizeSkills === 0} onChange={() => chooseRenderer('skill')} aria-describedby="renderer-line" /><span className="persona-seg">Skill</span></label>
+      </div>
+      <p className="persona-line" id="renderer-line">{renderer === 'skill' ? 'A skill you attached to Visualize draws it as a web page. It runs in a sandbox with no network.' : visualizeSkills === 0 ? 'The app draws it from a short spec. To draw with a skill, attach one to Visualize in Settings.' : 'The app draws it from a short spec.'}</p>
+    </fieldset>}
+    {!(isVisualize && renderer === 'skill') && <PersonaSwitch id={'step-' + stepNode} label={`How ${NODE_LABEL[stepNode]} works with you`} value={persona.persona} kept={persona.kept} disabled={busy}
+      onChange={p => void persona.choose(p).then(saved => { if (saved && hasPacket) void review(draft.input); })} />}
     {persona.failed && <p role="alert" className="small">That choice could not be saved. Nothing was changed.</p>}
     {asking && <p className="small muted ask-hint">Enter to ask · Esc to cancel</p>}
     {hasPacket && <details className="what-is-sent"><summary>What will be sent</summary>

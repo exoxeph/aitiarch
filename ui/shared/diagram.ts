@@ -17,6 +17,8 @@ export const DIAGRAM_ISSUE_TEXT = {
   node_detail: 'a node detail is too long or unsafe', node_kind: 'unknown node kind', edge: 'a connection is malformed', edge_label: 'a connection label is too long or unsafe',
   focus: 'bad step list', group: 'bad grouping', comparison: 'a comparison cannot have connections or more than 5 items', tree: 'the tree is not a tree', id: 'duplicate or invalid ids',
   kind: 'this kind of diagram needs a different number of items and cannot have connections or groups', axes: 'the axis labels are malformed',
+  // The Skill renderer (shared/skill-diagram.ts): reasons are fixed words, never the skill's own output.
+  skill_too_large: 'the skill\'s document is over 300 KB', skill_no_document: 'the skill did not return an HTML document',
 } as const;
 export type DiagramIssueCode = keyof typeof DIAGRAM_ISSUE_TEXT;
 /** What is stored on an item when a diagram was rejected: the old generic value, or a specific code. */
@@ -24,7 +26,8 @@ export type DiagramIssue = 'invalid' | DiagramIssueCode;
 export const isDiagramIssue = (v: unknown): v is DiagramIssue => v === 'invalid' || (typeof v === 'string' && Object.hasOwn(DIAGRAM_ISSUE_TEXT, v));
 export const diagramIssueText = (v: string | undefined): string => (v && v !== 'invalid' && isDiagramIssue(v) ? DIAGRAM_ISSUE_TEXT[v as DiagramIssueCode] : 'invalid format');
 /** The one short sentence shown wherever a diagram could not be drawn; issue is a stored reason code or 'layout'. */
-export const unavailableText = (issue?: string): string => `Diagram unavailable: ${issue === 'layout' ? 'it could not be laid out' : diagramIssueText(issue)}. The text answer is preserved.`;
+export const unavailableText = (issue?: string): string => issue?.startsWith('skill_') ? `Diagram unavailable: ${diagramIssueText(issue)}.`
+  : `Diagram unavailable: ${issue === 'layout' ? 'it could not be laid out' : diagramIssueText(issue)}. The text answer is preserved.`;
 export type DiagramCheck = { ok: true; diagram: Diagram } | { ok: false; code: DiagramIssueCode; path: string };
 /** Strict check. The reason is a fixed code and a JSON path, never model text. */
 export function checkDiagram(value: unknown): DiagramCheck {

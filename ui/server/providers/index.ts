@@ -16,6 +16,7 @@ import {ClaudeChatStream} from './chat-stream.ts';
 import {isolationPasses} from './claude-events.ts';
 import {secretKinds} from '../chat/secrets.ts';
 import {composeInstruction,type SkillBlock} from '../../shared/instruction.ts';
+import {skillDiagramInstruction} from '../../shared/skill-diagram.ts';
 import {personaInstruction,type PersonaMode} from '../../shared/persona.ts';
 import {claudeUsageRecord,type UsageLog} from './usage.ts';
 import { ProductValidationError, validateResponseSchema, type ValidationRecord } from '../product-validation.ts';
@@ -34,6 +35,8 @@ export interface Request {
   /** The node's thinking-partner mode and any skills you attached to it (instruction mode). Both optional: absent means the prompt is unchanged. */
   persona?: PersonaMode;
   skills?: SkillBlock;
+  /** 'skill': the Visualize skill renderer. The reply is one HTML document, passed through as raw text (server/assistance.ts checks and saves it). */
+  render?: 'skill';
 }
 export type ErrorCode = 'unsupported_cli' | 'missing_cli' | 'not_logged_in' | 'timeout'
   | 'cancelled' | 'invalid_response' | 'output_limit' | 'provider_error' | 'context_limit';
@@ -129,7 +132,7 @@ export function prepareRequest(request: Request): { instruction: string; data: R
     };
     return { id: turn.id, user: clip(turn.user), assistant: clip(turn.assistant) };
   });
-  return { instruction:withExtras(request,instruction+'\n'+(wantsDiagram(request.question,request.selection)?visualizeInstruction:diagramInstruction)+(request.action==='think'?'\nReturn only one JSON object. No code fences or text before or after the JSON.':'')), omittedTurns: Math.max(0, request.turns.length - 4), clippedMessages,
+  return { instruction:request.render==='skill'?skillDiagramInstruction(request.skills):withExtras(request,instruction+'\n'+(wantsDiagram(request.question,request.selection)?visualizeInstruction:diagramInstruction)+(request.action==='think'?'\nReturn only one JSON object. No code fences or text before or after the JSON.':'')), omittedTurns: Math.max(0, request.turns.length - 4), clippedMessages,
     data: { id: request.id, action: request.action, question: redact(request.question),
       selection: redact(request.selection), note: redact(request.note),
       decisions: request.decisions.map(d => ({ id: d.id, text: redact(d.text) })), turns } };
@@ -291,7 +294,7 @@ export function createProvider(configuration: Configuration): Provider {
       });
       fileCount=(await readdir(cwd)).length;
       if (fileCount !== 0) throw new ProviderError('invalid_response');
-      const result=parseResult(config.provider, requestId, output, stream,request.chat===true);
+      const result=parseResult(config.provider, requestId, output, stream,request.chat===true||request.render==='skill'); // both want the reply as raw text
       if(config.provider==='claude'&&config.usageLog){
         try{await config.usageLog.write(claudeUsageRecord(result.usage,performance.now()-start,result.answer));}
         catch{/* Private telemetry failure must not discard a validated answer. */}
