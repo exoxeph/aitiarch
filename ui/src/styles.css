@@ -245,8 +245,15 @@ body { background: var(--canvas); }
 .margin-card { font-size: var(--text-control); }
 button, a, summary, input, select, textarea { transition: color var(--motion-color) var(--ease), background-color var(--motion-color) var(--ease), border-color var(--motion-color) var(--ease); }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+/* The editor draws no frame when it is clicked or selected in: the caret and the selection are the indicator. (It used to put an inset shadow on .cm-editor,
+   which spans the whole pane, so a line appeared across the page and down the edge of the margin cards.) After Tab or Shift+Tab (src/input-modality.ts) the
+   writing column alone gets a ring, kept clear of the margin rail. */
 .cm-content:focus-visible { outline: none; }
-.cm-editor.cm-focused { box-shadow: inset 0 0 0 1px var(--control-border); }
+.cm-editor .cm-content { --ring-inset: var(--page-inset); position: relative; }
+@media (max-width: 1099px) and (min-width: 721px) { .cm-editor .cm-content { --ring-inset: var(--space-5); } }
+/* The ring is drawn by a pseudo-element so its sides can differ: sideways it sits INSIDE the column's (empty) padding, so it never reaches a margin card, which can
+   overlap that padding; above and below it sits just outside the text, so it never cuts the first or last line. It takes no part in editing or layout. */
+html[data-input="keyboard"] .cm-content:focus-visible::after { content: ""; position: absolute; top: -10px; bottom: -10px; left: var(--ring-inset); right: var(--ring-inset); border: 2px solid var(--focus); border-radius: var(--radius-small); pointer-events: none; }
 @media (max-width: 1099px) and (min-width: 721px) {
   .editor-col { margin-right: var(--space-2); }
   .cm-content { padding-left: var(--space-5); padding-right: var(--space-5); }
