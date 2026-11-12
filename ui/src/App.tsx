@@ -84,6 +84,8 @@ export default function App() {
   const listeners = useRef(new Set<(e: ServerEvent) => void>());
   const loaded = useRef(false);
   useEffect(()=>{const open=(event:Event)=>{const detail=(event as CustomEvent<{id:string;thought?:boolean}>).detail;setThreadId(detail.id);setThoughtChat(detail.id);};window.addEventListener('open-thread',open);return()=>window.removeEventListener('open-thread',open);},[]);
+  // A Think or Ask review takes the stage: the note menu, if open, closes so it cannot sit over the review's Send button.
+  useEffect(()=>{const close=()=>setNoteMenuOpen(false);window.addEventListener('invocation-begin',close);return()=>window.removeEventListener('invocation-begin',close);},[]);
 
   // Intersection, document visibility and the visible pane determine "shown".
   // Completion in an inactive tab alone must never produce a ledger event.
@@ -168,8 +170,11 @@ export default function App() {
   const openRef = useRef(openNote); openRef.current = openNote;
   const notesCache = useRef<{ at: number; p: Promise<CiteNote[]> } | null>(null);
   const [jump, setJump] = useState<{ path: string; heading: string } | null>(null);
+  // Keyed on the note list itself, not the tree object: every tree refresh made a new environment, and reconfiguring the
+  // editors for it closed an open Think or Ask review under the user (the threads check caught it).
+  const pathsKey = paths.join("\n");
   const cite = useMemo(() => {
-    const have = new Set(paths);
+    const have = new Set(pathsKey ? pathsKey.split("\n") : []);
     return {
       has: (p: string) => have.has(p),
       open: (p: string, heading: string | null) => { void openRef.current(p); if (heading) setJump({ path: p, heading }); },
@@ -179,7 +184,7 @@ export default function App() {
       },
       preview: async (p: string) => { try { return previewText((await api.file(p)).text) || null; } catch { return null; } },
     };
-  }, [paths]);
+  }, [pathsKey]);
   // Backlinks for the open note: read again when it changes, and (briefly after) when any note or the tree changes on disk.
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   // The Constellation view, and the notes it hands to the chat ("Use as chat context").

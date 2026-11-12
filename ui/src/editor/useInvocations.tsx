@@ -76,6 +76,8 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
     view.current.dispatch({ effects: addInk.of({ id: input.id, kind: 'answer', body: 'Review request…', anchor, originalAnchor: anchor,
       attachment: { status: 'attached', from: input.from, to: input.to } }) });
     setDraft({ input });
+    // Attention moves to this review: popovers left open elsewhere (the note's "..." menu) close so they never cover it.
+    window.dispatchEvent(new CustomEvent('invocation-begin'));
     if (action === 'think' || visualize) void review(input);
   };
   const cancelPreview = () => { if (draft && view.current) view.current.dispatch({ effects: removeInk.of(draft.input.id) }); setDraft(null); };
