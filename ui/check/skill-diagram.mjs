@@ -146,7 +146,7 @@ try {
   assert.equal(await again.getAttribute('data-frozen-selection'), text.slice(from, to), 'the same selection is frozen again'); await again.getByRole('button', { name: /^Send to/ }).waitFor();
   assert.equal(await again.getByRole('radio', { name: 'Built-in' }).isChecked(), true); assert.equal(await again.getByRole('radio', { name: 'Skill' }).isDisabled(), false); assert.equal(calls.length, 1, 'no second call before Send');
   await again.getByRole('button', { name: /^Send to/ }).click(); await page.locator('.margin-card.thought-blob svg').first().waitFor();
-  assert.deepEqual(calls.at(-1), { render: 'builtin', skills: ['diagram-design'] }); assert.equal(await page.locator(`[data-skill-asset="${a.skillDiagram.asset}"] img`).count(), 1, 'the skill image is still there');
+  assert.deepEqual(calls.at(-1), { render: 'builtin', skills: [] }, 'Built-in carries no skills: attached skills are used only with the Skill renderer'); assert.equal(await page.locator(`[data-skill-asset="${a.skillDiagram.asset}"] img`).count(), 1, 'the skill image is still there');
 
   // E. Add to note: the still image goes into the note as one markdown image line, in the note's own BOM and CRLF, shown in the editor as an image; one Undo removes it.
   const original = Buffer.from('\ufeff' + text.replace(/\n/g, '\r\n')), notePath = path.join(root, 'fixture.md');
