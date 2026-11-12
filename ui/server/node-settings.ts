@@ -19,7 +19,8 @@ export interface NodeExtras {
  /** For the review. Null when the node has no skills attached. */
  review:SkillsReview|null;
 }
-export type ExtrasFor=(node:PersonaNode)=>Promise<NodeExtras>;
+/** With `one`, only a single attached skill is loaded: the one with that id if it is attached and installed, otherwise the first attached. */
+export type ExtrasFor=(node:PersonaNode,one?:{id?:string})=>Promise<NodeExtras>;
 
 export class NodeSettingsService {
  private ui:Pick<UiStateStore,'nodes'|'saveNodes'>;private discover:()=>Promise<SkillInfo[]>;
@@ -29,16 +30,22 @@ export class NodeSettingsService {
   if(!validSavedNodes(value))throw new Error('Invalid node settings.');
   return this.ui.saveNodes(value as SavedNodeSettings);
  }
- async extras(node:PersonaNode):Promise<NodeExtras>{
+ async extras(node:PersonaNode,one?:{id?:string}):Promise<NodeExtras>{
   const setting=(await this.get())[node],chosen:SkillInfo[]=[],missing:string[]=[];
   if(setting.skills.length){
    const byId=new Map((await this.discover()).map(s=>[s.id,s]));
    for(const id of setting.skills){const s=byId.get(id);if(s)chosen.push(s);else missing.push(id);}
   }
-  const skills=await loadSkillBlock(chosen);
+  // One at a time (the Skill renderer): never send them all silently. The pick, else the first attached, is the only one loaded.
+  const pick=one&&chosen.length?chosen.find(s=>s.id===one.id)??chosen[0]:null;
+  const skills=await loadSkillBlock(pick?[pick]:chosen);
   const names=[...new Set(skills.loaded.map(l=>l.name))].filter(n=>validSkillRefs([n]));
   const review:SkillsReview|null=setting.skills.length?{loaded:skills.loaded.map(l=>({name:l.name,tokens:l.tokens,truncated:l.truncated})),
    skipped:skills.skipped.map(name=>({name,reason:skills.reasons?.[name]??'unreadable'})),missing}:null;
+  if(review&&pick&&chosen.length>1){
+   review.choose=chosen.map(s=>({id:s.id,name:s.name}));review.picked=pick.id;
+   review.note=`${chosen.length} skills are attached to Visualize. A diagram is drawn by one skill at a time, so only ${pick.name} is sent. Choose another below to use it instead.`;
+  }
   return {persona:setting.persona,skills,names,missing,review};
  }
 }

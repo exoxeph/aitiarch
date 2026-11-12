@@ -19,6 +19,9 @@ export interface SkillsReview {
  missing:string[];
  /** One plain line shown with the list, when the skills attached to this step are not part of this request. */
  note?:string;
+ /** Skill renderer with several skills attached: the installed ones to pick from (in the order attached), and the id of the one that is sent. */
+ choose?:{id:string;name:string}[];
+ picked?:string;
 }
 export const SKILLS_ONLY_WITH_SKILL_RENDERER='Attached skills are used only with the Skill renderer.';
 

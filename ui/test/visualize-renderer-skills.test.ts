@@ -18,7 +18,7 @@ import type {PersonaNode} from '../shared/persona.ts';
 const roots:string[]=[];afterEach(async()=>{for(const r of roots.splice(0))await rm(r,{recursive:true,force:true,maxRetries:5,retryDelay:100});});
 vi.setConfig({testTimeout:15000,hookTimeout:15000});
 const ONLY_LINE='Attached skills are used only with the Skill renderer.';
-const extrasWith=(names:string[])=>vi.fn(async(_node:PersonaNode,_only?:string):Promise<NodeExtras>=>({persona:'grill',names,missing:[],
+const extrasWith=(names:string[])=>vi.fn(async(_node:PersonaNode,_one?:{id?:string}):Promise<NodeExtras>=>({persona:'grill',names,missing:[],
  review:names.length?{loaded:names.map(name=>({name,tokens:8,truncated:false})),skipped:[],missing:[]}:null,
  skills:{text:names.length?'## Skill: '+names[0]+'\nDraw it well.':'',loaded:names.map(n=>({id:'0123456789ab',name:n,chars:30,tokens:8,truncated:false,files:['SKILL.md']})),skipped:[],truncated:false}}));
 async function fixture(){

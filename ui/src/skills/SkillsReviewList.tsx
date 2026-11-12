@@ -20,6 +20,7 @@ export function SkillsReviewList({review}:{review?:SkillsReview|null}){
    </li>)}
    {review.missing.map(id=><li key={'m'+id}><span className="skills-review-state">A skill you attached is not installed (id {id}). Nothing from it is sent.</span></li>)}
   </ul>
+  {review.note&&<p className="skills-review-note">{review.note}</p>}
   <p className="skills-review-note">The exact text is in the instructions below.</p>
  </section>;
 }

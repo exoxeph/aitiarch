@@ -6,6 +6,8 @@ export interface Invocation {
   text: string; from: number; to: number;
   /** Visualize only: who draws the diagram. Absent means Built-in (the app's own spec pipeline). */
   renderer?: Renderer;
+  /** Skill renderer only: which attached skill draws it (a skill id). Absent means the first one attached. */
+  skill?: string;
 }
 export function freezeInvocation(input: Invocation) {
   if (!input || typeof input.id !== 'string' || !/^[\w-]{1,100}$/.test(input.id) || !['think', 'ask'].includes(input.action) ||
@@ -13,6 +15,7 @@ export function freezeInvocation(input: Invocation) {
       input.question.length > 8000 || new TextEncoder().encode(input.text).length > 65536 ||
       input.to - input.from > 8000 || (input.action === 'ask' && !input.question.trim())) throw new Error('Invalid invocation or context too large.');
   if (input.renderer !== undefined && (!['builtin', 'skill'].includes(input.renderer) || (input.renderer === 'skill' && (input.action !== 'ask' || input.question !== VISUALIZE_QUESTION)))) throw new Error('Invalid invocation or context too large.');
+  if (input.skill !== undefined && (input.renderer !== 'skill' || typeof input.skill !== 'string' || !/^[a-f0-9]{12}$/.test(input.skill))) throw new Error('Invalid invocation or context too large.');
   const anchor = captureAnchor(input.text, input.from, input.to);
   return Object.freeze({ ...input, anchor: structuredClone(anchor), selection: anchor.quote });
 }

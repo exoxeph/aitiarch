@@ -11,6 +11,7 @@ import { addInk, removeInk, setInk } from './ink.ts';
 import {rememberQuestion} from '../threads/questions.ts';
 import {Thinking} from '../ink/streaming.tsx';
 import {SkillsReviewList} from '../skills/SkillsReviewList.tsx';
+import {SkillPick} from '../skills/SkillPick.tsx';
 import {PersonaSwitch} from '../skills/PersonaSwitch.tsx';
 import {useNodeSettings} from '../skills/useNodeSettings.ts';
 import {NODE_LABEL} from '../skills/skills-model.ts';
@@ -113,7 +114,8 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   const isVisualize = !!draft && draft.input.question === VISUALIZE_QUESTION, renderer = draft?.input.renderer ?? 'builtin';
   const [visualizeSkills, setVisualizeSkills] = useState(0);
   useEffect(() => { if (!isVisualize) return; let off = false; void api.nodes().then(r => { if (!off) setVisualizeSkills(r.nodes.visualize.skills.length); }).catch(() => {}); return () => { off = true; }; }, [isVisualize, draft?.input.id]);
-  const chooseRenderer = (next: 'builtin' | 'skill') => { if (!draft || busy || next === renderer) return; const input = { ...draft.input, renderer: next }; setDraft({ input }); void review(input); };
+  const chooseRenderer = (next: 'builtin' | 'skill') => { if (!draft || busy || next === renderer) return; const { skill: _drop, ...rest } = draft.input, input: Invocation = { ...rest, renderer: next }; setDraft({ input }); void review(input); }; // a pick belongs to the Skill renderer only
+  const pickSkill = (id: string) => { if (!draft || busy) return; const input: Invocation = { ...draft.input, renderer: 'skill', skill: id }; setDraft({ input }); void review(input); };
   useEffect(() => { if (hasPacket) sendRef.current?.focus(); }, [hasPacket]);
   const asking = !!draft && draft.input.action === 'ask' && !hasPacket && draft.input.question !== VISUALIZE_QUESTION;
   const draftSection = draft ? <section aria-label={`Review ${providerLabel} request`} className="invocation-review" data-frozen-selection={draft.input.text.slice(draft.input.from, draft.input.to)}
@@ -137,6 +139,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       </div>
       <p className="persona-line" id="renderer-line">{renderer === 'skill' ? 'A skill you attached to Visualize draws it as a still image. Only a cleaned copy of its drawing is kept; nothing it sends can run.' : visualizeSkills === 0 ? 'The app draws it from a short spec. To draw with a skill, attach one to Visualize in Settings.' : 'The app draws it from a short spec.'}</p>
     </fieldset>}
+    {isVisualize && renderer === 'skill' && <SkillPick review={(draft.packet as { skills?: SkillsReview } | undefined)?.skills} disabled={busy} onPick={pickSkill} />}
     {!(isVisualize && renderer === 'skill') && <PersonaSwitch id={'step-' + stepNode} label={`How ${NODE_LABEL[stepNode]} works with you`} value={persona.persona} kept={persona.kept} disabled={busy}
       onChange={p => void persona.choose(p).then(saved => { if (saved && hasPacket) void review(draft.input); })} />}
     {persona.failed && <p role="alert" className="small">That choice could not be saved. Nothing was changed.</p>}

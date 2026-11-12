@@ -60,9 +60,9 @@ export class Assistance {
   async availability() { return { ...await this.provider.checkAvailability(), provider:this.provider.name??'claude' }; }
   private extras?: ExtrasFor;
   /** The node's persona goes on every request; its skills only when something loaded. Names are what gets recorded on the answer. */
-  private async withExtras(base: Request): Promise<{ request: Request; names: string[]; review: SkillsReview | null }> {
+  private async withExtras(base: Request, pick?: string): Promise<{ request: Request; names: string[]; review: SkillsReview | null }> {
     if (!this.extras) return { request: base, names: [], review: null };
-    const node = nodeFor(base.action, base.question), e = await this.extras(node);
+    const node = nodeFor(base.action, base.question), e = await (node === 'visualize' && base.render === 'skill' ? this.extras(node, { id: pick }) : this.extras(node));
     // Skills attached to Visualize belong to the Skill renderer. The Built-in renderer draws from the app's own JSON spec and carries none of them.
     if (node === 'visualize' && base.render !== 'skill') return { request: { ...base, persona: e.persona }, names: [],
       review: e.review ? { loaded: [], skipped: [], missing: [], note: SKILLS_ONLY_WITH_SKILL_RENDERER } : null };
@@ -71,7 +71,7 @@ export class Assistance {
   async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview }> {
     const frozen = freezeInvocation(input);
     const { request, review } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question,
-      selection: frozen.selection, note: frozen.text, decisions: [], turns: [], ...(frozen.renderer === 'skill' ? { render: 'skill' as const } : {}) });
+      selection: frozen.selection, note: frozen.text, decisions: [], turns: [], ...(frozen.renderer === 'skill' ? { render: 'skill' as const } : {}) }, frozen.skill);
     this.checkSkillRenderer(frozen.renderer, request);
     const packet = prepareRequest(request);
     // The instruction in the packet is the exact text; "skills" beside it says what was loaded, skipped or not installed.
@@ -102,7 +102,7 @@ export class Assistance {
     const availability = await this.provider.checkAvailability();
     if (!availability.available) throw new ProviderError(availability.code, availability.message);
     const { request, names } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question, selection: frozen.selection,
-      note: frozen.text, decisions: [], turns: [], ...(frozen.renderer === 'skill' ? { render: 'skill' as const } : {}) });
+      note: frozen.text, decisions: [], turns: [], ...(frozen.renderer === 'skill' ? { render: 'skill' as const } : {}) }, frozen.skill);
     this.checkSkillRenderer(frozen.renderer, request);
     // Transcript context stays none. Optional source selection is a later slice;
     // never discover a user's global sessions or transmit one implicitly.
