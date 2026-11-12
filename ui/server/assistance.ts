@@ -50,10 +50,11 @@ export class Assistance {
     const failed = (code: DiagramIssue) => ({ body: SKILL_DIAGRAM_FAILED_BODY, model, skillDiagram: undefined as SkillDiagramRef | undefined, diagramIssue: code as DiagramIssue | undefined });
     const document = extractDocument(redact(result.answer));
     if (!document) return failed('skill_no_document');
-    if (Buffer.byteLength(document) > SKILL_DIAGRAM_MAX_BYTES) return failed('skill_too_large');
     // A static image is the product: only the sanitizer's rebuilt svg is kept. The page itself is saved (for a click-only interactive version) only when no valid svg could be made.
     const svg = sanitizeSvgDocument(document);
     if (svg.ok) return { body: skillDiagramBody(skills), model, skillDiagram: await this.skillDiagrams.saveSvg(svg.svg) as SkillDiagramRef | undefined, diagramIssue: undefined as DiagramIssue | undefined };
+    // No image could be made. The page itself can be kept for the click-only interactive version, but only if it fits the 300 KB the store allows.
+    if (Buffer.byteLength(document) > SKILL_DIAGRAM_MAX_BYTES) return failed('skill_too_large');
     return { body: skillDiagramFallbackBody(skills, svg.reason), model, skillDiagram: { ...await this.skillDiagrams.saveHtml(document), why: svg.reason } as SkillDiagramRef | undefined, diagramIssue: undefined as DiagramIssue | undefined };
   }
   async availability() { return { ...await this.provider.checkAvailability(), provider:this.provider.name??'claude' }; }

@@ -47,6 +47,11 @@ describe('the Skill renderer',()=>{
   const files=await readdir(path.join(t.root,'assets'));expect(files).toEqual([item.skillDiagram.asset]);
   expect((await readFile(path.join(t.root,'assets',files[0]))).equals(Buffer.from(expected.svg,'utf8'))).toBe(true);
  });
+ it('a page of more than 300 KB with a small drawing in it becomes a static svg (the cap is on the drawing, not the page)',async()=>{
+  const big='<!doctype html><html><head><style>'+'.ui-a{color:red;margin:0}\n'.repeat(15000)+'</style></head><body><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9"><rect x="1" y="1" width="3" height="3"/></svg></body></html>';
+  expect(big.length).toBeGreaterThan(300*1024);const t=await boot(()=>big),{item}=await t.run('bigpage-1') as any;
+  expect(item.skillDiagram.asset).toMatch(/\.svg$/);expect(item.skillDiagram.why).toBeUndefined();expect(await readFile(path.join(t.root,'assets',item.skillDiagram.asset),'utf8')).toContain('<rect x="1" y="1" width="3" height="3"/>');
+ });
  it('a hostile svg is saved only in its sanitized form',async()=>{
   const hostile='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9" onload="alert(1)"><script>fetch("https://evil.test")</script><image href="https://evil.test/i.png"/><rect x="1" y="1" width="3" height="3"/></svg>';
   const t=await boot(()=>hostile),{item}=await t.run('svg-2') as any,saved=await readFile(path.join(t.root,'assets',item.skillDiagram.asset),'utf8');

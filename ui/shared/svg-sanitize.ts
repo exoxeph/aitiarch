@@ -5,10 +5,11 @@
 // the same input always gives the same bytes. The result is shown only as an <img>, which also cannot run scripts or load anything.
 import {SVG_ISSUE_TEXT,type SvgIssue} from './skill-diagram.ts'; // the reasons live with the client-safe module, so the page need not load this file
 export {SVG_ISSUE_TEXT};export type {SvgIssue};
-export const SVG_LIMITS=Object.freeze({pageCssBytes:3*1024*1024,parsedElements:20000,parseDepth:200,elements:2000,depth:32,bytes:300*1024,styleBytes:40*1024,attributes:48,valueLength:2000,pathLength:60000,textLength:4000});
+export const SVG_LIMITS=Object.freeze({inputBytes:4*1024*1024,pageCssBytes:3*1024*1024,parsedElements:200000,parseDepth:200,elements:2000,depth:32,bytes:300*1024,styleBytes:40*1024,attributes:48,valueLength:2000,pathLength:60000,textLength:4000});
 export type SvgResult={ok:true;svg:string}|{ok:false;reason:SvgIssue;text:string};
 
-interface El{name:string;attrs:[string,string][];kids:(El|string)[]}
+/** `from` and `to` are where the element starts and ends in the source text, so the size of the drawing's own source can be measured. */
+interface El{name:string;attrs:[string,string][];kids:(El|string)[];from?:number;to?:number}
 class Complex extends Error{}
 const NS='http://www.w3.org/2000/svg',XLINK='http://www.w3.org/1999/xlink';
 
@@ -33,9 +34,9 @@ function parse(src:string):El{
   if(src.startsWith('<![CDATA[',i)){const e=src.indexOf(']]>',i);text(src.slice(i+9,e<0?n:e),true);i=e<0?n:e+3;continue;}
   if(src[i+1]==='!'||src[i+1]==='?'){const e=src.indexOf('>',i);i=e<0?n:e+1;continue;}
   if(src[i+1]==='/'){END.lastIndex=i;const m=END.exec(src);if(!m){text('<');i++;continue;}
-   const name=m[1].toLowerCase();for(let k=stack.length-1;k>0;k--)if(stack[k].name.toLowerCase()===name){stack.length=k;break;}i=END.lastIndex;continue;}
+   const name=m[1].toLowerCase();for(let k=stack.length-1;k>0;k--)if(stack[k].name.toLowerCase()===name){for(let j=k;j<stack.length;j++)stack[j].to=END.lastIndex;stack.length=k;break;}i=END.lastIndex;continue;}
   START.lastIndex=i;const s=START.exec(src);if(!s){text('<');i++;continue;}
-  const el:El={name:s[1],attrs:[],kids:[]};let at=START.lastIndex,closed=false;
+  const el:El={name:s[1],attrs:[],kids:[],from:i};let at=START.lastIndex,closed=false;
   for(;;){TAIL.lastIndex=at;const t=TAIL.exec(src);if(t){closed=t[1]==='/';at=TAIL.lastIndex;break;}
    ATTR.lastIndex=at;const a=ATTR.exec(src);if(!a||ATTR.lastIndex===at){closed=false;at=-1;break;}
    if(el.attrs.length<400)el.attrs.push([a[1],decode(a[2]??a[3]??a[4]??'')]);at=ATTR.lastIndex;}
@@ -43,10 +44,11 @@ function parse(src:string):El{
   if(++count>SVG_LIMITS.parsedElements)throw new Complex();
   stack[stack.length-1].kids.push(el);i=at;
   const lower=el.name.toLowerCase();
-  if(closed||VOID.has(lower))continue;
-  if(RAW.has(lower)){const e=new RegExp('</'+lower+'\\b','i').exec(src.slice(i));const end=e?i+e.index:n;el.kids.push(clean(src.slice(i,end)));const close=src.indexOf('>',end);i=e&&close>=0?close+1:n;continue;}
+  if(closed||VOID.has(lower)){el.to=at;continue;}
+  if(RAW.has(lower)){const e=new RegExp('</'+lower+'\\b','i').exec(src.slice(i));const end=e?i+e.index:n;el.kids.push(clean(src.slice(i,end)));const close=src.indexOf('>',end);i=e&&close>=0?close+1:n;el.to=i;continue;}
   stack.push(el);if(stack.length>SVG_LIMITS.parseDepth)throw new Complex();
  }
+ for(const e of stack)if(e.to===undefined)e.to=n;
  return root;
 }
 const size=(e:El):number=>1+e.kids.reduce((a:number,k)=>a+(typeof k==='string'?0:size(k)),0);
@@ -209,8 +211,11 @@ function drawingMatcher(svg:El){
 export function sanitizeSvgDocument(document:string):SvgResult{
  const no=(reason:SvgIssue):SvgResult=>({ok:false,reason,text:SVG_ISSUE_TEXT[reason]});
  try{
+  // Raw input is bounded so the parser cannot be fed without limit. The page may be large; what is capped below is the DRAWING and what is kept.
+  if(Buffer.byteLength(document)>SVG_LIMITS.inputBytes)return no('svg_page_too_large');
   const tree=parse(document),found=topSvgs(tree);if(!found.length)return no('svg_none');
   const svg=found.reduce((best,c)=>size(c)>size(best)?c:best);
+  if(Buffer.byteLength(document.slice(svg.from??0,svg.to??document.length))>SVG_LIMITS.bytes)return no('svg_too_large'); // the drawing's own source, not the page around it
   // Page styling the drawing relied on. Custom properties come from page-level rules (:root, html, body, *, svg) and the root's own style.
   // The page's own CSS (outside the drawing) is pruned below before any size check; the drawing's own <style> is its own and is checked as it is.
   const pageCss=allStyles(tree,[],svg).join('\n'),ownCss=allStyles(svg).join('\n');

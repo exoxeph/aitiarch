@@ -15,11 +15,12 @@ export const SKILL_DIAGRAM_SANDBOX='allow-scripts';
 export const SKILL_DIAGRAM_SVG_CSP_HEADER="default-src 'none'; style-src 'unsafe-inline'; sandbox";
 export const SKILL_ASSET_PATTERN=/^diagram-([a-f0-9]{64})\.(html|svg)$/;
 /** Why a skill's page could not be shown as an image. Plain words for the person; never the skill's own text. */
-export type SvgIssue='svg_none'|'svg_too_large'|'svg_too_complex';
+export type SvgIssue='svg_none'|'svg_too_large'|'svg_too_complex'|'svg_page_too_large';
 export const SVG_ISSUE_TEXT:Record<SvgIssue,string>={
  svg_none:'the skill did not draw a picture the app can show',
  svg_too_large:'the drawing is too large to show as an image',
  svg_too_complex:'the drawing has too many parts or is nested too deeply',
+ svg_page_too_large:'the page the skill returned is too large to read',
 };
 export const SVG_ISSUES=Object.keys(SVG_ISSUE_TEXT) as SvgIssue[];
 export const SKILL_DIAGRAM_URL=(asset:string)=>'/api/skill-diagram?name='+encodeURIComponent(asset);
