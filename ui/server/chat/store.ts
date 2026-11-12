@@ -2,7 +2,7 @@ import {execFile} from 'node:child_process';import {promisify} from 'node:util';
 import {lstat,mkdir,open,readFile,rename,unlink} from 'node:fs/promises';
 import path from 'node:path';import {randomUUID} from 'node:crypto';
 import {normalizeRel,isNotePath} from '../paths.ts';
-import {validId,validAt,exactKeys} from '../../shared/threads.ts';
+import {validId,validAt,exactKeys,validSkillRefs} from '../../shared/threads.ts';
 import type {ChatMessage} from '../../shared/chat.ts';
 const exec=promisify(execFile),missing=(e:unknown)=>(e as NodeJS.ErrnoException).code==='ENOENT';
 export interface ChatDocument {v:1;note:string;messages:ChatMessage[]}
@@ -43,7 +43,7 @@ export class ChatStore {
   if(!exactKeys(d,['v','note','messages'])||d.v!==1||d.note!==note||!Array.isArray(d.messages)||d.messages.length>200)throw new Error('Invalid chat sidecar.');
   const ids=new Set<string>();
   for(const m of d.messages){
-   if(!exactKeys(m,['id','role','body','at','provider','model','evidence','usage','insertionBlocked'])||!validId(m.id)||ids.has(m.id)||m.role!=='assistant'||m.provider!=='claude'||!validAt(m.at)||typeof m.body!=='string'||!m.body.trim()||m.body.length>100000||typeof m.insertionBlocked!=='boolean'||!(m.model===null||typeof m.model==='string'&&/^[\w.:-]{1,100}$/.test(m.model))||!Array.isArray(m.evidence)||m.evidence.length>32)throw new Error('Invalid chat message.');
+   if(!exactKeys(m,['id','role','body','at','provider','model','evidence','usage','insertionBlocked',...(m.skills===undefined?[]:['skills'])])||(m.skills!==undefined&&!validSkillRefs(m.skills))||!validId(m.id)||ids.has(m.id)||m.role!=='assistant'||m.provider!=='claude'||!validAt(m.at)||typeof m.body!=='string'||!m.body.trim()||m.body.length>100000||typeof m.insertionBlocked!=='boolean'||!(m.model===null||typeof m.model==='string'&&/^[\w.:-]{1,100}$/.test(m.model))||!Array.isArray(m.evidence)||m.evidence.length>32)throw new Error('Invalid chat message.');
    ids.add(m.id);
    for(const e of m.evidence)if(!exactKeys(e,['sourceId','sourceHash','quote'])||typeof e.sourceId!=='string'||!/^[A-Z][0-9]{1,3}$/.test(e.sourceId)||typeof e.sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(e.sourceHash)||typeof e.quote!=='string'||e.quote.length>240)throw new Error('Invalid chat evidence.');
    if(m.usage!==null&&(!exactKeys(m.usage,['inputTokens','outputTokens',...(m.usage.cachedTokens===undefined?[]:['cachedTokens'])])||!Object.values(m.usage).every(n=>typeof n==='number'&&Number.isFinite(n)&&n>=0)))throw new Error('Invalid chat usage.');

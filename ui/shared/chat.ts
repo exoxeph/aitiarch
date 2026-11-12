@@ -17,6 +17,8 @@ export interface ChatMessage {
  evidence:{sourceId:string;sourceHash:string;quote:string}[];
  usage:{inputTokens:number;outputTokens:number;cachedTokens?:number}|null;
  insertionBlocked:boolean;
+ /** Names of the skills that shaped this reply. Absent in older files. Names only: never paths or skill text. */
+ skills?:string[];
  /** Session-derived replies never enter the repository or Add to note. */
  ephemeral?:true;
 }

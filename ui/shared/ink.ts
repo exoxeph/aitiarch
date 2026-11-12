@@ -11,6 +11,8 @@ export interface Generation {
   status: "pending" | "complete" | "error" | "cancelled";
   evidence: { sourceId: string; sourceHash: string; quote: string }[];
   dismissed: boolean;
+  /** Names of the skills that shaped this answer. Absent in older files. Names only: never paths or skill text. */
+  skills?: string[];
 }
 
 export interface InkItem {
