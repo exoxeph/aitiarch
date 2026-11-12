@@ -11,7 +11,7 @@ import { chromium } from 'playwright-core';
 import { Store } from '../server/store.ts';
 import { NoteWatcher } from '../server/watch.ts';
 import { createApp } from '../server/http.ts';
-import { createProvider } from '../server/providers/index.ts';
+import { createProvider, prepareRequest } from '../server/providers/index.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const out = path.resolve(process.env.BATCH2A_OUTPUT ?? '');
@@ -24,7 +24,10 @@ const external = [];
 async function inApp(scenario, run) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'aitiarch-chat-send-'));
   await writeFile(path.join(root, 'fixture.md'), '# Chat fixture\n\nA unique selected sentence.\n');
-  const provider = createProvider({ provider: 'claude', contract: 'claude-canary-2.1.205', command: process.execPath, prefixArgs: [script, scenario, path.join(root, 'record'), 'claude'], failureLog: { write: async () => {} } });
+  // The real provider code, wrapped only to record exactly what it would send to the CLI (prepareRequest is the function invoke() calls).
+  const captured = [];
+  const real = createProvider({ provider: 'claude', contract: 'claude-canary-2.1.205', command: process.execPath, prefixArgs: [script, scenario, path.join(root, 'record'), 'claude'], failureLog: { write: async () => {} } });
+  const provider = { name: real.name, checkAvailability: real.checkAvailability, invoke: (r, o) => { captured.push(prepareRequest(r)); return real.invoke(r, o); } };
   const store = await Store.open(root), watcher = new NoteWatcher(store), app = createApp({ store, watcher, distDir: path.join(here, '../dist'), provider });
   try {
     const url = `http://127.0.0.1:${await app.listen(0)}/?debug=1`;
@@ -39,7 +42,7 @@ async function inApp(scenario, run) {
     await composer.fill('What does the fixture say?'); await composer.press('Enter');
     const review = panel.getByRole('region', { name: 'What will be sent' }); await review.waitFor();
     await review.getByRole('button', { name: 'Send', exact: true }).click();
-    await run({ page, panel });
+    await run({ page, panel, captured });
     await context.close();
   } finally { watcher.stop(); await app.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 }
@@ -47,7 +50,7 @@ async function inApp(scenario, run) {
 try {
   // 1. The reply streams in, even though the CLI sends a status event and a thinking block first.
   // The second CLI sends the thinking delta the way the real one does on the owner's machine: with a signature, an index and counters.
-  for (const ok of ['verified-chat-real-stream', 'verified-chat-thinking-extras']) await inApp(ok, async ({ page, panel }) => {
+  for (const ok of ['verified-chat-real-stream', 'verified-chat-thinking-extras']) await inApp(ok, async ({ page, panel, captured }) => {
     const reply = panel.locator('.chat-ai').last();
     // First the text streams in plainly (with a Stop button); when the reply is complete it is formatted and offers Add to note.
     await page.waitForFunction(() => /real-shape reply/.test(document.querySelector('#chat-panel .chat-ai')?.textContent ?? ''));
@@ -58,7 +61,27 @@ try {
     assert(!(await panel.innerText()).includes('could not complete'), 'and nothing says the call failed');
     assert(!(await panel.innerText()).includes('private reasoning'), 'the model\'s private reasoning never reaches the page');
     assert(!(await page.content()).includes('SECRET-THINKING-TEXT-42'), 'thinking text is nowhere on the page, not even hidden');
+    // "This note" is on by default: the note text must be in the request that went to the provider.
+    await panel.getByRole('button', { name: /^This note/ }).waitFor();
+    assert.equal(captured.length, 1, 'one request reached the provider');
+    assert(captured[0].data.note.includes('A unique selected sentence.'), 'the note text reached the provider');
+    assert.match(captured[0].instruction, /"note" field of the data/, 'and the request says where the note is');
+    assert.equal(await panel.locator('.chat-unstructured').count(), 0, 'a structured reply carries no unstructured label');
     await page.screenshot({ path: path.join(out, `chat-send-ok-${ok}.png`) });
+  });
+
+  // 1b. A reply in plain prose is shown, quietly labelled, with no claims; JSON the model wrapped in prose or a fence is extracted as a normal reply.
+  await inApp('verified-chat-reply-prose', async ({ page, panel }) => {
+    await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').waitFor();
+    assert.match((await panel.locator('.chat-ai').last().innerText()).replace(/\s+/g, ' '), /budget is 40 dollars in one place and 60 in another/, 'the prose reply is shown');
+    assert.equal((await panel.locator('.chat-unstructured').innerText()).trim(), 'Unstructured reply: no claims to check', 'with the quiet label');
+    assert.equal(await panel.locator('.chat-error').count(), 0, 'and it is not an error');
+    await page.screenshot({ path: path.join(out, 'chat-send-unstructured.png') });
+  });
+  for (const wrapped of ['verified-chat-reply-wrapped', 'verified-chat-reply-fenced']) await inApp(wrapped, async ({ panel }) => {
+    await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').waitFor();
+    assert.match((await panel.locator('.chat-ai').last().innerText()).replace(/\s+/g, ' '), /Yes: 40 vs 60\./, `${wrapped}: the answer inside the JSON is shown`);
+    assert.equal(await panel.locator('.chat-unstructured').count(), 0, `${wrapped}: and it is a normal structured reply, no label`);
   });
 
   // 2. Failures say why, in words, and keep "No retry was made." and Dismiss.
@@ -67,6 +90,7 @@ try {
     ['verified-chat-login', [/sign in|log in/i]],
     ['verified-chat-exit', [/exit code 3/, /boom: something broke/]],
     ['verified-chat-unknown-event', [/shape Aitiarch expects/, /brand_new_kind/]],
+    ['verified-chat-reply-takeaway', [/shape Aitiarch expects/, /wrong fields/]],
   ];
   for (const [scenario, patterns] of failing) {
     await inApp(scenario, async ({ page, panel }) => {
@@ -84,5 +108,5 @@ try {
     });
   }
   assert.deepEqual(external, [], 'no request left this machine');
-  console.log(JSON.stringify({ passed: true, scenarios: ['verified-chat-real-stream', 'verified-chat-thinking-extras', ...failing.map(f => f[0])] }, null, 1));
+  console.log(JSON.stringify({ passed: true, scenarios: ['verified-chat-real-stream', 'verified-chat-thinking-extras', 'verified-chat-reply-prose', 'verified-chat-reply-wrapped', 'verified-chat-reply-fenced', ...failing.map(f => f[0])] }, null, 1));
 } finally { await browser.close(); }
