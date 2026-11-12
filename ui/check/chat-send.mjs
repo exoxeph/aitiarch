@@ -89,9 +89,16 @@ try {
     ['verified-chat-flag-rejected', [/--include-partial-messages/, /does not accept/i]],
     ['verified-chat-login', [/sign in|log in/i]],
     ['verified-chat-exit', [/exit code 3/, /boom: something broke/]],
-    ['verified-chat-unknown-event', [/shape Aitiarch expects/, /brand_new_kind/]],
+    // An event kind Aitiarch has never seen is not fatal on its own; this CLI then ends without a reply, and the reason says so.
+    ['verified-chat-unknown-event', [/shape Aitiarch expects/, /ended before it was complete/]],
     ['verified-chat-reply-takeaway', [/shape Aitiarch expects/, /wrong fields/]],
   ];
+  // 2b. A CLI that adds an event kind Aitiarch has never seen, then answers: the reply arrives and no error is shown.
+  await inApp('verified-chat-unknown-then-reply', async ({ panel }) => {
+    await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').waitFor();
+    assert.match((await panel.locator('.chat-ai').last().innerText()).replace(/\s+/g, ' '), /Synthetic reply after a new event kind\./, 'the reply after an unknown event is shown');
+    assert.equal(await panel.locator('.chat-error').count(), 0, 'and no error is shown');
+  });
   for (const [scenario, patterns] of failing) {
     await inApp(scenario, async ({ page, panel }) => {
       const error = panel.locator('.chat-error'); await error.waitFor();
@@ -108,5 +115,5 @@ try {
     });
   }
   assert.deepEqual(external, [], 'no request left this machine');
-  console.log(JSON.stringify({ passed: true, scenarios: ['verified-chat-real-stream', 'verified-chat-thinking-extras', 'verified-chat-reply-prose', 'verified-chat-reply-wrapped', 'verified-chat-reply-fenced', ...failing.map(f => f[0])] }, null, 1));
+  console.log(JSON.stringify({ passed: true, scenarios: ['verified-chat-real-stream', 'verified-chat-thinking-extras', 'verified-chat-reply-prose', 'verified-chat-reply-wrapped', 'verified-chat-reply-fenced', 'verified-chat-unknown-then-reply', ...failing.map(f => f[0])] }, null, 1));
 } finally { await browser.close(); }

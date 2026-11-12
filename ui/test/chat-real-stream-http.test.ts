@@ -33,8 +33,13 @@ it.each([
  expect(e.code).toBe('provider_failed');expect(e.reason,text).toMatchObject(expected);
  expect(text,'the question never appears in an error').not.toContain('volunteer picnic');
 },20000);
-it('an unknown event is named by type only, so the reason says what was unexpected without echoing its contents',async()=>{
- const e=failure((await chatWith('verified-chat-unknown-event')).text);expect(e.reason.detail).toContain('system/brand_new_kind');expect(JSON.stringify(e)).not.toContain('synthetic');
+it('an unknown event with no reply after it fails because the reply never arrived, without echoing the event',async()=>{
+ const e=failure((await chatWith('verified-chat-unknown-event')).text);expect(e.reason.detail).toBe('the reply ended before it was complete');expect(JSON.stringify(e)).not.toContain('synthetic');
+},20000);
+it('an event kind Aitiarch has never seen does not stop a reply that follows it',async()=>{
+ const {text}=await chatWith('verified-chat-unknown-then-reply');
+ expect(text,text.slice(0,300)).toContain('event: complete');expect(text).not.toContain('event: error');expect(text).not.toContain('synthetic');
+ expect(done(text).message.body).toBe('Synthetic reply after a new event kind.');
 },20000);
 it('a CLI that exits with an error shows its exit code and a sanitized tail, without paths or key-like values',async()=>{
  const {text}=await chatWith('verified-chat-exit'),e=failure(text);

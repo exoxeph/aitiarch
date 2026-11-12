@@ -106,7 +106,16 @@ if (scenario.startsWith('verified-')) {
   if(scenario==='verified-chat-flag-rejected'){process.stderr.write("error: unknown option '--include-partial-messages'\n");process.exit(2);}
   if(scenario==='verified-chat-login'){process.stderr.write('Not logged in. Please log in.\n');process.exit(1);}
   if(scenario==='verified-chat-exit'){process.stderr.write('boom: something broke at C:\\Users\\someone\\private\\x.md token=supersecretvalue\n');process.exit(3);}
-  if(scenario==='verified-chat-unknown-event'){console.log(JSON.stringify({type:'system',subtype:'brand_new_kind',note:'synthetic'}));setTimeout(()=>process.exit(0),3000);}
+  // An event kind Aitiarch has never seen, then the CLI ends without a reply (synthetic).
+  if(scenario==='verified-chat-unknown-event'){console.log(JSON.stringify({type:'system',subtype:'brand_new_kind',note:'synthetic'}));await new Promise(r=>setTimeout(r,200));process.exit(0);}
+  // A future CLI adds an event kind Aitiarch has never seen, then answers normally (synthetic).
+  if(scenario==='verified-chat-unknown-then-reply'){
+    const text='{"answer":"Synthetic reply after a new event kind.","claims":[]}',emit=event=>console.log(JSON.stringify({type:'stream_event',event}));
+    console.log(JSON.stringify({type:'system',subtype:'brand_new_kind',note:'synthetic'}));console.log(JSON.stringify({type:'brand_new_type'}));
+    emit({type:'message_start',message:{role:'assistant'}});emit({type:'content_block_start',index:0,content_block:{type:'text',text:''}});
+    emit({type:'content_block_delta',index:0,delta:{type:'text_delta',text}});emit({type:'content_block_stop',index:0});emit({type:'message_stop'});
+    console.log(JSON.stringify({type:'result',subtype:'success',result:text,usage:{input_tokens:20,output_tokens:10}}));process.exit(0);
+  }
   // The stream the installed Claude CLI really produces with --include-partial-messages (event names and key sets captured from a
   // real call; all text here is synthetic): a "requesting" status event, then a thinking block before the text block.
   if(scenario==='verified-chat-real-stream'||scenario==='verified-chat-thinking-extras'){

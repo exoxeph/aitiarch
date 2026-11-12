@@ -13,6 +13,7 @@ import { flagFrom, safeTail, type FailureReason } from '../../shared/chat-failur
 import { parseChatReply } from './answer-json.ts';
 import { parseAnswerJson } from './answer-json.ts';
 import {ClaudeChatStream} from './chat-stream.ts';
+import {isolationPasses} from './claude-events.ts';
 import {secretKinds} from '../chat/secrets.ts';
 import {composeInstruction,type SkillBlock} from '../../shared/instruction.ts';
 import {personaInstruction,type PersonaMode} from '../../shared/persona.ts';
@@ -165,7 +166,8 @@ function parseResult(provider: ProviderName, id: string, stdout: string, stream 
     let response: unknown, model: string | null = null, usage: Result['usage'] = null, unstructured = false;
     if (provider === 'claude') {
       const events = stream ? stdout.trim().split(/\r?\n/).map(line => JSON.parse(line)) : [];
-      if (stream && !inspectClaudeCanary(events, []).passed) throw new Error('the stream failed the isolation check');
+      // Chat uses the tolerant normalizer (only harmful events are fatal); Think and Ask keep the canary's stricter check for now.
+      if (stream && !(chat ? isolationPasses(events) : inspectClaudeCanary(events, []).passed)) throw new Error('the stream failed the isolation check');
       const envelope = stream ? events.find(e => e.type === 'result') : JSON.parse(stdout);
       if (envelope.is_error || envelope.subtype !== 'success') throw new Error('the final result was not a success');
       if (chat) {

@@ -12,8 +12,12 @@ it('delivers real partial deltas across UTF-8 and JSONL chunk boundaries, requir
  const texts:string[]=[],s=new ClaudeChatStream(t=>texts.push(t)),bytes=Buffer.from(stream([],'{"answer":"Héllo","claims":[]}'));
  for(const b of bytes)s.push(Buffer.from([b]));s.finish();expect(texts).toEqual(['{"answer":"Héllo","claims":[]}']);
 });
-it.each([{type:'system',subtype:'hook_started'},{type:'unexpected'},event({type:'content_block_start',content_block:{type:'tool_use'}}),event({type:'content_block_delta',delta:{type:'input_json_delta',partial_json:'{}'}})])('rejects hook, unknown or tool partial events',e=>{
+it.each([{type:'system',subtype:'hook_started'},event({type:'content_block_start',content_block:{type:'tool_use'}}),event({type:'content_block_delta',delta:{type:'input_json_delta',partial_json:'{}'}})])('rejects hook or tool partial events',e=>{
  expect(()=>new ClaudeChatStream(()=>{}).push(Buffer.from(stream([e])))).toThrow();
+});
+it('an unknown event is counted by its type words and does not stop the reply',()=>{
+ const texts:string[]=[],s=new ClaudeChatStream(t=>texts.push(t));s.push(Buffer.from(stream([{type:'unexpected'},{type:'system',subtype:'brand_new_kind',note:'x'}])));s.finish();
+ expect(texts).toEqual(['{"answer":"Hi","claims":[]}']);expect(s.unknown).toEqual(['unexpected','system/brand_new_kind']);
 });
 // What the installed Claude CLI really emits with --include-partial-messages (shapes captured from a real call; all text synthetic).
 const ids={uuid:'11111111-1111-4111-8111-111111111111',session_id:'22222222-2222-4222-8222-222222222222'};
@@ -34,11 +38,12 @@ it('accepts the status event and the thinking block the real CLI emits, and stre
  const texts:string[]=[],s=new ClaudeChatStream(t=>texts.push(t));s.push(Buffer.from(realStream()));s.finish();
  expect(texts).toEqual(['{"answer":"Hi","claims":[]}']);expect(texts.join('')).not.toContain('private reasoning');
 });
+// A status event is the CLI's own progress note and cannot do harm, so its exact shape no longer matters.
 it.each([
  ['a status event with no status',{type:'system',subtype:'status'}],
  ['a status event with a payload',{type:'system',subtype:'status',status:'requesting',payload:'x',...ids}],
  ['a status that is not a plain word',{type:'system',subtype:'status',status:'Requesting now!',...ids}],
-])('still rejects %s',(_n,status)=>{expect(()=>new ClaudeChatStream(()=>{}).push(Buffer.from(realStream({status})))).toThrow();});
+])('tolerates %s',(_n,status)=>{const texts:string[]=[],s=new ClaudeChatStream(t=>texts.push(t));s.push(Buffer.from(realStream({status})));s.finish();expect(texts).toEqual(['{"answer":"Hi","claims":[]}']);});
 // The investigator already reads the same real stream and accepts any signature_delta. A signature delta may carry more than its signature:
 // extra plain fields are tolerated (they are never shown), but nested values and oversized ones are not.
 it('tolerates extra plain fields on a signature delta, as the real CLI evidently sends',()=>{
@@ -54,29 +59,27 @@ it('ignores a thinking delta that carries extra index, signature and counter fie
  s.push(Buffer.from(realStream({thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:secret,signature:'sig-field',index:0,thinking_tokens:5,partial:true,note:null}}})));s.finish();
  expect(texts).toEqual(['{"answer":"Hi","claims":[]}']);expect(texts.join('')).not.toContain(secret);
 });
-it('names the inner delta or block type of an unexpected event, so a mismatch says exactly what it was',()=>{
- const over={thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'x',more:{a:1}}}};
- expect(()=>{const s=new ClaudeChatStream(()=>{});s.push(Buffer.from(realStream(over)));s.finish();}).toThrow(/stream_event\/content_block_delta\/thinking_delta/);
-});
+// Thinking is never shown or kept, so the shape of a thinking or signature delta does not matter. Only its size is bounded.
 it.each([
- ['a nested value in a signature delta',{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'sig',more:{a:1}}}],
- ['an array in a signature delta',{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'sig',more:[1]}}],
- ['an oversized signature delta',{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'x'.repeat(250000)}}],
- ['a signature delta key that is not a plain name',{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'sig','C:\\secret':'x'}}],
-])('still rejects %s',(_n,thinkingDelta)=>{expect(()=>{const s=new ClaudeChatStream(()=>{});s.push(Buffer.from(realStream({thinkingDelta})));s.finish();}).toThrow();});
-it.each([
+ ['a nested value in a signature delta',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'sig',more:{a:1}}}}],
+ ['a signature delta key that is not a plain name',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'sig','C:\\secret':'x'}}}],
  ['a thinking block that starts with text',{thinkingStart:{type:'content_block_start',index:0,content_block:{type:'thinking',thinking:'already',signature:''}}}],
  ['a thinking block with an extra field',{thinkingStart:{type:'content_block_start',index:0,content_block:{type:'thinking',thinking:'',signature:'',extra:1}}}],
  ['a thinking delta with a nested value',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'x',more:{a:1}}}}],
- ['a thinking delta with an array value',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'x',more:[1]}}}],
  ['a thinking delta with no thinking text',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',signature:'sig'}}}],
- ['a thinking delta key that is not a plain name',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'x','C:\\secret':'y'}}}],
+])('tolerates %s and never emits it',(_n,over)=>{const texts:string[]=[],s=new ClaudeChatStream(t=>texts.push(t));s.push(Buffer.from(realStream(over)));s.finish();expect(texts).toEqual(['{"answer":"Hi","claims":[]}']);});
+it.each([
+ ['an oversized signature delta',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'x'.repeat(250000)}}}],
  ['an oversized thinking block',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'x'.repeat(250000)}}}],
 ])('still rejects %s',(_n,over)=>{expect(()=>{const s=new ClaudeChatStream(()=>{});s.push(Buffer.from(realStream(over)));s.finish();}).toThrow();});
-it('rejects truncated streams, nonempty tools, post-result events, and mismatched final output',()=>{
- for(const text of [JSON.stringify(init)+'\n',stream().replace('"tools":[]','"tools":["Read"]'),stream()+JSON.stringify(init)+'\n',stream().replace('"result":"{','"result":"changed{')]){
+it('rejects truncated streams, nonempty tools and a second session',()=>{
+ for(const text of [JSON.stringify(init)+'\n',stream().replace('"tools":[]','"tools":["Read"]'),stream()+JSON.stringify(init)+'\n']){
   expect(()=>{const s=new ClaudeChatStream(()=>{});s.push(Buffer.from(text));s.finish();}).toThrow();
  }
+});
+it('when the final result differs from the streamed text, the result wins and the mismatch is counted',()=>{
+ const s=new ClaudeChatStream(()=>{});s.push(Buffer.from(stream().replace('"result":"{','"result":"changed{')));s.finish();
+ expect(s.finalText).toBe('changed{"answer":"Hi","claims":[]}');expect(s.mismatch).toBe(true);
 });
 it('isolated fake CLI streams on the existing product path; missing partial flag fails closed',async()=>{
  const root=await mkdtemp(path.join(os.tmpdir(),'aitiarch-m2-cli-'));try{
