@@ -90,6 +90,11 @@ async function pluginCandidates(root:SkillRoot):Promise<Candidate[]>{
  const walk=async(dir:string,segs:string[])=>{
   if(segs.length>8||++seen>20000)return;
   let entries;try{entries=await readdir(dir,{withFileTypes:true});}catch{return;}
+  // A plugin can keep its one SKILL.md at its root, next to .claude-plugin/plugin.json. Only that marker makes a stray SKILL.md a skill.
+  if(segs.length>=1&&entries.some(e=>e.name==='SKILL.md'&&e.isFile())&&(await isFile(path.join(dir,'.claude-plugin','plugin.json'))||await isFile(path.join(dir,'.codex-plugin','plugin.json')))){
+   const last=segs.at(-1)!,hasVersion=VERSION.test(last)&&segs.length>=2,plugin=hasVersion?segs.at(-2)!:last;
+   out.push({root,skillPath:path.join(dir,'SKILL.md'),dir,plugin,version:hasVersion?last:null,folder:plugin});
+  }
   if(segs.at(-1)==='skills'){
    for(const e of entries){
     const sub=path.join(dir,e.name);if(SKIP.has(e.name)||!(e.isDirectory()||(e.isSymbolicLink()&&await isDir(sub))))continue;

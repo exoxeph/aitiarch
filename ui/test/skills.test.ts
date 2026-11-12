@@ -1,6 +1,7 @@
 import {afterEach,describe,expect,it} from 'vitest';
 import {mkdtemp,mkdir,readdir,rm,writeFile} from 'node:fs/promises';
 import os from 'node:os';import path from 'node:path';
+import {RECOMMENDED,markInstalled} from '../server/skill-recommended.ts';
 import {defaultRoots,discoverSkills,parseSkillFrontmatter,estimateTokens,type SkillRoot} from '../server/skills.ts';
 
 // The Skill library (2.6): read-only discovery of skills you already installed. Nothing is copied, installed or run.
@@ -84,6 +85,45 @@ describe('plugin caches',()=>{
  it('reports the plugin as the source and the root kind as its family',async()=>{
   const root=await tree({'m/p/2.0.0/skills/a/SKILL.md':skill('a','d')});
   expect(await discoverSkills([plugins(root,'codex-plugin')])).toMatchObject([{source:'p',sourceKind:'codex-plugin'}]);
+ });
+});
+
+describe('a skill at the root of a plugin',()=>{
+ // Some plugins put their one SKILL.md next to .claude-plugin/plugin.json instead of under skills/<folder>/. Only a folder with that marker counts.
+ it('finds the root SKILL.md of a plugin, named after the plugin, from the newest version',async()=>{
+  const root=await tree({
+   'mkt/explain/0.7.0/.claude-plugin/plugin.json':'{}','mkt/explain/0.7.0/SKILL.md':skill('visual-explainer','old'),
+   'mkt/explain/0.8.1/.claude-plugin/plugin.json':'{}','mkt/explain/0.8.1/SKILL.md':skill('visual-explainer','new'),
+   'mkt/explain/0.8.1/references/SKILL.md':skill('inner','an example inside the skill'),
+  });
+  const found=await discoverSkills([plugins(root)]);
+  expect(found.map(s=>`${s.name}:${s.description}:${s.source}`)).toEqual(['visual-explainer:new:explain']);
+  expect(found[0].dir).toBe(path.join(root,'mkt','explain','0.8.1'));expect(found[0].path).toBe(path.join(root,'mkt','explain','0.8.1','SKILL.md'));
+ });
+ it('reads both the root skill and skills/<folder> of the same plugin',async()=>{
+  const root=await tree({'m/p/1.0.0/.claude-plugin/plugin.json':'{}','m/p/1.0.0/SKILL.md':skill('main','root'),'m/p/1.0.0/skills/extra/SKILL.md':skill('extra','folder')});
+  expect((await discoverSkills([plugins(root)])).map(s=>s.name).sort()).toEqual(['extra','main']);
+ });
+ it('accepts the Codex marker and reports the root kind',async()=>{
+  const root=await tree({'m/p/1.0.0/.codex-plugin/plugin.json':'{}','m/p/1.0.0/SKILL.md':skill('x','d')});
+  expect(await discoverSkills([plugins(root,'codex-plugin')])).toMatchObject([{name:'x',source:'p',sourceKind:'codex-plugin'}]);
+ });
+ it('ignores a SKILL.md with no plugin marker (an example, not a skill)',async()=>{
+  const root=await tree({'m/p/1.0.0/SKILL.md':skill('stray','x'),'m/p/1.0.0/docs/examples/SKILL.md':skill('example','x')});
+  expect(await discoverSkills([plugins(root)])).toEqual([]);
+ });
+ it('uses the folder name when the root skill has no name of its own',async()=>{
+  const root=await tree({'m/p/1.0.0/.claude-plugin/plugin.json':'{}','m/p/1.0.0/SKILL.md':'Just text.\n'});
+  expect(await discoverSkills([plugins(root)])).toMatchObject([{name:'p',source:'p'}]);
+ });
+ it('does not read flat roots this way',async()=>{
+  const root=await tree({'.claude-plugin/plugin.json':'{}','SKILL.md':skill('x','d')});
+  expect(await discoverSkills([flat(root)])).toEqual([]);
+ });
+ it('lets the recommended card see a plugin whose skill is at its root as installed, and only that card',async()=>{
+  const root=await tree({'m/diagram-design/0.1.0/.claude-plugin/plugin.json':'{}','m/diagram-design/0.1.0/SKILL.md':skill('diagrams','draws')});
+  const by=Object.fromEntries(markInstalled(RECOMMENDED,await discoverSkills([plugins(root)])).map(r=>[r.id,r]));
+  expect(by['diagram-design']).toMatchObject({installed:true,foundAs:'diagrams'});expect(by.archify.installed).toBe(false);expect(by['vibe-wise'].installed).toBe(false);
  });
 });
 
