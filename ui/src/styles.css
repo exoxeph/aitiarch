@@ -904,10 +904,21 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .chat-flag .chat-ask-again { font: inherit; margin-left: 4px; }
 .chat-claims { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
 .chat-claims summary { cursor: pointer; }
-.chat-claims ul { margin: 4px 0 0; padding-left: 18px; }
-.chat-claims li { margin: 2px 0; overflow-wrap: anywhere; }
-.chat-claims li[data-state="no_valid_source"], .chat-claims li[data-state="not_found"] { color: var(--ink-text); }
-.chat-claim-quote { font-style: italic; quotes: "\201C" "\201D"; }
+/* Sources: one chip per claim, shaped like the @ citation pills in notes, with the filled AI mark so it reads as the AI's claim. The state is always in words;
+   the outline only backs the words up (solid = found, dashed = quote not found, double = no valid source). No side stripes. */
+.claim-sources { margin: 6px 0 0; }
+.claim-sources-title { margin: 0 0 4px; font: 600 11px/1.3 var(--font-ui); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.claim-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.claim-chips li { margin: 0; min-width: 0; max-width: 100%; }
+.claim-chip { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; max-width: 100%; box-sizing: border-box; padding: 3px 9px 3px 4px; border-radius: 999px; background: transparent;
+  color: var(--ink-text); font: 12px/1.35 var(--font-ui); border: 1px solid var(--control-border); overflow-wrap: anywhere; }
+.claim-chip[data-state="not_found"] { border-style: dashed; }
+.claim-chip[data-state="no_valid_source"] { border: 3px double var(--control-border); padding: 1px 7px 1px 2px; }
+.claim-ai { padding: 2px 6px 1px; border-radius: 4px; background: var(--ai-ink); color: var(--ai-surface); font: 700 10px/1.2 var(--font-ui); letter-spacing: .08em; }
+.claim-kind { display: inline-grid; place-items: center; min-width: 16px; height: 16px; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--control-border); font: 600 10px/1 var(--font-ui); color: var(--muted); }
+.claim-label { color: var(--ink-text); }
+.claim-state { color: var(--muted); white-space: nowrap; }
+.claim-chip[data-state="not_found"] .claim-state, .claim-chip[data-state="no_valid_source"] .claim-state { color: var(--ink-text); font-weight: 600; }
 .chat-ai p.used-skills { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
 .used-skills { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); overflow-wrap: anywhere; }
 .used-skills-label { font-weight: 600; }

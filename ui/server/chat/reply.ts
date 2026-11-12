@@ -4,6 +4,7 @@
 // not found marks that claim, never the reply. A reply that leans on the sources but cites nothing is flagged. Nothing is hidden,
 // rewritten or retried here. Older replies in the {answer, claims} JSON shape are still accepted.
 import {parseChatReply} from '../providers/answer-json.ts';
+import {normalizeQuote} from '../../shared/quote-match.ts';
 import {NO_CITATION_REASONS,type ChatClaim,type CitationIssue,type ClaimSourceKind,type NoCitationReason} from '../../shared/chat.ts';
 
 export type ClaimsBlock=
@@ -38,12 +39,8 @@ export function parseClaimsBlock(text:string):ClaimsBlock{
  return {body,block:'malformed'};
 }
 
-/** Whitespace, typographic quotes and Markdown marks (emphasis, code, links, headings, quote and list markers) do not count when matching. */
-export function normalizeQuote(text:string):string{
- return text.normalize('NFKC').replace(/[\u2018\u2019\u201A\u201B]/g,"'").replace(/[\u201C\u201D\u201E\u201F]/g,'"')
-  .replace(/\[([^\]]*)\]\([^)]*\)/g,'$1').replace(/^[ \t]*(?:#{1,6}[ \t]+|>[ \t]?|[-*+][ \t]+|\d+[.)][ \t]+)/gm,'')
-  .replace(/[*_`~]/g,'').replace(/\s+/g,' ').trim();
-}
+// Moved, byte for byte, to shared/ so the page's "Show in note" matches quotes exactly as this gate does. Behaviour here is unchanged.
+export {normalizeQuote};
 
 const STOP=new Set(('a an the and or but of to in on at for with is are was were be been being it its this that these those as by from you your '
  +'i me my we our they them he she his her not no yes do does did so if then than there here what which who whom how why when where can could '

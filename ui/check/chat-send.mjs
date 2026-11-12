@@ -92,11 +92,11 @@ try {
     await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').waitFor();
     const claims = panel.locator('.chat-claims'); await claims.waitFor();
     assert.equal(await claims.evaluate((d) => d.open), true, 'the list is open by itself when some claim needs a look');
-    const items = (await claims.locator('li').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
-    assert.equal(items.length, 5, `all five claims are listed (saw ${items.length})`);
-    assert.equal(items.filter((t) => t.startsWith('Claim had no valid source')).length, 4, 'four say "Claim had no valid source"');
-    assert.match(items[1], /^Claim had no valid source: The budget is 40 dollars$/, 'with the quote the model gave');
-    assert.match(items[0], /^Quote not found in your note/, 'the claim with a valid id that is not in the note says so');
+    const items = (await claims.locator('.claim-chips li').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
+    assert.equal(items.length, 5, `all five claims are one chip each (saw ${items.length})`);
+    assert.equal(items.filter((t) => /No valid source$/.test(t)).length, 4, 'four say "No valid source"');
+    assert(items.every((t) => t.startsWith('AI ')), 'every chip carries the AI mark');
+    assert.match(items[0], /Quote not found$/, 'the claim with a valid id that is not in the note says so');
     assert.match(await panel.locator('.chat-ai').last().innerText(), /Several points\./, 'the reply itself is shown');
     await page.screenshot({ path: path.join(out, 'chat-send-claims-no-valid-source.png') });
   });

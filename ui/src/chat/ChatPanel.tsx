@@ -31,6 +31,8 @@ export interface ChatPanelProps {
  settingsVersion:number;
  /** Notes chosen in the Constellation ("Use as chat context"): sent as the Other notes module, shown in the review first. */
  extraNotes?:string[];onClearExtraNotes?:()=>void;
+ /** Source chips: scroll the editor to a claim's quote and mark it for a moment (false when the quote is not in the current note), and cite the note at the cursor. */
+ onShowQuote?:(quote:string)=>boolean;onCiteClaim?:(heading:{text:string;slug:string;level:number}|null)=>boolean;
 }
 
 function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:ChatReview;stopAsking:boolean;setStopAsking:(v:boolean)=>void;onSend:()=>void;onCancel:()=>void}){
@@ -57,7 +59,7 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
 }
 
 /** The right-hand chat: streamed replies from the per-note chat backend, with what is sent always reviewable first. */
-export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,onAddText,onOpenSettings,settingsVersion,extraNotes=[],onClearExtraNotes}:ChatPanelProps){
+export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,onAddText,onOpenSettings,settingsVersion,extraNotes=[],onClearExtraNotes,onShowQuote=()=>false,onCiteClaim=()=>false}:ChatPanelProps){
  const otherNotes=extraNotes.filter(p=>p!==path);
  const [chips,setChips]=useState<ContextChip[]>(()=>DEFAULT_CONTEXT.map(c=>({...c}))),[turns,setTurns]=useState<Turn[]>([]),[draft,setDraft]=useState('');
  const [pending,setPending]=useState<ChatReview|null>(null),[stopAsking,setStopAsking]=useState(false),[busy,setBusy]=useState(false),[peek,setPeek]=useState<ContextChip['id']|null>(null);
@@ -181,7 +183,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
       {t.text?<p className="chat-stream">{t.text}<span className="chat-caret" aria-hidden="true"/></p>:<div className="chat-thinking"><Thinking/></div>}
       <div className="chat-message-tools"><button type="button" className="chat-stop" onClick={stop}>Stop</button></div></div>}
      {!t.trail&&t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span><ReplyMarkdown text={t.text}/>{t.message?.unstructured&&<p className="chat-unstructured">{UNSTRUCTURED_LABEL}</p>}{t.message?.echo&&<p className="chat-flag chat-echo">{ECHO_LABEL}</p>}
-      {t.message&&<ReplyNotes message={t.message} question={t.question} busy={composing} onAskAgain={q=>void submit(q)}/>}<UsedSkills names={t.message?.skills}/>
+      {t.message&&<ReplyNotes message={t.message} question={t.question} busy={composing} onAskAgain={q=>void submit(q)} note={{path,noteText,onShow:onShowQuote,onCite:onCiteClaim}}/>}<UsedSkills names={t.message?.skills}/>
       {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
       <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}>Add to note</button></div></div>}
      {!t.trail&&t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason,t.error.errorName)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button></div>}
