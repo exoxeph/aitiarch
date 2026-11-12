@@ -15,7 +15,7 @@ import { prepareRequest, ProviderError, redact, type Provider, type Request } fr
 import { ProductValidationError, validateProductResult, validationCounts, type ValidationLog, type ValidationRecord } from './product-validation.ts';
 import { privateValidationLog } from './providers/failure-metrics.ts';
 import type { ExtrasFor } from './node-settings.ts';
-import { nodeFor, type SkillsReview } from '../shared/node-settings.ts';
+import { nodeFor, SKILLS_ONLY_WITH_SKILL_RENDERER, type SkillsReview } from '../shared/node-settings.ts';
 
 interface Job { path: string; controller: AbortController; done: Promise<void>; run: () => Promise<void>; status: 'queued' | 'pending' | 'complete' | 'error' | 'cancelled' | 'persistence_error'; retry?: () => Promise<void> }
 export class Assistance {
@@ -62,7 +62,10 @@ export class Assistance {
   /** The node's persona goes on every request; its skills only when something loaded. Names are what gets recorded on the answer. */
   private async withExtras(base: Request): Promise<{ request: Request; names: string[]; review: SkillsReview | null }> {
     if (!this.extras) return { request: base, names: [], review: null };
-    const e = await this.extras(nodeFor(base.action, base.question));
+    const node = nodeFor(base.action, base.question), e = await this.extras(node);
+    // Skills attached to Visualize belong to the Skill renderer. The Built-in renderer draws from the app's own JSON spec and carries none of them.
+    if (node === 'visualize' && base.render !== 'skill') return { request: { ...base, persona: e.persona }, names: [],
+      review: e.review ? { loaded: [], skipped: [], missing: [], note: SKILLS_ONLY_WITH_SKILL_RENDERER } : null };
     return { request: { ...base, persona: e.persona, ...(e.skills.loaded.length ? { skills: e.skills } : {}) }, names: e.names, review: e.review };
   }
   async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview }> {

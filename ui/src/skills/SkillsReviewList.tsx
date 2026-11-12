@@ -7,6 +7,7 @@ const WHY={total_cap:'the 48,000-character limit for all skills was already used
 
 export function SkillsReviewList({review}:{review?:SkillsReview|null}){
  if(!review)return null;
+ if(review.note&&!review.loaded.length&&!review.skipped.length&&!review.missing.length)return <section className="skills-review" aria-label="Skills in this request"><h4 className="skills-review-title">Skills in this request</h4><p className="skills-review-note">None. {review.note}</p></section>;
  return <section className="skills-review" aria-label="Skills in this request">
   <h4 className="skills-review-title">Skills in this request</h4>
   <ul className="skills-review-list">

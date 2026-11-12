@@ -42,7 +42,8 @@ describe('thoughts (Think, Ask, Visualize)',()=>{
   const f=await fixture(),{seen,provider}=capturing(),extras=extrasWith(['grill-me']),a=new Assistance(f.store,f.ink,provider,()=>{},undefined,extras);
   await a.start(input('t1','think',''));await settled(f,'t1');await a.start(input('t2','ask','Why?'));await settled(f,'t2');await a.start(input('t3','ask',VISUALIZE_QUESTION));await settled(f,'t3');
   expect(extras.mock.calls.map(c=>c[0])).toEqual(['think','ask','visualize']);
-  for(const r of seen){expect(r.persona).toBe('grill');const t=prepareRequest(r).instruction;expect(t).toContain(SKILL_HEADING);expect(t).toContain('Ask one question at a time.');expect(t.endsWith(HARD_RULES)).toBe(true);}
+  expect(seen[2].persona).toBe('grill');expect(seen[2].skills).toBeUndefined(); // Visualize with the Built-in renderer: persona yes, skills only with the Skill renderer (visualize-renderer-skills.test.ts)
+  for(const r of seen.slice(0,2)){expect(r.persona).toBe('grill');const t=prepareRequest(r).instruction;expect(t).toContain(SKILL_HEADING);expect(t).toContain('Ask one question at a time.');expect(t.endsWith(HARD_RULES)).toBe(true);}
   await a.close();
  });
  it('records only the names of the skills used on the generation',async()=>{

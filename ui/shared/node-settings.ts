@@ -17,7 +17,10 @@ export interface SkillsReview {
  skipped:{name:string;reason:import('./instruction.ts').SkipReason}[];
  /** Attached skill ids that are no longer installed. */
  missing:string[];
+ /** One plain line shown with the list, when the skills attached to this step are not part of this request. */
+ note?:string;
 }
+export const SKILLS_ONLY_WITH_SKILL_RENDERER='Attached skills are used only with the Skill renderer.';
 
 export const validSkillId=(v:unknown):v is string=>typeof v==='string'&&/^[a-f0-9]{12}$/.test(v);
 
