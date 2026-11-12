@@ -3,16 +3,17 @@
 // iframe (allow-scripts, never allow-same-origin, CSP blocking all network) ONLY after an explicit click on "Show interactive version": until then no
 // iframe exists, nothing is requested and nothing runs.
 import {SKILL_DIAGRAM_SANDBOX,SKILL_DIAGRAM_URL,SVG_ISSUE_TEXT,type SkillDiagramRef} from '../../shared/skill-diagram.ts';
+import {scoped} from '../project-base.ts';
 import './diagrams.css';
 const skillLabel=(skills?:readonly string[])=>skills?.length?skills.join(', '):'a skill';
 export const isStaticSvg=(ref:SkillDiagramRef)=>ref.asset.endsWith('.svg');
 export function skillImage(ref:SkillDiagramRef,skills:readonly string[]|undefined,large:boolean):HTMLImageElement{
- const i=document.createElement('img');i.src=SKILL_DIAGRAM_URL(ref.asset);i.alt=`Diagram drawn by the ${skillLabel(skills)} skill`;i.decoding='async';i.referrerPolicy='no-referrer';i.draggable=false;
+ const i=document.createElement('img');i.src=scoped(SKILL_DIAGRAM_URL(ref.asset));i.alt=`Diagram drawn by the ${skillLabel(skills)} skill`;i.decoding='async';i.referrerPolicy='no-referrer';i.draggable=false;
  i.className=large?'skill-diagram-image skill-diagram-image-large':'skill-diagram-image';return i;
 }
 export function skillFrame(ref:SkillDiagramRef,skills:readonly string[]|undefined,large:boolean):HTMLIFrameElement{
  const f=document.createElement('iframe');
- f.setAttribute('sandbox',SKILL_DIAGRAM_SANDBOX);f.referrerPolicy='no-referrer';f.src=SKILL_DIAGRAM_URL(ref.asset);
+ f.setAttribute('sandbox',SKILL_DIAGRAM_SANDBOX);f.referrerPolicy='no-referrer';f.src=scoped(SKILL_DIAGRAM_URL(ref.asset));
  f.title=`Interactive version of the diagram from the ${skillLabel(skills)} skill, shown in a sandbox`;f.className=large?'skill-diagram-frame skill-diagram-frame-large':'skill-diagram-frame';
  return f;
 }

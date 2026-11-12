@@ -148,6 +148,23 @@ try {
   await again.getByRole('button', { name: /^Send to/ }).click(); await page.locator('.margin-card.thought-blob svg').first().waitFor();
   assert.deepEqual(calls.at(-1), { render: 'builtin', skills: ['diagram-design'] }); assert.equal(await page.locator(`[data-skill-asset="${a.skillDiagram.asset}"] img`).count(), 1, 'the skill image is still there');
 
+  // E. Add to note: the still image goes into the note as one markdown image line, in the note's own BOM and CRLF, shown in the editor as an image; one Undo removes it.
+  const original = Buffer.from('\ufeff' + text.replace(/\n/g, '\r\n')), notePath = path.join(root, 'fixture.md');
+  const cardOf = (host) => host.locator('xpath=ancestor::*[contains(@class,"margin-card")][1]');
+  await cardOf(hostA).getByRole('button', { name: 'Add to note' }).click();
+  await until('the note to be saved with the image', async () => (await readFile(notePath)).includes(Buffer.from(a.skillDiagram.asset)));
+  const added = await readFile(notePath); report.noteHasBom = added.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf]));
+  assert(report.noteHasBom, 'the BOM is still there'); const addedText = added.toString('utf8');
+  assert.equal(addedText.replace(/\r\n/g, '').includes('\n'), false, 'every line break is still CRLF'); assert.equal(addedText.replace(/\r\n/g, '').includes('\r'), false);
+  assert.match(addedText, new RegExp(`> \\[!ai\\]\\r\\n> Diagram drawn by the diagram-design skill\\. It is shown as a static image\\.\\r\\n> !\\[AI diagram: diagram-design\\]\\(assets/${a.skillDiagram.asset}\\)`));
+  assert(addedText.startsWith(original.toString('utf8').slice(0, original.toString('utf8').indexOf('The app')) ), 'text before the selection is untouched');
+  const figure = page.locator('.cm-editor figure.cm-image img'); await figure.first().waitFor(); assert.match(await figure.first().getAttribute('src'), /^\/api\/skill-diagram\?name=diagram-[a-f0-9]{64}\.svg$/);
+  assert.equal(await figure.first().evaluate(async (i) => { await i.decode(); return i.naturalWidth; }), 300, 'the editor shows the sanitized svg as an image');
+  await page.waitForTimeout(1200); assert.deepEqual(hits, [], 'the evil server saw nothing from the editor either'); assert.equal(await page.locator('.cm-editor iframe').count(), 0);
+  await page.screenshot({ path: path.join(out, 'skill-diagram-in-note.png') });
+  await page.evaluate(() => { const v = window.__aitiarch['fixture.md'].view; v.focus(); }); await page.keyboard.press('Control+z');
+  await until('Undo to restore the note', async () => (await readFile(notePath)).equals(original)); report.undoRestoresBytes = true;
+
   // B. A page with no drawing: a fallback. Nothing is requested or run until the click.
   const b = await runSkill('hostile', 1); report.fallback = b.item.skillDiagram;
   assert.match(b.item.skillDiagram.asset, /\.html$/); assert.equal(b.item.skillDiagram.why, 'svg_none'); assert.match(b.item.body, /could not be shown as an image/);
@@ -170,6 +187,19 @@ try {
   await page.waitForTimeout(2000); assert.deepEqual(hits, [], 'even after the click, the evil server saw nothing: ' + hits.join(', ')); assert.deepEqual(popups, []); assert(page.url().startsWith(base));
   await b.host.screenshot({ path: path.join(out, 'skill-diagram-fallback.png') });
   await b.host.getByRole('button', { name: 'Hide interactive version' }).click(); assert.equal(await b.host.locator('iframe').count(), 0, 'Hide removes the iframe');
+
+  // F. Add the fallback to the note: a link to the saved page. In the editor it is a control only; no iframe and no request until the click.
+  await cardOf(b.host).getByRole('button', { name: 'Add to note' }).click();
+  await until('the note to be saved with the link', async () => (await readFile(notePath)).includes(Buffer.from(b.item.skillDiagram.asset)));
+  const linked = (await readFile(notePath)).toString('utf8'); assert.match(linked, new RegExp(`> \\[AI diagram, interactive version: diagram-design\\]\\(assets/${b.item.skillDiagram.asset}\\)\\r\\n`));
+  assert(!linked.includes(`![AI diagram, interactive`), 'a link, not an image'); const control = page.locator('.cm-editor .cm-skill-page').first(); await control.waitFor();
+  const before = responses.filter((r2) => r2.url.includes(b.item.skillDiagram.asset)).length;
+  assert.equal(await page.locator('.cm-editor iframe').count(), 0, 'no iframe in the editor before the click'); await page.waitForTimeout(1000);
+  assert.equal(responses.filter((r2) => r2.url.includes(b.item.skillDiagram.asset)).length, before, 'and the page is not requested for the editor either');
+  await control.getByRole('button', { name: 'Show interactive version' }).click(); const live = page.locator('.cm-editor .cm-skill-page iframe'); await live.waitFor();
+  assert.equal(await live.getAttribute('sandbox'), 'allow-scripts'); await control.getByRole('button', { name: 'Hide interactive version' }).click(); assert.equal(await page.locator('.cm-editor iframe').count(), 0);
+  await page.evaluate(() => { window.__aitiarch['fixture.md'].view.focus(); }); await page.keyboard.press('Control+z'); await until('Undo to restore the note', async () => (await readFile(notePath)).equals(original));
+  await page.waitForTimeout(1500); assert.deepEqual(hits, [], 'the evil server still saw nothing');
 
   // C. A while(true){} page: never fetched, never run, and the app stays responsive. (It is not clicked: a user who clicks gets what they asked for.)
   const c = await runSkill('loop', 2); assert.match(c.item.skillDiagram.asset, /\.html$/);

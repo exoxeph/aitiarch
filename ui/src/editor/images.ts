@@ -5,15 +5,57 @@ import DOMPurify from "dompurify";
 import { Prec } from "@codemirror/state";
 import { EditorView, keymap, WidgetType } from "@codemirror/view";
 import { scoped } from "../project-base.ts";
+import { SKILL_DIAGRAM_URL } from "../../shared/skill-diagram.ts";
+import { skillFrame } from "../diagrams/skill-frame.ts";
 
 const ASSET = /^ai-diagram-[a-f0-9]{64}\.svg$/;
+// A skill's diagram: the saved static svg (an image) or, when no svg could be made, its page (a link, opened only on a click).
+const SKILL_SVG = /^diagram-[a-f0-9]{64}\.svg$/, SKILL_PAGE = /^diagram-[a-f0-9]{64}\.html$/;
 
 /** The local URL for an inserted diagram asset, or null when the path is anything else. */
 export function imageSrc(url: string): string | null {
   const clean = url.trim().replace(/^<|>$/g, "");
   const name = clean.split(/[\\/]/).pop() ?? "";
   if (/^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("//")) return null; // never a remote or data: URL
+  if (SKILL_SVG.test(name)) return scoped(SKILL_DIAGRAM_URL(name));
   return ASSET.test(name) ? scoped(`/api/diagram-asset?name=${name}`) : null;
+}
+/** The saved page's file name when a link points at a skill's interactive fallback, else null. Local paths only. */
+export function skillPageName(url: string): string | null {
+  const clean = url.trim().replace(/^<|>$/g, "");
+  if (/^[a-z][a-z0-9+.-]*:/i.test(clean) || clean.startsWith("//")) return null;
+  const name = clean.split(/[\\/]/).pop() ?? "";
+  return SKILL_PAGE.test(name) ? name : null;
+}
+/** Display only, beside a link to a skill's saved page: a control that opens the page in a sandboxed iframe ON CLICK. Until then no iframe exists and nothing is requested. */
+export class SkillPageWidget extends WidgetType {
+  constructor(readonly asset: string) {
+    super();
+  }
+  eq(o: SkillPageWidget) {
+    return o.asset === this.asset;
+  }
+  toDOM(view: EditorView) {
+    const host = document.createElement("span");
+    host.className = "cm-skill-page";
+    host.contentEditable = "false";
+    const stage = document.createElement("span");
+    stage.className = "cm-skill-stage";
+    let live: HTMLIFrameElement | undefined;
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.textContent = "Show interactive version";
+    toggle.addEventListener("click", () => {
+      if (live) { live.remove(); live = undefined; toggle.textContent = "Show interactive version"; }
+      else { live = skillFrame({ asset: this.asset, bytes: 1 }, undefined, false); stage.replaceChildren(live); toggle.textContent = "Hide interactive version"; }
+      view.requestMeasure();
+    });
+    host.append(toggle, stage);
+    return host;
+  }
+  ignoreEvent() {
+    return true;
+  }
 }
 
 const observers = new WeakMap<HTMLElement, ResizeObserver>();

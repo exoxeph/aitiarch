@@ -5,6 +5,7 @@ import type {InkItem} from '../shared/ink.ts';
 import type {InkStore} from './ink-store.ts';import type {Store} from './store.ts';import type {LedgerStore} from './ledger-store.ts';
 import {normalizeRel} from './paths.ts';import {previewThoughtInsertion} from '../shared/thoughts.ts';
 import {diagramSvg,type DiagramLayout} from '../shared/diagram-svg.ts';
+import {SkillDiagramStore} from './skill-diagram-store.ts';
 export interface BringInput {path:string;id:string;noteVersion:string;layout?:DiagramLayout;theme?:'light'|'dark';replyId?:string}
 export interface BringPreview {noteVersion:string;changes:{from:number;to:number;insert:string};authorship:'ai';insertedBy:'human';assetName?:string}
 /** The message to insert as an item-shaped value: the thought's first answer, or one of its replies. */
@@ -19,8 +20,8 @@ const hash=(s:string|Buffer)=>createHash('sha256').update(s).digest('hex');
 const assetPattern=/^ai-diagram-[a-f0-9]{64}\.svg$/;
 /** Durable write-ahead intent. This class never writes Markdown. */
 export class InsertionStore {
- private ink:InkStore;private store:Store;private ledger:LedgerStore;private tail:Promise<unknown>=Promise.resolve();
- constructor(ink:InkStore,store:Store,ledger:LedgerStore){this.ink=ink;this.store=store;this.ledger=ledger;}
+ private ink:InkStore;private store:Store;private ledger:LedgerStore;private tail:Promise<unknown>=Promise.resolve();private skillFiles:SkillDiagramStore;
+ constructor(ink:InkStore,store:Store,ledger:LedgerStore){this.ink=ink;this.store=store;this.ledger=ledger;this.skillFiles=new SkillDiagramStore(ink.rootReal);}
  private async confined(rel:string,create=false){const parts=normalizeRel(rel).split('/');let target=this.ink.rootReal;
   for(let i=0;i<parts.length;i++){target=path.join(target,parts[i]);let stat;try{stat=await lstat(target);}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;if(create&&i<parts.length-1){await mkdir(target).catch(async err=>{if(err.code!=='EEXIST')throw err;});stat=await lstat(target);}else continue;}if(stat&&(stat.isSymbolicLink()||(i<parts.length-1?!stat.isDirectory():!stat.isFile())))throw new Error('Linked or invalid insertion path.');}return target;
  }
@@ -48,7 +49,16 @@ export class InsertionStore {
   const s=await this.ink.read(input.path),mapped=await this.ink.reanchor(input.path,s.version),item=mapped.document.items.find(i=>i.id===input.id);if(!item)throw new Error('Thought not found.');
   const source=input.replyId?replyAsItem(item,input.replyId):item; // a specific AI message (a reply) can be added instead of the first answer
   const base=previewThoughtInsertion(note,source,input.noteVersion);let preview:BringPreview=base,svg:string|undefined;
-  if(source.diagram){if(!input.layout||!['light','dark'].includes(input.theme??''))throw new Error('Review the diagram before inserting.');svg=diagramSvg(source.diagram,input.layout,input.theme!,undefined,true);const assetName='ai-diagram-'+hash(svg)+'.svg',relative=path.posix.relative(path.posix.dirname(input.path),'assets/'+assetName),alt=('AI diagram: '+source.diagram.title).replace(/[\\\[\]]/g,'\\$&');
+  if(source.skillDiagram){
+   // A skill's diagram is already a saved, hash-named file under assets/: verify it, then point at it from the same AI callout. Nothing is written here.
+   if(input.layout!==undefined)throw new Error('The thought diagram changed. Review a new preview.');
+   const ref=source.skillDiagram;await this.skillFiles.read(ref.asset);
+   const relative=path.posix.relative(path.posix.dirname(input.path),'assets/'+ref.asset),label=(source.generation?.skills??[]).join(', ')||'skill',alt=label.replace(/[\\\[\]]/g,'\\$&');
+   const nl=note.text.includes('\r\n')?'\r\n':'\n',tail=base.changes.from===note.text.length?nl:'';
+   // A still image is an image; the interactive fallback is only a link to the saved page (the editor opens it behind a click).
+   const line=ref.asset.endsWith('.svg')?'> ![AI diagram: '+alt+']('+relative+')':'> [AI diagram, interactive version: '+alt+']('+relative+')';
+   preview={...base,changes:{...base.changes,insert:base.changes.insert.slice(0,base.changes.insert.length-tail.length)+nl+line+tail}};
+  }else if(source.diagram){if(!input.layout||!['light','dark'].includes(input.theme??''))throw new Error('Review the diagram before inserting.');svg=diagramSvg(source.diagram,input.layout,input.theme!,undefined,true);const assetName='ai-diagram-'+hash(svg)+'.svg',relative=path.posix.relative(path.posix.dirname(input.path),'assets/'+assetName),alt=('AI diagram: '+source.diagram.title).replace(/[\\\[\]]/g,'\\$&');
    // One AI callout: the explanation stays and the diagram goes inside it, below the text, in the note's own line ending.
    const nl=note.text.includes('\r\n')?'\r\n':'\n',tail=base.changes.from===note.text.length?nl:'';
    preview={...base,changes:{...base.changes,insert:base.changes.insert.slice(0,base.changes.insert.length-tail.length)+nl+'> !['+alt+']('+relative+')'+tail},assetName};

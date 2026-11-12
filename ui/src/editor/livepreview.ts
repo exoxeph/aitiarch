@@ -7,7 +7,7 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, typ
 import { frontmatterEnd } from "../frontmatter.ts";
 import { findFailedMarks } from "./format.ts";
 import { FenceHeader, fenceLabel } from "./codeblocks.ts";
-import { ImageWidget, imageClicks, imageKeys, imageSrc } from "./images.ts";
+import { ImageWidget, SkillPageWidget, imageClicks, imageKeys, imageSrc, skillPageName } from "./images.ts";
 import { linkHref, linkTooltip } from "./links.ts";
 import { toggleTaskAt } from "./tasks.ts";
 import { autolinkHides, calloutHeader, hidesFor, quoteMarkGroups, touchesLines, touchesSpan } from "./reveal.ts";
@@ -338,6 +338,9 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
               else if (c.name === "URL") url = state.sliceDoc(c.from, c.to);
             }
             if (marks.length >= 2 && url) {
+              // A link to a skill's saved page: a control after it (display only), which opens the page in a sandboxed iframe on a click.
+              const skillPage = skillPageName(url);
+              if (skillPage) out.push(Decoration.widget({ widget: new SkillPageWidget(skillPage), side: 1 }).range(n.to));
               const [textFrom, textTo] = [marks[0][1], marks[1][0]];
               if (textTo > textFrom) {
                 // An @ link to a note is a citation: a chip, drawn by a mark so the text itself is never touched. A missing note shows muted.
