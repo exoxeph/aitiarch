@@ -72,6 +72,12 @@ describe('harness chat sessions',()=>{
   expect(r.review.excluded).toEqual(['notebook.md']);expect(r.review.sources.map(x=>x.label)).toEqual(['This note','other.md']);
   const [c]=await p.calls();expect(c.addendum).not.toContain('CANARY-NOTEBOOK-SESSION');expect(c.addendum).toContain('Another note.');
  });
+ it('redacts secrets in every pasted source, as the one-off chat does',async()=>{
+  const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'x',note:'plan.md'});
+  await writeFile(path.join(p.root,'other.md'),'Another note.\npassword=hunter2-session-secret\n');
+  await turn(runtime,ask(s.id,'m-redact','Summarise.',[{moduleId:'this-note',ids:['note']},{moduleId:'other-notes',ids:['other.md']}]));
+  const [c]=await p.calls();expect(c.addendum).not.toContain('hunter2-session-secret');expect(c.addendum).toContain('[SECRET]');
+ });
  it('keeps the chat node\'s persona in the session instruction',async()=>{
   const p=await project(),{index,runtime}=await p.open('ok',async()=>({persona:'grill',skills:{text:'',loaded:[],skipped:[],truncated:false},names:[],missing:[],review:null}));
   const s=await index.create({mode:'chat',label:'x',note:'plan.md'});await turn(runtime,ask(s.id,'m-persona'));

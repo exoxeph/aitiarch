@@ -81,7 +81,7 @@ export class ChatRuntime {
   if(extra){request.persona=extra.persona;if(extra.skills.loaded.length)request.skills=extra.skills;}
   const packet=prepareRequest(request);
   // In a session the CLI gets the instruction with the sources pasted before the rules (rules last); the earlier conversation is in the session.
-  const sessionText=session?chatSessionInstruction(request,[...sources.map(x=>({id:x.id,label:x.label,text:x.text})),...(request.selection?[{id:'S1',label:'Selection',text:request.selection}]:[])]):null;
+  const sessionText=session?chatSessionInstruction(request,[...sources.map(x=>({id:x.id,label:x.label,text:redact(x.text)})),...(request.selection?[{id:'S1',label:'Selection',text:request.selection}]:[])]):null;
   const estimate=sessionText?estimateTokens(sessionText.addendum+request.question):estimateTokens(JSON.stringify(packet));
   const privateContext=!!s.privateContext||sources.some(x=>x.ephemeral);
   const review:ChatReview={reviewId:randomUUID(),requestId:input.id,path:input.path,question:request.question,selection:request.selection,sources:sources.map(x=>({id:x.id,label:x.label,text:x.text,characters:x.text.length,estimatedTokens:estimateTokens(x.text)})),historyPairs:history.length,omittedPairs:session?0:s.omittedPairs+sameMode.length-history.length,...(otherModePairs&&!session?{otherModePairs}:{}),instruction:sessionText?.instruction??packet.instruction,history:structuredClone(packet.data.turns),estimatedTokens:estimate,requiresConfirmation:privateContext||!this.dontAsk};
