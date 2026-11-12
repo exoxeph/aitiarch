@@ -3,6 +3,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { Autolink, Strikethrough, TaskList, Table } from '@lezer/markdown';
 import { Compartment, EditorSelection, EditorState } from "@codemirror/state";
 import { citeEnv, type CiteEnv } from "../citations/cite-env.ts";
+import { headingOffset } from "../../shared/headings.ts";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
 import type { InkItem } from "../../shared/ink.ts";
@@ -42,6 +43,9 @@ interface Props {
   onOpenWiki: (target: string) => void;
   /** What @ citations need: which notes exist, how to open and preview one, and the note index for the picker. */
   cite?: Omit<CiteEnv, "from">;
+  /** A heading fragment to land on (from a citation like plan.md#token-refresh), and the callback once it has been handled. */
+  jumpTo?: string | null;
+  onJumped?: () => void;
   onStatus: (path: string, s: SyncStatus) => void;
   onDoc: (path: string, text: string) => void;
   subscribe: (fn: (e: ServerEvent) => void) => () => void;
@@ -294,6 +298,14 @@ export function EditorPane(props: Props) {
   useEffect(() => {
     viewRef.current?.dispatch({ effects: resolverSlot.current.reconfigure(wikiResolver.of(props.resolver)) });
   }, [props.resolver]);
+  // Opening a heading link (plan.md#token-refresh): once this pane is on screen, put the cursor on that heading and scroll it to the top.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!props.jumpTo || !props.visible || !view) return;
+    const at = headingOffset(view.state.doc.toString(), props.jumpTo);
+    if (at !== null) { view.dispatch({ selection: { anchor: at }, effects: EditorView.scrollIntoView(at, { y: "start", yMargin: 48 }) }); view.focus(); }
+    props.onJumped?.();
+  }, [props.jumpTo, props.visible]); // eslint-disable-line react-hooks/exhaustive-deps
   // A new note list (or open handler) gives the pane a fresh citation environment, so chips and the picker see the current notes.
   useEffect(() => {
     viewRef.current?.dispatch({ effects: citeSlot.current.reconfigure(props.cite ? citeEnv.of({ from: props.file.path, ...props.cite }) : []) });

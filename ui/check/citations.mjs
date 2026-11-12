@@ -23,7 +23,8 @@ const proj = path.join(base, "notes"), notes = path.join(proj, ".aitiarch");
 const put = (rel, body) => { const f = path.join(notes, ...rel.split("/")); mkdirSync(path.dirname(f), { recursive: true }); writeFileSync(f, body); };
 const INDEX0 = "\uFEFF# Home\r\n\r\n[@Gone](gone.md)\r\n";
 put("index.md", Buffer.from(INDEX0, "utf8"));
-put("auth/plan.md", "# Auth plan\n\n## Token refresh\nWe refresh tokens every fifteen minutes.\n");
+// Many sections above the cited heading, so landing on it needs a real scroll (headings only: the hover preview still shows the paragraph).
+put("auth/plan.md", "# Auth plan\n\n" + Array.from({ length: 60 }, (_, i) => `### Section ${i + 1}\n\n`).join("") + "## Token refresh\nWe refresh tokens every fifteen minutes.\n");
 put("other.md", "# Other\n");
 const read = (rel) => readFileSync(path.join(notes, ...rel.split("/")));
 
@@ -135,6 +136,22 @@ try {
   await page.screenshot({ path: path.join(shots, "backlinks.png") });
   await panel.locator("button").first().click();
   check("a backlink opens the citing note", await until(async () => (await activeNote()) === "index.md"), String(await activeNote()));
+
+  // ---- a heading link lands on its heading
+  await page.locator('.cm-cite[data-cite-heading="token-refresh"]').click({ modifiers: ["Control"] });
+  const atHeading = () => page.evaluate(() => {
+    const v = window.__aitiarch?.["auth/plan.md"]?.view; if (!v) return { ok: false, why: "no view" };
+    const at = v.state.doc.toString().indexOf("## Token refresh"), head = v.state.selection.main.head, r = v.coordsAtPos(at);
+    // Measured from the top of the element that actually scrolls the note (a notice or the top bar may sit above it).
+    let box = v.dom; while (box && !(box.scrollHeight > box.clientHeight + 4 && /(auto|scroll)/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+    const top = box ? box.getBoundingClientRect().top : 0, offset = r ? Math.round(r.top - top) : null;
+    const third = box ? box.clientHeight / 3 : 300; // near the top: within the top third of what the pane shows
+    return { ok: head === at && offset !== null && offset >= 0 && offset < third, head, at, offset, third: Math.round(third), scroller: box?.className ?? null };
+  });
+  const landed = await until(async () => (await activeNote()) === "auth/plan.md" && (await atHeading()).ok);
+  check("a heading link opens the note at that heading, scrolled into view", landed, JSON.stringify(await atHeading()));
+  await page.locator(".backlinks-pill").click(); await page.locator(".backlinks button").first().click();
+  await until(async () => (await activeNote()) === "index.md");
 
   // ---- keyboard: Enter inside a chip opens it
   const pos = (await doc()).indexOf("[@Auth plan](auth/plan.md)") + 4;

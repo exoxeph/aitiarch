@@ -165,11 +165,12 @@ export default function App() {
   // @ citations: which notes exist, opening one, a short preview, and the note index the picker searches (cached for a moment while typing).
   const openRef = useRef(openNote); openRef.current = openNote;
   const notesCache = useRef<{ at: number; p: Promise<CiteNote[]> } | null>(null);
+  const [jump, setJump] = useState<{ path: string; heading: string } | null>(null);
   const cite = useMemo(() => {
     const have = new Set(paths);
     return {
       has: (p: string) => have.has(p),
-      open: (p: string) => void openRef.current(p),
+      open: (p: string, heading: string | null) => { void openRef.current(p); if (heading) setJump({ path: p, heading }); },
       notes: () => {
         const c = notesCache.current; if (c && Date.now() - c.at < 1500) return c.p;
         const p = api.citations(); notesCache.current = { at: Date.now(), p }; p.catch(() => { notesCache.current = null; }); return p;
@@ -580,7 +581,7 @@ export default function App() {
         )}
         {tabs.map((p) =>
           files[p] ? (
-            <EditorPane key={p} file={files[p]} visible={p === active} resolver={resolver} onOpenWiki={onOpenWiki} cite={cite} onStatus={onStatus} onDoc={onDoc} subscribe={subscribe} register={register}
+            <EditorPane key={p} file={files[p]} visible={p === active} resolver={resolver} onOpenWiki={onOpenWiki} cite={cite} jumpTo={jump?.path === p ? jump.heading : null} onJumped={() => setJump(null)} onStatus={onStatus} onDoc={onDoc} subscribe={subscribe} register={register}
               inkItems={inkFiles[p]?.document.items} trustedText={p === active ? trustedText : null}
               typingOptions={{enabled:typingHelpOn,doubleSpace:doubleSpacePeriod,smart:smartCorrections,vocabulary:vocabulary??undefined,neverCorrect,onReject:rejectCorrection}}
               inkVersion={inkFiles[p]?.version} onInk={onInk} onInkSaved={onInkSaved} onInkError={setNotice} />
