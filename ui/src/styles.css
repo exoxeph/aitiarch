@@ -696,7 +696,7 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 
 /* The prompt on the empty line where the cursor is: a pseudo-element, out of the flow, so it never changes a line height or moves the cursor. */
 .cm-line.cm-has-prompt { position: relative; }
-.cm-line.cm-has-prompt::before { content: "Write, or type / for commands…"; position: absolute; left: 0; top: 0; white-space: nowrap; pointer-events: none; user-select: none; color: var(--muted); opacity: .8; font-style: normal; }
+.cm-line.cm-has-prompt::before { content: "Write, or type / for commands…"; position: absolute; left: 14px; top: 0; white-space: nowrap; pointer-events: none; user-select: none; color: var(--muted); opacity: .8; font-style: normal; }
 
 /* M1: left edge menu, note menu, chat panel. The menu overlays the note and never reflows it; motion is a short slide, or a fade under reduced motion. */
 .topbar { position: relative; z-index: 35; }

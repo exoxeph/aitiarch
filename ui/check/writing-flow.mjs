@@ -144,6 +144,10 @@ try{
  // The prompt shows on an empty line you are on, and nowhere else.
  const promptCount=async(d,caret,focus=true)=>{await setDoc(d,caret);if(focus)await page.evaluate(()=>window.__aitiarch['n.md'].view.focus());await page.waitForTimeout(150);return page.evaluate(()=>[...document.querySelectorAll('.cm-has-prompt')].map(e=>getComputedStyle(e,'::before').content));};
  const onEmpty=await promptCount('Hello\n\n',7);if(onEmpty.length!==1||!/type \/ for commands/.test(onEmpty[0]))failures.push({case:'the prompt shows on an empty line',got:onEmpty});
+ const promptLeft=await page.evaluate(()=>{const e=document.querySelector('.cm-has-prompt');return e?parseFloat(getComputedStyle(e,'::before').left):null;});
+ if(!(promptLeft>=8))failures.push({case:'the prompt starts clear of the caret, not under it',got:promptLeft});
+ const midGap=await promptCount('Hello\n\nWorld',6);if(midGap.length)failures.push({case:'no prompt on an empty line with text below it',got:midGap});
+ const trailing=await promptCount('Hello\n\n\n',6);if(trailing.length!==1)failures.push({case:'the prompt shows on an empty line when only blank space is below',got:trailing});
  const onText=await promptCount('Hello\n\nWorld',3);if(onText.length)failures.push({case:'no prompt on a line with text',got:onText});
  const inCode=await promptCount('```\n\n```',4);if(inCode.length)failures.push({case:'no prompt inside a code block',got:inCode});
  const unfocused=await promptCount('Hello\n\n',7,false);if(unfocused.length)failures.push({case:'no prompt while the editor is not focused',got:unfocused});

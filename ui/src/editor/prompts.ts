@@ -14,9 +14,14 @@ export function isPlainEmptyLine(state:EditorState,pos:number):boolean{
   for(const side of [1,-1] as const)for(let n:{name:string;parent:any}|null=syntaxTree(state).resolveInner(pos,side);n;n=n.parent)if(BLOCKS.has(n.name))return false; // inside a block from either side (also an unclosed fence)
  return true;
 }
+/** The hint shows only at the end of the note: an empty plain line with nothing but blank space after it, never in a gap between text. */
+export function showsWritingPrompt(state:EditorState,pos:number):boolean{
+ if(!isPlainEmptyLine(state,pos))return false;
+ return state.doc.sliceString(state.doc.lineAt(pos).to).trim()==='';
+}
 function build(view:EditorView):DecorationSet{
  const s=view.state.selection.main;
- if(!view.hasFocus||!s.empty||!isPlainEmptyLine(view.state,s.head))return Decoration.none;
+ if(!view.hasFocus||!s.empty||!showsWritingPrompt(view.state,s.head))return Decoration.none;
  return Decoration.set([Decoration.line({class:'cm-has-prompt'}).range(view.state.doc.lineAt(s.head).from)]); // a CSS pseudo-element draws it: no DOM is added to the line
 }
 export const writingPrompt=ViewPlugin.fromClass(class{
