@@ -11,7 +11,8 @@ import {draw,readPalette,type Palette} from './draw.ts';
 
 interface Props {active:string|null;onClose:()=>void;onOpen:(path:string)=>void;onUseAsContext:(paths:string[])=>void;subscribe:(fn:(e:ServerEvent)=>void)=>()=>void}
 type Graph={data:GraphData;positions:Record<string,[number,number]>};
-const STATE_WORDS:Record<StarState,string>={open:'Has open decisions',decided:'All decided',stale:'Not edited in 30 days',quiet:'No decisions yet'};
+// "Decision" is reserved for the human-marked unit of the handoff spec (not built yet), so the map only speaks of threads.
+const STATE_WORDS:Record<StarState,string>={open:'Has open threads',closed:'All threads closed',stale:'Not edited in 30 days',quiet:'No threads yet'};
 const FLY_MS=650;
 
 export default function Constellation({active,onClose,onOpen,onUseAsContext,subscribe}:Props){
@@ -48,7 +49,7 @@ export default function Constellation({active,onClose,onOpen,onUseAsContext,subs
  useEffect(()=>{
   if(!shown)return;
   const prev=new Map(stars.current.map(s=>[s.path,{x:s.x??0,y:s.y??0}]));
-  const list:Star[]=shown.data.notes.map(n=>({path:n.path,title:n.title,r:starRadius(n.decisions)*(clustered?1.6:1),folder:clustered?n.path:topFolder(n.path)}));
+  const list:Star[]=shown.data.notes.map(n=>({path:n.path,title:n.title,r:starRadius(n.threads)*(clustered?1.6:1),folder:clustered?n.path:topFolder(n.path)}));
   const byPath=new Map(list.map(s=>[s.path,s])),links:Link[]=shown.data.edges.map(e=>({source:e.from,target:e.to,count:e.count}));
   const s=makeLayout(list,links,prev,clustered?{}:positions.current);
   if(reduced.current||prev.size===0&&list.length>400)for(let i=0;i<300&&s.alpha()>s.alphaMin();i++)s.tick(); // no visible settling with reduced motion
@@ -206,7 +207,7 @@ export default function Constellation({active,onClose,onOpen,onUseAsContext,subs
       <p className="cn-list-head">{clustered?`${visible.size} notes, shown as ${listStars.length} folders`:`${listStars.length} ${listStars.length===1?'note':'notes'}`} · Space selects</p>
       <ul>{listStars.slice(0,400).map(n=>{const st=shown?.info.get(n.path)?.state??'quiet';return <li key={n.path}>
        <button type="button" aria-pressed={selected.includes(n.path)} aria-current={chosen===n.path?'true':undefined} onClick={()=>choose(n.path)} onKeyDown={e=>listKey(e,n.path)}>
-        <i className={`cn-dot cn-${st}`} aria-hidden="true"/><span>{n.title}</span>{n.openDecisions>0&&<em>{n.openDecisions} open</em>}</button></li>;})}</ul>
+        <i className={`cn-dot cn-${st}`} aria-hidden="true"/><span>{n.title}</span>{n.openThreads>0&&<em>{n.openThreads} open</em>}</button></li>;})}</ul>
       {listStars.length>400&&<p className="cn-list-head">and {listStars.length-400} more: use Find</p>}
      </>}
    </aside>
@@ -218,7 +219,7 @@ export default function Constellation({active,onClose,onOpen,onUseAsContext,subs
     {card&&<div className="cn-card" role="region" aria-label={`About ${card.title}`}>
      <h3>{card.title}</h3><p className="cn-path">{card.path}</p>
      <p className={`cn-state cn-${card.state}`}>{STATE_WORDS[card.state]}</p>
-     <dl><div><dt>Decisions</dt><dd>{card.decisions}</dd></div><div><dt>Open</dt><dd>{card.openDecisions}</dd></div><div><dt>Cites</dt><dd>{card.cites}</dd></div><div><dt>Cited by</dt><dd>{card.citedBy}</dd></div></dl>
+     <dl><div><dt>Threads</dt><dd>{card.threads}</dd></div><div><dt>Open</dt><dd>{card.openThreads}</dd></div><div><dt>Cites</dt><dd>{card.cites}</dd></div><div><dt>Cited by</dt><dd>{card.citedBy}</dd></div></dl>
      {card.problems.length>0&&<ul className="cn-problems">{card.problems.map(p=><li key={p}>{p}</li>)}</ul>}
      <div className="cn-card-actions"><button type="button" className="primary" onClick={()=>onOpen(card.path)}>Open note</button>
       <button type="button" aria-pressed={selected.includes(card.path)} onClick={()=>toggle(card.path)}>{selected.includes(card.path)?'Selected':'Select'}</button>
@@ -233,7 +234,7 @@ export default function Constellation({active,onClose,onOpen,onUseAsContext,subs
     </div>}
     {notice&&<p className="cn-notice" role="status">{notice} <button type="button" className="text-btn" onClick={()=>setNotice('')}>Dismiss</button></p>}
     <ul className="cn-legend" aria-label="Legend">
-     <li><i className="cn-dot cn-open"/>Open decisions</li><li><i className="cn-dot cn-decided"/>All decided</li><li><i className="cn-dot cn-stale"/>Stale</li><li><i className="cn-dot cn-quiet"/>No decisions</li>
+     <li><i className="cn-dot cn-open"/>Open threads</li><li><i className="cn-dot cn-closed"/>All closed</li><li><i className="cn-dot cn-stale"/>Stale</li><li><i className="cn-dot cn-quiet"/>No threads</li>
      <li><i className="cn-ring cn-ring-orphan"/>No links</li><li><i className="cn-ring cn-ring-uncited"/>Open, uncited</li><li><i className="cn-mark-broken"/>Broken link</li>
     </ul>
    </div>

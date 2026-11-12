@@ -1,18 +1,20 @@
 // The Constellation's model: notes as stars, citations as edges, and the problems worth seeing (orphans, broken links,
-// open decisions nothing cites). Also the handoff order: a note's decisions come after the decisions of the notes it cites.
+// open threads nothing cites). Also the handoff order: a note's takeaways and open threads come after those of the notes it cites.
+// A "thread" is an AI thought you have not dismissed. "Decision" is reserved for the human-marked unit of the handoff spec
+// (Mark as decision: proposed, decided, superseded, dead), which is not built yet: nothing here counts decisions.
 // Pure and DOM-free: the server builds the data, the browser lays it out and draws it.
 import {markdownLinks,resolveHref} from './links.ts';
 
-export interface GraphNote {path:string;title:string;mtimeMs:number;decisions:number;openDecisions:number}
+export interface GraphNote {path:string;title:string;mtimeMs:number;threads:number;openThreads:number}
 export interface GraphEdge {from:string;to:string;count:number}
 export interface GraphData {notes:GraphNote[];edges:GraphEdge[];broken:{from:string;target:string}[]}
-export type StarState='open'|'decided'|'stale'|'quiet';
+export type StarState='open'|'closed'|'stale'|'quiet';
 export interface StarInfo {state:StarState;inDegree:number;outDegree:number;orphan:boolean;broken:number;uncitedOpen:boolean;folder:string;radius:number}
 
 const STALE_MS=30*86400000;
 export const topFolder=(path:string)=>path.includes('/')?path.slice(0,path.indexOf('/')):'';
-/** Bigger with more decisions, but slowly: a note with 400 decisions must not swallow the map. */
-export const starRadius=(decisions:number)=>Math.min(14,3+Math.sqrt(Math.max(0,decisions))*2.2);
+/** Bigger with more threads, but slowly: a note with 400 threads must not swallow the map. */
+export const starRadius=(threads:number)=>Math.min(14,3+Math.sqrt(Math.max(0,threads))*2.2);
 
 /** Edges between existing notes (one per ordered pair, with how many links), and links to notes that do not exist. */
 export function linkGraph(notes:{path:string;text:string}[]):Pick<GraphData,'edges'|'broken'>{
@@ -33,8 +35,8 @@ export function analyze(data:GraphData,now=Date.now()):Map<string,StarInfo>{
  const out=new Map<string,StarInfo>();
  for(const n of data.notes){
   const inDegree=inD.get(n.path)??0,outDegree=outD.get(n.path)??0;
-  const state:StarState=n.openDecisions>0?'open':now-n.mtimeMs>STALE_MS?'stale':n.decisions>0?'decided':'quiet';
-  out.set(n.path,{state,inDegree,outDegree,orphan:inDegree===0&&outDegree===0,broken:brk.get(n.path)??0,uncitedOpen:n.openDecisions>0&&inDegree===0,folder:topFolder(n.path),radius:starRadius(n.decisions)});
+  const state:StarState=n.openThreads>0?'open':now-n.mtimeMs>STALE_MS?'stale':n.threads>0?'closed':'quiet';
+  out.set(n.path,{state,inDegree,outDegree,orphan:inDegree===0&&outDegree===0,broken:brk.get(n.path)??0,uncitedOpen:n.openThreads>0&&inDegree===0,folder:topFolder(n.path),radius:starRadius(n.threads)});
  }
  return out;
 }

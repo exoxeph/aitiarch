@@ -26,10 +26,10 @@ export function lastOpenedText(iso:string|null,now=new Date()):string{
  return `Opened ${then.getUTCDate()} ${MONTHS[then.getUTCMonth()]} ${then.getUTCFullYear()}`;
 }
 
-export function statsText(s:{notes:number;openDecisions:number;waiting:number}){
+export function statsText(s:{notes:number;openThreads:number;waiting:number}){
  return {
   notes:s.notes===0?'No notes yet':plural(s.notes,'note'),
-  decisions:s.openDecisions?plural(s.openDecisions,'open decision'):null,
+  threads:s.openThreads?plural(s.openThreads,'open thread'):null,
   waiting:s.waiting?`${s.waiting} waiting on you`:null,
  };
 }

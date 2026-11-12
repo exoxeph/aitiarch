@@ -107,7 +107,7 @@ describe('adding a project from the home screen',()=>{
   const {port,security,ea,a}=await setup();
   await writeFile(path.join(a,'.aitiarch','index.md'),'[a](a.md) [gone](gone.md)\n');
   const s=JSON.parse((await req(port,`/api/projects/summary?id=${ea.id}`,{headers:auth(security,port)})).body);
-  expect(s).toMatchObject({notes:2,openDecisions:0,waiting:0,graph:{nodes:['a.md','index.md'],edges:[[1,0]]}});
+  expect(s).toMatchObject({notes:2,openThreads:0,waiting:0,graph:{nodes:['a.md','index.md'],edges:[[1,0]]}});
   expect((await req(port,'/api/projects/summary?id=000000000000',{headers:auth(security,port)})).status).toBe(404);
  });
 });

@@ -28,8 +28,8 @@ describe('camera',()=>{
 });
 
 const NOW=Date.UTC(2026,10,12);
-const n=(path:string,o:Partial<{title:string;decisions:number;openDecisions:number;mtimeMs:number}>={})=>({path,title:o.title??path.replace(/\.md$/,'').split('/').pop()!,mtimeMs:o.mtimeMs??NOW,decisions:o.decisions??0,openDecisions:o.openDecisions??0});
-const data:GraphData={notes:[n('index.md',{title:'Home'}),n('auth/plan.md',{title:'Auth plan',decisions:2,openDecisions:1}),n('auth/keys.md',{title:'Keys'}),n('ops/run.md',{title:'Runbook',decisions:1}),n('lonely.md',{title:'Lonely'})],
+const n=(path:string,o:Partial<{title:string;threads:number;openThreads:number;mtimeMs:number}>={})=>({path,title:o.title??path.replace(/\.md$/,'').split('/').pop()!,mtimeMs:o.mtimeMs??NOW,threads:o.threads??0,openThreads:o.openThreads??0});
+const data:GraphData={notes:[n('index.md',{title:'Home'}),n('auth/plan.md',{title:'Auth plan',threads:2,openThreads:1}),n('auth/keys.md',{title:'Keys'}),n('ops/run.md',{title:'Runbook',threads:1}),n('lonely.md',{title:'Lonely'})],
  edges:[{from:'index.md',to:'auth/plan.md',count:1},{from:'auth/plan.md',to:'auth/keys.md',count:2},{from:'auth/keys.md',to:'ops/run.md',count:1}],broken:[{from:'ops/run.md',target:'gone.md'}]};
 const info=analyze(data,NOW);
 
@@ -44,10 +44,10 @@ describe('what the view shows',()=>{
   expect([...visibleNotes(data,info,{mode:'global',center:null,folder:'',state:'*'})].sort()).toEqual(['index.md','lonely.md']);
   expect([...visibleNotes(data,info,{mode:'global',center:null,folder:'*',state:'open'})]).toEqual(['auth/plan.md']);
  });
- it('above the limit, folders become one cluster star each, with summed decisions and folded edges',()=>{
+ it('above the limit, folders become one cluster star each, with summed threads and folded edges',()=>{
   expect(CLUSTER_ABOVE).toBe(1000);
   const c=clusterByFolder(data);
-  expect(c.notes.map(x=>[x.path,x.title,x.decisions,x.openDecisions])).toEqual([['folder:','(top level)',0,0],['folder:auth','auth',2,1],['folder:ops','ops',1,0]]);
+  expect(c.notes.map(x=>[x.path,x.title,x.threads,x.openThreads])).toEqual([['folder:','(top level)',0,0],['folder:auth','auth',2,1],['folder:ops','ops',1,0]]);
   expect(c.edges).toEqual([{from:'folder:',to:'folder:auth',count:1},{from:'folder:auth',to:'folder:ops',count:1}]);
  });
 });
@@ -63,11 +63,11 @@ describe('choosing stars',()=>{
   expect(searchStar(data,'ops/')).toBe('ops/run.md');expect(searchStar(data,'zzz')).toBeNull();expect(searchStar(data,' ')).toBeNull();
  });
  it('the card says what the star is and what is wrong with it, in words',()=>{
-  expect(cardFor('auth/plan.md',data,info)).toEqual({path:'auth/plan.md',title:'Auth plan',state:'open',decisions:2,openDecisions:1,cites:1,citedBy:1,problems:[]});
+  expect(cardFor('auth/plan.md',data,info)).toEqual({path:'auth/plan.md',title:'Auth plan',state:'open',threads:2,openThreads:1,cites:1,citedBy:1,problems:[]});
   expect(cardFor('lonely.md',data,info)?.problems).toEqual(['No links in or out']);
   expect(cardFor('ops/run.md',data,info)?.problems).toEqual(['1 broken link']);
-  const d2:GraphData={...data,notes:[...data.notes,n('q.md',{openDecisions:1,decisions:1})]};
-  expect(cardFor('q.md',d2,analyze(d2,NOW))?.problems).toEqual(['No links in or out','Open decision that no note cites']);
+  const d2:GraphData={...data,notes:[...data.notes,n('q.md',{openThreads:1,threads:1})]};
+  expect(cardFor('q.md',d2,analyze(d2,NOW))?.problems).toEqual(['No links in or out','Open thread that no note cites']);
   expect(cardFor('nope.md',data,info)).toBeNull();
  });
 });

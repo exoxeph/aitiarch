@@ -7,7 +7,7 @@ import {threadStatus} from '../shared/threads.ts';
 import type {InkItem} from '../shared/ink.ts';
 import {Explorer} from './explorer.ts';
 
-export interface ProjectSummary {notes:number;openDecisions:number;waiting:number;graph:{nodes:string[];edges:[number,number][]}}
+export interface ProjectSummary {notes:number;openThreads:number;waiting:number;graph:{nodes:string[];edges:[number,number][]}}
 const GRAPH_NODES=80,MAX_SIDECAR=8*1024*1024;
 
 export async function summarize(notesRoot:string):Promise<ProjectSummary>{
@@ -17,12 +17,12 @@ export async function summarize(notesRoot:string):Promise<ProjectSummary>{
  notes.forEach((n,i)=>{for(const l of markdownLinks(n.text)){const r=resolveHref(n.path,n.text.slice(l.from,l.to)),j=r?index.get(r.path):undefined;
   if(j===undefined||j===i||pairs.has(`${i}>${j}`))continue;pairs.add(`${i}>${j}`);edges.push([i,j]);}});
  // Open threads (no takeaway yet) and those whose AI reply is in, so it is the human's turn.
- let openDecisions=0,waiting=0;
+ let openThreads=0,waiting=0;
  for(const n of notes){
   const file=path.join(ex.rootReal,'ink',...`${n.path.slice(0,-3)}.ink.json`.split('/'));
   try{const s=await lstat(file);if(!s.isFile()||s.size>MAX_SIDECAR)continue;
    const items=JSON.parse(await readFile(file,'utf8'))?.items;if(!Array.isArray(items))continue;
-   for(const item of items as InkItem[]){if(threadStatus(item)!=='open')continue;openDecisions++;if(item.generation?.status==='complete')waiting++;}
+   for(const item of items as InkItem[]){if(threadStatus(item)!=='open')continue;openThreads++;if(item.generation?.status==='complete')waiting++;}
   }catch{/* no sidecar, or one this card cannot read */}
  }
  // A thumbnail needs only the best-connected notes.
@@ -32,5 +32,5 @@ export async function summarize(notesRoot:string):Promise<ProjectSummary>{
   const keep=nodes.map((_,i)=>i).sort((a,b)=>degree[b]-degree[a]||a-b).slice(0,GRAPH_NODES).sort((a,b)=>a-b),remap=new Map(keep.map((old,i)=>[old,i]));
   nodes=keep.map(i=>nodes[i]);kept=edges.filter(([a,b])=>remap.has(a)&&remap.has(b)).map(([a,b])=>[remap.get(a)!,remap.get(b)!]);
  }
- return {notes:notes.length,openDecisions,waiting,graph:{nodes,edges:kept}};
+ return {notes:notes.length,openThreads,waiting,graph:{nodes,edges:kept}};
 }

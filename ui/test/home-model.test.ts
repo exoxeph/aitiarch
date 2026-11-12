@@ -26,9 +26,9 @@ describe('lastOpenedText',()=>{
 
 describe('statsText',()=>{
  it('pluralizes and leaves out what is zero',()=>{
-  expect(statsText({notes:1,openDecisions:0,waiting:0})).toEqual({notes:'1 note',decisions:null,waiting:null});
-  expect(statsText({notes:12,openDecisions:3,waiting:1})).toEqual({notes:'12 notes',decisions:'3 open decisions',waiting:'1 waiting on you'});
-  expect(statsText({notes:0,openDecisions:1,waiting:0})).toEqual({notes:'No notes yet',decisions:'1 open decision',waiting:null});
+  expect(statsText({notes:1,openThreads:0,waiting:0})).toEqual({notes:'1 note',threads:null,waiting:null});
+  expect(statsText({notes:12,openThreads:3,waiting:1})).toEqual({notes:'12 notes',threads:'3 open threads',waiting:'1 waiting on you'});
+  expect(statsText({notes:0,openThreads:1,waiting:0})).toEqual({notes:'No notes yet',threads:'1 open thread',waiting:null});
  });
 });
 

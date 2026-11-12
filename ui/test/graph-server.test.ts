@@ -15,27 +15,27 @@ async function notebook(files:Record<string,string>){
  for(const [rel,body] of Object.entries(files)){const f=path.join(root,...rel.split('/'));await mkdir(path.dirname(f),{recursive:true});await writeFile(f,body);}
  return {root,ex:await Explorer.open(root)};
 }
-// A synthetic thread: open (no takeaway yet), decided (the human's submitted takeaway), or dismissed.
-const item=(id:string,quote:string,kind:'open'|'decided'|'dismissed',takeaway='')=>({id,kind:'margin',body:'AI text',originalAnchor:{quote},anchor:{quote,prefix:'',suffix:'',position:{from:0,to:quote.length}},attachment:{status:'attached',from:0,to:quote.length},
+// A synthetic thread: open (no takeaway yet), closed (the human's submitted takeaway), or dismissed.
+const item=(id:string,quote:string,kind:'open'|'closed'|'dismissed',takeaway='')=>({id,kind:'margin',body:'AI text',originalAnchor:{quote},anchor:{quote,prefix:'',suffix:'',position:{from:0,to:quote.length}},attachment:{status:'attached',from:0,to:quote.length},
  generation:{status:'complete',dismissed:kind==='dismissed'},
  thread:{schemaVersion:1,dismissed:kind==='dismissed',providerConfirmations:[],followups:[],summary:{reply:null,revealedAt:null},
-  takeaway:kind==='decided'?{events:[],state:'submitted',text:takeaway,updatedAt:'2026-11-01T00:00:00.000Z'}:{events:[],state:'untouched',text:null,updatedAt:null}}});
+  takeaway:kind==='closed'?{events:[],state:'submitted',text:takeaway,updatedAt:'2026-11-01T00:00:00.000Z'}:{events:[],state:'untouched',text:null,updatedAt:null}}});
 const sidecar=(note:string,items:unknown[])=>JSON.stringify({v:2,note,noteVersion:null,lastSeenTextHash:null,items});
 
 const files={
  'index.md':'# Home\nSee [@Plan](plan.md) and [gone](gone.md).\n',
  'plan.md':'# Plan\nBuilt on [@Base](base.md).\n',
  'base.md':'# Base\nThe foundation.\n',
- 'ink/plan.ink.json':sidecar('plan.md',[item('p1','refresh tokens','decided','Rotate every 15 minutes.\nKeep the old one for a minute.'),item('p2','store sessions','open')]),
- 'ink/base.ink.json':sidecar('base.md',[item('b1','pick a database','decided','Postgres.'),item('b2','noise','dismissed')]),
+ 'ink/plan.ink.json':sidecar('plan.md',[item('p1','refresh tokens','closed','Rotate every 15 minutes.\nKeep the old one for a minute.'),item('p2','store sessions','open')]),
+ 'ink/base.ink.json':sidecar('base.md',[item('b1','pick a database','closed','Postgres.'),item('b2','noise','dismissed')]),
 };
 
 describe('graph data',()=>{
- it('has every note with its decisions, edges with counts, broken links and modification times',async()=>{
+ it('has every note with its threads, edges with counts, broken links and modification times',async()=>{
   const {root,ex}=await notebook(files);
   await utimes(path.join(root,'base.md'),new Date('2026-01-01'),new Date('2026-01-01'));
   const g=await buildGraph(ex);
-  expect(g.notes.map(n=>[n.path,n.title,n.decisions,n.openDecisions])).toEqual([['base.md','Base',1,0],['index.md','Home',0,0],['plan.md','Plan',2,1]]);
+  expect(g.notes.map(n=>[n.path,n.title,n.threads,n.openThreads])).toEqual([['base.md','Base',1,0],['index.md','Home',0,0],['plan.md','Plan',2,1]]);
   expect(g.notes[0].mtimeMs).toBe(new Date('2026-01-01').getTime());
   expect(g.edges).toEqual([{from:'index.md',to:'plan.md',count:1},{from:'plan.md',to:'base.md',count:1}]);
   expect(g.broken).toEqual([{from:'index.md',target:'gone.md'}]);
@@ -43,14 +43,14 @@ describe('graph data',()=>{
 });
 
 describe('handoff document',()=>{
- it('lists decisions note by note in citation order: cited notes first, the human takeaways verbatim, open questions marked',async()=>{
+ it('lists takeaways and open threads note by note in citation order: cited notes first, the human takeaways verbatim, open threads marked',async()=>{
   const {ex}=await notebook(files),doc=await handoffDocument(ex);
   expect(doc.order).toEqual(['base.md','plan.md','index.md']);
   expect(doc.markdown.startsWith(HANDOFF_MARK)).toBe(true);
   const body=doc.markdown.slice(doc.markdown.indexOf('## '));
   expect(body).toBe([
-   '## Base','[base.md](base.md)','','- Decided: Postgres.','',
-   '## Plan','[plan.md](plan.md)','','- Decided: Rotate every 15 minutes.','  Keep the old one for a minute.','- Open: “store sessions”','',
+   '## Base','[base.md](base.md)','','- Takeaway: Postgres.','',
+   '## Plan','[plan.md](plan.md)','','- Takeaway: Rotate every 15 minutes.','  Keep the old one for a minute.','- Open thread: “store sessions”','',
   ].join('\n'));
  });
  it('writes handoff.md when it is missing or was written by the app, and never over a file you wrote',async()=>{

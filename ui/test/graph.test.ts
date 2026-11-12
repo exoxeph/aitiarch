@@ -3,7 +3,7 @@ import {linkGraph,analyze,neighborhood,pathBetween,handoffOrder,starRadius,topFo
 
 // The Constellation's model (2.4): stars are notes, edges are citations, and the problems it surfaces are computed here, not drawn.
 const DAY=86400000,NOW=Date.UTC(2026,10,12);
-const note=(path:string,o:Partial<{title:string;mtimeMs:number;decisions:number;openDecisions:number}>={})=>({path,title:o.title??path.replace(/\.md$/,''),mtimeMs:o.mtimeMs??NOW,decisions:o.decisions??0,openDecisions:o.openDecisions??0});
+const note=(path:string,o:Partial<{title:string;mtimeMs:number;threads:number;openThreads:number}>={})=>({path,title:o.title??path.replace(/\.md$/,''),mtimeMs:o.mtimeMs??NOW,threads:o.threads??0,openThreads:o.openThreads??0});
 
 describe('building the graph from links',()=>{
  it('counts links per pair, keeps broken links apart, and ignores code, self links and web links',()=>{
@@ -19,24 +19,24 @@ describe('building the graph from links',()=>{
 
 describe('what each star shows',()=>{
  const data:GraphData={notes:[
-  note('open.md',{decisions:3,openDecisions:1}),
-  note('done.md',{decisions:2}),
-  note('old.md',{decisions:1,mtimeMs:NOW-31*DAY}),
+  note('open.md',{threads:3,openThreads:1}),
+  note('done.md',{threads:2}),
+  note('old.md',{threads:1,mtimeMs:NOW-31*DAY}),
   note('quiet.md'),
-  note('lonely.md',{openDecisions:1,decisions:1}),
+  note('lonely.md',{openThreads:1,threads:1}),
  ],edges:[{from:'done.md',to:'open.md',count:1},{from:'open.md',to:'old.md',count:1},{from:'quiet.md',to:'done.md',count:2}],broken:[{from:'done.md',target:'x.md'},{from:'done.md',target:'y.md'}]};
  const a=analyze(data,NOW);
- it('gives a state: open decisions, all decided, stale after 30 days, or quiet',()=>{
-  expect(a.get('open.md')!.state).toBe('open');expect(a.get('done.md')!.state).toBe('decided');
+ it('gives a state: open threads, all threads closed, stale after 30 days, or quiet',()=>{
+  expect(a.get('open.md')!.state).toBe('open');expect(a.get('done.md')!.state).toBe('closed');
   expect(a.get('old.md')!.state).toBe('stale');expect(a.get('quiet.md')!.state).toBe('quiet');
  });
- it('surfaces orphans, broken links and open decisions nothing cites',()=>{
+ it('surfaces orphans, broken links and open threads nothing cites',()=>{
   expect([...a].filter(([,s])=>s.orphan).map(([p])=>p)).toEqual(['lonely.md']);
   expect(a.get('done.md')!.broken).toBe(2);
   expect([...a].filter(([,s])=>s.uncitedOpen).map(([p])=>p)).toEqual(['lonely.md']);
   expect(a.get('open.md')).toMatchObject({inDegree:1,outDegree:1,uncitedOpen:false});
  });
- it('sizes stars by decisions, gently',()=>{
+ it('sizes stars by their threads, gently',()=>{
   expect(starRadius(0)).toBeLessThan(starRadius(1));expect(starRadius(1)).toBeLessThan(starRadius(9));expect(starRadius(400)).toBeLessThanOrEqual(14);
   expect(a.get('open.md')!.radius).toBe(starRadius(3));
  });

@@ -107,7 +107,7 @@ try {
   await clickStar(page, "plan.md");
   await page.locator(".cn-card").waitFor({ timeout: 4000 });
   const card = await page.locator(".cn-card").innerText();
-  check("clicking a star shows its card", /Plan/.test(card) && /Has open decisions/.test(card) && /Cited by\s*2/.test(card.replace(/\n/g, " ")), card.replace(/\s+/g, " "));
+  check("clicking a star shows its card", /Plan/.test(card) && /Has open threads/.test(card) && /Cited by\s*2/.test(card.replace(/\n/g, " ")), card.replace(/\s+/g, " "));
   await listPick(page, "Lonely");
   check("the card names problems in words", /No links in or out/.test(await page.locator(".cn-card").innerText()));
   await listPick(page, "Runbook");

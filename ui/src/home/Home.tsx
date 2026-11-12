@@ -29,7 +29,7 @@ function Card({p,home,onChange}:{p:ProjectEntry;home:string;onChange:()=>void}){
   <p className="card-path" title={p.root}>{shortenPath(p.root,home)}</p>
   <p className="card-meta">{lastOpenedText(p.lastOpened)}</p>
   {unreadable?<p className="card-problem">{unreadable}</p>
-   :<p className="card-stats" aria-live="polite">{stats?<><span>{stats.notes}</span>{stats.decisions&&<span>{stats.decisions}</span>}{stats.waiting&&<span className="card-waiting">{stats.waiting}</span>}</>:<span className="card-loading">Reading…</span>}</p>}
+   :<p className="card-stats" aria-live="polite">{stats?<><span>{stats.notes}</span>{stats.threads&&<span>{stats.threads}</span>}{stats.waiting&&<span className="card-waiting">{stats.waiting}</span>}</>:<span className="card-loading">Reading…</span>}</p>}
   <div className="card-actions">
    <button type="button" className="icon-btn" aria-pressed={p.pinned} aria-label={p.pinned?`Unpin ${p.name}`:`Pin ${p.name}`} title={p.pinned?'Unpin':'Pin to the top'} disabled={busy} onClick={()=>void act(()=>api.pinProject(p.id,!p.pinned))}><PinIcon on={p.pinned}/></button>
    {!confirm&&<button type="button" className="text-btn" onClick={()=>setConfirm(true)}>Remove</button>}

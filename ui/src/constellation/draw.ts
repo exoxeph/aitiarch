@@ -74,7 +74,7 @@ export function draw(ctx:CanvasRenderingContext2D,p:Palette,sc:Scene){
   if(q.x<-40||q.y<-40||q.x>size.w+40||q.y>size.h+40)continue;
   const state=info?.state??'quiet';
   if(state==='open'){ctx.shadowColor=alpha(p.accent,0.75);ctx.shadowBlur=14;}
-  ctx.fillStyle=state==='open'?p.accentHi:state==='decided'?p.ink:state==='stale'?alpha(p.muted,0.5):alpha(p.muted,0.9);
+  ctx.fillStyle=state==='open'?p.accentHi:state==='closed'?p.ink:state==='stale'?alpha(p.muted,0.5):alpha(p.muted,0.9);
   ctx.beginPath();ctx.arc(q.x,q.y,r,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
   if(info?.uncitedOpen){ctx.strokeStyle=alpha(p.accent,0.35+0.35*pulse);ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(q.x,q.y,r+5+pulse*2,0,Math.PI*2);ctx.stroke();}
   if(info?.orphan){ctx.setLineDash([3,3]);ctx.strokeStyle=alpha(p.muted,0.8);ctx.lineWidth=1;ctx.beginPath();ctx.arc(q.x,q.y,r+4,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);}

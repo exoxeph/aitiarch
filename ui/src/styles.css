@@ -1159,7 +1159,7 @@ a.menu-row { text-decoration: none; }
 .cn-list-head { margin: var(--space-1) var(--space-2); color: var(--muted); font-size: var(--text-meta); line-height: 1.4; }
 .cn-dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; }
 .cn-dot.cn-open { background: var(--accent-hi); box-shadow: 0 0 0 3px var(--glow); }
-.cn-dot.cn-decided { background: var(--ink-text); }
+.cn-dot.cn-closed { background: var(--ink-text); }
 .cn-dot.cn-stale { background: var(--muted); opacity: .5; }
 .cn-dot.cn-quiet { background: var(--muted); }
 .cn-stage { position: relative; min-width: 0; overflow: hidden; }

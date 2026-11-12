@@ -11,13 +11,13 @@ export function visibleNotes(data:GraphData,info:Map<string,StarInfo>,f:ViewFilt
  return new Set([...base].filter(p=>{const s=info.get(p);return !!s&&(f.folder==='*'||s.folder===f.folder)&&(f.state==='*'||s.state===f.state);}));
 }
 
-/** One star per top folder (decisions summed, links between folders folded together): for notebooks too big to draw note by note. */
+/** One star per top folder (threads summed, links between folders folded together): for notebooks too big to draw note by note. */
 export function clusterByFolder(data:GraphData):GraphData{
  const groups=new Map<string,GraphNote>();
  for(const n of data.notes){
   const f=topFolder(n.path),key='folder:'+f,g=groups.get(key);
-  if(g){g.decisions+=n.decisions;g.openDecisions+=n.openDecisions;g.mtimeMs=Math.max(g.mtimeMs,n.mtimeMs);}
-  else groups.set(key,{path:key,title:f||'(top level)',mtimeMs:n.mtimeMs,decisions:n.decisions,openDecisions:n.openDecisions});
+  if(g){g.threads+=n.threads;g.openThreads+=n.openThreads;g.mtimeMs=Math.max(g.mtimeMs,n.mtimeMs);}
+  else groups.set(key,{path:key,title:f||'(top level)',mtimeMs:n.mtimeMs,threads:n.threads,openThreads:n.openThreads});
  }
  const counts=new Map<string,number>();
  for(const e of data.edges){const a='folder:'+topFolder(e.from),b='folder:'+topFolder(e.to);if(a===b)continue;const k=`${a}\0${b}`;counts.set(k,(counts.get(k)??0)+e.count);}
@@ -38,12 +38,12 @@ export function searchStar(data:GraphData,query:string):string|null{
  return (data.notes.find(n=>n.title.toLowerCase().startsWith(q))??data.notes.find(n=>n.title.toLowerCase().includes(q))??data.notes.find(n=>n.path.toLowerCase().includes(q)))?.path??null;
 }
 
-export interface Card {path:string;title:string;state:StarState;decisions:number;openDecisions:number;cites:number;citedBy:number;problems:string[]}
+export interface Card {path:string;title:string;state:StarState;threads:number;openThreads:number;cites:number;citedBy:number;problems:string[]}
 export function cardFor(path:string,data:GraphData,info:Map<string,StarInfo>):Card|null{
  const n=data.notes.find(x=>x.path===path),s=info.get(path);if(!n||!s)return null;
  const problems:string[]=[];
  if(s.orphan)problems.push('No links in or out');
  if(s.broken)problems.push(`${s.broken} broken link${s.broken===1?'':'s'}`);
- if(s.uncitedOpen)problems.push('Open decision that no note cites');
- return {path,title:n.title,state:s.state,decisions:n.decisions,openDecisions:n.openDecisions,cites:s.outDegree,citedBy:s.inDegree,problems};
+ if(s.uncitedOpen)problems.push('Open thread that no note cites');
+ return {path,title:n.title,state:s.state,threads:n.threads,openThreads:n.openThreads,cites:s.outDegree,citedBy:s.inDegree,problems};
 }
