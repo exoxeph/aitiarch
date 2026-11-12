@@ -2,10 +2,10 @@ import {Store} from './store.ts';
 import {randomUUID} from 'node:crypto';
 import {InkStore,type InkSnapshot} from './ink-store.ts';import {UiStateStore} from './ui-state-store.ts';import {LedgerStore} from './ledger-store.ts';
 import type {InkItem} from '../shared/ink.ts';
-import {newThread,exactKeys,validId,validProvider,failureCodes,type ThreadFailure,type ThreadProvider,type ThreadReply} from '../shared/threads.ts';
+import {newThread,exactKeys,validId,validSkillRefs,validProvider,failureCodes,type ThreadFailure,type ThreadProvider,type ThreadReply} from '../shared/threads.ts';
 import {validateProductResult} from './product-validation.ts';import {redact,type Result} from './providers/index.ts';import {textHash} from './anchor-cache.ts';
 export type HumanThreadAction={type:'open'|'skip'|'reopen'|'dismiss'|'restore'}|{type:'submit';text:string}|{type:'resolve'|'unresolve'}|{type:'delete';confirmed:boolean};
-interface ReplyInput {id:string;parentId:string;provider:ThreadProvider;action:'think'|'ask';purpose:'followup'|'summary'}
+interface ReplyInput {id:string;parentId:string;provider:ThreadProvider;action:'think'|'ask';purpose:'followup'|'summary';/** Names of the skills attached to the step. Names only. */skills?:string[]}
 export class ThreadStore {
  private ink:InkStore;private drafts:UiStateStore;readonly ledger:LedgerStore;
  constructor(ink:InkStore,drafts:UiStateStore,ledger?:LedgerStore){this.ink=ink;this.drafts=drafts;this.ledger=ledger??new LedgerStore(ink.rootReal);}
@@ -55,13 +55,13 @@ export class ThreadStore {
    description:'The reviewed selected note and your in-memory question will be sent; no takeaway drafts or external transcripts are sent.'};
  }
  async beginReply(note:string,id:string,version:string|null,input:ReplyInput,confirmed:boolean){
-  if(!exactKeys(input,['id','parentId','provider','action','purpose'])||!validId(input.id)||!validId(input.parentId)||!validProvider(input.provider)||!['think','ask'].includes(input.action)||!['followup','summary'].includes(input.purpose))throw new Error('Invalid reply request.');
+  if(!exactKeys(input,['id','parentId','provider','action','purpose',...(input.skills===undefined?[]:['skills'])])||(input.skills!==undefined&&!validSkillRefs(input.skills))||!validId(input.id)||!validId(input.parentId)||!validProvider(input.provider)||!['think','ask'].includes(input.action)||!['followup','summary'].includes(input.purpose))throw new Error('Invalid reply request.');
   const notice=await this.providerNotice(note,id,input.provider);if(notice.required&&confirmed!==true)throw new Error('Confirm sending to a different provider.');
   return this.change(note,id,version,i=>{const t=i.thread!,responses=this.responses(i);if(responses.some(r=>r.id===input.id)||!responses.some(r=>r.id===input.parentId&&r.generation?.status==='complete'))throw new Error('Invalid reply parent or duplicate id.');
    if(input.purpose==='summary'&&(!this.canSummarize(i)||t.summary.reply))throw new Error('Submit or skip takeaway before requesting a closing summary.');
    if(t.followups.length>=100)throw new Error('Thread reply limit reached.');
    if(notice.required)t.providerConfirmations.push({at:new Date().toISOString(),from:notice.from!,to:input.provider});
-   const reply:ThreadReply={id:input.id,parentId:input.parentId,body:'',generation:{requestId:input.id,action:input.action,provider:input.provider,model:null,createdAt:new Date().toISOString(),status:'pending',evidence:[],dismissed:false}};
+   const reply:ThreadReply={id:input.id,parentId:input.parentId,body:'',generation:{requestId:input.id,action:input.action,provider:input.provider,model:null,createdAt:new Date().toISOString(),status:'pending',evidence:[],dismissed:false,...(input.skills?.length?{skills:input.skills}:{})}};
    if(input.purpose==='summary')t.summary.reply=reply;else t.followups.push(reply);
   });
  }

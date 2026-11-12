@@ -2,6 +2,8 @@ import {Store} from './store.ts';
 import {ThreadStore} from './thread-store.ts';
 import {prepareRequest,ProviderError,type Provider,type Request} from './providers/index.ts';
 import {ProductValidationError} from './product-validation.ts';
+import type {ExtrasFor} from './node-settings.ts';
+import type {SkillsReview} from '../shared/node-settings.ts';
 import type {ThreadFailure} from '../shared/threads.ts';
 export interface ThreadRequest {path:string;id:string;inkVersion:string|null;replyId:string;parentId:string;purpose:'followup'|'summary';question:string;confirmed:boolean;noteVersion?:string}
 export function threadFailure(error:unknown):ThreadFailure {
@@ -18,12 +20,20 @@ export class ThreadRuntime {
  private store:Store;private threads:ThreadStore;private provider:Provider;private notify:(path:string)=>void;
  private jobs=new Map<string,{done:Promise<void>;controller:AbortController;active:boolean;retry?:()=>Promise<void>}>();
  private starting=new Set<string>();
- constructor(store:Store,threads:ThreadStore,provider:Provider,notify:(path:string)=>void=()=>{}){this.store=store;this.threads=threads;this.provider=provider;this.notify=notify;}
+ private extras?:ExtrasFor;
+ constructor(store:Store,threads:ThreadStore,provider:Provider,notify:(path:string)=>void=()=>{},extras?:ExtrasFor){this.store=store;this.threads=threads;this.provider=provider;this.notify=notify;this.extras=extras;}
+ /** A follow-up or closing summary is an Ask: it carries the Ask step's persona, and its skills only when something loaded. */
+ private async withExtras(base:Request):Promise<{request:Request;names:string[];review:SkillsReview|null}>{
+  if(!this.extras)return {request:base,names:[],review:null};
+  const e=await this.extras('ask');
+  return {request:{...base,persona:e.persona,...(e.skills.loaded.length?{skills:e.skills}:{})},names:e.names,review:e.review};
+ }
  activeIds(){return new Set([...this.starting,...[...this.jobs].filter(([,j])=>j.active||j.retry).map(([id])=>id)]);}
  async preview(input:Pick<ThreadRequest,'path'|'id'|'replyId'|'purpose'|'question'>){
   const note=await this.store.read(input.path),s=await this.threads.read(input.path),i=s.document.items.find(i=>i.id===input.id);
   if(!i||i.attachment.status!=='attached'||note.text.slice(i.attachment.from,i.attachment.to)!==i.anchor.quote)throw new Error('Re-attach the thread before asking a new question.');
-  return {noteVersion:note.version,packet:prepareRequest({id:input.replyId,action:'ask',question:input.purpose==='summary'?'Provide a closing summary of the selected note. Never write or suggest a takeaway, why or failed-reason.':input.question,selection:i.anchor.quote,note:note.text,decisions:[],turns:[]})};
+  const {request,review}=await this.withExtras({id:input.replyId,action:'ask',question:input.purpose==='summary'?'Provide a closing summary of the selected note. Never write or suggest a takeaway, why or failed-reason.':input.question,selection:i.anchor.quote,note:note.text,decisions:[],turns:[]});
+  return {noteVersion:note.version,packet:prepareRequest(request),...(review?{skills:review}:{})};
  }
  async start(input:ThreadRequest){
   if(this.jobs.has(input.replyId)||this.starting.has(input.replyId))throw new Error('Request id already used.');
@@ -33,10 +43,10 @@ export class ThreadRuntime {
   if(!i||i.attachment.status!=='attached'||note.text.slice(i.attachment.from,i.attachment.to)!==i.anchor.quote)throw new Error('Re-attach the thread before asking a new question.');
   if(this.activeIds().size>=2)throw new Error('Two requests are already running. Wait before sending another.');
   const provider=this.provider,providerName=provider.name==='chatgpt-plan'?'chatgpt-plan':'claude';
-  const request:Request={id:input.replyId,action:'ask',question:input.purpose==='summary'?'Provide a closing summary of the selected note. Never write or suggest a takeaway, why or failed-reason.':input.question,selection:i.anchor.quote,note:note.text,decisions:[],turns:[]};
+  const {request,names}=await this.withExtras({id:input.replyId,action:'ask',question:input.purpose==='summary'?'Provide a closing summary of the selected note. Never write or suggest a takeaway, why or failed-reason.':input.question,selection:i.anchor.quote,note:note.text,decisions:[],turns:[]});
   const packet=prepareRequest(request);
   this.starting.add(input.replyId);let saved;
-  try{saved=await this.threads.beginReply(input.path,input.id,input.inkVersion,{id:input.replyId,parentId:input.parentId,provider:providerName,action:'ask',purpose:input.purpose},input.confirmed);}catch(e){this.starting.delete(input.replyId);throw e;}
+  try{saved=await this.threads.beginReply(input.path,input.id,input.inkVersion,{id:input.replyId,parentId:input.parentId,provider:providerName,action:'ask',purpose:input.purpose,...(names.length?{skills:names}:{})},input.confirmed);}catch(e){this.starting.delete(input.replyId);throw e;}
   const controller=new AbortController();let finish!:()=>void;
   const job={controller,done:new Promise<void>(r=>{finish=r;}),active:true,retry:undefined as (()=>Promise<void>)|undefined};this.jobs.set(input.replyId,job);this.starting.delete(input.replyId);
   const persist=async(action:()=>Promise<unknown>)=>{for(let n=0;;n++){try{await action();this.notify(input.path);return;}catch(e){if(!/conflict|busy/i.test(String(e))||n>=7)throw e;await new Promise(r=>setTimeout(r,20*(n+1)));}}};

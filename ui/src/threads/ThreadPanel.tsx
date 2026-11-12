@@ -7,6 +7,8 @@ import type {InkItem} from '../../shared/ink.ts';
 import {newThread,questionPlaceholder,threadStatus,type ThreadFailure,type ThreadReply} from '../../shared/threads.ts';
 import {api,type InkSnapshot} from '../api.ts';
 import {rememberQuestion,recalledQuestion,forgetQuestion} from './questions.ts';
+import {SkillsReviewList} from '../skills/SkillsReviewList.tsx';
+import type {SkillsReview} from '../../shared/node-settings.ts';
 /** The persistence notice lives in the one status spot at the bottom of the app; if that is not mounted it renders in place. */
 const statusLabel=(s:string)=>({open:'Open',resolved:'Resolved',dismissed:'Dismissed',orphaned:'Needs re-attaching',has_takeaway:'Takeaway written',skipped:'Takeaway skipped'} as Record<string,string>)[s]??s;
 const statusNotice=(node:ReactNode)=>{const slot=document.getElementById('status-notice-slot');return slot?createPortal(node,slot):node;};
@@ -55,7 +57,7 @@ export function ThreadPanel(props:Props){
 function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{item:InkItem;memory:Map<string,MemoryDraft>}){
  const key=path+':'+item.id;let entry=memory.get(key);if(!entry){entry={text:'',revision:null,loaded:false,dirty:false,enabled:false,sequence:0,queue:Promise.resolve()};memory.set(key,entry);}const draft=entry;
  const [text,setText]=useState(draft.text),[draftNotice,setDraftNotice]=useState(false),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[confirmDelete,setConfirmDelete]=useState(false);
- const [question,setQuestion]=useState(''),[review,setReview]=useState<null|{purpose:'followup'|'summary';replyId:string;parentId:string;provider:string;required:boolean;from:string|null;description:string;packet:unknown;noteVersion:string;question:string}>(null),[confirmed,setConfirmed]=useState(false);
+ const [question,setQuestion]=useState(''),[review,setReview]=useState<null|{purpose:'followup'|'summary';replyId:string;parentId:string;provider:string;required:boolean;from:string|null;description:string;packet:unknown;noteVersion:string;question:string;skills?:SkillsReview}>(null),[confirmed,setConfirmed]=useState(false);
  const [saveFailures,setSaveFailures]=useState<string[]>([]);
  const mounted=useRef(true),card=useRef<HTMLElement|null>(null),seen=useRef(new Set<string>()),live=useRef({item,version,saved});live.current={item,version,saved};
  const t=item.thread??newThread(item),revealed=t.takeaway.state!=='untouched'||t.summary.revealedAt!==null;
@@ -100,7 +102,7 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{
  const prepare=async(purpose:'followup'|'summary')=>{
   setBusy(true);setNotice('');try{
    const a=await api.assistance(),notice=await api.threadCall<{required:boolean;from:string|null;to:string;description:string}>('notice',{path,id:item.id});
-   const replyId=crypto.randomUUID(),response=await api.threadCall<{packet:unknown;noteVersion:string}>('preview',{path,id:item.id,purpose,question,replyId});
+   const replyId=crypto.randomUUID(),response=await api.threadCall<{packet:unknown;noteVersion:string;skills?:SkillsReview}>('preview',{path,id:item.id,purpose,question,replyId});
    const replies=[initial,...t.followups,...(t.summary.reply?[t.summary.reply]:[])].filter(r=>r.generation.status==='complete');
    setConfirmed(!notice.required);setReview({purpose,replyId,parentId:replies.at(-1)?.id??item.id,provider:a.provider??'claude',question,...notice,...response});
   }catch(e){fail(e);}finally{setBusy(false);}
@@ -125,6 +127,7 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{
   <div className="writeback"><input aria-label="Write back" placeholder="Write back…" value={question} disabled={!!review||busy} maxLength={8000} onChange={e=>setQuestion(e.target.value)}/>
   <button className="send-arrow" aria-label="Review reply" title="Review reply" disabled={busy||!question.trim()||item.attachment.status!=='attached'} onClick={()=>void prepare('followup')}><span aria-hidden="true"/></button></div>
   {review&&<section className="thread-request" aria-label="Review thread request"><p>Send to {providerLabel(review.provider)}. Note and selection frozen by version; changes require a new review.</p>
+   <SkillsReviewList review={review.skills}/>
    <details><summary>Exact redacted request</summary><pre>{JSON.stringify(review.packet,null,2)}</pre></details>
    {review.required&&<label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>Switch from {providerLabel(review.from??'claude')} to {providerLabel(review.provider)}: {review.description} Confirm this first change.</label>}
    <button disabled={busy||!confirmed} onClick={()=>void send()}>Send reply</button><button onClick={()=>setReview(null)}>Cancel write-back</button></section>}
