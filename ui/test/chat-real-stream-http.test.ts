@@ -67,6 +67,26 @@ it.each(['verified-chat-reply-takeaway','verified-chat-reply-cutoff'])('%s: a JS
  const {text}=await chatWith(scenario);expect(text).not.toContain('event: complete');const e=failure(text);expect(e.code).toBe('provider_failed');expect(e.reason.kind).toBe('unparseable');
 },20000);
 
+// Every streamed piece goes through the output gate: what the page receives while the reply streams is redacted, never secret-shaped,
+// never the JSON wrapper, and never a recital of the instructions.
+const deltas=(text:string)=>[...text.matchAll(/event: delta\ndata: (.*)\n/g)].map(m=>JSON.parse(m[1]).text as string).join('');
+it('a key split across many pieces never reaches the page while streaming, and the final body is redacted',async()=>{
+ const {text}=await chatWith('verified-chat-reply-secret-split'),shown=deltas(text);
+ expect(shown).toContain('The key is ');expect(shown).not.toMatch(/sk-[a-z0-9]/);
+ expect(done(text).message.body).toContain('[TOKEN]');expect(done(text).message.body).not.toContain('sk-abc');
+},20000);
+it('a JSON object wrapped in prose never streams its JSON',async()=>{
+ const shown=deltas((await chatWith('verified-chat-reply-wrapped')).text);expect(shown).not.toContain('{');expect(shown).not.toContain('"answer"');
+},20000);
+it('a reply that recites the instruction stops streaming and is flagged on the saved message',async()=>{
+ const {text,base,cookie}=await chatWith('verified-chat-reply-echo',true),shown=deltas(text);
+ expect(shown.length).toBeLessThan(160);expect(done(text).message.echo).toBe(true);
+ const saved=await (await fetch(base+'/api/chat?path=fixture.md',{headers:{cookie}})).json();expect(saved.messages.at(-1).echo).toBe(true);
+},20000);
+it('an ordinary reply is not flagged as an echo',async()=>{
+ expect(done((await chatWith('verified-chat-reply-prose')).text).message.echo).toBeUndefined();
+},20000);
+
 // A thinking delta that carries extra fields (signature, index, counters), as the real CLI sends it: the reply still arrives, and the
 // thinking text is ignored everywhere - not streamed to the page, not in the saved message, not on disk, not in the ledger.
 it('ignores a thinking delta with extra fields: never displayed, never stored',async()=>{

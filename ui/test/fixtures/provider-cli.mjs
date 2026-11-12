@@ -90,14 +90,21 @@ if (scenario.startsWith('verified-')) {
     'verified-chat-reply-question':'{"answer":"What makes you sure the budget is 40 dollars and not 60?","claims":[]}',
     // Records the prompt it was given (to <record>.prompt) and answers with a valid structured reply, so Think, Ask and chat all accept it.
     'verified-chat-record':'{"answer":"Synthetic recorded reply.","claims":[]}',
+    // A prose reply with a key in it, streamed in small pieces (synthetic key shape).
+    'verified-chat-reply-secret-split':'The key is sk-abcdefghijklmnopqrstuvwxyz0123 in the file, and nothing else is needed for this.',
+    // A reply that recites the instruction it was given (a prompt-injection outcome), built below from the real packet.
+    'verified-chat-reply-echo':'',
     // An answer that mentions an Authorization header and a Windows user path: redaction must change the text, not break parsing.
     'verified-chat-reply-auth':JSON.stringify({answer:'Send it in the Authorization: Bearer header.\nYour copy is at C:\\Users\\someone\\notes\\x.md today.',claims:[]}),
   };
   if(scenario==='verified-chat-record')writeFileSync(record+'.prompt',input); // stdin was already read into `input` above
+  if(scenario==='verified-chat-reply-echo')replies[scenario]='Here is what I was told: '+packet.instruction.slice(0,400);
   if(replies[scenario]){
     const text=replies[scenario],mid=Math.floor(text.length/2),emit=event=>console.log(JSON.stringify({type:'stream_event',event}));
     emit({type:'message_start',message:{role:'assistant'}});emit({type:'content_block_start',index:0,content_block:{type:'text',text:''}});
-    emit({type:'content_block_delta',index:0,delta:{type:'text_delta',text:text.slice(0,mid)}});emit({type:'content_block_delta',index:0,delta:{type:'text_delta',text:text.slice(mid)}});
+    // Small pieces where the test is about what a partial reply can show; two halves otherwise.
+    const pieces=['verified-chat-reply-secret-split','verified-chat-reply-echo'].includes(scenario)?text.match(/[\s\S]{1,6}/g):[text.slice(0,mid),text.slice(mid)];
+    for(const piece of pieces)emit({type:'content_block_delta',index:0,delta:{type:'text_delta',text:piece}});
     emit({type:'content_block_stop',index:0});emit({type:'message_stop'});
     console.log(JSON.stringify({type:'assistant',message:{content:[{type:'text',text}]}}));
     console.log(JSON.stringify({type:'result',subtype:'success',result:text,usage:{input_tokens:20,output_tokens:10}}));process.exit(0);

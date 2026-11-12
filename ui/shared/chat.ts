@@ -19,6 +19,8 @@ export interface ChatMessage {
  insertionBlocked:boolean;
  /** The model replied in plain prose, not as {answer, claims}: shown as an answer with no claims to check, stored with no evidence. */
  unstructured?:true;
+ /** The reply recites a long run of the instructions Aitiarch sent (persona, skills, rules). Shown with a note; absent otherwise. */
+ echo?:true;
  /** Names of the skills that shaped this reply. Absent in older files. Names only: never paths or skill text. */
  skills?:string[];
  /** Session-derived replies never enter the repository or Add to note. */

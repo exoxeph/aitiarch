@@ -54,7 +54,8 @@ it('fake stream: review first, frozen context, provisional tokens, accepted mark
  const review=await f.runtime.review(f.input);expect(review.requiresConfirmation).toBe(true);
  await writeFile(path.join(f.root,'fixture.md'),'External synthetic edit.');
  await f.runtime.send({reviewId:review.reviewId,confirmed:true,dontAskAgain:true},e=>events.push(e));
- expect(events.map(e=>e.type)).toEqual(['start','delta','delta','complete']);
+ // The output gate holds back the unfinished word, so a two-piece reply may arrive as one provisional delta; the final message replaces it.
+ expect(events[0].type).toBe('start');expect(events.at(-1)!.type).toBe('complete');expect(events.slice(1,-1).every(e=>e.type==='delta')).toBe(true);expect(events.length).toBeGreaterThanOrEqual(3);
  expect(f.provider.requests[0].note).toContain('invented web app');
  const saved=await readFile(path.join(f.root,'chat/fixture.md.chat.json'),'utf8');
  expect(saved).toContain('**Synthetic**');expect(saved).not.toMatch(/Explain the plan|question|turns|takeaway|failedReason/);

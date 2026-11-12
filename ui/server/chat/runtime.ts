@@ -10,23 +10,12 @@ import {prepareRequest,ProviderError,redact,type Provider,type Request} from '..
 import {validateProductResult,ProductValidationError} from '../product-validation.ts';
 import type {ExtrasFor} from '../node-settings.ts';
 import {describeFailure} from '../../shared/chat-failure.ts';
+import {StreamGate,echoes} from './gate.ts';
 export class ChatError extends Error {code:ChatErrorCode;constructor(code:ChatErrorCode){super(code);this.code=code;}}
 interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true}
 type Pair={id:string;user:string;assistant:string};
 interface State {history:Pair[];omittedPairs:number;serial:number;usage:ChatUsage;calls:number[];running:boolean;privateContext?:true;controller?:AbortController}
-/** Stream extraction only. Partial answer text is NEVER an accepted/stored message. */
-export function answerPrefix(json:string):string {
- const match=/^\s*(?:```(?:json)?\s*\r?\n)?\s*\{\s*"answer"\s*:\s*"/.exec(json);
- if(!match)return '';
- let out='';
- for(let n=match[0].length;n<json.length;n++){
-  const c=json[n];if(c==='"')break;
-  if(c==='\\'){
-   const rest=json.slice(n),escape=/^\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})/.exec(rest)?.[0];
-   if(!escape)break;try{out+=JSON.parse('"'+escape+'"');}catch{break;}n+=escape.length-1;
-  }else {if(c.charCodeAt(0)<32)break;out+=c;}
- }return out;
-}
+
 export class ChatRuntime {
  private store:Store;private ink:InkStore;private chats:ChatStore;private provider?:Provider;private ledger:LedgerStore;
  private states=new Map<string,State>();private reviews=new Map<string,Frozen>();private dontAsk=false;private jobs=new Set<Promise<void>>();private closed=false;
@@ -101,13 +90,12 @@ export class ChatRuntime {
    if(input.dontAskAgain===true&&!frozen.privateContext)this.dontAsk=true;
    if(frozen.privateContext)s.privateContext=true;
    s.calls.push(Date.now());s.usage.calls++;called=true;emit({type:'start',id:request.id});
-   let json='',sent='';const outputRoom=s.usage.tokenBudget-s.usage.spent-review.estimatedTokens;
+   let json='';const outputRoom=s.usage.tokenBudget-s.usage.spent-review.estimatedTokens,gate=new StreamGate({instruction:review.instruction});
    const result=await this.provider.invoke(request,{signal:controller.signal,onTextDelta:text=>{
     json+=text;if(json.length>100000)throw new ProviderError('output_limit');
     if(estimateTokens(json)>outputRoom)throw new ChatError('budget_reached');
-    // A structured reply streams its answer field. A reply that starts as plain prose streams as written (the final message replaces it).
-    const prose=json.trim()!==''&&!/^\s*[{`\[]/.test(json),prefix=prose?json:answerPrefix(json);
-    if(prefix.length>sent.length){const delta=prefix.slice(sent.length);sent=prefix;emit({type:'delta',id:request.id,text:delta,provisional:true});}
+    // Only what the output gate lets through reaches the page. The final, validated message replaces it.
+    const delta=gate.push(text);if(delta)emit({type:'delta',id:request.id,text:delta,provisional:true});
    }});
    if(controller.signal.aborted)throw new ChatError('cancelled');
    if(result.usage){for(const n of Object.values(result.usage))if(typeof n!=='number'||!Number.isFinite(n)||n<0)throw new ChatError('validation');
@@ -117,7 +105,7 @@ export class ChatRuntime {
    // Enforce exact keys for fake/adapted providers too; never accept owned fields or aliases.
    if(!Array.isArray(result.claims)||result.claims.some(c=>!c||typeof c!=='object'||Object.keys(c).sort().join()!=='quote,sourceId')||Object.keys(result).some(k=>!['id','provider','model','answer','claims','usage','insertionBlocked','unstructured'].includes(k)))throw new ChatError('validation');
    const validated=validateProductResult(result,request.id,request,redact,hash,'claude');
-   const message:ChatMessage={id:request.id,role:'assistant',body:validated.body,at:new Date().toISOString(),provider:'claude',model:validated.model,evidence:validated.evidence,usage:result.usage,insertionBlocked:!!s.privateContext||result.insertionBlocked===true||secretKinds(result.answer).length>0,...(result.unstructured?{unstructured:true as const}:{}),...(frozen.skillNames.length?{skills:frozen.skillNames}:{}),...(s.privateContext?{ephemeral:true as const}:{})};
+   const message:ChatMessage={id:request.id,role:'assistant',body:validated.body,at:new Date().toISOString(),provider:'claude',model:validated.model,evidence:validated.evidence,usage:result.usage,insertionBlocked:!!s.privateContext||result.insertionBlocked===true||secretKinds(result.answer).length>0,...(result.unstructured?{unstructured:true as const}:{}),...(gate.echo||echoes(validated.body,review.instruction)?{echo:true as const}:{}),...(frozen.skillNames.length?{skills:frozen.skillNames}:{}),...(s.privateContext?{ephemeral:true as const}:{})};
    stage='save'; // from here on, a failure is about saving the reply
    let persistence:'memory'|'private';
    if(s.privateContext){const messages=this.ephemeral.get(review.path)??[];if(messages.length>=200)throw new ChatError('budget_reached');messages.push(message);this.ephemeral.set(review.path,messages);persistence='memory';}

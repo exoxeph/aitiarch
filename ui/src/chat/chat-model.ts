@@ -58,6 +58,8 @@ export function usageLine(u:ChatUsage):string{
 }
 /** Shown quietly under a reply the model gave as plain prose: it has no claims, so there is nothing to check against the note. */
 export const UNSTRUCTURED_LABEL='Unstructured reply: no claims to check';
+/** Shown under a reply that recites a long run of the instructions Aitiarch sent with the question. */
+export const ECHO_LABEL='Part of this reply repeats the instructions Aitiarch sent with your question.';
 /** A failed Claude call says why when the server gave a reason it understands; otherwise the same generic sentence as ever. */
 export function errorText(code:ChatErrorCode,reason?:FailureReason,errorName?:string):string{
  if(code==='internal'&&typeof errorName==='string'&&/^[A-Za-z]{1,40}$/.test(errorName))return `Something went wrong inside Aitiarch while handling this request (${errorName}). No retry was made.`;
