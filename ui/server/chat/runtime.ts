@@ -8,8 +8,9 @@ import {Store} from '../store.ts';import {InkStore} from '../ink-store.ts';impor
 import {ChatStore} from './store.ts';import {contextModules,hash,estimateTokens} from './context.ts';import {secretKinds} from './secrets.ts';
 import {prepareRequest,ProviderError,redact,type Provider,type Request} from '../providers/index.ts';
 import {validateProductResult,ProductValidationError} from '../product-validation.ts';
+import type {ExtrasFor} from '../node-settings.ts';
 export class ChatError extends Error {code:ChatErrorCode;constructor(code:ChatErrorCode){super(code);this.code=code;}}
-interface Frozen {review:ChatReview;request:Request;created:number;serial:number;reservation:number;privateContext?:true}
+interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true}
 type Pair={id:string;user:string;assistant:string};
 interface State {history:Pair[];omittedPairs:number;serial:number;usage:ChatUsage;calls:number[];running:boolean;privateContext?:true;controller?:AbortController}
 /** Stream extraction only. Partial answer text is NEVER an accepted/stored message. */
@@ -28,8 +29,8 @@ export function answerPrefix(json:string):string {
 export class ChatRuntime {
  private store:Store;private ink:InkStore;private chats:ChatStore;private provider?:Provider;private ledger:LedgerStore;
  private states=new Map<string,State>();private reviews=new Map<string,Frozen>();private dontAsk=false;private jobs=new Set<Promise<void>>();private closed=false;
- private sessions:ContextModule[];private ephemeral=new Map<string,ChatMessage[]>();
- constructor(store:Store,ink:InkStore,chats:ChatStore,provider?:Provider,sessions?:ContextModule[]){this.store=store;this.ink=ink;this.chats=chats;this.provider=provider;this.ledger=new LedgerStore(store.rootReal);this.sessions=sessions??sessionModules({project:path.dirname(store.rootReal)});}
+ private extras?:ExtrasFor;private sessions:ContextModule[];private ephemeral=new Map<string,ChatMessage[]>();
+ constructor(store:Store,ink:InkStore,chats:ChatStore,provider?:Provider,sessions?:ContextModule[],extras?:ExtrasFor){this.extras=extras;this.store=store;this.ink=ink;this.chats=chats;this.provider=provider;this.ledger=new LedgerStore(store.rootReal);this.sessions=sessions??sessionModules({project:path.dirname(store.rootReal)});}
  memoryMessages(note:string){return structuredClone(this.ephemeral.get(note)??[]);}
  private state(note:string){let s=this.states.get(note);if(!s){if(this.states.size>=50)throw new ChatError('busy');s={history:[],omittedPairs:0,serial:0,calls:[],running:false,usage:{note,calls:0,input:0,cached:0,output:0,unreportedCalls:0,spent:0,reserved:0,tokenBudget:CHAT_LIMITS.tokenBudget,rollingRequestCap:CHAT_LIMITS.rollingRequestCap,windowMinutes:CHAT_LIMITS.windowMinutes}};this.states.set(note,s);}return s;}
  usage(){return [...this.states.values()].map(s=>({...s.usage}));}
@@ -61,13 +62,16 @@ export class ChatRuntime {
   if(sources.length>CHAT_LIMITS.sources||sources.reduce((n,x)=>n+Buffer.byteLength(x.text),0)>85000)throw new ProviderError('context_limit');
   let history=[...s.history];while(history.length>CHAT_LIMITS.historyPairs||history.reduce((n,p)=>n+p.user.length+p.assistant.length,0)>CHAT_LIMITS.historyCharacters)history.shift();
   const request:Request={id:input.id,action:'ask',chat:true,note:sources.find(x=>x.id==='N1')?.text??'',selection:redact(input.selection??''),decisions:sources.filter(x=>x.id!=='N1').map(x=>({id:x.id,text:x.text})),turns:history,question:redact(input.question)};
+  // The chat node's persona always rides along; its skills only when something loaded. Fixed here, so the review shows what is sent.
+  const extra=this.extras?await this.extras('chat'):null;
+  if(extra){request.persona=extra.persona;if(extra.skills.loaded.length)request.skills=extra.skills;}
   const packet=prepareRequest(request),estimate=estimateTokens(JSON.stringify(packet));
   const privateContext=!!s.privateContext||sources.some(x=>x.ephemeral);
   const review:ChatReview={reviewId:randomUUID(),requestId:input.id,path:input.path,question:request.question,selection:request.selection,sources:sources.map(x=>({id:x.id,label:x.label,text:x.text,characters:x.text.length,estimatedTokens:estimateTokens(x.text)})),historyPairs:history.length,omittedPairs:s.omittedPairs+s.history.length-history.length,instruction:packet.instruction,history:structuredClone(packet.data.turns),estimatedTokens:estimate,requiresConfirmation:privateContext||!this.dontAsk};
   if(privateContext)review.ephemeral=true;
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');
-  this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),created:Date.now(),serial:s.serial,reservation:estimate+3000,...(privateContext?{privateContext:true as const}:{})});
+  this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate+3000,...(privateContext?{privateContext:true as const}:{})});
   return review;
  }
  async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
@@ -109,7 +113,7 @@ export class ChatRuntime {
    // Enforce exact keys for fake/adapted providers too; never accept owned fields or aliases.
    if(!Array.isArray(result.claims)||result.claims.some(c=>!c||typeof c!=='object'||Object.keys(c).sort().join()!=='quote,sourceId')||Object.keys(result).some(k=>!['id','provider','model','answer','claims','usage','insertionBlocked'].includes(k)))throw new ChatError('validation');
    const validated=validateProductResult(result,request.id,request,redact,hash,'claude');
-   const message:ChatMessage={id:request.id,role:'assistant',body:validated.body,at:new Date().toISOString(),provider:'claude',model:validated.model,evidence:validated.evidence,usage:result.usage,insertionBlocked:!!s.privateContext||result.insertionBlocked===true||secretKinds(result.answer).length>0,...(s.privateContext?{ephemeral:true as const}:{})};
+   const message:ChatMessage={id:request.id,role:'assistant',body:validated.body,at:new Date().toISOString(),provider:'claude',model:validated.model,evidence:validated.evidence,usage:result.usage,insertionBlocked:!!s.privateContext||result.insertionBlocked===true||secretKinds(result.answer).length>0,...(frozen.skillNames.length?{skills:frozen.skillNames}:{}),...(s.privateContext?{ephemeral:true as const}:{})};
    let persistence:'memory'|'private';
    if(s.privateContext){const messages=this.ephemeral.get(review.path)??[];if(messages.length>=200)throw new ChatError('budget_reached');messages.push(message);this.ephemeral.set(review.path,messages);persistence='memory';}
    else persistence=await this.chats.append(review.path,message);

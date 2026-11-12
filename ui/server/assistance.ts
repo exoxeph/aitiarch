@@ -11,6 +11,8 @@ import { LedgerStore } from './ledger-store.ts';
 import { prepareRequest, ProviderError, redact, type Provider, type Request } from './providers/index.ts';
 import { ProductValidationError, validateProductResult, validationCounts, type ValidationLog, type ValidationRecord } from './product-validation.ts';
 import { privateValidationLog } from './providers/failure-metrics.ts';
+import type { ExtrasFor } from './node-settings.ts';
+import { nodeFor } from '../shared/node-settings.ts';
 
 interface Job { path: string; controller: AbortController; done: Promise<void>; run: () => Promise<void>; status: 'queued' | 'pending' | 'complete' | 'error' | 'cancelled' | 'persistence_error'; retry?: () => Promise<void> }
 export class Assistance {
@@ -24,16 +26,24 @@ export class Assistance {
   private provider: Provider;
   private notify: (path: string) => void;
   private readonly validationLog:ValidationLog;
-  constructor(store: Store, ink: InkStore, provider: Provider, notify: (path: string) => void = () => {}, validationLog:ValidationLog=privateValidationLog()) {
-    this.validationLog=validationLog;
+  constructor(store: Store, ink: InkStore, provider: Provider, notify: (path: string) => void = () => {}, validationLog:ValidationLog=privateValidationLog(), extras?: ExtrasFor) {
+    this.validationLog=validationLog;this.extras=extras;
     this.store = store; this.ink = ink; this.provider = provider; this.notify = notify;
     this.ledger = new LedgerStore(store.rootReal);
   }
   async availability() { return { ...await this.provider.checkAvailability(), provider:this.provider.name??'claude' }; }
-  preview(input: Invocation) {
+  private extras?: ExtrasFor;
+  /** The node's persona goes on every request; its skills only when something loaded. Names are what gets recorded on the answer. */
+  private async withExtras(base: Request): Promise<{ request: Request; names: string[] }> {
+    if (!this.extras) return { request: base, names: [] };
+    const e = await this.extras(nodeFor(base.action, base.question));
+    return { request: { ...base, persona: e.persona, ...(e.skills.loaded.length ? { skills: e.skills } : {}) }, names: e.names };
+  }
+  async preview(input: Invocation) {
     const frozen = freezeInvocation(input);
-    return prepareRequest({ id: frozen.id, action: frozen.action, question: frozen.question,
+    const { request } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question,
       selection: frozen.selection, note: frozen.text, decisions: [], turns: [] });
+    return prepareRequest(request);
   }
   private serial<T>(fn: () => Promise<T>): Promise<T> { const p = this.writes.catch(() => {}).then(fn); this.writes = p; return p; }
   private async mutate(path: string, before: string, change: (items: InkItem[], text: string | null) => InkItem[]): Promise<InkSnapshot> {
@@ -59,14 +69,14 @@ export class Assistance {
     if (this.jobs.has(frozen.id)||this.starting.has(frozen.id)) throw new Error('Request ID already exists.');
     const availability = await this.provider.checkAvailability();
     if (!availability.available) throw new ProviderError(availability.code, availability.message);
-    const request: Request = { id: frozen.id, action: frozen.action, question: frozen.question, selection: frozen.selection,
-      note: frozen.text, decisions: [], turns: [] };
+    const { request, names } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question, selection: frozen.selection,
+      note: frozen.text, decisions: [], turns: [] });
     // Transcript context stays none. Optional source selection is a later slice;
     // never discover a user's global sessions or transmit one implicitly.
     const packet = prepareRequest(request);
     const pending: InkItem = { id: frozen.id, kind: 'answer', body: 'Thinking…', originalAnchor: frozen.anchor, anchor: frozen.anchor,
       attachment: { status: 'attached', from: frozen.from, to: frozen.to }, generation: { requestId: frozen.id, action: frozen.action,
-        provider: this.provider.name==='chatgpt-plan'?'chatgpt-plan':'claude', model: null, createdAt: new Date().toISOString(), status: 'pending', evidence: [], dismissed: false } };
+        provider: this.provider.name==='chatgpt-plan'?'chatgpt-plan':'claude', model: null, createdAt: new Date().toISOString(), status: 'pending', evidence: [], dismissed: false, ...(names.length ? { skills: names } : {}) } };
     // Map the newly captured item too if disk changed after the click.
     this.starting.add(frozen.id);
     const snapshot = await this.mutate(path, frozen.text, (items, text) => {

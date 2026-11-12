@@ -128,7 +128,7 @@ export function createApp(opts: AppOptions) {
   const assistance = inkReady.then(ink => new Assistance(store, ink, opts.provider ?? {
     checkAvailability: async () => ({ available: false, code: "unsupported_cli", message: "Claude is not configured. Start with --claude and an absolute executable path. Codex is disabled." }),
     invoke: async () => { throw new ProviderError("unsupported_cli"); },
-  }, path => { for (const c of clients) c.write(`event: ink\ndata: ${JSON.stringify({ type: "ink", path })}\n\n`); }));
+  }, path => { for (const c of clients) c.write(`event: ink\ndata: ${JSON.stringify({ type: "ink", path })}\n\n`); }, undefined, (node) => nodeSettings.extras(node)));
   let port = 0;
   // Shared with the multi-project host when it embeds this app; otherwise this app is its own front door.
   const security = opts.security ?? createSecurity({ port: () => port, extraOrigins: opts.allowOrigins, requireLaunch: opts.requireLaunch });
@@ -176,7 +176,7 @@ export function createApp(opts: AppOptions) {
   const investigator=new InvestigatorRuntime(investigatorPolicy,new Lookups(investigatorPolicy),new LedgerStore(store.rootReal),opts.investigator??{},undefined,store.rootReal);
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
   const chatStore=new ChatStore(store.rootReal);
-  const chatReady=inkReady.then(ink=>new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules));
+  const chatReady=inkReady.then(ink=>new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node)));
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
@@ -395,7 +395,7 @@ export function createApp(opts: AppOptions) {
       const b = await readBody(req) as Record<string, unknown>, service = await assistance;
       if (url.pathname === "/api/assistance/preview" || url.pathname === "/api/assistance/invoke") {
         const input = { id: b.id, path: b.path, action: b.action, question: b.question, text: b.text, from: b.from, to: b.to } as Invocation;
-        if (url.pathname.endsWith("preview")) return json(res, 200, service.preview(input));
+        if (url.pathname.endsWith("preview")) return json(res, 200, await service.preview(input));
         return json(res, 202, await service.start(input));
       }
       if (typeof b.id !== "string") throw new PathError(400, "bad_body", "Invalid request ID.");
