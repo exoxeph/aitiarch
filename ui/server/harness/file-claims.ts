@@ -11,11 +11,13 @@ import {redact} from '../providers/index.ts';
 export const LINE_SLACK=3,QUOTE_LINES=8,FILE_CAP=1024*1024;
 
 async function realFile(root:string,rel:string):Promise<string|null>{
- if(!rel||rel.length>400||path.isAbsolute(rel)||/^[A-Za-z]:/.test(rel)||rel.split('/').some(p=>!p||p==='.'||p==='..')||harnessDenied(rel)||/[\u0000-\u001f<>:"|?*]/.test(rel))return null;
+ // Windows aliases are refused outright: 8.3 short names (~), trailing dots or spaces, and alternate data streams (:).
+ if(!rel||rel.length>400||path.isAbsolute(rel)||/^[A-Za-z]:/.test(rel)||rel.split('/').some(p=>!p||p==='.'||p==='..'||/[. ]$/.test(p)||p.includes('~'))||harnessDenied(rel)||/[\u0000-\u001f<>:"|?*]/.test(rel))return null;
  let cur=root;
  for(const part of rel.split('/')){cur=path.join(cur,part);let s;try{s=await lstat(cur);}catch{return null;}if(s.isSymbolicLink())return null;}
- const s=await lstat(cur);if(!s.isFile()||s.size>FILE_CAP)return null;
+ const s=await lstat(cur);if(!s.isFile()||s.nlink!==1||s.size>FILE_CAP)return null;
  const real=await realpath(cur),inside=path.relative(root,real);if(!inside||inside.startsWith('..')||path.isAbsolute(inside))return null;
+ if(harnessDenied(inside.split(path.sep).join('/')))return null; // the real path must pass the same rules as the one the reply named
  try{return new TextDecoder('utf-8',{fatal:true}).decode(await readFile(real));}catch{return null;}
 }
 export function quoteNearLine(text:string,line:number,quote:string):boolean{

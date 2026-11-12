@@ -32,8 +32,8 @@ describe('finishFileReply',()=>{
   const r=await repo(),outside=await temp('aitiarch-fclaims-out-');await writeFile(path.join(outside,'x.js'),'const sessions = new Map();\n');
   await symlink(outside,path.join(r,'linked'),'junction');
   const out=await finishFileReply(reply([{path:'../'+path.basename(outside)+'/x.js',line:1,quote:'const sessions = new Map();'},{path:path.join(outside,'x.js'),line:1,quote:'const sessions = new Map();'},
-   {path:'.env',line:1,quote:'KEY=secret'},{path:'linked/x.js',line:1,quote:'const sessions = new Map();'},{quote:'no path'}]),r);
-  expect(out.claims.map((c:{status:string})=>c.status)).toEqual(['no_valid_source','no_valid_source','no_valid_source','no_valid_source','no_valid_source']);
+   {path:'.env',line:1,quote:'KEY=secret'},{path:'linked/x.js',line:1,quote:'const sessions = new Map();'},{quote:'no path'},{path:'src~1/login.js',line:3,quote:'x'},{path:'src/login.js.',line:3,quote:'x'}]),r);
+  expect(out.claims.map((c:{status:string})=>c.status)).toEqual(Array(7).fill('no_valid_source'));
   expect(validClaims(out.claims)).toBe(true);
  });
  it('a reply without a claims block keeps its text and says so',async()=>{

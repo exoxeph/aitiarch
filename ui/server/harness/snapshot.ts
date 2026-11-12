@@ -7,16 +7,18 @@ import {lstat,mkdir,readdir,readFile,realpath,rm,rmdir,writeFile} from 'node:fs/
 import path from 'node:path';
 import {promisify} from 'node:util';
 import {harnessDenied} from '../../shared/harness.ts';
+import {safeTarget} from './tripwire.ts';
 const exec=promisify(execFile);
 export const SNAPSHOT_LIMITS=Object.freeze({fileBytes:262144,files:5000,totalBytes:50*1024*1024});
 export interface SnapshotResult {files:number;bytes:number;changed:number;hash:string;skipped:{denied:number;links:number;tooLarge:number;overCap:number;notFile:number}}
 export interface Drift {changed:string[];added:string[];removed:string[]}
 const sha=(b:Buffer|string)=>createHash('sha256').update(b).digest('hex');
-const gitEnv=()=>({...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_OPTIONAL_LOCKS:'0'});
+// The repo's own git config must not be able to run anything while the app lists files: no system or global config, no fsmonitor hook.
+const gitEnv=()=>({...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',GIT_OPTIONAL_LOCKS:'0',GIT_TERMINAL_PROMPT:'0'});
 
 /** Tracked files plus untracked files that are not ignored, as forward-slash paths relative to the repo. */
 export async function repoFiles(repo:string):Promise<string[]>{
- const list=async(args:string[])=>(await exec('git',['-c','core.quotepath=false','ls-files','-z',...args],{cwd:repo,windowsHide:true,timeout:20000,maxBuffer:32*1024*1024,env:gitEnv()})).stdout.split('\0').filter(Boolean);
+ const list=async(args:string[])=>(await exec('git',['-c','core.quotepath=false','-c','core.fsmonitor=false','-c','core.untrackedCache=false','-c','core.hooksPath=','ls-files','-z',...args],{cwd:repo,windowsHide:true,timeout:20000,maxBuffer:32*1024*1024,env:gitEnv()})).stdout.split('\0').filter(Boolean);
  return [...new Set([...await list(['--cached']),...await list(['--others','--exclude-standard'])])].sort();
 }
 async function walk(root:string,rel=''):Promise<string[]>{
@@ -47,15 +49,18 @@ export async function syncSnapshot(repo:string,dest:string,manifestFile:string,l
   if(Object.keys(files).length>=limits.files||bytes+s.size>limits.totalBytes){skipped.overCap++;continue;}
   const b=await readFile(path.join(root,rel));files[rel]=sha(b);data.set(rel,b);bytes+=b.length;
  }
- // Bring the copy in line: write what changed, then remove everything the manifest does not list (including anything written into the copy).
+ // Bring the copy in line. First remove everything the manifest does not list (anything written into the copy, and any link: rm never follows
+ // one), then write what changed, and only through real folders inside the copy.
  await mkdir(dest,{recursive:true});const old=await readManifest(manifestFile);let changed=0;
+ for(const rel of await walk(dest))if(!(rel in files)){await rm(path.join(dest,...rel.split('/')),{force:true,recursive:true});changed++;}
+ await pruneEmpty(dest);
  for(const [rel,h] of Object.entries(files)){
-  const target=path.join(dest,...rel.split('/'));let same=old[rel]===h;
+  const target=path.join(dest,...rel.split('/'));
+  if(!await safeTarget(dest,rel)){await rm(target,{force:true});if(!await safeTarget(dest,rel))throw new Error('The snapshot folder contains a link.');}
+  let same=old[rel]===h;
   if(same){try{same=sha(await readFile(target))===h;}catch{same=false;}}
   if(!same){await mkdir(path.dirname(target),{recursive:true});await writeFile(target,data.get(rel)!);changed++;}
  }
- for(const rel of await walk(dest))if(!(rel in files)){await rm(path.join(dest,...rel.split('/')),{force:true,recursive:true});changed++;}
- await pruneEmpty(dest);
  await writeFile(manifestFile,JSON.stringify({v:1,files}));
  return {files:Object.keys(files).length,bytes,changed,hash:sha(JSON.stringify(Object.entries(files).sort())),skipped};
 }

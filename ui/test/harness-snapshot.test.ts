@@ -55,6 +55,22 @@ describe('syncSnapshot',()=>{
  });
 });
 
+describe('links planted in the copy or the notebook',()=>{
+ it('a link put into the snapshot is removed, never written through',async()=>{
+  const {root}=await repo(),dest=path.join(await temp('aitiarch-snap-dest-'),'files'),manifest=path.join(path.dirname(dest),'manifest.json'),elsewhere=await temp('aitiarch-snap-elsewhere-');
+  await syncSnapshot(root,dest,manifest);await rm(path.join(dest,'src'),{recursive:true});await symlink(elsewhere,path.join(dest,'src'),'junction');
+  await writeFile(path.join(root,'src','server.js'),'const port = 6000;\n');await syncSnapshot(root,dest,manifest);
+  expect(await readdir(elsewhere)).toEqual([]);expect(await readFile(path.join(dest,'src','server.js'),'utf8')).toContain('6000');
+ });
+ it('restore never writes through a junction that replaced a folder',async()=>{
+  const nb=await temp('aitiarch-trip-nb-'),backup=await temp('aitiarch-trip-backup-'),elsewhere=await temp('aitiarch-trip-elsewhere-');
+  await mkdir(path.join(nb,'sub'));await writeFile(path.join(nb,'sub','a.md'),'A\n');const before=await captureFolder(nb,backup);
+  await rm(path.join(nb,'sub'),{recursive:true});await symlink(elsewhere,path.join(nb,'sub'),'junction');
+  await restoreFolder(nb,backup,{changed:[],added:[],removed:['sub/a.md']});
+  expect(await readdir(elsewhere)).toEqual([]);expect(Object.keys(before)).toEqual(['sub/a.md']);
+ });
+});
+
 describe('tripwire',()=>{
  it('detects a changed, an added and a removed note, ignores the app\'s own state, and restores the folder exactly',async()=>{
   const nb=await temp('aitiarch-trip-nb-'),backup=await temp('aitiarch-trip-backup-');
