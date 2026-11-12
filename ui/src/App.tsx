@@ -5,7 +5,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 // The Constellation and d3-force load only when the view is first opened: none of it is in the first page load.
 const Constellation = lazy(() => import("./constellation/Constellation.tsx"));
 import { api, ApiError, connectEvents, type Backlink, type InkSnapshot, type NoteFile, type ServerEvent, type TreeNode } from "./api.ts";
-import { previewText, type CiteNote } from "./citations/citation-model.ts";
+import { previewText, titleOf, type CiteNote } from "./citations/citation-model.ts";
+import { citeAtCursor } from "./citations/cite-editor.ts";
 import { BacklinksPanel } from "./citations/BacklinksPanel.tsx";
 import type { InkItem } from "../shared/ink.ts";
 import { OrphanList } from "./ink/OrphanList.tsx";
@@ -615,7 +616,7 @@ export default function App() {
           onOpen={p => { setMapOpen(false); void openNote(p); }}
           onUseAsContext={ps => { setMapNotes(ps); setMapOpen(false); setChatOpen(true); }} />
       </Suspense>}
-      {chatOpen && <ChatPanel key={active ?? "none"} extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} getSelection={chatSelection} onAdd={addChatMessage} onAddText={addTextToNote} onOpenSettings={() => setSettingsOpen(true)} settingsVersion={settingsVersion} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
+      {chatOpen && <ChatPanel key={active ?? "none"} extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} getSelection={chatSelection} onAdd={addChatMessage} onAddText={addTextToNote} onOpenSettings={() => setSettingsOpen(true)} settingsVersion={settingsVersion} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onCiteClaim={(heading) => { const h = active ? panes.current.get(active) : undefined; return !!h && !!active && citeAtCursor(h.view, active, { path: active, title: titleOf(h.view.state.doc.toString(), active), ...(heading ? { heading } : {}) }); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
       {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); setSettingsVersion(v => v + 1); burgerRef.current?.focus(); }} />}
       {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,toast.undo)}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
       {added&&<div className="thought-toast" role="status"><span>{added.text} · Undo (Ctrl+Z)</span><details className="added-detail"><summary>What was added</summary><pre>{added.detail}</pre></details><button onClick={()=>{const h=active?panes.current.get(active):undefined;if(h){undo(h.view);h.view.focus();}setAdded(null);}}>Undo</button><button aria-label="Close notice" onClick={()=>setAdded(null)}>Close</button></div>}

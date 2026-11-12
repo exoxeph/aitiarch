@@ -113,6 +113,34 @@ try {
     assert.match(await panel.locator('.claim-said').innerText(), /Quote not found in the current note\./, 'a moved quote says so');
     assert.equal(await page.locator('.cm-quote-flash').count(), 0); assert.equal(await page.evaluate(() => document.querySelector('.pane').scrollTop), scroll3);
   });
+
+  // Cite in note: the exact link at the cursor, by keyboard, in LF, CRLF and BOM+CRLF notes; the file's other bytes (line endings, BOM) are untouched; one undo step.
+  const LINK = '[@Decisions#Setup choices](decisions.md#setup-choices)';
+  for (const [name, text] of [['lf', NOTE], ['crlf', NOTE.replace(/\n/g, '\r\n')], ['bom-crlf', '﻿' + NOTE.replace(/\n/g, '\r\n')]]) {
+    await inApp('cite-' + name, text, async ({ page, panel, root }) => {
+      const chips = panel.locator('button.claim-chip'), at = text.indexOf('Intro.') + 'Intro.'.length, expected = Buffer.from(text.slice(0, at) + LINK + text.slice(at));
+      await page.evaluate(() => { const { view } = window.__aitiarch['decisions.md'], d = view.state.doc.toString(), a = d.indexOf('Intro.') + 6; view.dispatch({ selection: { anchor: a } }); });
+      const before = await docText(page);
+      assert.equal(await panel.getByRole('button', { name: 'Cite in note' }).count(), 0, 'nothing is cited until you ask: no Cite button without opening a chip, and nothing inserted');
+      assert.equal(await docText(page), before);
+      // Thread/selection/not-found claims offer no Cite: the not-found chip has none.
+      await chips.nth(1).focus(); await page.keyboard.press('Enter'); assert.equal(await panel.getByRole('button', { name: 'Cite in note' }).count(), 0, 'a claim whose quote is not found offers no Cite'); await page.keyboard.press('Escape');
+      // The found chip: Enter, Tab (Show in note), Tab (Cite in note), Enter.
+      await chips.nth(0).focus(); await page.keyboard.press('Enter'); await page.keyboard.press('Tab'); await page.keyboard.press('Tab');
+      assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Cite in note'); await page.keyboard.press('Enter');
+      assert.match(await panel.locator('.claim-said').innerText(), /Cited in the note, at the cursor\./);
+      const after = await docText(page); assert.equal(after, before.slice(0, before.indexOf('Intro.') + 6) + LINK + before.slice(before.indexOf('Intro.') + 6), 'the exact link is at the cursor');
+      await page.waitForSelector('.cm-cite', { timeout: 5000 }); // the editor reads it as an @ citation, like one made with the picker
+      // The saved file is the original bytes plus the link, nothing else (line endings and BOM kept).
+      const waitDisk = async (want) => { for (let i = 0; i < 60; i++) { const d = await disk(root); if (d.equals(want)) return true; await page.waitForTimeout(150); } return false; };
+      assert(await waitDisk(expected), `${name}: the file is the original bytes with only the link added`);
+      // One undo step takes it back exactly.
+      await page.evaluate(() => window.__aitiarch['decisions.md'].view.focus()); await page.keyboard.press('Control+z');
+      assert.equal(await docText(page), before, `${name}: one Ctrl+Z removes the whole link`);
+      assert(await waitDisk(Buffer.from(text)), `${name}: and the file is the original bytes again`);
+      report['cite-' + name] = 'exact bytes, one undo';
+    });
+  }
   assert.deepEqual(external, [], 'no request left the machine');
   console.log(JSON.stringify({ passed: true, ...report }, null, 1));
 } finally { await browser.close(); }

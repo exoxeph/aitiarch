@@ -2,7 +2,7 @@
 // Only the picker ever changes the document, and only when you choose an item: one ordinary transaction inserting plain Markdown.
 import type {CompletionContext,CompletionResult,Completion} from '@codemirror/autocomplete';
 import {syntaxTree} from '@codemirror/language';
-import {Prec,type EditorState} from '@codemirror/state';
+import {Prec,type EditorState,type TransactionSpec} from '@codemirror/state';
 import {EditorView,hoverTooltip,keymap} from '@codemirror/view';
 import {frontmatterEnd} from '../frontmatter.ts';
 import {citeEnv} from './cite-env.ts';
@@ -24,6 +24,18 @@ export function citationAt(state:EditorState,pos:number,inside=false){
   }
  }
  return null;
+}
+
+/**
+ * "Cite in note" from a chat source chip: the same link text the @ picker inserts (citationInsert), put at the cursor as one ordinary edit, so it is one undo step
+ * and the note's other bytes (line endings, BOM) are untouched. It never replaces a selection and is never dispatched except from that explicit action.
+ */
+export function citeAtCursorSpec(state:EditorState,fromPath:string,target:Parameters<typeof citationInsert>[1]):TransactionSpec{
+ const text=citationInsert(fromPath,target),at=state.selection.main.head;
+ return {changes:{from:at,insert:text},selection:{anchor:at+text.length},userEvent:'input.complete',scrollIntoView:true};
+}
+export function citeAtCursor(view:EditorView,fromPath:string,target:Parameters<typeof citationInsert>[1]):boolean{
+ view.dispatch(citeAtCursorSpec(view.state,fromPath,target));return true;
 }
 
 /** The @ picker. Results are never filtered by CodeMirror: the model ranks them, so `Note#heading` can list headings. */
