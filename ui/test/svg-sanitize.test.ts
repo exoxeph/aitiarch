@@ -59,7 +59,7 @@ describe('every kind of thing that must not survive',()=>{
   ['an image with an external href',svg(RECT+'<image href="https://evil.test/a.png" width="9" height="9"/>'),/<image|evil/i],
   ['an image with a data: uri',svg(RECT+'<image xlink:href="data:image/png;base64,AAAA" width="9" height="9"/>'),/<image|data:/i],
   ['a use pointing outside the document',svg(RECT+'<use href="https://evil.test/a.svg#x"/>'),/<use|evil/i],
-  ['a use pointing inside the document (use is not on the list)',svg('<defs><rect id="a" width="2" height="2"/></defs><use href="#a"/>'),/<use/i],
+  ['a use pointing at an id that is not in the document (in-document uses are allowed since svg-sanitize-use.test.ts)',svg('<defs><rect id="a" width="2" height="2"/></defs><use href="#nope"/>'),/<use/i],
   ['a link with a javascript: href (the link goes, its drawing stays)',svg('<a href="javascript:alert(1)"><rect x="1" y="1" width="2" height="2"/></a>'),/<a[ >]|javascript|alert|href/i],
   ['an iframe',svg(RECT+'<iframe src="https://evil.test"></iframe>'),/iframe|evil/i],
   ['an object',svg(RECT+'<object data="https://evil.test/a.swf"></object>'),/object|evil/i],

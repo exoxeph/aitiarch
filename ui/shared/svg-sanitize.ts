@@ -5,7 +5,7 @@
 // the same input always gives the same bytes. The result is shown only as an <img>, which also cannot run scripts or load anything.
 import {SVG_ISSUE_TEXT,type SvgIssue} from './skill-diagram.ts'; // the reasons live with the client-safe module, so the page need not load this file
 export {SVG_ISSUE_TEXT};export type {SvgIssue};
-export const SVG_LIMITS=Object.freeze({inputBytes:4*1024*1024,pageCssBytes:3*1024*1024,parsedElements:200000,parseDepth:200,elements:2000,depth:32,bytes:300*1024,styleBytes:40*1024,attributes:48,valueLength:2000,pathLength:60000,textLength:4000});
+export const SVG_LIMITS=Object.freeze({inputBytes:4*1024*1024,pageCssBytes:3*1024*1024,parsedElements:200000,parseDepth:200,elements:2000,depth:32,bytes:300*1024,styleBytes:40*1024,attributes:48,valueLength:2000,pathLength:60000,textLength:4000,uses:200,expanded:6000});
 export type SvgResult={ok:true;svg:string}|{ok:false;reason:SvgIssue;text:string};
 
 /** `from` and `to` are where the element starts and ends in the source text, so the size of the drawing's own source can be measured. */
@@ -114,19 +114,39 @@ const keepDecls=(decls:[string,string][],vars:Map<string,string>):[string,string
 const declText=(d:[string,string][])=>d.map(([n,v])=>`${n}:${v}`).join(';');
 
 // ---- writing -----------------------------------------------------------------------------------------------------------------------------
-const ELEMENTS=new Map(['svg','g','path','rect','circle','ellipse','line','polyline','polygon','text','tspan','defs','linearGradient','radialGradient','stop','marker','clipPath','mask','title','desc'].map(n=>[n.toLowerCase(),n]));
+const ELEMENTS=new Map(['svg','g','path','rect','circle','ellipse','line','polyline','polygon','text','tspan','defs','linearGradient','radialGradient','stop','marker','clipPath','mask','title','desc','use','pattern'].map(n=>[n.toLowerCase(),n]));
 const TEXTUAL=new Set(['text','tspan','title','desc']);
-const ATTRS=new Map(['id','class','transform','fill','stroke','stroke-width','stroke-dasharray','stroke-dashoffset','stroke-linecap','stroke-linejoin','stroke-miterlimit','stroke-opacity','fill-opacity','fill-rule','clip-rule','opacity','display','visibility','font-family','font-size','font-weight','font-style','letter-spacing','word-spacing','text-anchor','dominant-baseline','alignment-baseline','text-decoration','color','stop-color','stop-opacity','marker-start','marker-mid','marker-end','clip-path','mask','vector-effect','paint-order','shape-rendering','role','aria-label','aria-hidden','xml:space','x','y','width','height','rx','ry','cx','cy','r','x1','y1','x2','y2','points','d','dx','dy','rotate','viewBox','preserveAspectRatio','offset','gradientUnits','gradientTransform','spreadMethod','fx','fy','markerWidth','markerHeight','markerUnits','refX','refY','orient','clipPathUnits','maskUnits','maskContentUnits'].map(n=>[n.toLowerCase(),n]));
+const ATTRS=new Map(['id','class','transform','fill','stroke','stroke-width','stroke-dasharray','stroke-dashoffset','stroke-linecap','stroke-linejoin','stroke-miterlimit','stroke-opacity','fill-opacity','fill-rule','clip-rule','opacity','display','visibility','font-family','font-size','font-weight','font-style','letter-spacing','word-spacing','text-anchor','dominant-baseline','alignment-baseline','text-decoration','color','stop-color','stop-opacity','marker-start','marker-mid','marker-end','clip-path','mask','vector-effect','paint-order','shape-rendering','role','aria-label','aria-hidden','xml:space','x','y','width','height','rx','ry','cx','cy','r','x1','y1','x2','y2','points','d','dx','dy','rotate','viewBox','preserveAspectRatio','offset','gradientUnits','gradientTransform','spreadMethod','fx','fy','markerWidth','markerHeight','markerUnits','refX','refY','orient','clipPathUnits','maskUnits','maskContentUnits','patternUnits','patternContentUnits','patternTransform'].map(n=>[n.toLowerCase(),n]));
 const GRADIENTS=new Set(['lineargradient','radialgradient']);
 const escText=(s:string)=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const escAttr=(s:string)=>escText(s).replace(/"/g,'&quot;');
-const FORMAT:Record<string,RegExp>={id:/^[A-Za-z][A-Za-z0-9_.:-]{0,99}$/,class:/^[A-Za-z0-9_\- ]{1,300}$/,d:/^[MmLlHhVvCcSsQqTtAaZz0-9eE+\-.,\s]+$/,points:/^[0-9eE+\-.,\s]+$/,transform:/^[A-Za-z0-9()+\-.,\s]+$/,'xml:space':/^(default|preserve)$/};
+const FORMAT:Record<string,RegExp>={id:/^[A-Za-z][A-Za-z0-9_.:-]{0,99}$/,class:/^[A-Za-z0-9_\- ]{1,300}$/,d:/^[MmLlHhVvCcSsQqTtAaZz0-9eE+\-.,\s]+$/,points:/^[0-9eE+\-.,\s]+$/,transform:/^[A-Za-z0-9()+\-.,\s]+$/,patternTransform:/^[A-Za-z0-9()+\-.,\s]+$/,'xml:space':/^(default|preserve)$/};
 
 function rebuild(svg:El,vars:Map<string,string>){
- let elements=0,usesXlink=false;
+ let elements=0,extra=0,usesXlink=false;
+ // In-document references only. ids = allowed elements of THIS svg; a use is kept when its first href is "#id" of one of them and it cannot form a chain or a loop:
+ // its target is not a use, and it does not sit inside anything a use points at (that also rules out self-reference and cycles).
+ const ids=new Map<string,El>(),weights=new Map<El,number>(),kept=new Set<El>(),LINK=/^#[A-Za-z][\w.:-]{0,99}$/;
+ const hrefOf=(e:El)=>e.attrs.find(([n])=>/^(xlink:)?href$/i.test(n))?.[1];
+ const allowed=(e:El)=>ELEMENTS.has(e.name.toLowerCase());
+ const eachKid=(e:El,f:(k:El)=>void)=>{for(const k of e.kids)if(typeof k!=='string'){if(allowed(k))f(k);else if(k.name.toLowerCase()==='a')eachKid(k,f);}};
+ const weight=(e:El):number=>{const w=weights.get(e);if(w!==undefined)return w;let t=1;eachKid(e,k=>{t+=weight(k);});weights.set(e,t);return t;};
+ const register=(e:El)=>{const id=attrOf(e,'id');if(id!==undefined&&FORMAT.id.test(id)&&!ids.has(id))ids.set(id,e);eachKid(e,register);};
+ register(svg);
+ const candidates:{use:El;target:El}[]=[];
+ const find=(e:El)=>{if(e.name.toLowerCase()==='use'){const h=hrefOf(e),t=h!==undefined&&LINK.test(h)?ids.get(h.slice(1)):undefined;if(t&&t.name.toLowerCase()!=='use')candidates.push({use:e,target:t});}eachKid(e,find);};
+ find(svg);
+ const targets=new Set(candidates.map(c=>c.target)),isCandidate=new Map(candidates.map(c=>[c.use,c.target] as [El,El]));
+ const keep=(e:El,inside:boolean)=>{if(isCandidate.has(e)&&!inside)kept.add(e);const inner=inside||targets.has(e);eachKid(e,k=>keep(k,inner));};
+ keep(svg,false);
+ if(kept.size>SVG_LIMITS.uses)throw new Complex();
+ for(const u of kept)extra+=weight(isCandidate.get(u)!);
  const attrOut=(name:string,value:string,el:El):string|null=>{
   const lname=name.toLowerCase();
-  if(lname==='href'||lname==='xlink:href'){if(GRADIENTS.has(el.name.toLowerCase())&&/^#[A-Za-z][\w.:-]*$/.test(value)){if(lname==='xlink:href')usesXlink=true;return `${lname}="${escAttr(value)}"`;}return null;}
+  if(lname==='href'||lname==='xlink:href'){
+   const lower=el.name.toLowerCase();
+   if(!(kept.has(el)||lower==='pattern'||GRADIENTS.has(lower))||!LINK.test(value)||!ids.has(value.slice(1)))return null;
+   if(lname==='xlink:href')usesXlink=true;return `${lname}="${escAttr(value)}"`;}
   const canon=ATTRS.get(lname);if(!canon)return null;
   const v=resolveVars(value,vars);if(v===null)return null;
   const limit=canon==='d'||canon==='points'?SVG_LIMITS.pathLength:SVG_LIMITS.valueLength;
@@ -137,12 +157,13 @@ function rebuild(svg:El,vars:Map<string,string>){
  const emit=(el:El,depth:number):string=>{
   const lower=el.name.toLowerCase(),canon=ELEMENTS.get(lower);
   if(!canon){return lower==='a'?el.kids.map(k=>typeof k==='string'?'':emit(k,depth)).join(''):'';} // a link goes, its drawing stays; everything else goes with its contents
-  if(depth>SVG_LIMITS.depth||++elements>SVG_LIMITS.elements)throw new Complex();
+  if(lower==='use'&&!kept.has(el))return '';
+  if(depth>SVG_LIMITS.depth||++elements>SVG_LIMITS.elements||elements+extra>SVG_LIMITS.expanded)throw new Complex();
   const seen=new Set<string>(),attrs:string[]=[];
   for(const [n,v] of el.attrs){
-   const lname=n.toLowerCase();if(seen.has(lname)||attrs.length>=SVG_LIMITS.attributes)continue;
+   const lname=n.toLowerCase(),key=lname==='xlink:href'?'href':lname;if(seen.has(key)||attrs.length>=SVG_LIMITS.attributes)continue;
    if(lname==='style'){const d=keepDecls(declarations(v),vars);if(d.length){seen.add(lname);attrs.push(`style="${escAttr(declText(d))}"`);}continue;}
-   const a=attrOut(n,v,el);if(a){seen.add(lname);attrs.push(a);}
+   const a=attrOut(n,v,el);if(a){seen.add(key);attrs.push(a);}
   }
   const inner=el.kids.map(k=>typeof k==='string'?(TEXTUAL.has(canon)?escText(k.replace(/\r\n?/g,'\n').slice(0,SVG_LIMITS.textLength)):''):emit(k,depth+1)).join('');
   return `<${canon}${attrs.length?' '+attrs.join(' '):''}${inner?`>${inner}</${canon}>`:'/>'}`;
