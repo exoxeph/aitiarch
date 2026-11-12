@@ -9,6 +9,7 @@ import {ChatStore} from './store.ts';import {contextModules,hash,estimateTokens}
 import {prepareRequest,ProviderError,redact,type Provider,type Request} from '../providers/index.ts';
 import {validateProductResult,ProductValidationError} from '../product-validation.ts';
 import type {ExtrasFor} from '../node-settings.ts';
+import {describeFailure} from '../../shared/chat-failure.ts';
 export class ChatError extends Error {code:ChatErrorCode;constructor(code:ChatErrorCode){super(code);this.code=code;}}
 interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true}
 type Pair={id:string;user:string;assistant:string};
@@ -126,7 +127,7 @@ export class ChatRuntime {
    if(called&&!charged){s.usage.spent+=frozen.reservation;s.usage.unreportedCalls++;}
    const code:ChatErrorCode=e instanceof ChatError?e.code:e instanceof ProductValidationError?'validation':e instanceof ProviderError&&e.code==='cancelled'?'cancelled':e instanceof ProviderError?'provider_failed':'persistence';
    try{await this.audit(review.path,request.id,'chat_failed');}catch{/* No text or exceptions are logged. */}
-   emit({type:'error',id:request.id,code,...(e instanceof ProductValidationError?{rule:e.record.rule}:{})});
+   emit({type:'error',id:request.id,code,...(e instanceof ProductValidationError?{rule:e.record.rule}:{}),...(code==='provider_failed'&&e instanceof ProviderError?{reason:describeFailure(e.code,e.reason)}:{})});
   }finally{s.running=false;s.controller=undefined;s.usage.reserved=0;signal?.removeEventListener('abort',abort);resolve();this.jobs.delete(done);}
  }
  private audit(note:string,id:string,event:'chat_started'|'chat_completed'|'chat_failed'){return this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(note),requestId:id,note,event,at:new Date().toISOString()});}

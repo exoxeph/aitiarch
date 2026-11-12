@@ -40,7 +40,7 @@ export type ChatEvent=
  |{type:'start';id:string}
  |{type:'delta';id:string;text:string;provisional:true}
  |{type:'complete';id:string;message:ChatMessage;persistence:'private'|'memory';usage:ChatUsage}
- |{type:'error';id:string;code:ChatErrorCode;rule?:string};
+ |{type:'error';id:string;code:ChatErrorCode;rule?:string;/** For provider_failed: why, in a safe form the page can say in words. */reason?:import('./chat-failure.ts').FailureReason};
 export interface ChatInput {id:string;path:string;question:string;selection?:string;context:ContextChoice[]}
 export interface ChatReview {
  reviewId:string;requestId:string;path:string;question:string;selection:string;

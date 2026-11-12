@@ -22,6 +22,18 @@ describe('streamed turns',()=>{
   const t=applyEvent([turn('a',{text:'half an answ'})],{type:'error',id:'a',code:'cancelled'});
   expect(t[0]).toMatchObject({status:'error',text:'',error:{code:'cancelled'}});expect(t[0].message).toBeUndefined();
  });
+ it('keeps the reason a failed call gave, and says it in words with the same closing sentence as before',()=>{
+  const reason={kind:'flag_rejected' as const,flag:'--include-partial-messages'};
+  const t=applyEvent([turn('a')],{type:'error',id:'a',code:'provider_failed',reason});expect(t[0].error).toEqual({code:'provider_failed',reason});
+  const text=errorText('provider_failed',reason);
+  expect(text.startsWith('Claude could not complete this request.')).toBe(true);expect(text).toContain('--include-partial-messages');expect(text.endsWith('No retry was made.')).toBe(true);
+ });
+ it('without a reason, or with one it does not understand, the message is the same generic sentence; other errors ignore a reason',()=>{
+  expect(errorText('provider_failed')).toBe('Claude could not complete this request. No retry was made.');
+  expect(errorText('provider_failed',{kind:'from_the_future'} as any)).toBe('Claude could not complete this request. No retry was made.');
+  expect(errorText('provider_failed',null as any)).toBe('Claude could not complete this request. No retry was made.');
+  expect(errorText('busy',{kind:'timeout'})).toBe(errorText('busy'));
+ });
  it('ignores events for a turn that is not there',()=>{const t=[turn('a')];expect(applyEvent(t,{type:'delta',id:'zzz',text:'x',provisional:true})).toEqual(t);});
  it('marks a started turn as streaming',()=>{expect(applyEvent([turn('a',{status:'review'})],{type:'start',id:'a'})[0].status).toBe('streaming');});
 });

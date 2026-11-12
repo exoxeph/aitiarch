@@ -79,6 +79,11 @@ if (scenario.startsWith('verified-')) {
     console.log(JSON.stringify({type:'assistant',message:{content:[{type:'text',text:result}]}}));
     console.log(JSON.stringify({type:'result',subtype:'success',result,usage:{input_tokens:20,output_tokens:10}}));process.exit(0);
   }
+  // Ways a real CLI can fail while the chat is waiting for a reply (all text synthetic).
+  if(scenario==='verified-chat-flag-rejected'){process.stderr.write("error: unknown option '--include-partial-messages'\n");process.exit(2);}
+  if(scenario==='verified-chat-login'){process.stderr.write('Not logged in. Please log in.\n');process.exit(1);}
+  if(scenario==='verified-chat-exit'){process.stderr.write('boom: something broke at C:\\Users\\someone\\private\\x.md token=supersecretvalue\n');process.exit(3);}
+  if(scenario==='verified-chat-unknown-event'){console.log(JSON.stringify({type:'system',subtype:'brand_new_kind',note:'synthetic'}));setTimeout(()=>process.exit(0),3000);}
   // The stream the installed Claude CLI really produces with --include-partial-messages (event names and key sets captured from a
   // real call; all text here is synthetic): a "requesting" status event, then a thinking block before the text block.
   if(scenario==='verified-chat-real-stream'){

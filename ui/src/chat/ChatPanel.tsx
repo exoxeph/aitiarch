@@ -181,7 +181,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
      {!t.trail&&t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span><ReplyMarkdown text={t.text}/><UsedSkills names={t.message?.skills}/>
       {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
       <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}>Add to note</button></div></div>}
-     {!t.trail&&t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button></div>}
+     {!t.trail&&t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button></div>}
     </div>)}
    <span className="chat-sr" role="status">{busy&&!pending?'Claude is replying…':''}</span>
   </div>

@@ -12,7 +12,9 @@ export class ClaudeChatStream {
   if(final&&this.pending.trim()){this.event(JSON.parse(this.pending));this.pending='';}
  }
  private event(e:any){
-  const reject=()=>{throw new Error('Invalid chat stream.');};
+  // The message names the unexpected event by its type words only (never its contents), so it is safe to show.
+  const word=(v:unknown)=>typeof v==='string'&&/^[a-z_]{1,40}$/.test(v)?v:'?';
+  const reject=()=>{throw new Error('Invalid chat stream: unexpected '+(e&&typeof e==='object'?[word(e.type),e.subtype!==undefined?word(e.subtype):null,e.type==='stream_event'&&e.event?word(e.event.type):null].filter(Boolean).join('/'):'event'));};
   if(!e||typeof e!=='object'||this.ended)reject();
   const check=inspectClaudeCanary([e],[]);
   if(check.toolAttempts||check.hookEvents||check.unknownEvents)reject();

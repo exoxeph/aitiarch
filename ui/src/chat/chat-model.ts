@@ -1,11 +1,12 @@
 // Pure chat state for the panel: turns, streamed events, context chips and the one-line usage summary. No DOM and no network here.
+import {failureText,type FailureReason} from '../../shared/chat-failure.ts';
 import {CHAT_MESSAGES,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatUsage,type ContextChoice} from '../../shared/chat.ts';
 import type {ContextChip} from './chat-stub.ts';
 import type {Trail} from './trail-model.ts';
 
 export type TurnStatus='review'|'streaming'|'complete'|'error';
 /** One question and its answer. `text` is provisional while streaming and the accepted message body once complete. */
-export interface Turn {id:string;question:string|null;status:TurnStatus;text:string;message?:ChatMessage;error?:{code:ChatErrorCode;rule?:string};/** Set when this turn is an investigation: the cards, steps and answer come from the M4 events. */trail?:Trail}
+export interface Turn {id:string;question:string|null;status:TurnStatus;text:string;message?:ChatMessage;error?:{code:ChatErrorCode;rule?:string;reason?:FailureReason};/** Set when this turn is an investigation: the cards, steps and answer come from the M4 events. */trail?:Trail}
 
 export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
  if(!turns.some(t=>t.id===event.id))return [...turns];
@@ -15,7 +16,7 @@ export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
    case 'start':return {...t,status:'streaming'};
    case 'delta':return {...t,status:'streaming',text:t.text+event.text};
    case 'complete':return {...t,status:'complete',text:event.message.body,message:event.message};
-   case 'error':{const {message:_dropped,...rest}=t;return {...rest,status:'error',text:'',error:{code:event.code,...(event.rule?{rule:event.rule}:{})}};} // a partial reply is never kept
+   case 'error':{const {message:_dropped,...rest}=t;return {...rest,status:'error',text:'',error:{code:event.code,...(event.rule?{rule:event.rule}:{}),...(event.reason?{reason:event.reason}:{})}};} // a partial reply is never kept
   }
  });
 }
@@ -55,4 +56,10 @@ export function usageLine(u:ChatUsage):string{
  const calls=u.calls===0?'No calls yet':`${u.calls} ${u.calls===1?'call':'calls'} · ${formatCount(u.input+u.cached)} in · ${formatCount(u.output)} out`;
  return `${calls} · ${formatCount(u.spent)} of ${formatCount(u.tokenBudget)} tokens`+(u.unreportedCalls>0?' (some counts unreported)':'');
 }
-export const errorText=(code:ChatErrorCode)=>CHAT_MESSAGES[code]??CHAT_MESSAGES.invalid_chat;
+/** A failed Claude call says why when the server gave a reason it understands; otherwise the same generic sentence as ever. */
+export function errorText(code:ChatErrorCode,reason?:FailureReason):string{
+ if(code==='provider_failed'&&reason&&typeof reason==='object'&&typeof reason.kind==='string'){
+  const why=failureText(reason);if(typeof why==='string')return `Claude could not complete this request. ${why} No retry was made.`;
+ }
+ return CHAT_MESSAGES[code]??CHAT_MESSAGES.invalid_chat;
+}

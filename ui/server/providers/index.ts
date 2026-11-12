@@ -9,6 +9,7 @@ import { probeCapabilities } from './capabilities.ts';
 import type { Availability } from './capabilities.ts';
 import { claudeArguments, inspectClaudeCanary } from './claude-canary.ts';
 import { failureMetadata, privateFailureLog, type FailureLog, type FailureMetadata } from './failure-metrics.ts';
+import { flagFrom, safeTail, type FailureReason } from '../../shared/chat-failure.ts';
 import { parseAnswerJson } from './answer-json.ts';
 import {ClaudeChatStream} from './chat-stream.ts';
 import {secretKinds} from '../chat/secrets.ts';
@@ -45,6 +46,8 @@ const messages: Record<ErrorCode, string> = {
 };
 export class ProviderError extends Error {
   validation?:ValidationRecord;
+  /** Why the call failed, in words that are safe to show (never prompt text, credentials or paths). */
+  reason?:FailureReason;
   readonly code: ErrorCode;
   constructor(code: ErrorCode, detail?: string) { super(detail ?? messages[code]); this.name = 'ProviderError'; this.code = code; }
 }
@@ -150,9 +153,9 @@ function parseResult(provider: ProviderName, id: string, stdout: string, stream 
     let response: unknown, model: string | null = null, usage: Result['usage'] = null;
     if (provider === 'claude') {
       const events = stream ? stdout.trim().split(/\r?\n/).map(line => JSON.parse(line)) : [];
-      if (stream && !inspectClaudeCanary(events, []).passed) throw new Error();
+      if (stream && !inspectClaudeCanary(events, []).passed) throw new Error('the stream failed the isolation check');
       const envelope = stream ? events.find(e => e.type === 'result') : JSON.parse(stdout);
-      if (envelope.is_error || envelope.subtype !== 'success') throw new Error();
+      if (envelope.is_error || envelope.subtype !== 'success') throw new Error('the final result was not a success');
       response = parseAnswerJson(envelope.result); model = typeof envelope.model === 'string' ? envelope.model : null;
       if (Number.isFinite(envelope.usage?.input_tokens) && Number.isFinite(envelope.usage?.output_tokens))
         usage = { inputTokens: envelope.usage.input_tokens, outputTokens: envelope.usage.output_tokens,
@@ -171,13 +174,16 @@ function parseResult(provider: ProviderName, id: string, stdout: string, stream 
       }
       if (messages !== 1 || completed !== 1) throw new Error();
     }
-    if(chat&&(!response||typeof response!=='object'||Object.keys(response).sort().join()!=='answer,claims'))throw new Error();
+    if(chat&&(!response||typeof response!=='object'||Object.keys(response).sort().join()!=='answer,claims'))throw new Error('the answer did not have exactly answer and claims');
     const blocked=chat&&typeof (response as any)?.answer==='string'&&secretKinds((response as any).answer).length>0;
     const safe = validateProviderResponse(response);
     return { id, provider, model, answer: safe.answer, claims: safe.claims, ...(safe.diagram===undefined?{}:{diagram:safe.diagram}), usage,...(chat?{insertionBlocked:blocked}:{}) };
   } catch(error) {
     const failure=new ProviderError('invalid_response');
     if(error instanceof ProductValidationError)failure.validation=error.record;
+    // Only our own fixed sentences are shown; a JSON syntax error can quote the reply, so it never is.
+    const own=['the stream failed the isolation check','the final result was not a success','the answer did not have exactly answer and claims'];
+    failure.reason={kind:'unparseable',detail:error instanceof Error&&own.includes(error.message)?error.message:error instanceof ProductValidationError?'the answer did not pass validation':'the reply could not be read'};
     throw failure;
   }
 }
@@ -218,9 +224,10 @@ export function createProvider(configuration: Configuration): Provider {
           { cwd:cwd!, env: environment(), shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: 'pipe' });
         let bytes = 0, failure: ProviderError | undefined;
         let killing: Promise<void> = Promise.resolve();
-        const stop = (code: ErrorCode) => {
+        const stop = (code: ErrorCode, reason?: FailureReason) => {
           if (failure) return;
           failure = new ProviderError(code);
+          if (reason) failure.reason = reason;
           if (child.pid) killing = killTree(child.pid);
         };
         const timer = setTimeout(() => stop('timeout'), options.timeoutMs ?? 180000);
@@ -232,7 +239,8 @@ export function createProvider(configuration: Configuration): Provider {
           bytes += chunk.length;
           if (bytes > 262144) { stop('output_limit'); return; }
           (stream === 'out' ? stdout : stderr).push(chunk);
-          if(stream==='out'&&partial){try{partial.push(chunk);}catch{stop('invalid_response');}}
+          // Only our own parser's message is shown (it names an event by type words). A JSON syntax error can quote the line, so it never is.
+          if(stream==='out'&&partial){try{partial.push(chunk);}catch(e){const own=e instanceof Error&&e.message.startsWith('Invalid chat stream: ');stop('invalid_response',{kind:'unparseable',detail:own?(e as Error).message.slice('Invalid chat stream: '.length):'the output was not valid JSON lines'});}}
         };
         child.stdout.on('data', chunk => collect(chunk, 'out'));
         child.stderr.on('data', chunk => collect(chunk, 'err'));
@@ -248,8 +256,13 @@ export function createProvider(configuration: Configuration): Provider {
           clearTimeout(timer); options.signal?.removeEventListener('abort', abort);
           await killing;
           if (failure) reject(failure);
-          else if (code !== 0) reject(new ProviderError(/not logged in|login required|authentication required|please (?:log|sign) in/i.test(Buffer.concat(stderr).toString('utf8')) ? 'not_logged_in' : 'provider_error'));
-          else {try{partial?.finish();resolve(Buffer.concat(stdout).toString('utf8'));}catch{reject(new ProviderError('invalid_response'));}}
+          else if (code !== 0) {
+            const text = Buffer.concat(stderr).toString('utf8'), login = /not logged in|login required|authentication required|please (?:log|sign) in/i.test(text), flag = flagFrom(text);
+            const exited = new ProviderError(login ? 'not_logged_in' : 'provider_error');
+            exited.reason = login ? { kind: 'login' } : flag ? { kind: 'flag_rejected', flag } : { kind: 'exited', ...(code === null ? {} : { exitCode: code }), ...(safeTail(text, input) ? { detail: safeTail(text, input) } : {}) };
+            reject(exited);
+          }
+          else {try{partial?.finish();resolve(Buffer.concat(stdout).toString('utf8'));}catch{const early=new ProviderError('invalid_response');early.reason={kind:'unparseable',detail:'the reply ended before it was complete'};reject(early);}}
         });
         child.stdin.end(input);
       });
