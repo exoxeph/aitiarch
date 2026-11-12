@@ -3,13 +3,14 @@ import {api,ApiError} from '../api.ts';
 import type {InvestigatorPolicy,Permission,Tier} from '../../shared/investigator.ts';
 import type {UsageSummary} from '../../shared/usage.ts';
 import {formatCount} from '../chat/chat-model.ts';
+import {SkillsPane} from '../skills/SkillsPane.tsx';
 import {DENY_EXAMPLES,SETTING_FIELDS,displaySetting,parseSettingInput,rootProblem,tierSummary,tokenMeter,type Meter} from './settings-model.ts';
 
 interface Status {policy:InvestigatorPolicy;persistence:boolean;ignoreLine:string;notice:string;fallback:string;claudeConfigured:boolean;codex:string}
 type Patch=Partial<InvestigatorPolicy>&{action?:string};
 type Configure=(patch:Patch)=>Promise<boolean>;
-type Tab='consent'|'folders'|'limits'|'usage';
-const TABS:{id:Tab;label:string}[]=[{id:'consent',label:'Investigator'},{id:'folders',label:'Folders and permissions'},{id:'limits',label:'Limits'},{id:'usage',label:'Usage'}];
+type Tab='consent'|'folders'|'limits'|'usage'|'skills';
+const TABS:{id:Tab;label:string}[]=[{id:'consent',label:'Investigator'},{id:'folders',label:'Folders and permissions'},{id:'limits',label:'Limits'},{id:'usage',label:'Usage'},{id:'skills',label:'Skills'}];
 const TIER_LABEL:Record<Tier,string>={inside:'Read inside registered folders',outside:'Read outside registered folders',commands:'Read-only git commands'};
 const explain=(e:unknown)=>e instanceof ApiError&&e.code==='invalid_policy'?'That value or folder is not allowed. A folder must exist, be absolute, not be a link, and not be on the deny list.'
  :e instanceof ApiError&&e.code==='blocked'?'Blocked: raise policy to retry':'That change could not be saved. Nothing was retried.';
@@ -141,7 +142,8 @@ export function SettingsDialog({onClose}:{onClose:()=>void}){
      {TABS.map(t=><button key={t.id} id={`settings-tab-${t.id}`} type="button" role="tab" aria-selected={tab===t.id} aria-controls={`settings-pane-${t.id}`} tabIndex={tab===t.id?0:-1} onClick={()=>setTab(t.id)}>{t.label}</button>)}
     </div>
     <div className="settings-pane" role="tabpanel" id={`settings-pane-${tab}`} aria-labelledby={`settings-tab-${tab}`}>
-     {!status?<p className="settings-lead" role="status">Loading…</p>
+     {tab==='skills'?<SkillsPane/>
+      :!status?<p className="settings-lead" role="status">Loading…</p>
       :tab==='consent'?<ConsentPane status={status} busy={busy} configure={configure}/>
       :tab==='folders'?<FoldersPane status={status} busy={busy} configure={configure} setProblem={setProblem}/>
       :tab==='limits'?<LimitsPane status={status} busy={busy} configure={configure}/>

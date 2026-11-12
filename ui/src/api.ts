@@ -132,6 +132,10 @@ export const api = {
   investigator:()=>ok<any>('GET','/api/investigator'),
   investigatorCall:<T,>(action:string,body:unknown)=>ok<T>('PUT','/api/investigator/'+action,body),
   usage:()=>ok<import('../shared/usage.ts').UsageSummary>('GET','/api/usage'),
+  /** The Skill library never sends a flat list: skills come only from a search (q) or from ids you already hold. */
+  skills:(q:string,ids:string[]=[])=>ok<import('../server/skill-library.ts').SkillLibraryReply>('GET','/api/skills'+(q||ids.length?'?'+new URLSearchParams({...(q?{q}:{}),...(ids.length?{ids:ids.join(',')}:{})}).toString():'')),
+  nodes:()=>ok<{nodes:import('../shared/node-settings.ts').NodeSettings}>('GET','/api/nodes'),
+  saveNodes:(nodes:import('../shared/node-settings.ts').SavedNodeSettings)=>ok<{nodes:import('../shared/node-settings.ts').NodeSettings;persisted:boolean}>('PUT','/api/nodes',nodes),
   insertionStatus:(path:string)=>ok<import('../server/insertion-store.ts').RepairStatus>('GET',`/api/insertions?path=${encodeURIComponent(path)}`),
   threads:(path:string)=>ok<InkSnapshot>('GET',`/api/threads?path=${encodeURIComponent(path)}`),
   threadAction:(path:string,id:string,version:string|null,action:unknown)=>ok<InkSnapshot>('PUT','/api/threads/action',{path,id,version,action}),
