@@ -64,7 +64,17 @@ export const citeTooltip=hoverTooltip(async(view,pos)=>{
 export const citeKeys=Prec.high(keymap.of([
  {key:'Mod-Enter',run:view=>openAtCursor(view,false)},
  {key:'Enter',run:view=>openAtCursor(view,true)},
+ // The chip is one thing to the eye, so Backspace right after it (or Delete right before it) removes the whole link instead of eating
+ // its last character and exposing the address. One ordinary deletion: Ctrl+Z restores it. Inside the link they behave as usual.
+ {key:'Backspace',run:view=>removeBeside(view,'before')},
+ {key:'Delete',run:view=>removeBeside(view,'after')},
 ]));
+function removeBeside(view:EditorView,side:'before'|'after'):boolean{
+ const sel=view.state.selection.main;if(!sel.empty)return false;
+ const c=citationAt(view.state,sel.head);if(!c||sel.head!==(side==='before'?c.to:c.from))return false;
+ view.dispatch({changes:{from:c.from,to:c.to},selection:{anchor:c.from},userEvent:side==='before'?'delete.backward':'delete.forward',scrollIntoView:true});
+ return true;
+}
 function openAtCursor(view:EditorView,inside:boolean):boolean{
  const sel=view.state.selection.main;if(!sel.empty)return false;
  const c=citationAt(view.state,sel.head,inside);if(!c||c.broken)return false;

@@ -102,6 +102,22 @@ try {
   await page.mouse.move(900, 650); await sleep(300);
   await page.screenshot({ path: path.join(shots, "chips.png") });
 
+  // ---- removing a citation: Backspace right after the chip (or Delete right before it) removes the whole link, in one undoable step
+  const gone = "[@Gone](gone.md)", whole = await doc(), at = whole.indexOf(gone);
+  const placeCursor = (p) => page.evaluate((x) => { const v = window.__aitiarch["index.md"].view; v.focus(); v.dispatch({ selection: { anchor: x } }); }, p);
+  await placeCursor(at + gone.length); await page.keyboard.press("Backspace");
+  const afterBack = await doc();
+  check("Backspace right after a chip removes the whole citation", afterBack === whole.replace(gone, "") && !afterBack.includes("](gone"), JSON.stringify(afterBack.slice(0, 40)));
+  await page.keyboard.press("Control+z");
+  check("and one Ctrl+Z brings it back", (await doc()) === whole);
+  await placeCursor(at); await page.keyboard.press("Delete");
+  check("Delete right before a chip removes it too", (await doc()) === whole.replace(gone, ""));
+  await page.keyboard.press("Control+z");
+  check("and Ctrl+Z restores it", (await doc()) === whole);
+  await placeCursor(at + gone.length - 3); await page.keyboard.press("Backspace");
+  check("inside a citation Backspace still deletes one character", (await doc()) === whole.replace(gone, gone.slice(0, gone.length - 4) + gone.slice(-3)));
+  await page.keyboard.press("Control+z");
+  await until(async () => norm(read("index.md").toString("utf8")) === (await doc()));
   const beforeOpen = read("index.md");
   await page.locator(".cm-cite:not(.cm-cite-broken)").first().click({ modifiers: ["Control"] });
   check("Ctrl+click opens the cited note", await until(async () => (await activeNote()) === "auth/plan.md"), String(await activeNote()));
