@@ -25,6 +25,8 @@ export interface ChatPanelProps {
  onAddText:(text:string)=>Promise<void>;onOpenSettings:()=>void;
  /** Bumps when the AI settings dialog closes, so the Investigate switch re-reads what is on. */
  settingsVersion:number;
+ /** Notes chosen in the Constellation ("Use as chat context"): sent as the Other notes module, shown in the review first. */
+ extraNotes?:string[];onClearExtraNotes?:()=>void;
 }
 
 function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:ChatReview;stopAsking:boolean;setStopAsking:(v:boolean)=>void;onSend:()=>void;onCancel:()=>void}){
@@ -50,7 +52,8 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
 }
 
 /** The right-hand chat: streamed replies from the per-note chat backend, with what is sent always reviewable first. */
-export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,onAddText,onOpenSettings,settingsVersion}:ChatPanelProps){
+export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,onAddText,onOpenSettings,settingsVersion,extraNotes=[],onClearExtraNotes}:ChatPanelProps){
+ const otherNotes=extraNotes.filter(p=>p!==path);
  const [chips,setChips]=useState<ContextChip[]>(()=>DEFAULT_CONTEXT.map(c=>({...c}))),[turns,setTurns]=useState<Turn[]>([]),[draft,setDraft]=useState('');
  const [pending,setPending]=useState<ChatReview|null>(null),[stopAsking,setStopAsking]=useState(false),[busy,setBusy]=useState(false),[peek,setPeek]=useState<ContextChip['id']|null>(null);
  const [usage,setUsage]=useState<ChatUsage|null>(null),[persistence,setPersistence]=useState<'private'|'memory'>('memory'),[notice,setNotice]=useState(''),[adding,setAdding]=useState<string|null>(null);
@@ -119,7 +122,8 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
   const id=newTurnId(),{context,selection}=buildContext(chips,getSelection());setNotice('');setBusy(true);
   try{
    const sessionContext=sessionChoices(pickedSessions);
-   const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...sessionContext],...(selection?{selection}:{})});
+   const fromMap=otherNotes.length?[{moduleId:'other-notes' as const,ids:otherNotes}]:[];
+   const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...fromMap,...sessionContext],...(selection?{selection}:{})});
    questions.set(id,question);setTurns(t=>[...t,{id,question,status:'review',text:''}]);setDraft('');
    if(review.requiresConfirmation){setPending(review);setBusy(false);return;}
    await send(review,false);
@@ -148,6 +152,10 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
    <span className="chat-chip-wrap chat-investigate"><button type="button" className="chat-chip chat-chip-solo" aria-pressed={investigating&&investigatorReady} aria-disabled={!investigatorReady}
     title={investigatorReady?'Let agents read files in your registered folders to answer (read-only)':'The investigator is off. Open AI settings to turn it on.'}
     onClick={()=>{if(investigatorReady)setInvestigating(v=>!v);else onOpenSettings();}}>Investigate</button></span>
+   {otherNotes.length>0&&<span className="chat-chip-wrap chat-from-map">
+    <button type="button" className="chat-chip" aria-pressed="true" title={otherNotes.join('\n')}>From the constellation · {otherNotes.length} {otherNotes.length===1?'note':'notes'}</button>
+    <button type="button" className="chat-chip-peek" aria-label="Stop sending the notes chosen in the constellation" onClick={onClearExtraNotes}>×</button>
+   </span>}
    <span className="chat-context-total">About {formatCount(total)} tokens of context</span>
    {path&&<SessionPicker key={path} path={path} selected={pickedSessions} onChange={setPickedSessions} disabled={composing||investigating} budget={usage?.tokenBudget??50000}/>}
   </div>

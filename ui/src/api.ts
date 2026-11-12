@@ -153,6 +153,11 @@ export const api = {
   session: () => ok<{ rootName: string; rootPath: string; anchorCache: { enabled: boolean; ignoreFile: string; ignoreLine: string } }>("GET", "/api/session"),
   tree: () => ok<TreeNode>("GET", "/api/tree"),
   citations: () => ok<NoteSummary[]>("GET", "/api/citations"),
+  // The Constellation: graph data with remembered star positions, the handoff order, and its explicit write.
+  graph: () => ok<{ data: import("../shared/graph.ts").GraphData; positions: Record<string, [number, number]> }>("GET", "/api/graph"),
+  handoff: () => ok<{ order: string[]; markdown: string }>("GET", "/api/handoff"),
+  writeHandoff: () => ok<{ written: true; path: string; order: string[] }>("PUT", "/api/handoff/write", {}),
+  saveStarPositions: (positions: Record<string, [number, number]>) => ok<{ positions: Record<string, [number, number]> }>("PUT", "/api/constellation/positions", { positions }),
   backlinks: (path: string) => ok<Backlink[]>("GET", `/api/backlinks?path=${encodeURIComponent(path)}`),
   // The projects home: the registry, the folder browser, Initialize, and the per-card summary. All unprefixed host routes.
   projects: (sort: "recent" | "name" = "recent") => ok<{ projects: ProjectEntry[]; home: string }>("GET", `/api/projects?sort=${sort}`),

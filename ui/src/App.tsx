@@ -1,7 +1,9 @@
 import {notebookWords} from './editor/smart-dictionary.ts';
 import type {BringPreview,RepairStatus} from '../server/insertion-store.ts';
 import type {DiagramLayout} from '../shared/diagram-svg.ts';
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+// The Constellation and d3-force load only when the view is first opened: none of it is in the first page load.
+const Constellation = lazy(() => import("./constellation/Constellation.tsx"));
 import { api, ApiError, connectEvents, type Backlink, type InkSnapshot, type NoteFile, type ServerEvent, type TreeNode } from "./api.ts";
 import { previewText, type CiteNote } from "./citations/citation-model.ts";
 import { BacklinksPanel } from "./citations/BacklinksPanel.tsx";
@@ -180,6 +182,8 @@ export default function App() {
   }, [paths]);
   // Backlinks for the open note: read again when it changes, and (briefly after) when any note or the tree changes on disk.
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
+  // The Constellation view, and the notes it hands to the chat ("Use as chat context").
+  const [mapOpen, setMapOpen] = useState(false), [mapNotes, setMapNotes] = useState<string[]>([]), mapButtonRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!active) { setBacklinks([]); return; }
     let live = true, timer: ReturnType<typeof setTimeout> | undefined;
@@ -557,6 +561,10 @@ export default function App() {
             <div className="attach-actions"><button onClick={() => void saveAttach()}>Save re-attachment</button><button onClick={() => setAttachDraft(null)}>Cancel</button></div>
           </section>}
         </NoteMenu>
+        <button ref={mapButtonRef} type="button" className="map-pill" aria-expanded={mapOpen} onClick={() => setMapOpen(v => !v)} title="Your notes as a map of linked stars">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"><circle cx="3.5" cy="11.5" r="1.6" fill="currentColor"/><circle cx="8" cy="4" r="2" fill="currentColor"/><circle cx="12.8" cy="10" r="1.3" fill="currentColor"/><path d="M4.6 10.2 7 5.6M9.6 5.2l2.4 3.6M5.1 11.4l6.3-1.2"/></svg>
+          Constellation
+        </button>
         <button ref={chatPillRef} type="button" className="chat-pill" aria-expanded={chatOpen} aria-controls="chat-panel" onClick={() => setChatOpen(v => !v)}><span className="chat-pill-dot" aria-hidden="true" />Chat</button>
       </header>
       <NotesMenu menu={menu} burger={burgerRef} rootName={boot.rootName} rootPath={boot.rootPath} tree={tree} active={active} onOpen={(p) => void openNote(p)} onSearch={() => setOverlay("palette")} onSettings={() => setSettingsOpen(true)} usage={<UsagePanel />} settings={settingsPanel} onTreeChanged={() => refreshTree()} onMoved={m => void afterMove(m)} blocked={moveBlocked} />
@@ -594,7 +602,13 @@ export default function App() {
           </div>
         )}
       </main>
-      {chatOpen && <ChatPanel key={active ?? "none"} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} getSelection={chatSelection} onAdd={addChatMessage} onAddText={addTextToNote} onOpenSettings={() => setSettingsOpen(true)} settingsVersion={settingsVersion} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
+      {mapOpen && <Suspense fallback={<section className="constellation" role="status" aria-label="Constellation"><p className="cn-empty">Charting your notes…</p></section>}>
+        <Constellation active={active} subscribe={subscribe}
+          onClose={() => { setMapOpen(false); mapButtonRef.current?.focus(); }}
+          onOpen={p => { setMapOpen(false); void openNote(p); }}
+          onUseAsContext={ps => { setMapNotes(ps); setMapOpen(false); setChatOpen(true); }} />
+      </Suspense>}
+      {chatOpen && <ChatPanel key={active ?? "none"} extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} getSelection={chatSelection} onAdd={addChatMessage} onAddText={addTextToNote} onOpenSettings={() => setSettingsOpen(true)} settingsVersion={settingsVersion} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
       {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); setSettingsVersion(v => v + 1); burgerRef.current?.focus(); }} />}
       {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,toast.undo)}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
       {added&&<div className="thought-toast" role="status"><span>{added.text} · Undo (Ctrl+Z)</span><details className="added-detail"><summary>What was added</summary><pre>{added.detail}</pre></details><button onClick={()=>{const h=active?panes.current.get(active):undefined;if(h){undo(h.view);h.view.focus();}setAdded(null);}}>Undo</button><button aria-label="Close notice" onClick={()=>setAdded(null)}>Close</button></div>}
