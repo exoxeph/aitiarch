@@ -9,6 +9,8 @@ export function thoughtSide(id:string):ThoughtSide {
 /** Kept under its old name for existing callers; the placement rules now live in thought-placement.ts. */
 export {placeThoughts as layoutThoughts} from './thought-placement.ts';
 export function thoughtVisible(item:InkItem){return !item.generation?.dismissed&&!item.thread?.dismissed&&item.attachment.status==='attached';}
+/** The card repeats the selected text only when the anchor is lost (orphaned, or changed and awaiting re-attach); while attached the connector shows it. */
+export function quoteShown(item:InkItem){return item.attachment.status!=='attached';}
 export function thoughtText(item:InkItem){return !item.generation||item.generation.status==='complete'?item.body:item.generation.status==='pending'?'Waiting for a validated AI answer…':'Request failed or interrupted. Open thread for details.';}
 
 /** Only an explicit human command may apply this preview; never used by rendering. */

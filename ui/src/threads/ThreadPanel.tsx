@@ -4,6 +4,7 @@ import {DiagramReveal,Streamed,Thinking} from '../ink/streaming.tsx';
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import type {InkItem} from '../../shared/ink.ts';
+import {quoteShown} from '../../shared/thoughts.ts';
 import {newThread,questionPlaceholder,threadStatus,type ThreadFailure,type ThreadReply} from '../../shared/threads.ts';
 import {api,type InkSnapshot} from '../api.ts';
 import {rememberQuestion,recalledQuestion,forgetQuestion} from './questions.ts';
@@ -113,7 +114,7 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{
  }catch(e){fail(e);}finally{setBusy(false);}};
  if(t.dismissed)return <article className="thread-card"><p>Thread dismissed; replies and your work are preserved.</p><button disabled={busy} onClick={()=>void act({type:'restore'})}>Restore thread</button><button onClick={()=>setConfirmDelete(true)}>Delete thread…</button>{confirmDelete&&<DeleteConfirm busy={busy} cancel={()=>setConfirmDelete(false)} remove={()=>void act({type:'delete',confirmed:true})}/ >}</article>;
  return <article className="thread-card" data-thread-id={item.id} ref={card}>
-  <blockquote>{item.anchor.quote}</blockquote>
+  {quoteShown(item)&&<blockquote>{item.anchor.quote}</blockquote>}
   <p className="small muted">{statusLabel(threadStatus(item))}{item.attachment.status==='orphaned'?' · Re-attach using the orphan list above. Your takeaway is preserved.':''}</p>
   <ReplyStack replies={[initial,...t.followups]} question={id=>recalledQuestion(path,id)??questionPlaceholder} cancel={replyId=>void api.threadCall('cancel',{path,id:item.id,replyId})} onAdd={r=>card.current?.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id,...(r.id===item.id?{}:{replyId:r.id})}}))}/>
   {notice&&<p role="alert">{notice}</p>}

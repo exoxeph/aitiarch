@@ -130,7 +130,9 @@ try {
   assert.equal(await img.evaluate(async (i) => { await i.decode(); return i.naturalWidth; }), 300, 'the sanitized svg loads as an image at its own size');
   assert.equal(await page.locator('iframe').count(), 0, 'no iframe anywhere on the page'); assert.equal(await hostA.locator('svg').count(), 0, 'and the drawing is not inline either');
   assert(!(await page.locator('body').innerText()).includes('HOSTILE SVG'), 'the text of the drawing is only inside the image'); assert.equal(await page.evaluate(() => document.documentElement.outerHTML.includes('HOSTILE')), false);
-  assert.match(await hostA.innerText(), /Drawn by the diagram-design skill\. Shown as a still image\./);
+  // One caption only: the card's own text says "Diagram drawn by the diagram-design skill. It is shown as a static image."; the frame adds none for a still image.
+  assert.equal(await hostA.locator('.diagram-caption').count(), 0, 'no second caption under a still image'); assert.doesNotMatch(await hostA.innerText(), /Shown as a still image/);
+  assert.equal(await hostA.locator('xpath=ancestor::article[contains(@class,"margin-card")]').innerText().then((t) => t.split('Diagram drawn by the diagram-design skill').length - 1), 1, 'the sentence appears once in the card');
   const svgResponse = responses.find((r) => r.url.includes(a.skillDiagram.asset)); assert(svgResponse, 'the image was fetched'); report.svgHeaders = { type: svgResponse.headers['content-type'], csp: svgResponse.headers['content-security-policy'] };
   assert.equal(svgResponse.headers['content-type'], 'image/svg+xml'); assert.equal(svgResponse.headers['content-security-policy'], SKILL_DIAGRAM_SVG_CSP_HEADER); assert.equal(svgResponse.headers['x-content-type-options'], 'nosniff');
   await page.waitForTimeout(1500); assert.deepEqual(hits, [], 'as an image: the evil server saw nothing: ' + hits.join(', '));

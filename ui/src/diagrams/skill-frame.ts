@@ -38,6 +38,8 @@ export function mountSkillDiagram(host:HTMLElement,ref:SkillDiagramRef,opts:{ite
  else{toggle=button('Show interactive version',()=>{if(live)hideLive();else showLive();});toggle.setAttribute('aria-live','polite');tools.append(toggle);}
  // Opens a normal, reviewable Visualize request for the same selection, drawn by the app's own pipeline. This diagram stays until you dismiss it.
  tools.append(button('Try with Built-in',()=>host.dispatchEvent(new CustomEvent('visualize-again',{bubbles:true,detail:{id:opts.itemId,renderer:'builtin'}}))));
- host.replaceChildren(stage,caption,tools);
+ // A still image needs no caption of its own: the card's text already says which skill drew it and that it is a static image (one caption, not two).
+ // The caption stays only where it says something else: the drawing could not be shown, or the sandboxed interactive version is open.
+ host.replaceChildren(...(still?[stage,tools]:[stage,caption,tools]));
  return()=>{const open=dialog;dialog=undefined;open?.close();open?.remove();live?.remove();live=undefined;host.replaceChildren();};
 }

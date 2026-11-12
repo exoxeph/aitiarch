@@ -83,6 +83,9 @@ try {
       host: r(hostEl), image: r(hostEl.querySelector('img')), buttons: [...hostEl.querySelectorAll('button')].map((b) => ({ t: b.textContent, ...r(b) })), cards, connectors, lines,
       noteScroll: (() => { const h = document.querySelector('.pane'); return h ? { scrollTop: h.scrollTop, scrollHeight: h.scrollHeight, clientHeight: h.clientHeight } : null; })() };
   }, diagram.skillDiagram.asset);
+  // The thought's text never leaks into the note: without "Add to note" the editor holds none of it (an italic copy under the paragraph can only be an inserted callout).
+  assert.equal(await page.evaluate(() => document.querySelector('.cm-content').innerText.includes('Diagram drawn by the')), false, 'thought text must not appear in the editor before Add to note');
+  assert.equal(await page.evaluate(() => document.querySelector('.thought-text').closest('.margin-card') !== null), true);
   report.atCard = await measure();
   await page.screenshot({ path: path.join(out, 'skill-layout-at-card.png') });
   const inside = (a, b) => a.left >= b.left - 1 && a.right <= b.right + 1 && a.top >= b.top - 1 && a.bottom <= b.bottom + 1;
