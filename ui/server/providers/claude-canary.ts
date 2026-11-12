@@ -9,6 +9,11 @@ import path from 'node:path';
 import { inspectThinkingTokens } from './thinking-status.ts';
 
 type Event = Record<string, any>;
+const idShape = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** The CLI's own progress note when partial messages are on, e.g. {type:'system',subtype:'status',status:'requesting'}: exactly one short
+ *  lowercase word plus the usual ids. A status event with no status, an unfamiliar status or any other field is still an unknown event. */
+const validStatusEvent = (e: any) => e.type === 'system' && e.subtype === 'status' && typeof e.status === 'string' && /^[a-z_]{1,30}$/.test(e.status)
+  && Object.entries(e).every(([key, value]) => key === 'type' || key === 'subtype' || key === 'status' || ((key === 'uuid' || key === 'session_id') && typeof value === 'string' && idShape.test(value)));
 export function inspectClaudeCanary(events: Event[], files: string[]) {
   const starts = events.filter(e => e.type === 'system' && e.subtype === 'init');
   const init = starts[0];
@@ -29,7 +34,7 @@ export function inspectClaudeCanary(events: Event[], files: string[]) {
     if (/hook/i.test(String(event.type)) || /hook/i.test(String(event.subtype))) hookEvents++;
     if (event.type === 'assistant' && event.message?.content?.some((b: any) => b.type === 'text' && b.text?.trim())) answers++;
     if (!['assistant', 'result', 'rate_limit_event', 'stream_event'].includes(event.type)
-      && !(event.type === 'system' && (event.subtype === 'init'||(event.subtype==='thinking_tokens'&&inspectThinkingTokens(event).valid)))
+      && !(event.type === 'system' && (event.subtype === 'init'||(event.subtype==='thinking_tokens'&&inspectThinkingTokens(event).valid)||validStatusEvent(event)))
       && !/hook/i.test(String(event.subtype))) unknownEvents++;
   }
   const results = events.filter(e => e.type === 'result');

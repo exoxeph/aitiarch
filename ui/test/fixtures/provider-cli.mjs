@@ -79,6 +79,30 @@ if (scenario.startsWith('verified-')) {
     console.log(JSON.stringify({type:'assistant',message:{content:[{type:'text',text:result}]}}));
     console.log(JSON.stringify({type:'result',subtype:'success',result,usage:{input_tokens:20,output_tokens:10}}));process.exit(0);
   }
+  // The stream the installed Claude CLI really produces with --include-partial-messages (event names and key sets captured from a
+  // real call; all text here is synthetic): a "requesting" status event, then a thinking block before the text block.
+  if(scenario==='verified-chat-real-stream'){
+    if(!args.includes('--include-partial-messages'))process.exit(94);
+    const result=JSON.stringify({answer:'**Synthetic** real-shape reply.',claims:[]});
+    const ids={uuid:'11111111-1111-4111-8111-111111111111',session_id:'22222222-2222-4222-8222-222222222222'};
+    const emit=event=>console.log(JSON.stringify({type:'stream_event',event,...ids}));
+    console.log(JSON.stringify({type:'system',subtype:'status',status:'requesting',...ids}));
+    console.log(JSON.stringify({type:'rate_limit_event',rate_limit_info:{status:'allowed'},...ids}));
+    emit({type:'message_start',message:{role:'assistant',content:[]}});
+    emit({type:'content_block_start',index:0,content_block:{type:'thinking',thinking:'',signature:''}});
+    console.log(JSON.stringify({type:'system',subtype:'thinking_tokens',estimated_tokens:12,estimated_tokens_delta:12,...ids}));
+    emit({type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'synthetic private reasoning'}});
+    emit({type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'synthetic-signature'}});
+    console.log(JSON.stringify({type:'assistant',message:{content:[{type:'thinking',thinking:'synthetic private reasoning',signature:'synthetic-signature'}]},...ids}));
+    emit({type:'content_block_stop',index:0});
+    emit({type:'content_block_start',index:1,content_block:{type:'text',text:''}});
+    emit({type:'content_block_delta',index:1,delta:{type:'text_delta',text:result.slice(0,20)}});
+    emit({type:'content_block_delta',index:1,delta:{type:'text_delta',text:result.slice(20)}});
+    console.log(JSON.stringify({type:'assistant',message:{content:[{type:'text',text:result}]},...ids}));
+    emit({type:'content_block_stop',index:1});
+    emit({type:'message_delta',delta:{stop_reason:'end_turn'}});emit({type:'message_stop'});
+    console.log(JSON.stringify({type:'result',subtype:'success',result,usage:{input_tokens:20,output_tokens:10},...ids}));process.exit(0);
+  }
   if(scenario==='verified-truncated'){process.stdout.write('{"type":"assistant","message":');process.exit(0);}
   if (scenario === 'verified-hook') console.log(JSON.stringify({ type: 'system', subtype: 'hook_started' }));
   if (scenario === 'verified-hook-prefixed') console.log(JSON.stringify({ type: 'system', subtype: 'hook_custom' }));

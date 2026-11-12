@@ -3,7 +3,7 @@ import {inspectClaudeCanary} from './claude-canary.ts';
 /** Bounded incremental view of the SAME isolated stream, never a second CLI/session. */
 export class ClaudeChatStream {
  private decoder=new StringDecoder('utf8');private pending='';private initialized=false;private ended=false;private text='';private emit:(text:string)=>void;
- private messageStarted=false;private messageEnded=false;private block:number|null=null;
+ private messageStarted=false;private messageEnded=false;private block:number|null=null;private kind:'text'|'thinking'|null=null;private thinkingChars=0;
  constructor(emit:(text:string)=>void){this.emit=emit;}
  push(bytes:Buffer){this.pending+=this.decoder.write(bytes);this.lines(false);}
  finish(){this.pending+=this.decoder.end();this.lines(true);if(!this.initialized||!this.ended)throw new Error('Invalid chat stream.');}
@@ -27,11 +27,26 @@ export class ClaudeChatStream {
   const event=e.event;if(!event||typeof event!=='object')reject();
   switch(event.type){
    case 'message_start':if(this.messageStarted||event.message?.role!=='assistant')reject();this.messageStarted=true;break;
-   case 'content_block_start':if(!this.messageStarted||this.messageEnded||this.block!==null||!Number.isSafeInteger(event.index)||event.index<0||event.content_block?.type!=='text'||typeof event.content_block.text!=='string'||event.content_block.text!=='')reject();this.block=event.index;break;
-   case 'content_block_delta':
-    if(this.block===null||event.index!==this.block||event.delta?.type!=='text_delta'||typeof event.delta.text!=='string'||Object.keys(event.delta).sort().join()!=='text,type')reject();
-    this.text+=event.delta.text;if(this.text.length>100000)reject();this.emit(event.delta.text);break;
-   case 'content_block_stop':if(this.block===null||event.index!==this.block)reject();this.block=null;break;
+   case 'content_block_start':{
+    if(!this.messageStarted||this.messageEnded||this.block!==null||!Number.isSafeInteger(event.index)||event.index<0)reject();
+    const cb=event.content_block;
+    if(cb?.type==='text'){if(typeof cb.text!=='string'||cb.text!=='')reject();this.kind='text';}
+    // The model may think before it answers. A thinking block is accepted only in its exact empty-start shape, is never shown, and is bounded.
+    else if(cb?.type==='thinking'){const keys=Object.keys(cb).sort().join();if(keys!=='signature,thinking,type'&&keys!=='thinking,type')reject();if(cb.thinking!==''||(cb.signature!==undefined&&cb.signature!==''))reject();this.kind='thinking';}
+    else reject();
+    this.block=event.index;break;
+   }
+   case 'content_block_delta':{
+    if(this.block===null||event.index!==this.block)reject();
+    const d=event.delta;
+    if(this.kind==='thinking'){
+     const ok=d?.type==='thinking_delta'?typeof d.thinking==='string'&&Object.keys(d).sort().join()==='thinking,type':d?.type==='signature_delta'?typeof d.signature==='string'&&Object.keys(d).sort().join()==='signature,type':false;
+     if(!ok)reject();this.thinkingChars+=(d.thinking??d.signature).length;if(this.thinkingChars>200000)reject();break; // never emitted, never part of the answer
+    }
+    if(d?.type!=='text_delta'||typeof d.text!=='string'||Object.keys(d).sort().join()!=='text,type')reject();
+    this.text+=d.text;if(this.text.length>100000)reject();this.emit(d.text);break;
+   }
+   case 'content_block_stop':if(this.block===null||event.index!==this.block)reject();this.block=null;this.kind=null;break;
    case 'message_stop':if(!this.messageStarted||this.messageEnded||this.block!==null)reject();this.messageEnded=true;break;
    case 'message_delta':if(!this.messageStarted||this.messageEnded||event.delta?.stop_reason&&event.delta.stop_reason!=='end_turn')reject();break;
    default:reject();
