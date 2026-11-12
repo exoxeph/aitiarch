@@ -28,6 +28,9 @@ import { Assistance } from "./assistance.ts";
 import { ProviderError, type Provider } from "./providers/index.ts";
 import type { Invocation } from "../shared/invocation.ts";
 import type { ChatGPTPlan } from "./providers/chatgpt-plan.ts";
+import { defaultRoots, discoverSkills, type SkillInfo, type SkillRoot } from "./skills.ts";
+import { skillLibrary } from "./skill-library.ts";
+import { homedir } from "node:os";
 
 export interface AppOptions {
   sessionModules?:import('../shared/chat.ts').ContextModule[];
@@ -43,6 +46,8 @@ export interface AppOptions {
   investigator?:Partial<Record<AgentName,InvestigatorRunner>>;
   plan?: ChatGPTPlan;
   usage?: {summary():Promise<import('../shared/usage.ts').UsageSummary>};
+  /** Where the Skill library looks. Tests pass temp folders; the real app uses the usual places under your home folder and this project. */
+  skillRoots?: SkillRoot[];
 }
 
 export const CSP = [
@@ -158,6 +163,12 @@ export function createApp(opts: AppOptions) {
 
   const explorerReady = Explorer.open(store.rootReal);
   const uiStateStore = new UiStateStore(store.rootReal);
+  // Walking every plugin cache is slow, so the answer is kept for half a minute; "refresh=1" asks again (after an install).
+  let skillsCache: { at: number; list: Promise<SkillInfo[]> } | null = null;
+  const discoveredSkills = (refresh: boolean) => {
+    if (refresh || !skillsCache || Date.now() - skillsCache.at > 30_000) skillsCache = { at: Date.now(), list: discoverSkills(opts.skillRoots ?? defaultRoots(homedir(), path.dirname(store.rootReal))) };
+    return skillsCache.list;
+  };
   const investigatorPolicy=new PolicyGate(uiStateStore,path.dirname(store.rootReal));
   const investigator=new InvestigatorRuntime(investigatorPolicy,new Lookups(investigatorPolicy),new LedgerStore(store.rootReal),opts.investigator??{},undefined,store.rootReal);
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
@@ -262,6 +273,10 @@ export function createApp(opts: AppOptions) {
         }
         throw new InvestigatorError('invalid_envelope');
       }catch(e){if(res.headersSent)return res.end();const code=e instanceof InvestigatorError?e.code:'invalid_policy';return json(res,409,{error:code,message:code==='blocked'?'Blocked: raise policy to retry':'Investigator: '+code+'. Nothing was retried.'});}
+    }
+    if(url.pathname==='/api/skills'&&req.method==='GET'){
+      const ids=(url.searchParams.get('ids')??'').split(',').filter(Boolean);
+      return json(res,200,skillLibrary(await discoveredSkills(url.searchParams.get('refresh')==='1'),{q:url.searchParams.get('q')??'',ids,limit:Number(url.searchParams.get('limit'))||undefined}));
     }
     if(url.pathname==='/api/usage'&&req.method==='GET'){
       const chats=(await chatReady).usage();return json(res,200,{...(opts.usage?await opts.usage.summary():{since:new Date().toISOString(),hourlyCap:2,providers:[]}),...(chats.length?{chats}:{})});
