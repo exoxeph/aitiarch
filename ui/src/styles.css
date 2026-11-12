@@ -850,6 +850,9 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .chat-review-est { color: var(--muted); }
 .persona-switch { margin: 0 0 8px; padding: 0; border: 0; min-width: 0; }
 #chat-panel > .persona-switch { margin-inline: 15px; }
+/* The ask/review panel styles every input as a full-width block and every label as a grid; a radio and its words stay on one line. */
+.invocation-review .persona-switch .persona-option, .thought-ask .invocation-review .persona-switch .persona-option { display: inline-flex; gap: 5px; align-items: center; }
+.invocation-review .persona-switch input { display: inline-block; width: auto; margin: 0; padding: 0; }
 .persona-legend { padding: 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
 .persona-options { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 2px; }
 .persona-option { display: inline-flex; align-items: center; gap: 5px; font: var(--text-control) var(--font-ui); cursor: pointer; }
