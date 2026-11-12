@@ -3,7 +3,7 @@ import {unavailableText,type Diagram} from '../../shared/diagram.ts';
 import type {SkillDiagramRef} from '../../shared/skill-diagram.ts';
 import {mountSkillDiagram} from './skill-frame.ts';
 /** User-triggered only: asks the app to open a normal, reviewable Visualize request for the same selection. */
-export const requestDiagramAgain=(from:EventTarget,id:string)=>from.dispatchEvent(new CustomEvent('visualize-again',{bubbles:true,detail:{id}}));
+export const requestDiagramAgain=(from:EventTarget,id:string,renderer?:'builtin')=>from.dispatchEvent(new CustomEvent('visualize-again',{bubbles:true,detail:{id,...(renderer?{renderer}:{})}}));
 /** Only this tiny boundary is eager; renderer, serializer and ELK stay lazy. */
 export function DiagramSlot({diagram,invalid,itemId,skillDiagram,skills}:{diagram?:Diagram;invalid?:string;itemId?:string;skillDiagram?:SkillDiagramRef;skills?:readonly string[]}){
  const ref=useRef<HTMLDivElement>(null);
@@ -21,5 +21,5 @@ export function DiagramSlot({diagram,invalid,itemId,skillDiagram,skills}:{diagra
  // eslint-disable-next-line react-hooks/exhaustive-deps
  },[skillAsset]);
  if(!diagram&&!invalid&&!skillDiagram)return null;
- return <div className="thought-diagram-slot" ref={ref}>{invalid?<><span data-diagram-issue={invalid}>{unavailableText(invalid)}</span>{itemId&&<button type="button" className="diagram-retry" onClick={e=>requestDiagramAgain(e.currentTarget,itemId)}>Try diagram again</button>}</>:'Loading diagram...'}</div>;
+ return <div className="thought-diagram-slot" ref={ref}>{invalid?<><span data-diagram-issue={invalid}>{unavailableText(invalid)}</span>{itemId&&<button type="button" className="diagram-retry" onClick={e=>requestDiagramAgain(e.currentTarget,itemId,invalid?.startsWith('skill_')?'builtin':undefined)}>{invalid?.startsWith('skill_')?'Try with Built-in':'Try diagram again'}</button>}</>:'Loading diagram...'}</div>;
 }

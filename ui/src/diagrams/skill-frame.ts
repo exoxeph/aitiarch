@@ -21,6 +21,8 @@ export function mountSkillDiagram(host:HTMLElement,ref:SkillDiagramRef,opts:{ite
   dialog.addEventListener('click',e=>{if(e.target===dialog)dialog?.close();});
   dialog.addEventListener('close',()=>{dialog?.remove();dialog=undefined;if(prior?.isConnected)prior.focus();});dialog.showModal();close.focus();};
  tools.append(button('See it larger',openLarge));
+ // Opens a normal, reviewable Visualize request for the same selection, drawn by the app's own pipeline. The skill's diagram stays until you dismiss it.
+ tools.append(button('Try with Built-in',()=>host.dispatchEvent(new CustomEvent('visualize-again',{bubbles:true,detail:{id:opts.itemId,renderer:'builtin'}}))));
  host.replaceChildren(skillFrame(ref,opts.skills,false),caption,tools);
  return()=>{const open=dialog;dialog=undefined;open?.close();open?.remove();host.replaceChildren();};
 }

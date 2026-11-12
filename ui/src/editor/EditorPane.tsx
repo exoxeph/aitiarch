@@ -88,13 +88,13 @@ export function EditorPane(props: Props) {
   const invokeRef = useRef(invoked.begin); invokeRef.current = invoked.begin;
   // While a question or review is open in its blob, the format toolbar would sit on top of it, so it is hidden meanwhile.
   useEffect(() => { surface.current?.toggleAttribute('data-asking', !!invoked.draftId); }, [invoked.draftId]);
-  // Try diagram again (a user click) opens a normal, reviewable Visualize request for the same selection.
+  // Try diagram again, or Try with Built-in on a skill's diagram (a user click), opens a normal, reviewable Visualize request for the same selection.
   useEffect(() => {
     const again = (event: Event) => {
-      const id = (event as CustomEvent<{ id: string }>).detail?.id, v = viewRef.current;
+      const detail = (event as CustomEvent<{ id: string; renderer?: 'builtin' | 'skill' }>).detail, id = detail?.id, v = viewRef.current;
       const item = v?.state.field(inkField).items.find((i) => i.id === id);
       if (!v || !item || item.attachment.status !== 'attached') return;
-      invokeRef.current('visualize', { text: v.state.doc.toString(), from: item.attachment.from, to: item.attachment.to });
+      invokeRef.current('visualize', { text: v.state.doc.toString(), from: item.attachment.from, to: item.attachment.to }, detail?.renderer ? { renderer: detail.renderer } : undefined);
     };
     window.addEventListener('visualize-again', again);
     return () => window.removeEventListener('visualize-again', again);

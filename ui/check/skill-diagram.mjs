@@ -156,6 +156,21 @@ try {
   await page.getByRole('button', { name: 'Close larger diagram' }).click();
   await blob.screenshot({ path: path.join(out, 'skill-diagram-blob.png') });
 
+  // 6b. Try with Built-in: a normal, reviewable request for the SAME selection, with Built-in chosen. Nothing is sent until Send.
+  await blob.getByRole('button', { name: 'Try with Built-in' }).click();
+  const again = page.locator('.invocation-review'); await again.waitFor();
+  assert.equal(await again.getAttribute('data-frozen-selection'), text.slice(from, to), 'the same selection is frozen again');
+  await again.getByRole('button', { name: /^Send to/ }).waitFor();
+  assert.equal(await again.getByRole('radio', { name: 'Built-in' }).isChecked(), true, 'Built-in is chosen');
+  assert.equal(await again.getByRole('radio', { name: 'Skill' }).isDisabled(), false, 'and Skill is still available');
+  assert.equal(calls.length, 1, 'no second call before Send');
+  await again.getByRole('button', { name: /^Send to/ }).click();
+  await page.locator('.margin-card.thought-blob svg').first().waitFor();
+  assert.deepEqual(calls.at(-1), { render: 'builtin', skills: ['diagram-design'] }, 'the second call went through the Built-in renderer (the Visualize step\'s skill still shapes its text)');
+  assert.equal(calls.length, 2);
+  assert.equal(await page.locator('iframe.skill-diagram-frame').count(), 1, 'the skill\'s diagram is still there');
+  await page.screenshot({ path: path.join(out, 'skill-diagram-try-builtin.png') });
+
   // 7. Saved: one file under assets/, named by the hash of its bytes, with the CSP first. The thought records the skill.
   const files = await readdir(path.join(root, 'assets')); assert.equal(files.length, 1); assert.match(files[0], /^diagram-[a-f0-9]{64}\.html$/);
   assert((await readFile(path.join(root, 'assets', files[0]), 'utf8')).startsWith('<!doctype html><meta http-equiv="Content-Security-Policy"'));

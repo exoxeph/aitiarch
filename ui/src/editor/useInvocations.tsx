@@ -2,7 +2,7 @@ import {transient} from '../transient.ts';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { EditorView } from '@codemirror/view';
 import { captureAnchor } from '../../shared/anchors.ts';
-import type { Invocation } from '../../shared/invocation.ts';
+import type { Invocation, Renderer } from '../../shared/invocation.ts';
 import { api, ApiError, type InkSnapshot } from '../api.ts';
 import type { NoteSession } from './session.ts';
 import type { InvokeAction, SelectedSource } from './toolbar.ts';
@@ -74,12 +74,12 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
     } catch (e) { if (mounted.current) setDraft({ input, error: e instanceof Error ? e.message : 'Context preview failed.' }); }
     finally { if (mounted.current) setBusy(false); }
   };
-  const begin = (requested: InvokeAction, source: SelectedSource) => {
+  const begin = (requested: InvokeAction, source: SelectedSource, options?: { renderer?: Renderer }) => {
     if (draft || !view.current) return;
     // Visualize is an ordinary Ask with a fixed question, so nothing new is stored: the wording itself tells the prompt
     // builder that a diagram was explicitly requested.
     const visualize = requested === 'visualize', action = visualize ? 'ask' : requested;
-    const input: Invocation = { id: crypto.randomUUID(), path, action, question: visualize ? VISUALIZE_QUESTION : '', ...source };
+    const input: Invocation = { id: crypto.randomUUID(), path, action, question: visualize ? VISUALIZE_QUESTION : '', ...source, ...(visualize && options?.renderer ? { renderer: options.renderer } : {}) };
     const anchor = captureAnchor(input.text, input.from, input.to);
     view.current.dispatch({ effects: addInk.of({ id: input.id, kind: 'answer', body: 'Review request…', anchor, originalAnchor: anchor,
       attachment: { status: 'attached', from: input.from, to: input.to } }) });
