@@ -111,7 +111,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   const stepNode = draft ? nodeFor(draft.input.action, draft.input.question) : 'ask', persona = useNodeSettings(stepNode);
   useEffect(() => { if (hasPacket) sendRef.current?.focus(); }, [hasPacket]);
   const asking = !!draft && draft.input.action === 'ask' && !hasPacket && draft.input.question !== VISUALIZE_QUESTION;
-  const draftSection = draft ? <section aria-label={`Review ${providerLabel} request`} className="invocation-review"
+  const draftSection = draft ? <section aria-label={`Review ${providerLabel} request`} className="invocation-review" data-frozen-selection={draft.input.text.slice(draft.input.from, draft.input.to)}
     onKeyDown={e => {
       if (e.key === 'Escape') { e.stopPropagation(); if(!busy&&!(draft.input.action==='ask'&&draft.input.question!==VISUALIZE_QUESTION&&draft.input.question.trim()))cancelPreview(); return; }
       if (e.key !== 'Enter' || e.shiftKey || busy) return;
@@ -119,11 +119,11 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       if (asking && target.tagName === 'INPUT') { e.preventDefault(); if (draft.input.question.trim()) void review(draft.input); }
       else if (hasPacket && !['BUTTON', 'SUMMARY', 'INPUT'].includes(target.tagName)) { e.preventDefault(); void send(); }
     }}>
-    <strong>{draft.input.action === 'think' ? 'Think on this' : draft.input.question === VISUALIZE_QUESTION ? 'Visualize' : `Ask ${providerLabel}`}</strong>
+    {/* The dot is where the arrow from the selected text lands, as on a finished thought. The selection itself is not repeated here. */}
+    <div className="thought-meta invoke-head"><span className="thought-dot" aria-hidden="true" /><strong>{draft.input.action === 'think' ? 'Think on this' : draft.input.question === VISUALIZE_QUESTION ? 'Visualize' : `Ask ${providerLabel}`}</strong></div>
     <p role="status" className="sr-only">{hasPacket ? 'Review ready. Press Enter to send, Escape to cancel.' : asking ? 'Type your question, then press Enter to review it. Escape cancels.' : ''}</p>
     {asking && <label>Question for {providerLabel}<input aria-label={`Question for ${providerLabel}`} placeholder="Ask about this selection…" maxLength={8000} autoFocus
       value={draft.input.question} onChange={e => setDraft({ input: { ...draft.input, question: e.target.value } })} /></label>}
-    <blockquote>{draft.input.text.slice(draft.input.from, draft.input.to)}</blockquote>
     <PersonaSwitch id={'step-' + stepNode} label={`How ${NODE_LABEL[stepNode]} works with you`} value={persona.persona} kept={persona.kept} disabled={busy}
       onChange={p => void persona.choose(p).then(saved => { if (saved && hasPacket) void review(draft.input); })} />
     {persona.failed && <p role="alert" className="small">That choice could not be saved. Nothing was changed.</p>}

@@ -280,9 +280,11 @@ await session('toolbar-b',small,async({page,theme,root,bytes})=>{
  await put(page,from,to);await toolbar.waitFor();
  await toolbar.getByTitle('Link',{exact:true}).click();assert.equal(await doc(page),d.slice(0,from)+'['+d.slice(from,to)+']()'+d.slice(to));await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
  await put(page,from,to);await toolbar.getByRole('button',{name:'Ask...',exact:true}).click();
- const frozen=await page.locator('.invocation-review blockquote').textContent();
+ // The card no longer repeats the selected text; the frozen selection is kept on the panel for this guard.
+ const frozen=await page.locator('.invocation-review').getAttribute('data-frozen-selection');
+ assert.equal(await page.locator('.invocation-review blockquote').count(),0,'the card does not repeat the selected text');
  await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view;v.dispatch({changes:{from:0,insert:'User edit.\n'}});});
- assert.equal(await page.locator('.invocation-review blockquote').textContent(),frozen,'frozen selection changed');assert.equal(frozen,d.slice(from,to));
+ assert.equal(await page.locator('.invocation-review').getAttribute('data-frozen-selection'),frozen,'frozen selection changed');assert.equal(frozen,d.slice(from,to));
  await page.getByRole('button',{name:'Cancel preview'}).click();await page.evaluate(()=>window.__aitiarch['n.md'].view.focus());await page.keyboard.press('Control+z');assert.deepEqual(await disk(page,root),bytes);
  await put(page,from,to);await page.locator('.editor-col').screenshot({path:path.join(output,`gate-toolbar-b-${theme}.png`)});
  await put(page,from);assert.equal(await toolbar.isHidden(),true,'empty selection toolbar shown');

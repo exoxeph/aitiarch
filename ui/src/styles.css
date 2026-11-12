@@ -508,7 +508,8 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .thought-resolved-tag {font:600 11px/1.4 var(--font-ui);color:var(--muted);}
 /* Ask blob: the question, the privacy review and Send live in the margin blob of the selection (no top-of-page panel). */
 .thought-ask .invocation-review {display:grid;gap:6px;padding:0;margin:0;border:0;background:none;font:var(--text-control) var(--font-ui);}
-.thought-ask .invocation-review > strong {font:600 13px var(--font-ui);}
+.thought-ask .invocation-review > strong, .invoke-head strong {font:600 13px var(--font-ui);}
+.invoke-head { margin-bottom: 0; padding-inline: 6px; }
 .thought-ask .invocation-review label {display:grid;gap:4px;}
 .thought-ask .invocation-review input[type=text],.thought-ask .invocation-review input:not([type]) {width:100%;font:inherit;padding:6px 8px;border:1px solid var(--control-border);border-radius:var(--radius-small);background:var(--paper);color:var(--ink-text);}
 .thought-ask blockquote {margin:0;color:var(--muted);font:italic 12px/1.4 var(--font-body);max-height:3.6em;overflow:hidden;}
