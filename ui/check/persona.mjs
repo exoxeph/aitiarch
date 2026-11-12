@@ -65,8 +65,26 @@ try {
     await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').nth(sent - 1).waitFor();
     const got = await recorded(before);
     assert.deepEqual(personasIn(got.instruction), [persona], `chat with ${LABEL[persona]}: only that persona's text is in the request (found ${personasIn(got.instruction)})`);
+    // Honest display (stage 5). The fake CLI always answers with one plain sentence and no question: that breaks Grill me's and Plan with me's contract, not Explain's.
+    const reply = panel.locator('.chat-ai:not(.chat-streaming)').nth(sent - 1), notice = reply.locator('.chat-contract');
+    assert.match(await reply.innerText(), /Synthetic recorded reply\./, `${LABEL[persona]}: the reply is shown as written`);
+    if (persona === 'explain') assert.equal(await notice.count(), 0, 'Explain: nothing to flag for a short reply');
+    else {
+      await notice.waitFor(); assert.match(await notice.innerText(), new RegExp(`Not what ${LABEL[persona]} asks for: it does not end with a question\\.`), `${LABEL[persona]}: a plain line says what is wrong`);
+      assert.equal(await notice.getByRole('button', { name: 'Ask again' }).count(), 1, `${LABEL[persona]}: one Ask again button`);
+    }
   };
   for (const p of ['grill', 'explain', 'plan', 'grill']) await chatWith(p);
+  {
+    // The last reply (Grill me) broke its contract. Nothing resends by itself; Ask again goes through the normal review, then the same question is asked as a new message.
+    const promptMtime = (await stat(promptFile)).mtimeMs; await page.waitForTimeout(1200);
+    assert.equal((await stat(promptFile)).mtimeMs, promptMtime, 'no silent retry: the CLI was not called again');
+    const reviewed = page.waitForRequest((r) => r.url().includes('/api/chat/review'));
+    await panel.locator('.chat-ai:not(.chat-streaming)').nth(sent - 1).getByRole('button', { name: 'Ask again' }).click(); await reviewed;
+    await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').nth(sent).waitFor(); sent++;
+    assert.equal(await panel.locator('.chat-you').count(), sent, 'Ask again added a new message; the old reply is still there');
+    assert.equal(await panel.locator('.chat-ai:not(.chat-streaming) .chat-contract').count(), 4, 'the four broken replies (3x Grill me, Plan with me) are all still flagged, including the new one');
+  }
   await page.screenshot({ path: path.join(out, 'persona-chat.png') });
 
   // ---- Think and Ask from the selection panel use their own persona (the chat's choice does not leak into them).

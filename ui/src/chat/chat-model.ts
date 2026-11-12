@@ -1,6 +1,7 @@
 // Pure chat state for the panel: turns, streamed events, context chips and the one-line usage summary. No DOM and no network here.
 import {failureText,type FailureReason} from '../../shared/chat-failure.ts';
-import {CHAT_MESSAGES,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatUsage,type CitationIssue,type ContextChoice} from '../../shared/chat.ts';
+import {CHAT_MESSAGES,type ChatClaim,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatUsage,type CitationIssue,type ClaimSourceKind,type ContextChoice} from '../../shared/chat.ts';
+import {contractText} from '../../shared/persona-contract.ts';
 import type {ContextChip} from './chat-stub.ts';
 import type {Trail} from './trail-model.ts';
 
@@ -64,6 +65,17 @@ export const CITATION_LABELS:Record<CitationIssue,string>={
  missing_block:'This reply did not say whether it used your note',
  malformed_block:'This reply\'s citations could not be read',
 };
+/** Shown under a reply that broke what its mode asks for: one plain sentence, the reply itself untouched, and Ask again (through the review). Null when it did not. */
+export function contractNotice(m:Pick<ChatMessage,'contract'>):{text:string;askAgain:true}|null{
+ const text=m.contract?contractText(m.contract):null;return text?{text,askAgain:true}:null;
+}
+const SOURCE_WORDS:Record<ClaimSourceKind,string>={note:'your note',selection:'your selection',thread:'a thread',other_note:'another note',session:'a session'};
+export interface ClaimLine {state:ChatClaim['status'];text:string;quote:string}
+/** Every claim in the reply, in words. Nothing is left out; a claim with no valid source says so and is never worded as found. */
+export function claimLines(claims:readonly ChatClaim[]|undefined):ClaimLine[]{
+ return (claims??[]).map(c=>c.status==='no_valid_source'?{state:c.status,text:'Claim had no valid source',quote:c.quote}
+  :{state:c.status,text:c.status==='found'?`Found in ${SOURCE_WORDS[c.source]}`:`Quote not found in ${SOURCE_WORDS[c.source]}`,quote:c.quote});
+}
 /** Shown under a reply that recites a long run of the instructions Aitiarch sent with the question. */
 export const ECHO_LABEL='Part of this reply repeats the instructions Aitiarch sent with your question.';
 /** A failed Claude call says why when the server gave a reason it understands; otherwise the same generic sentence as ever. */

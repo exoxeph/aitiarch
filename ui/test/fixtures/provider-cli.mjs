@@ -96,6 +96,14 @@ if (scenario.startsWith('verified-')) {
     'verified-chat-claims-none-overlap':'The plan says the venue is the library on Main Street and volunteers bring their own food, with the event starting at noon on the second Saturday of June. The budget is 40 dollars, which looks tight for a library booking.\n<claims>{"none":"no_context_used"}</claims>',
     'verified-chat-claims-question':'What makes you sure the budget is 40 dollars and not 60?\n<claims>{"none":"question_back"}</claims>',
     'verified-chat-claims-badquote':'Two points stand out.\n<claims>[{"source":"N1","quote":"The venue is the library"},{"source":"N1","quote":"The budget is 90 dollars"}]</claims>',
+    // Persona contract (stage 5): replies that keep or break what Grill me, Plan with me and Explain ask for. All synthetic.
+    'verified-chat-contract-grill-summary':'Here is a summary of your plan.\n\n- The budget is 40 dollars.\n- The venue is the library.\n\nI think it looks fine overall.\n<claims>{"none":"opinion"}</claims>',
+    'verified-chat-contract-grill-two':'Who agreed to the budget figure? And who pays for the venue?\n<claims>{"none":"question_back"}</claims>',
+    'verified-chat-contract-plan-ok':'Option A keeps the library and the small budget. Option B moves outdoors and costs more.\n\nWhich of these fits what you want?\n<claims>{"none":"opinion"}</claims>',
+    'verified-chat-contract-plan-none':'Option A keeps the library and the small budget. Option B moves outdoors and costs more. Go with option A.\n<claims>{"none":"opinion"}</claims>',
+    'verified-chat-contract-explain-long':'Yes. '+'alpha beta gamma delta '.repeat(70)+'\n<claims>{"none":"opinion"}</claims>',
+    // A claims block with claims whose source ids are not valid (a word, an unknown letter, a number, none), next to one good claim.
+    'verified-chat-claims-badsource':'Several points.\n<claims>[{"source":"N1","quote":"The venue is the library"},{"source":"banana","quote":"The budget is 40 dollars"},{"source":"Z9","quote":"Volunteers bring their own food"},{"source":7,"quote":"the event starts at noon"},{"quote":"the second Saturday of June"}]</claims>',
     // A prose reply with a key in it, streamed in small pieces (synthetic key shape).
     'verified-chat-reply-secret-split':'The key is sk-abcdefghijklmnopqrstuvwxyz0123 in the file, and nothing else is needed for this.',
     // A reply that recites the instruction it was given (a prompt-injection outcome), built below from the real packet.

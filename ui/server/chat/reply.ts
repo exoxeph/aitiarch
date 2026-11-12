@@ -12,6 +12,7 @@ export type ClaimsBlock=
  |{body:string;block:'missing'}
  |{body:string;block:'malformed'};
 const OPEN='<claims>',CLOSE='</claims>';
+const sourceOf=(c:unknown)=>{const s=(c as any).source??(c as any).sourceId;return typeof s==='string'?s:'';};
 const pureBlock=(s:string)=>{const t=s.trim(),l=t.toLowerCase();return l.startsWith(OPEN)&&l.endsWith(CLOSE)&&l.indexOf(OPEN)===l.lastIndexOf(OPEN);};
 /** The final claims block and the body before it. Only a block that ends the reply counts (optionally inside one code fence of its own). */
 function finalBlock(text:string):{before:string;inner:string}|null{
@@ -29,7 +30,8 @@ export function parseClaimsBlock(text:string):ClaimsBlock{
  const body=found.before.replace(/\s+$/,''),json=found.inner.slice(OPEN.length,found.inner.length-CLOSE.length).trim();
  let value:unknown;try{value=JSON.parse(json);}catch{return {body,block:'malformed'};}
  if(Array.isArray(value)){
-  const claims=value.flatMap(c=>c&&typeof c==='object'&&typeof (c as any).quote==='string'&&typeof ((c as any).source??(c as any).sourceId)==='string'?[{source:String((c as any).source??(c as any).sourceId),quote:(c as any).quote as string}]:[]);
+  // A claim needs a quote to be shown. A missing or non-string source is kept as an empty one, so it is shown as "no valid source" rather than dropped.
+  const claims=value.flatMap(c=>c&&typeof c==='object'&&typeof (c as any).quote==='string'?[{source:sourceOf(c),quote:(c as any).quote as string}]:[]);
   return claims.length?{body,block:'claims',claims}:{body,block:'malformed'};
  }
  if(value&&typeof value==='object'&&Object.keys(value).length===1&&(NO_CITATION_REASONS as readonly unknown[]).includes((value as any).none))return {body,block:'none',reason:(value as any).none};
@@ -70,7 +72,7 @@ export interface FinishedReply {body:string;claims:ChatClaim[];noCitation?:NoCit
 /** `legacy` is a structured result from an adapted provider (its answer and claims are already separate); otherwise `text` is the raw reply. */
 export function finishReply(input:{text:string;legacy:boolean;claims?:unknown[]},sources:ReplySources,hash:(text:string)=>string,redact:(text:string)=>string=t=>t):FinishedReply{
  let parsed:ClaimsBlock;
- const fromClaims=(body:string,claims:unknown[]):ClaimsBlock=>{const list=claims.flatMap(c=>c&&typeof c==='object'&&typeof (c as any).quote==='string'&&typeof ((c as any).sourceId??(c as any).source)==='string'?[{source:String((c as any).sourceId??(c as any).source),quote:(c as any).quote as string}]:[]);return list.length?{body,block:'claims',claims:list}:{body,block:'missing'};};
+ const fromClaims=(body:string,claims:unknown[]):ClaimsBlock=>{const list=claims.flatMap(c=>c&&typeof c==='object'&&typeof (c as any).quote==='string'?[{source:sourceOf(c),quote:(c as any).quote as string}]:[]);return list.length?{body,block:'claims',claims:list}:{body,block:'missing'};};
  if(input.legacy)parsed=fromClaims(input.text,input.claims??[]);
  else{
   parsed=parseClaimsBlock(input.text);
@@ -81,7 +83,11 @@ export function finishReply(input:{text:string;legacy:boolean;claims?:unknown[]}
  if(parsed.block==='claims')for(const c of parsed.claims){
   if(claims.length>=32)break;
   const id=ALIAS[c.source.trim().toLowerCase()]??c.source.trim();
-  if(!/^[A-Z][0-9]{1,3}$/.test(id)||!KIND[id[0]])continue;
+  if(!/^[A-Z][0-9]{1,3}$/.test(id)||!KIND[id[0]]){
+   // Not a source the request could have carried. Kept, with its quote, and shown as "no valid source": never dropped, never counted as evidence.
+   const tidy=(s:string,n:number)=>redact(s).replace(/[\u0000-\u001f\u007f]+/g,' ').trim().slice(0,n);
+   claims.push({sourceId:tidy(c.source,40),quote:tidy(c.quote,240),status:'no_valid_source'});continue;
+  }
   // Sources were redacted before they were sent, so a faithful quote is checked (and kept) in its redacted form.
   const full=redact(c.quote),source=textOf(id),quote=full.slice(0,240),q=normalizeQuote(quote);
   const found=typeof source==='string'&&!!source&&!!q&&full.length<=240&&normalizeQuote(source).includes(q);

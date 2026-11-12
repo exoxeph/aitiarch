@@ -14,7 +14,8 @@ import {SkillsReviewList} from '../skills/SkillsReviewList.tsx';
 import {PersonaSwitch,UsedSkills} from '../skills/PersonaSwitch.tsx';
 import {useNodeSettings} from '../skills/useNodeSettings.ts';
 import {DEFAULT_CONTEXT,SUGGESTED_PROMPTS,chatHeader,toggleChip,type ContextChip} from './chat-stub.ts';
-import {applyEvent,buildContext,chipEstimate,errorText,formatCount,fromStored,newTurnId,previewText,usageLine,CITATION_LABELS,ECHO_LABEL,UNSTRUCTURED_LABEL,type Turn} from './chat-model.ts';
+import {applyEvent,buildContext,chipEstimate,errorText,formatCount,fromStored,newTurnId,previewText,usageLine,ECHO_LABEL,UNSTRUCTURED_LABEL,type Turn} from './chat-model.ts';
+import {ReplyNotes} from './ReplyNotes.tsx';
 
 /** Questions are not stored by the server; this session remembers them so a closed and reopened panel still reads as a conversation. */
 const questions=new Map<string,string>();
@@ -180,7 +181,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
       {t.text?<p className="chat-stream">{t.text}<span className="chat-caret" aria-hidden="true"/></p>:<div className="chat-thinking"><Thinking/></div>}
       <div className="chat-message-tools"><button type="button" className="chat-stop" onClick={stop}>Stop</button></div></div>}
      {!t.trail&&t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span><ReplyMarkdown text={t.text}/>{t.message?.unstructured&&<p className="chat-unstructured">{UNSTRUCTURED_LABEL}</p>}{t.message?.echo&&<p className="chat-flag chat-echo">{ECHO_LABEL}</p>}
-      {t.message?.citation&&<p className="chat-flag chat-citation">{CITATION_LABELS[t.message.citation]}{t.question&&<> <button type="button" className="ghost chat-ask-again" disabled={composing} onClick={()=>void submit(t.question!)}>Ask again</button></>}</p>}<UsedSkills names={t.message?.skills}/>
+      {t.message&&<ReplyNotes message={t.message} question={t.question} busy={composing} onAskAgain={q=>void submit(q)}/>}<UsedSkills names={t.message?.skills}/>
       {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
       <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}>Add to note</button></div></div>}
      {!t.trail&&t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason,t.error.errorName)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button></div>}

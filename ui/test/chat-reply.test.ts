@@ -64,7 +64,27 @@ describe('finishReply',()=>{
  });
  it('a claim naming a source the request did not carry is not found; one with an invalid id is dropped',()=>{
   const r=finish('X.\n<claims>[{"source":"O3","quote":"anything"},{"source":"../x","quote":"y"},{"source":"note","quote":"The venue is the library"}]</claims>');
-  expect(r.claims.map(c=>[c.sourceId,c.status])).toEqual([['O3','not_found'],['N1','found']]);
+  // A well-formed id for a source the request did not carry is "not found". An invalid id is no longer dropped: it is kept and shown as "no valid source" (stage 5).
+  expect(r.claims.map(c=>[c.sourceId,c.status])).toEqual([['O3','not_found'],['../x','no_valid_source'],['N1','found']]);
+ });
+ it('a claim whose source id is invalid is kept with its quote and marked "no_valid_source", never dropped',()=>{
+  const r=finish('X.\n<claims>[{"source":"banana","quote":"The budget is 40 dollars"},{"source":"Z9","quote":"The venue is the library"},{"source":"N12345","quote":"q3"},{"source":7,"quote":"q4"},{"quote":"q5"},{"source":"N1","quote":"The venue is the library"}]</claims>');
+  expect(r.claims.map(c=>[c.sourceId,c.status,c.quote])).toEqual([['banana','no_valid_source','The budget is 40 dollars'],['Z9','no_valid_source','The venue is the library'],['N12345','no_valid_source','q3'],['','no_valid_source','q4'],['','no_valid_source','q5'],['N1','found','The venue is the library']]);
+  expect(r.claims[0]).toEqual({sourceId:'banana',quote:'The budget is 40 dollars',status:'no_valid_source'}); // no source kind, no hash: nothing was checked
+  expect(r.body).toBe('X.');expect(r.citation).toBeUndefined();
+ });
+ it('the id and quote of an unsourced claim are redacted, cleaned and capped before they are kept',()=>{
+  const redact=(t:string)=>t.replace(/password=\S+/g,'password=[SECRET]');
+  const r=finishReply({text:`X.\n<claims>[{"source":"id\\u0000\\n${'z'.repeat(80)}","quote":"password=hunter22 ${'q'.repeat(300)}"}]</claims>`,legacy:false},sources,hash,redact);
+  expect(r.claims).toHaveLength(1);const c=r.claims[0];expect(c.status).toBe('no_valid_source');expect(c.sourceId.length).toBeLessThanOrEqual(40);expect(c.sourceId).not.toMatch(/[\u0000-\u001f]/);
+  expect(c.quote.length).toBeLessThanOrEqual(240);expect(c.quote).toContain('password=[SECRET]');expect(c.quote).not.toContain('hunter22');
+ });
+ it('an adapted provider\'s claim with an invalid source is kept the same way',()=>{
+  const r=finishReply({text:'Yes.',legacy:true,claims:[{sourceId:'nope',quote:'The venue is the library'}]},sources,hash);
+  expect(r.claims).toEqual([{sourceId:'nope',quote:'The venue is the library',status:'no_valid_source'}]);
+ });
+ it('a no-valid-source claim does not count as evidence',()=>{
+  const r=finish('X.\n<claims>[{"source":"banana","quote":"The venue is the library"}]</claims>');expect(r.claims.every(c=>c.status!=='found')).toBe(true);
  });
  it('a malformed block keeps the body and is flagged, as uncited when the reply leans on the note',()=>{
   expect(finish('Short.\n<claims>[oops</claims>').citation).toBe('malformed_block');

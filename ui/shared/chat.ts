@@ -15,7 +15,10 @@ export interface ContextModule {
 /** Where a claim's quote comes from: the note (N1), the selection (S1), threads (T1), another note (O1...) or a session (C1.../X1...). */
 export type ClaimSourceKind='note'|'selection'|'thread'|'other_note'|'session';
 /** One claim from the reply's claims block, checked against its source after whitespace and Markdown normalisation. */
-export interface ChatClaim {sourceId:string;source:ClaimSourceKind;quote:string;status:'found'|'not_found';/** Only when found. */sourceHash?:string}
+export interface CheckedClaim {sourceId:string;source:ClaimSourceKind;quote:string;status:'found'|'not_found';/** Only when found. */sourceHash?:string}
+/** A claim whose source id was not a valid one (a word, an unknown letter, a number, or none). Kept and shown with its quote; nothing was checked, so it is never evidence. */
+export interface UnsourcedClaim {sourceId:string;quote:string;status:'no_valid_source'}
+export type ChatClaim=CheckedClaim|UnsourcedClaim;
 /** Why a reply cites nothing, from a fixed list the model must choose from. */
 export const NO_CITATION_REASONS=['opinion','question_back','no_context_used'] as const;
 export type NoCitationReason=typeof NO_CITATION_REASONS[number];
@@ -25,7 +28,9 @@ export type CitationIssue=typeof CITATION_ISSUES[number];
 const CLAIM_KINDS:readonly string[]=['note','selection','thread','other_note','session'];
 export function validClaims(v:unknown):v is ChatClaim[]{
  return Array.isArray(v)&&v.length<=32&&v.every(c=>{
-  if(!c||typeof c!=='object'||Array.isArray(c))return false;const k=Object.keys(c).sort().join(),x=c as ChatClaim;
+  if(!c||typeof c!=='object'||Array.isArray(c))return false;const k=Object.keys(c).sort().join();
+  if((c as ChatClaim).status==='no_valid_source'){const u=c as UnsourcedClaim;return k==='quote,sourceId,status'&&typeof u.sourceId==='string'&&u.sourceId.length<=40&&!/[\u0000-\u001f\u007f]/.test(u.sourceId)&&typeof u.quote==='string'&&u.quote.length<=240;}
+  const x=c as CheckedClaim;
   return (k==='quote,source,sourceId,status'&&x.status==='not_found'||k==='quote,source,sourceHash,sourceId,status'&&x.status==='found'&&typeof x.sourceHash==='string'&&/^[a-f0-9]{64}$/.test(x.sourceHash))
    &&typeof x.sourceId==='string'&&/^[A-Z][0-9]{1,3}$/.test(x.sourceId)&&CLAIM_KINDS.includes(x.source)&&typeof x.quote==='string'&&x.quote.length<=240;
  });
@@ -45,6 +50,8 @@ export interface ChatMessage {
  citation?:CitationIssue;
  /** The thinking-partner mode the reply was written in. Absent in older files. */
  persona?:import('./persona.ts').PersonaMode;
+ /** Whether the reply is what that mode asks for (see persona-contract.ts). Set whenever there is a persona; absent in older files. A reply that breaks it is kept as written. */
+ contract?:import('./persona-contract.ts').Contract;
  /** The reply recites a long run of the instructions Aitiarch sent (persona, skills, rules). Shown with a note; absent otherwise. */
  echo?:true;
  /** Names of the skills that shaped this reply. Absent in older files. Names only: never paths or skill text. */

@@ -12,6 +12,7 @@ import type {ExtrasFor} from '../node-settings.ts';
 import {describeFailure} from '../../shared/chat-failure.ts';
 import {StreamGate,echoes} from './gate.ts';
 import {finishReply} from './reply.ts';
+import {checkContract} from '../../shared/persona-contract.ts';
 import type {PersonaMode} from '../../shared/persona.ts';
 export class ChatError extends Error {code:ChatErrorCode;constructor(code:ChatErrorCode){super(code);this.code=code;}}
 interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true}
@@ -115,7 +116,7 @@ export class ChatRuntime {
     const failure=new ProviderError('invalid_response');failure.reason={kind:'unparseable',detail:error instanceof Error&&shape[error.message]?shape[error.message]:'the reply could not be read'};throw failure;}
    const validated=validateProductResult({...result,answer:finished.body,claims:[]},request.id,request,redact,hash,'claude');
    const message:ChatMessage={id:request.id,role:'assistant',body:validated.body,at:new Date().toISOString(),provider:'claude',model:validated.model,evidence:finished.claims.flatMap(c=>c.status==='found'&&c.sourceHash?[{sourceId:c.sourceId,sourceHash:c.sourceHash,quote:c.quote}]:[]),usage:result.usage,insertionBlocked:!!s.privateContext||result.insertionBlocked===true||secretKinds(result.answer).length>0||secretKinds(validated.body).length>0,
-   claims:finished.claims,...(finished.noCitation?{noCitation:finished.noCitation}:{}),...(finished.citation?{citation:finished.citation}:{}),...(request.persona?{persona:request.persona}:{}),...(gate.echo||echoes(validated.body,review.instruction)?{echo:true as const}:{}),...(frozen.skillNames.length?{skills:frozen.skillNames}:{}),...(s.privateContext?{ephemeral:true as const}:{})};
+   claims:finished.claims,...(finished.noCitation?{noCitation:finished.noCitation}:{}),...(finished.citation?{citation:finished.citation}:{}),...(request.persona?{persona:request.persona,contract:checkContract(request.persona,validated.body)}:{}),...(gate.echo||echoes(validated.body,review.instruction)?{echo:true as const}:{}),...(frozen.skillNames.length?{skills:frozen.skillNames}:{}),...(s.privateContext?{ephemeral:true as const}:{})};
    stage='save'; // from here on, a failure is about saving the reply
    let persistence:'memory'|'private';
    if(s.privateContext){const messages=this.ephemeral.get(review.path)??[];if(messages.length>=200)throw new ChatError('budget_reached');messages.push(message);this.ephemeral.set(review.path,messages);persistence='memory';}

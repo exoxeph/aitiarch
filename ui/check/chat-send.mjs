@@ -76,15 +76,31 @@ try {
     assert.match((await panel.locator('.chat-ai').last().innerText()).replace(/\s+/g, ' '), /budget is 40 dollars in one place and 60 in another/, 'the prose reply is shown');
     // This note is sent and the reply has no claims block: the reply says so in words, with Ask again (through the review).
     assert.match((await panel.locator('.chat-citation').innerText()).trim(), /^This reply did not say whether it used your note/, 'with the plain citation label');
-    assert.equal(await panel.locator('.chat-citation').getByRole('button', { name: 'Ask again' }).count(), 1, 'and an Ask again button');
+    // One Ask again button per reply, not two: the default chat mode (Plan with me) also flags this reply for not ending with a question, and that line carries the button.
+    assert.equal(await panel.locator('.chat-ai').last().getByRole('button', { name: 'Ask again' }).count(), 1, 'and one Ask again button');
+    assert.match((await panel.locator('.chat-contract').innerText()).trim(), /^⚠ Not what Plan with me asks for: it does not end with a question\./, 'and the contract line for the default mode');
     assert.equal(await panel.locator('.chat-unstructured').count(), 0, 'and no unstructured label any more');
     assert.equal(await panel.locator('.chat-error').count(), 0, 'and it is not an error');
     await page.screenshot({ path: path.join(out, 'chat-send-citation-label.png') });
     // Ask again goes through the review like any message.
-    await panel.locator('.chat-citation').getByRole('button', { name: 'Ask again' }).click();
+    await panel.locator('.chat-ai').last().getByRole('button', { name: 'Ask again' }).click();
     await panel.getByRole('region', { name: 'What will be sent' }).waitFor();
     assert.equal(captured.length, 1, 'Ask again sent nothing before the review');
   });
+  await inApp('verified-chat-claims-badsource', async ({ page, panel }) => {
+    // 1c. Claims whose source id is invalid are listed in words with their quotes, never dropped (stage 5). Here the quotes are not in this short note either.
+    await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').waitFor();
+    const claims = panel.locator('.chat-claims'); await claims.waitFor();
+    assert.equal(await claims.evaluate((d) => d.open), true, 'the list is open by itself when some claim needs a look');
+    const items = (await claims.locator('li').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
+    assert.equal(items.length, 5, `all five claims are listed (saw ${items.length})`);
+    assert.equal(items.filter((t) => t.startsWith('Claim had no valid source')).length, 4, 'four say "Claim had no valid source"');
+    assert.match(items[1], /^Claim had no valid source: The budget is 40 dollars$/, 'with the quote the model gave');
+    assert.match(items[0], /^Quote not found in your note/, 'the claim with a valid id that is not in the note says so');
+    assert.match(await panel.locator('.chat-ai').last().innerText(), /Several points\./, 'the reply itself is shown');
+    await page.screenshot({ path: path.join(out, 'chat-send-claims-no-valid-source.png') });
+  });
+
   for (const wrapped of ['verified-chat-reply-wrapped', 'verified-chat-reply-fenced']) await inApp(wrapped, async ({ panel }) => {
     await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').waitFor();
     assert.match((await panel.locator('.chat-ai').last().innerText()).replace(/\s+/g, ' '), /Yes: 40 vs 60\./, `${wrapped}: the answer inside the JSON is shown`);
