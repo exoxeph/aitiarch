@@ -12,6 +12,7 @@ import { MarginRail, type PlacedMargin } from "../ink/MarginRail.tsx";
 import { frontBlob, moveBlob, readBlobPrefs, resetBlob, writeBlobPrefs, type BlobPrefs } from "../ink/blob-prefs.ts";
 import { api, ApiError, type InkSnapshot, type NoteFile, type ServerEvent } from "../api.ts";
 import { conflictDecorations, conflictHandlers, conflictsField } from "./conflicts.ts";
+import { quoteFlash } from "./quote-highlight.ts";
 import { livePreview, previewHandlers, wikiResolver } from "./livepreview.ts";
 import { externalChange, NoteSession, type SyncStatus } from "./session.ts";
 import { addInk, removeInk, inkField, setInk, setThoughtNarrow } from "./ink.ts";
@@ -158,6 +159,7 @@ export function EditorPane(props: Props) {
           conflictsField,
           inkField,
           conflictDecorations,
+          quoteFlash, // "Show in note" from a chat claim chip: a temporary mark, never part of the document
           conflictHandlers.of({ resolve: (id, choice) => session.resolve(id, choice) }),
           previewHandlers.of({ openWiki: (t) => live.current.onOpenWiki(t) }),
           resolverSlot.current.of(wikiResolver.of(props.resolver)),

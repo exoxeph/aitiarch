@@ -23,6 +23,7 @@ import {defaultNote} from './menu/explorer-model.ts';
 import {NoteMenu} from './menu/NoteMenu.tsx';
 import {useEdgeMenu} from './menu/useEdgeMenu.ts';
 import {ChatPanel} from './chat/ChatPanel.tsx';
+import {showQuote} from './editor/quote-highlight.ts';
 import {ThreadPanel} from './threads/ThreadPanel.tsx';
 import {DismissedThoughts} from './ink/DismissedThoughts.tsx';
 import {calloutHeader} from './editor/reveal.ts';
@@ -614,7 +615,7 @@ export default function App() {
           onOpen={p => { setMapOpen(false); void openNote(p); }}
           onUseAsContext={ps => { setMapNotes(ps); setMapOpen(false); setChatOpen(true); }} />
       </Suspense>}
-      {chatOpen && <ChatPanel key={active ?? "none"} extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} getSelection={chatSelection} onAdd={addChatMessage} onAddText={addTextToNote} onOpenSettings={() => setSettingsOpen(true)} settingsVersion={settingsVersion} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
+      {chatOpen && <ChatPanel key={active ?? "none"} extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} getSelection={chatSelection} onAdd={addChatMessage} onAddText={addTextToNote} onOpenSettings={() => setSettingsOpen(true)} settingsVersion={settingsVersion} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
       {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); setSettingsVersion(v => v + 1); burgerRef.current?.focus(); }} />}
       {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,toast.undo)}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
       {added&&<div className="thought-toast" role="status"><span>{added.text} · Undo (Ctrl+Z)</span><details className="added-detail"><summary>What was added</summary><pre>{added.detail}</pre></details><button onClick={()=>{const h=active?panes.current.get(active):undefined;if(h){undo(h.view);h.view.focus();}setAdded(null);}}>Undo</button><button aria-label="Close notice" onClick={()=>setAdded(null)}>Close</button></div>}

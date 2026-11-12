@@ -64,5 +64,9 @@ describe('ClaimChips markup',()=>{
   const h=html([found('N1','note','Parking is a problem.'),{sourceId:'N2',source:'note',quote:'zzz',status:'not_found'},{sourceId:'x',quote:'q',status:'no_valid_source'}]);
   for(const w of ['Found','Quote not found','No valid source'])expect(h).toContain(w);
  });
+ it('each chip is a button that says whether its quote is open, and no quote is open at first',()=>{
+  const h=html([found('N1','note','Parking is a problem.')]);
+  expect(h).toMatch(/<button type="button" class="claim-chip"[^>]*aria-expanded="false"/);expect(h).not.toContain('The AI quoted');
+ });
  it('nothing to show without claims',()=>expect(html([])).toBe(''));
 });

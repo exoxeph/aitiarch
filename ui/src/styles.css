@@ -919,6 +919,20 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .claim-label { color: var(--ink-text); }
 .claim-state { color: var(--muted); white-space: nowrap; }
 .claim-chip[data-state="not_found"] .claim-state, .claim-chip[data-state="no_valid_source"] .claim-state { color: var(--ink-text); font-weight: 600; }
+button.claim-chip { cursor: pointer; text-align: left; transition: box-shadow var(--motion-color, .15s ease); }
+button.claim-chip:hover, button.claim-chip[aria-expanded="true"] { box-shadow: inset 0 0 0 1px var(--accent); }
+button.claim-chip:focus-visible, .claim-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The quote the AI claimed, shown inline under the chips: inset, outlined and in the UI's sans type (never your own words' serif), no side stripe. */
+.claim-quote { margin: 8px 0 0; padding: 8px 10px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--paper-2); font: 13px/1.5 var(--font-ui); color: var(--ink-text); }
+.claim-quote-label { margin: 0 0 2px; font: 600 11px/1.3 var(--font-ui); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.claim-quote-text { display: block; font: inherit; quotes: "\201C" "\201D"; overflow-wrap: anywhere; }
+.claim-chips li:has(> .claim-quote) { flex-basis: 100%; }
+.claim-quote-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.claim-action { font: 12px/1.3 var(--font-ui); padding: 4px 10px; border-radius: 999px; border: 1px solid var(--control-border); background: transparent; color: var(--ink-text); cursor: pointer; }
+.claim-action:hover { box-shadow: inset 0 0 0 1px var(--accent); }
+.claim-said { margin: 6px 0 0; min-height: 1.4em; font: 12px/1.4 var(--font-ui); color: var(--muted); }
+/* The passage "Show in note" marks for a moment. A tint and an underline, so it is not colour alone; not animated, so reduced motion has nothing to turn off. */
+.cm-quote-flash { background: var(--accent-soft); box-shadow: 0 2px 0 var(--accent); border-radius: 2px; }
 .chat-ai p.used-skills { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
 .used-skills { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); overflow-wrap: anywhere; }
 .used-skills-label { font-weight: 600; }
