@@ -113,7 +113,9 @@ export class NoteWatcher extends EventEmitter {
       const prev = this.known.get(n.path);
       const forced = force.has(n.path.toLowerCase());
       if (!prev) {
-        await this.settle(n.path);
+        // Settle only notes that appear while we watch. The first baseline does not wait per note (30 ms each made a 1,000-note
+        // notebook take 30 s to open); a note caught half-written then changes size or time and is read again on the next poll.
+        if (this.initialized) await this.settle(n.path);
         this.known.set(n.path, { mtimeMs: n.mtimeMs, size: n.size, version: await this.store.currentVersion(n.path) });
         treeChanged = true;
       } else if (forced || prev.mtimeMs !== n.mtimeMs || prev.size !== n.size) {
