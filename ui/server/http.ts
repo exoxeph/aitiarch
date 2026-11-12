@@ -20,6 +20,7 @@ import path from "node:path";
 import { normalizeRel, isNotePath, PathError } from "./paths.ts";
 import { Explorer } from "./explorer.ts";
 import { backlinks, noteIndex } from "./citations.ts";
+import { buildGraph, handoffDocument, HandoffError, writeHandoff } from "./graph.ts";
 import type { Store } from "./store.ts";
 import { InkStore } from "./ink-store.ts";
 import type { NoteWatcher, WatchEvent } from "./watch.ts";
@@ -217,6 +218,19 @@ export function createApp(opts: AppOptions) {
 
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await (await explorerReady).tree());
     if (url.pathname === "/api/citations" && req.method === "GET") return json(res, 200, await noteIndex(await explorerReady));
+    // The Constellation: the graph and remembered star positions; the handoff preview and its explicit write.
+    if (url.pathname === "/api/graph" && req.method === "GET") return json(res, 200, { data: await buildGraph(await explorerReady), positions: await uiStateStore.starPositions().catch(() => ({})) });
+    if (url.pathname === "/api/handoff" && req.method === "GET") return json(res, 200, await handoffDocument(await explorerReady));
+    if (url.pathname === "/api/handoff/write" && req.method === "PUT") {
+      await readBody(req);
+      try { return json(res, 200, await writeHandoff(await explorerReady)); }
+      catch (e) { if (e instanceof HandoffError) return json(res, 409, { error: e.code, message: e.message }); throw e; }
+    }
+    if (url.pathname === "/api/constellation/positions" && req.method === "PUT") {
+      const b = (await readBody(req)) as { positions?: unknown };
+      try { return json(res, 200, { positions: await uiStateStore.saveStarPositions(b?.positions as never) }); }
+      catch (e) { const m = String((e as Error).message); return json(res, /ignored/.test(m) ? 409 : 400, { error: /ignored/.test(m) ? "not_private" : "invalid", message: /ignored/.test(m) ? "Star positions stay in memory until /ui-state.json* is git-ignored." : "Those positions could not be saved." }); }
+    }
     if (url.pathname === "/api/backlinks" && req.method === "GET") return json(res, 200, await backlinks(await explorerReady, url.searchParams.get("path")));
     if (url.pathname.startsWith("/api/explorer/") && req.method === "PUT") {
       const b = (await readBody(req)) as Record<string, unknown>, ex = await explorerReady;

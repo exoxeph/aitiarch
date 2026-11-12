@@ -125,6 +125,22 @@ describe('citations through a project',()=>{
  });
 });
 
+describe('the constellation through a project',()=>{
+ it('serves the graph, previews and writes the handoff, and keeps positions only when they can be kept private',async()=>{
+  const {port,security,ea,a}=await setup(),r=(p:string,o:{method?:string;body?:unknown}={})=>req(port,`/api/p/${ea.id}/${p}`,{headers:auth(security,port,o.method==='PUT'),...o});
+  await writeFile(path.join(a,'.aitiarch','index.md'),'# Home\n[@A](a.md)\n');
+  const g=JSON.parse((await r('graph')).body);
+  expect(g.data.notes.map((n:{path:string})=>n.path)).toEqual(['a.md','index.md']);expect(g.data.edges).toEqual([{from:'index.md',to:'a.md',count:1}]);
+  expect(g.positions).toEqual({});
+  expect(JSON.parse((await r('handoff')).body).order).toEqual(['a.md','index.md']);
+  expect((await r('handoff/write',{method:'PUT',body:{}})).status).toBe(200);
+  await writeFile(path.join(a,'.aitiarch','handoff.md'),'# mine\n');
+  const refused=await r('handoff/write',{method:'PUT',body:{}});expect(refused.status).toBe(409);expect(JSON.parse(refused.body).error).toBe('not_ours');
+  const pos=await r('constellation/positions',{method:'PUT',body:{positions:{'a.md':[1,2]}}});
+  expect(pos.status).toBe(409);expect(JSON.parse(pos.body).error).toBe('not_private'); // no git-ignore for ui-state.json in this fixture
+ });
+});
+
 describe('the explorer through a project',()=>{
  it('creates, previews and applies a move inside that project only',async()=>{
   const {port,security,ea,a}=await setup(),w=auth(security,port,true),p=(s:string)=>`/api/p/${ea.id}/explorer/${s}`;
