@@ -14,11 +14,19 @@ class Complex extends Error{}
 const NS='http://www.w3.org/2000/svg',XLINK='http://www.w3.org/1999/xlink';
 
 // ---- reading -----------------------------------------------------------------------------------------------------------------------------
-const ENTITY:Record<string,string>={amp:'&',lt:'<',gt:'>',quot:'"',apos:"'",nbsp:'\u00a0'};
+const XML_ENTITY:Record<string,string>={amp:'&',lt:'<',gt:'>',quot:'"',apos:"'",nbsp:'\u00a0'}; // these match in any letter case, as before
+// The common named HTML entities, fixed (case-sensitive). Anything else stays as literal text, which is then escaped like all text. One pass only, so "&amp;bull;" stays "&bull;".
+const NAMED=new Map<string,string>(Object.entries({
+ bull:'\u2022',middot:'\u00b7',mdash:'\u2014',ndash:'\u2013',hellip:'\u2026',rarr:'\u2192',larr:'\u2190',uarr:'\u2191',darr:'\u2193',harr:'\u2194',rArr:'\u21d2',lArr:'\u21d0',hArr:'\u21d4',
+ copy:'\u00a9',reg:'\u00ae',trade:'\u2122',times:'\u00d7',divide:'\u00f7',plusmn:'\u00b1',minus:'\u2212',check:'\u2713',cross:'\u2717',deg:'\u00b0',micro:'\u00b5',para:'\u00b6',sect:'\u00a7',
+ laquo:'\u00ab',raquo:'\u00bb',lsquo:'\u2018',rsquo:'\u2019',ldquo:'\u201c',rdquo:'\u201d',sbquo:'\u201a',bdquo:'\u201e',dagger:'\u2020',prime:'\u2032',Prime:'\u2033',
+ le:'\u2264',ge:'\u2265',ne:'\u2260',asymp:'\u2248',infin:'\u221e',sum:'\u2211',radic:'\u221a',euro:'\u20ac',pound:'\u00a3',yen:'\u00a5',cent:'\u00a2',ensp:'\u2002',emsp:'\u2003',thinsp:'\u2009',
+ shy:'\u00ad',iexcl:'\u00a1',iquest:'\u00bf',frac12:'\u00bd',frac14:'\u00bc',frac34:'\u00be',alpha:'\u03b1',beta:'\u03b2',lambda:'\u03bb',pi:'\u03c0',Delta:'\u0394',loz:'\u25ca',spades:'\u2660',hearts:'\u2665',
+}));
 const clean=(s:string)=>s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\ufffe\uffff]/g,'');
-const decode=(s:string)=>clean(s.replace(/&(#x[0-9a-f]{1,6}|#[0-9]{1,7}|[a-z]{2,6});/gi,(m,e:string)=>{
+const decode=(s:string)=>clean(s.replace(/&(#x[0-9a-f]{1,6}|#[0-9]{1,7}|[a-z][a-z0-9]{1,9});/gi,(m,e:string)=>{
  if(e[0]==='#'){const n=e[1].toLowerCase()==='x'?parseInt(e.slice(2),16):parseInt(e.slice(1),10);return n>0&&n<0x110000&&!(n>=0xd800&&n<=0xdfff)?String.fromCodePoint(n):'';}
- return ENTITY[e.toLowerCase()]??m;}));
+ return NAMED.get(e)??XML_ENTITY[e.toLowerCase()]??m;}));
 const VOID=new Set(['meta','link','img','br','hr','input','source','area','base','col','embed','param','track','wbr']);
 const RAW=new Set(['script','style','textarea']);
 const START=/<([A-Za-z][A-Za-z0-9:_-]*)/y,ATTR=/[\s\/]*([^\s"'<>\/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/y,TAIL=/\s*(\/?)>/y,END=/<\/([A-Za-z][A-Za-z0-9:_-]*)[^>]*>/y;
