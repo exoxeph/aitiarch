@@ -65,6 +65,9 @@ try {
   await page.keyboard.press("Enter");
   const want1 = INDEX0 + "See [@Auth plan](auth/plan.md)";
   check("choosing inserts a standard relative link", (await doc()) === norm(want1), JSON.stringify((await doc()).slice(-60)));
+  // The cursor sits right after the new link: its brackets and address must stay hidden, only the chip shows.
+  const seeLine = (await page.locator(".cm-line", { hasText: "See" }).first().innerText()).replace(/\s+/g, " ");
+  check("the address is not shown while the cursor is at the chip's edge", !/\]\(|auth\/plan\.md|\[/.test(seeLine) && /@Auth plan/.test(seeLine), seeLine);
   check("the file on disk is byte-exact (BOM and CRLF kept)", await until(() => read("index.md").equals(Buffer.from(want1, "utf8"))), read("index.md").toString("utf8"));
 
   // ---- heading link

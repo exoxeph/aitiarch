@@ -344,7 +344,9 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
                 const env = state.facet(citeEnv), cite = env && classifyCitation(env.from, state.sliceDoc(textFrom, textTo), url, env.has);
                 if (cite) out.push(Decoration.mark({ class: cite.broken ? "cm-cite cm-cite-broken" : "cm-cite", attributes: { "data-cite": cite.path, "data-cite-heading": cite.heading ?? "", "data-cite-broken": cite.broken ? "1" : "0" } }).range(textFrom, textTo));
                 else out.push(Decoration.mark({ class: "cm-link", attributes: { "data-href": url } }).range(textFrom, textTo));
-                if (!touchesSpan(ctx.sel, n.from, n.to)) {
+                // A citation's address stays hidden when the cursor is only beside it (right after the picker inserts it); it shows once the cursor is inside.
+                const revealed = cite ? ctx.sel.some((r) => (r.from === r.to ? r.from > n.from && r.from < n.to : r.from < n.to && r.to > n.from)) : touchesSpan(ctx.sel, n.from, n.to);
+                if (!revealed) {
                   out.push(hide.range(marks[0][0], marks[0][1]));
                   if (n.to > textTo) out.push(hide.range(textTo, n.to));
                 }
