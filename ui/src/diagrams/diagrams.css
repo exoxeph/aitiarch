@@ -16,6 +16,8 @@
 
 /* A skill's diagram is a still image on a light plate (its own colours are unknown, and a transparent drawing must stay readable on the dark page). The
    click-only interactive fallback is an unknown page, so it gets a plain frame in the app's colours and nothing else. */
+/* In a margin card the drawing is capped in height (a tall drawing used to make the card scroll inside itself and hang past the rail); "See it larger" shows it whole. */
+.thought-diagram-slot .skill-diagram-image { max-height: clamp(120px, calc(60vh - 330px), 260px); width: auto; object-fit: contain; margin-inline: auto; }
 .skill-diagram-image { display: block; max-width: 100%; height: auto; box-sizing: border-box; padding: 8px; border: 1px solid var(--control-border); border-radius: 6px; background: var(--ink-text); }
 .skill-diagram-image-large { max-width: min(1100px, 90vw); max-height: 78vh; width: auto; }
 /* In the editor, beside a link to a skill's saved page: a quiet control; the page itself appears only after the click. */

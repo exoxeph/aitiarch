@@ -545,6 +545,8 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 
 /* One note scroll surface; long thoughts contain their own wheel scrolling. */
 .thought-rails .margin-card.thought-blob {max-height:60vh;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;}
+/* A card with a drawing is sized by the drawing's own cap (diagrams.css), never by an inner scrollbar: no scroll, no reserved gutter line. */
+.thought-rails .margin-card.thought-blob:has(.skill-diagram-image) {max-height:none;overflow:visible;scrollbar-gutter:auto;}
 .thought-scroll-tail {flex:none;pointer-events:none;}
 .thoughts-scrolling .thought-connector {opacity:0;}
 .thoughts-scrolling .thought-connector-on {opacity:1;}
