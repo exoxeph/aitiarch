@@ -60,8 +60,11 @@ it('a Grill me reply (the answer is one question, no claims) is an ordinary stru
  const {text}=await chatWith('verified-chat-reply-question'),c=done(text);
  expect(text).not.toContain('event: error');expect(c.message.body).toBe('What makes you sure the budget is 40 dollars and not 60?');expect(c.message.evidence).toEqual([]);expect(c.message.unstructured).toBeUndefined();
 },20000);
-it.each(['verified-chat-reply-wrapped','verified-chat-reply-fenced'])('%s: the JSON is extracted and the reply is structured, not flagged',async(scenario)=>{
- const c=done((await chatWith(scenario)).text);expect(c.message.body).toBe('Yes: 40 vs 60.');expect(c.message.unstructured).toBeUndefined();
+it.each([
+ ['verified-chat-reply-wrapped','Here is my analysis: {"answer":"Yes: 40 vs 60.","claims":[]} Hope that helps.'],
+ ['verified-chat-reply-fenced','Analysis:\n```json\n{"answer":"Yes: 40 vs 60.","claims":[]}\n```\nDone.'],
+])('%s: JSON wrapped in prose or a fence is no longer extracted: it is shown as written, not as an error',async(scenario,written)=>{
+ const {text}=await chatWith(scenario),c=done(text);expect(text).not.toContain('event: error');expect(c.message.body).toBe(written);expect(c.message.unstructured).toBeUndefined();
 },20000);
 it.each(['verified-chat-reply-takeaway','verified-chat-reply-cutoff'])('%s: a JSON-shaped reply that is wrong or cut off fails closed with a reason',async(scenario)=>{
  const {text}=await chatWith(scenario);expect(text).not.toContain('event: complete');const e=failure(text);expect(e.code).toBe('provider_failed');expect(e.reason.kind).toBe('unparseable');
@@ -75,8 +78,12 @@ it('a key split across many pieces never reaches the page while streaming, and t
  expect(shown).toContain('The key is ');expect(shown).not.toMatch(/sk-[a-z0-9]/);
  expect(done(text).message.body).toContain('[TOKEN]');expect(done(text).message.body).not.toContain('sk-abc');
 },20000);
-it('a JSON object wrapped in prose never streams its JSON',async()=>{
- const shown=deltas((await chatWith('verified-chat-reply-wrapped')).text);expect(shown).not.toContain('{');expect(shown).not.toContain('"answer"');
+it('an exact {answer, claims} reply (the older format, still accepted) never streams its JSON wrapper',async()=>{
+ const shown=deltas((await chatWith('verified-chat-reply-question')).text);expect(shown.length).toBeGreaterThan(10);expect('What makes you sure the budget is 40 dollars and not 60?'.startsWith(shown.trimEnd())).toBe(true);expect(shown).not.toContain('{'); // the last unfinished word is held back while streaming
+},20000);
+it('JSON wrapped in prose is prose: it streams like any text, and what streamed is what is kept',async()=>{
+ const {text}=await chatWith('verified-chat-reply-wrapped'),shown=deltas(text);
+ expect(text.indexOf('event: delta')).toBeGreaterThan(-1);expect(shown.trimEnd()).toBe(done(text).message.body.slice(0,shown.trimEnd().length));
 },20000);
 it('a reply that recites the instruction stops streaming and is flagged on the saved message',async()=>{
  const {text,base,cookie}=await chatWith('verified-chat-reply-echo',true),shown=deltas(text);

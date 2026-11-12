@@ -26,9 +26,12 @@ describe('StreamGate',()=>{
   const {g,shown}=run(split('Use AKIAABCDEFGHIJKLMNOP for the bucket and then continue the long explanation here. ',6));
   expect(shown).not.toContain('AKIA');expect(g.frozen).toBe(true);
  });
- it('a JSON object wrapped in prose never streams its JSON',()=>{
-  const {shown}=run(split('Here is my analysis: {"answer":"Yes: 40 vs 60.","claims":[]} Hope that helps.',4));
-  expect(shown).not.toContain('{');expect(shown).not.toContain('answer');expect(shown).toBe('Here is my analysis: ');
+ it('a JSON object wrapped in prose is just prose: it streams as written (it is no longer extracted)',()=>{
+  const text='Here is my analysis: {"answer":"Yes: 40 vs 60.","claims":[]} Hope that helps.',{shown}=run(split(text,4));
+  expect(shown).toContain('{"answer":"Yes: 40 vs 60.","claims":[]}');expect(text.startsWith(shown.trimEnd())).toBe(true);
+ });
+ it('an exact {answer, claims} reply (the older format) still shows only its answer while it streams',()=>{
+  const {shown}=run(split('{"answer":"Yes: 40 vs 60.","claims":[]}',4));expect(shown).not.toContain('{');expect(shown).not.toContain('claims');expect('Yes: 40 vs 60.'.startsWith(shown.trimEnd())).toBe(true);
  });
  it('stops at a recited instruction and flags it',()=>{
   const {g,shown}=run(split('Sure, my instructions say: '+INSTRUCTION.slice(0,240)+' and so on.',9));

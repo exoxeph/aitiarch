@@ -17,7 +17,7 @@ export function echoes(text:string,instruction:string,n=ECHO_RUN):boolean{
 
 /** The answer string of a reply that is being streamed as {"answer": ...}, decoded as far as it has arrived. */
 export function answerPrefix(json:string):string {
- const match=/^\s*(?:```(?:json)?\s*\r?\n)?\s*\{\s*"answer"\s*:\s*"/.exec(json);
+ const match=/^\s*\{\s*"answer"\s*:\s*"/.exec(json);
  if(!match)return '';
  let out='';
  for(let n=match[0].length;n<json.length;n++){
@@ -28,14 +28,12 @@ export function answerPrefix(json:string):string {
   }else {if(c.charCodeAt(0)<32)break;out+=c;}
  }return out;
 }
-/** The displayable text of the raw reply so far: the answer field of a JSON reply, or prose up to (not including) anything that is, or may
- *  still become, an {"answer": ...} object. */
+/** The displayable text of the raw reply so far: the answer field of an exact {answer, claims} reply (the older format), or the Markdown reply up to its claims block. */
 export function wireText(raw:string):string{
  if(!raw.trim())return '';
- if(/^\s*[{`\[]/.test(raw))return answerPrefix(raw);
+ if(/^\s*[{\[]/.test(raw))return answerPrefix(raw); // a reply that starts like JSON shows only its answer; a malformed one is refused when the reply ends
  // The claims block is not part of the reply text: nothing from it on is shown while streaming (a partial "<cla" is held as an unfinished word).
  const claims=raw.search(/<claims\b/i);if(claims>=0)raw=raw.slice(0,claims);
- for(let i=raw.indexOf('{');i>=0;i=raw.indexOf('{',i+1)){const rest=raw.slice(i+1).replace(/^\s+/,'');if(rest.startsWith('"answer"')||'"answer"'.startsWith(rest.slice(0,8)))return raw.slice(0,i);}
  return raw;
 }
 

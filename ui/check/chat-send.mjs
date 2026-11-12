@@ -103,8 +103,10 @@ try {
 
   for (const wrapped of ['verified-chat-reply-wrapped', 'verified-chat-reply-fenced']) await inApp(wrapped, async ({ panel }) => {
     await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').waitFor();
-    assert.match((await panel.locator('.chat-ai').last().innerText()).replace(/\s+/g, ' '), /Yes: 40 vs 60\./, `${wrapped}: the answer inside the JSON is shown`);
-    assert.equal(await panel.locator('.chat-unstructured').count(), 0, `${wrapped}: and it is a normal structured reply, no label`);
+    // JSON wrapped in prose or a fence is no longer extracted: the reply is shown exactly as written, JSON included, and it is not an error.
+    assert.match((await panel.locator('.chat-ai').last().innerText()).replace(/\s+/g, ' '), /"answer":\s*"Yes: 40 vs 60\."/, `${wrapped}: shown as written, JSON included`);
+    assert.equal(await panel.locator('.chat-error').count(), 0, `${wrapped}: and it is not an error`);
+    assert.equal(await panel.locator('.chat-unstructured').count(), 0, `${wrapped}: and no unstructured label`);
   });
 
   // 2. Failures say why, in words, and keep "No retry was made." and Dismiss.
