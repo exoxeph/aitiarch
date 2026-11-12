@@ -22,6 +22,7 @@
     "check:invoked": "vite build && node check/invoked.mjs",
     "check:threads": "vite build && node check/threads.mjs",
     "check:skills": "vite build && node check/skills.mjs",
+    "check:blobs": "vite build && node check/blobs.mjs",
     "fixture": "node check/manual-fixture.mjs"
   },
   "dependencies": {

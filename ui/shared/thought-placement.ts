@@ -69,8 +69,8 @@ export function overlapDepths(boxes:readonly Box[],order:readonly string[]):Map<
 /** Brightness of a blob that has `depth` blobs over it: a straight line down by 16% a step, never darker than 40%. */
 export const dimFor=(depth:number)=>Math.max(0.4,1-0.16*depth);
 export const bringToFront=(order:readonly string[],id:string)=>[...order.filter(x=>x!==id),id];
-/** Keep the saved order for blobs that still exist; blobs that are new go in front. */
+/** Keep the saved order for blobs that still exist. Blobs nobody has chosen yet sit behind the ones that were chosen. */
 export function normalizeOrder(saved:readonly string[],ids:readonly string[]):string[]{
  const kept=[...new Set(saved.filter(x=>ids.includes(x)))];
- return [...kept,...ids.filter(x=>!kept.includes(x))];
+ return [...ids.filter(x=>!kept.includes(x)),...kept];
 }

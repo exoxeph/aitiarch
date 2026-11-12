@@ -7,8 +7,9 @@ import { headingOffset } from "../../shared/headings.ts";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef, useState } from "react";
 import type { InkItem } from "../../shared/ink.ts";
-import {BLOB_RESERVE,layoutThoughts,thoughtSide,thoughtVisible} from '../../shared/thoughts.ts';
+import {BLOB_MAX,BLOB_RESERVE,layoutThoughts,thoughtSide,thoughtVisible} from '../../shared/thoughts.ts';
 import { MarginRail, type PlacedMargin } from "../ink/MarginRail.tsx";
+import { frontBlob, moveBlob, readBlobPrefs, resetBlob, writeBlobPrefs, type BlobPrefs } from "../ink/blob-prefs.ts";
 import { api, ApiError, type InkSnapshot, type NoteFile, type ServerEvent } from "../api.ts";
 import { conflictDecorations, conflictHandlers, conflictsField } from "./conflicts.ts";
 import { livePreview, previewHandlers, wikiResolver } from "./livepreview.ts";
@@ -62,6 +63,13 @@ export function EditorPane(props: Props) {
   const host = useRef<HTMLDivElement>(null);
   const surface = useRef<HTMLDivElement>(null);
   const [margin, setMargin] = useState<PlacedMargin[]>([]);
+  // Where the person put their blobs and which is in front: a display preference kept in this browser (see ink/blob-prefs.ts).
+  const [blobPrefs, setBlobPrefs] = useState<BlobPrefs>(() => readBlobPrefs(props.file.path));
+  const blobPrefsRef = useRef(blobPrefs);
+  blobPrefsRef.current = blobPrefs;
+  const knownRef = useRef<{ path: string; ids: Set<string> } | null>(null);
+  useEffect(() => { surface.current?.dispatchEvent(new CustomEvent("thought-size")); }, [blobPrefs]);
+  const updateBlobs = (change: (p: BlobPrefs) => BlobPrefs) => { const next = change(blobPrefsRef.current); blobPrefsRef.current = next; setBlobPrefs(next); writeBlobPrefs(props.file.path, next); };
   const live = useRef(props);
   live.current = props;
   const resolverSlot = useRef(new Compartment());
@@ -203,6 +211,15 @@ export function EditorPane(props: Props) {
         const narrow=bounds.width<560+BLOB_RESERVE; // the column may shrink to 560px; below that there is no room for a blob on each side
         if(surface.current.dataset.thoughtLayout!==(narrow?'narrow':'wide')){surface.current.dataset.thoughtLayout=narrow?'narrow':'wide';queueMargin();return;}
         if(ink.items.length&&!!ink.narrow!==narrow){view.dispatch({effects:setThoughtNarrow.of(narrow)});return;}
+        // Blobs that appeared after this note was opened take the nearest free gap and move nobody; blobs the person placed stay put.
+        if (knownRef.current?.path !== path && ink.items.length > 0) knownRef.current = { path, ids: new Set(ink.items.map(i => i.id)) };
+        const colBox = view.contentDOM.getBoundingClientRect(), colMid = (colBox.left + colBox.right) / 2 - bounds.left, prefs = blobPrefsRef.current;
+        // A placed blob keeps its offset from its own sentence, so it follows the text when anything above it changes.
+        const blobFlags = (id: string, target: number) => {
+          const pos = prefs.positions[id];
+          if (pos) return { manual: { left: pos.left, top: target + pos.top, side: (pos.left + BLOB_MAX / 2 < colMid ? "left" : "right") as "left" | "right" } };
+          return knownRef.current && !knownRef.current.ids.has(id) ? { fresh: true } : {};
+        };
         const rows = narrow?[]:ink.items.filter(thoughtVisible).flatMap(item => {
           const anchor = item.attachment;
           if (anchor.status !== "attached") return [];
@@ -219,7 +236,7 @@ export function EditorPane(props: Props) {
            if(endBox&&view.state.sliceDoc(endPos,lineEnd).trim()==='')rightX=endBox.right-bounds.left+6;
            if(view.state.sliceDoc(lineStart,anchor.from).trim()==='')leftX=coords.left-bounds.left-6;
           }
-          return [{id:item.id,item,target:anchorTop-bounds.top+scroll,side:thoughtSide(item.id),height:el?.getBoundingClientRect().height??160,...(coords?{end:{x:coords.left-bounds.left,lineBottom:coords.bottom-bounds.top,lineMid:(coords.top+coords.bottom)/2-bounds.top,rightX,leftX}}:{})}];
+          return [{id:item.id,item,target:anchorTop-bounds.top+scroll,side:thoughtSide(item.id),height:el?.getBoundingClientRect().height??160,...blobFlags(item.id, anchorTop - bounds.top + scroll),...(coords?{end:{x:coords.left-bounds.left,lineBottom:coords.bottom-bounds.top,lineMid:(coords.top+coords.bottom)/2-bounds.top,rightX,leftX}}:{})}];
         });
         const scroll=host.current?.scrollTop??0;
         // Inserted diagrams span the whole width, margins included, so the thoughts make room above or below them.
@@ -325,6 +342,7 @@ export function EditorPane(props: Props) {
     {invoked.panel}
     {invoked.draftSection&&!margin.some(m=>m.item.id===invoked.draftId)&&<div className="invocation-panel">{invoked.draftSection}</div>}
     <div className="pane" ref={host} data-path={props.file.path} />
-    <MarginRail placed={margin} renderDraft={id=>id===invoked.draftId?invoked.draftSection:null} />
+    <MarginRail placed={margin} renderDraft={id=>id===invoked.draftId?invoked.draftSection:null}
+      blobs={{ order: blobPrefs.order, getScroll: () => host.current?.scrollTop ?? 0, onMove: (id, pos) => { const scroll = host.current?.scrollTop ?? 0, target = (margin.find(m => m.item.id === id)?.target ?? 0) + scroll; updateBlobs(p => moveBlob(p, id, { left: pos.left, top: pos.top - target })); }, onFront: id => updateBlobs(p => frontBlob(p, id)), onReset: id => updateBlobs(p => resetBlob(p, id)) }} />
   </div>;
 }

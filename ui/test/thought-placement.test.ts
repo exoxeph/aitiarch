@@ -96,7 +96,8 @@ describe('layers: the blobs behind get linearly darker',()=>{
  it('choosing a blob brings it to the front; the order of the others is kept',()=>{
   expect(bringToFront(['a','b','c'],'a')).toEqual(['b','c','a']);expect(bringToFront(['a','b'],'z')).toEqual(['a','b','z']);expect(bringToFront(['a','b','c'],'c')).toEqual(['a','b','c']);
  });
- it('a saved order keeps what still exists, drops what is gone, and puts new blobs in front',()=>{
-  expect(normalizeOrder(['x','a','b'],['a','b','n'])).toEqual(['a','b','n']);expect(normalizeOrder([],['a','b'])).toEqual(['a','b']);
+ it('a saved order keeps what still exists and drops what is gone; blobs nobody has chosen sit behind the chosen ones',()=>{
+  expect(normalizeOrder(['x','a','b'],['a','b','n'])).toEqual(['n','a','b']);expect(normalizeOrder([],['a','b'])).toEqual(['a','b']);
+  expect(normalizeOrder(['c'],['a','b','c'])).toEqual(['a','b','c']);
  });
 });

@@ -3,6 +3,7 @@
 import {bringToFront} from '../../shared/thought-placement.ts';
 import {exactKeys,validId} from '../../shared/threads.ts';
 
+/** `left` is across the margin; `top` is how far below (or above) the blob's own sentence it sits, so it follows the text. */
 export interface BlobPos {left:number;top:number}
 export interface BlobPrefs {positions:Record<string,BlobPos>;/** Back to front. */order:string[]}
 type Store=Pick<Storage,'getItem'|'setItem'>;
