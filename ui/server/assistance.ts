@@ -12,7 +12,7 @@ import { prepareRequest, ProviderError, redact, type Provider, type Request } fr
 import { ProductValidationError, validateProductResult, validationCounts, type ValidationLog, type ValidationRecord } from './product-validation.ts';
 import { privateValidationLog } from './providers/failure-metrics.ts';
 import type { ExtrasFor } from './node-settings.ts';
-import { nodeFor } from '../shared/node-settings.ts';
+import { nodeFor, type SkillsReview } from '../shared/node-settings.ts';
 
 interface Job { path: string; controller: AbortController; done: Promise<void>; run: () => Promise<void>; status: 'queued' | 'pending' | 'complete' | 'error' | 'cancelled' | 'persistence_error'; retry?: () => Promise<void> }
 export class Assistance {
@@ -34,16 +34,18 @@ export class Assistance {
   async availability() { return { ...await this.provider.checkAvailability(), provider:this.provider.name??'claude' }; }
   private extras?: ExtrasFor;
   /** The node's persona goes on every request; its skills only when something loaded. Names are what gets recorded on the answer. */
-  private async withExtras(base: Request): Promise<{ request: Request; names: string[] }> {
-    if (!this.extras) return { request: base, names: [] };
+  private async withExtras(base: Request): Promise<{ request: Request; names: string[]; review: SkillsReview | null }> {
+    if (!this.extras) return { request: base, names: [], review: null };
     const e = await this.extras(nodeFor(base.action, base.question));
-    return { request: { ...base, persona: e.persona, ...(e.skills.loaded.length ? { skills: e.skills } : {}) }, names: e.names };
+    return { request: { ...base, persona: e.persona, ...(e.skills.loaded.length ? { skills: e.skills } : {}) }, names: e.names, review: e.review };
   }
-  async preview(input: Invocation) {
+  async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview }> {
     const frozen = freezeInvocation(input);
-    const { request } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question,
+    const { request, review } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question,
       selection: frozen.selection, note: frozen.text, decisions: [], turns: [] });
-    return prepareRequest(request);
+    const packet = prepareRequest(request);
+    // The instruction in the packet is the exact text; "skills" beside it says what was loaded, skipped or not installed.
+    return review ? { ...packet, skills: review } : packet;
   }
   private serial<T>(fn: () => Promise<T>): Promise<T> { const p = this.writes.catch(() => {}).then(fn); this.writes = p; return p; }
   private async mutate(path: string, before: string, change: (items: InkItem[], text: string | null) => InkItem[]): Promise<InkSnapshot> {

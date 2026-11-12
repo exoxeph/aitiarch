@@ -848,6 +848,12 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .chat-review-source { margin-top: 4px; }
 .chat-review-source summary { cursor: pointer; font-size: var(--text-control); }
 .chat-review-est { color: var(--muted); }
+.skills-review { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--rule); border-radius: var(--radius-small); font-size: var(--text-control); }
+.skills-review-title { margin: 0 0 4px; font-size: var(--text-control); font-weight: 600; }
+.skills-review-list { margin: 0; padding-left: 18px; }
+.skills-review-name { font-weight: 600; }
+.skills-review-est, .skills-review-state, .skills-review-note { color: var(--muted); }
+.skills-review-note { margin: 6px 0 0; }
 .chat-review-source pre { max-height: 140px; overflow: auto; margin: 4px 0 0; padding: 8px; border-radius: var(--radius-small); background: var(--paper-2); color: var(--muted); white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--font-mono); }
 .chat-review-total { margin: 10px 0 6px; font-size: var(--text-control); }
 .chat-review-ask { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--text-control); cursor: pointer; }

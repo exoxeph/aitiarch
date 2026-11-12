@@ -68,6 +68,7 @@ export class ChatRuntime {
   const packet=prepareRequest(request),estimate=estimateTokens(JSON.stringify(packet));
   const privateContext=!!s.privateContext||sources.some(x=>x.ephemeral);
   const review:ChatReview={reviewId:randomUUID(),requestId:input.id,path:input.path,question:request.question,selection:request.selection,sources:sources.map(x=>({id:x.id,label:x.label,text:x.text,characters:x.text.length,estimatedTokens:estimateTokens(x.text)})),historyPairs:history.length,omittedPairs:s.omittedPairs+s.history.length-history.length,instruction:packet.instruction,history:structuredClone(packet.data.turns),estimatedTokens:estimate,requiresConfirmation:privateContext||!this.dontAsk};
+  if(extra?.review)review.skills=extra.review;
   if(privateContext)review.ephemeral=true;
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');

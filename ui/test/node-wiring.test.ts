@@ -20,6 +20,7 @@ import type {PersonaNode} from '../shared/persona.ts';
 const roots:string[]=[];afterEach(async()=>{for(const r of roots.splice(0))await rm(r,{recursive:true,force:true,maxRetries:5,retryDelay:100});});
 vi.setConfig({testTimeout:15000,hookTimeout:15000});
 const extrasWith=(names:string[])=>vi.fn(async(_node:PersonaNode):Promise<NodeExtras>=>({persona:'grill',names,missing:[],
+ review:names.length?{loaded:names.map(name=>({name,tokens:8,truncated:false})),skipped:[],missing:[]}:null,
  skills:{text:names.length?'## Skill: grill-me\nAsk one question at a time.':'',loaded:names.map(n=>({id:'0123456789ab',name:n,chars:30,tokens:8,truncated:false,files:['SKILL.md']})),skipped:[],truncated:false}}));
 async function fixture(){
  const root=await mkdtemp(path.join(os.tmpdir(),'aitiarch-wiring-'));roots.push(root);
@@ -61,6 +62,12 @@ describe('thoughts (Think, Ask, Visualize)',()=>{
   const f=await fixture(),{provider}=capturing(),a=new Assistance(f.store,f.ink,provider,()=>{},undefined,extrasWith(['grill-me']));
   const p=await a.preview(input('t1','ask','Why?'));expect(p.instruction).toContain(SKILL_HEADING);expect(p.instruction.endsWith(HARD_RULES)).toBe(true);await a.close();
  });
+ it('the preview lists the loaded skills; with none attached it has no skills entry',async()=>{
+  const f=await fixture(),{provider}=capturing();
+  const withSkill=await new Assistance(f.store,f.ink,provider,()=>{},undefined,extrasWith(['grill-me'])).preview(input('t1','ask','Why?'));
+  expect(withSkill.skills).toEqual({loaded:[{name:'grill-me',tokens:8,truncated:false}],skipped:[],missing:[]});
+  expect('skills' in await new Assistance(f.store,f.ink,provider,()=>{},undefined,extrasWith([])).preview(input('t2','ask','Why?'))).toBe(false);
+ });
 });
 
 describe('chat',()=>{
@@ -74,6 +81,10 @@ describe('chat',()=>{
   expect(extras.mock.calls[0][0]).toBe('chat');expect(review.instruction).toContain(SKILL_HEADING);expect(review.instruction.endsWith(HARD_RULES)).toBe(true);
   await runtime.send({reviewId:review.reviewId,confirmed:true},()=>{});
   expect(provider.requests[0].persona).toBe('grill');expect(provider.requests[0].skills?.loaded.map(l=>l.name)).toEqual(['grill-me']);await runtime.close();
+ });
+ it('the review lists the loaded skills, and has no skills entry when none are attached',async()=>{
+  expect((await chat(['grill-me'])).review.skills).toEqual({loaded:[{name:'grill-me',tokens:8,truncated:false}],skipped:[],missing:[]});
+  expect('skills' in (await chat([])).review).toBe(false);
  });
  it('records the skill names on the reply',async()=>{
   const {runtime,review}=await chat(['grill-me']);const events:any[]=[];

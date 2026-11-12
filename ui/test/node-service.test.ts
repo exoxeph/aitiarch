@@ -44,6 +44,26 @@ describe('extras: what a request carries for a node',()=>{
  });
 });
 
+describe('the review of a node\'s skills',()=>{
+ it('is nothing when no skills are attached',async()=>{expect((await service().extras('think')).review).toBeNull();});
+ it('lists each loaded skill with an estimated token cost',async()=>{
+  const svc=service();await svc.save({ask:{persona:'plan',skills:[await idOf('grill-me')]}});
+  const r=(await svc.extras('ask')).review!;
+  expect(r.loaded).toEqual([{name:'grill-me',tokens:expect.any(Number),truncated:false}]);expect(r.loaded[0].tokens).toBeGreaterThan(0);expect(r.skipped).toEqual([]);expect(r.missing).toEqual([]);
+ });
+ it('lists a skill that is no longer installed as missing',async()=>{
+  const svc=service();await svc.save({ask:{persona:'plan',skills:['0123456789ab']}});
+  expect((await svc.extras('ask')).review).toEqual({loaded:[],skipped:[],missing:['0123456789ab']});
+ });
+ it('lists a skill with no room left as skipped, with the reason, and marks a cut one as truncated',async()=>{
+  const big=path.join(tmp,'big');for(const n of ['a','b','c']){mkdirSync(path.join(big,n),{recursive:true});writeFileSync(path.join(big,n,'SKILL.md'),`---\nname: ${n}\ndescription: d\n---\n${n.repeat(26000)}`);}
+  const discover=()=>discoverSkills([{kind:'user',dir:big,layout:'flat'}]),all=await discover();
+  const svc=new NodeSettingsService(new UiStateStore(dirs()),discover);await svc.save({ask:{persona:'plan',skills:all.map(s=>s.id)}});
+  const r=(await svc.extras('ask')).review!;
+  expect(r.loaded.map(l=>[l.name,l.truncated])).toEqual([['a',true],['b',true]]);expect(r.skipped).toEqual([{name:'c',reason:'total_cap'}]);
+ });
+});
+
 describe('GET and PUT /api/nodes',()=>{
  const root=path.join(tmp,'proj','.aitiarch');mkdirSync(root,{recursive:true});writeFileSync(path.join(root,'notebook.md'),'# T\n');
  let app:ReturnType<typeof createApp>,watcher:NoteWatcher,port=0,cookie='';

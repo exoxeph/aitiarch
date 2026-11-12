@@ -10,6 +10,7 @@ import {SessionPicker} from './SessionPicker.tsx';
 import {sessionChoices,type PickedSession} from './session-picker-model.ts';
 import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
 import {Thinking} from '../ink/streaming.tsx';
+import {SkillsReviewList} from '../skills/SkillsReviewList.tsx';
 import {DEFAULT_CONTEXT,SUGGESTED_PROMPTS,chatHeader,toggleChip,type ContextChip} from './chat-stub.ts';
 import {applyEvent,buildContext,chipEstimate,errorText,formatCount,fromStored,newTurnId,previewText,usageLine,type Turn} from './chat-model.ts';
 
@@ -44,6 +45,7 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
    <dt>Earlier messages</dt>
    <dd>{review.historyPairs===0?'None yet.':`${review.historyPairs} earlier ${review.historyPairs===1?'exchange':'exchanges'} included${review.omittedPairs>0?`, ${review.omittedPairs} older left out`:''}.`}</dd>
   </dl>
+  <SkillsReviewList review={review.skills}/>
   <details className="chat-review-source"><summary>Instructions Claude gets</summary><pre>{review.instruction}</pre></details>
   <p className="chat-review-total">About {formatCount(review.estimatedTokens)} tokens in all</p>
   {review.ephemeral?<><p>{SESSION_NOTICES.privacy}</p><details><summary>Recent messages included</summary>{review.history.map(t=><div key={t.id}><pre>{t.user}</pre><pre>{t.assistant}</pre></div>)}</details></>:<label className="chat-review-ask"><input type="checkbox" checked={stopAsking} onChange={e=>setStopAsking(e.target.checked)}/> Don’t ask again this session</label>}

@@ -47,6 +47,8 @@ export interface ChatReview {
  sources:(ContextPreview&{text:string})[];historyPairs:number;omittedPairs:number;
  instruction:string;history:{id:string;user:string;assistant:string}[];
  estimatedTokens:number;requiresConfirmation:boolean;
+ /** The node's attached skills: what loaded, what was skipped and why, what is no longer installed. Absent when none are attached. */
+ skills?:import('./node-settings.ts').SkillsReview;
  ephemeral?:true;
 }
 export const CHAT_LIMITS=Object.freeze({noteCharacters:40000,questionCharacters:2000,historyPairs:4,historyCharacters:4000,

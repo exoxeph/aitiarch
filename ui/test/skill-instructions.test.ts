@@ -42,6 +42,12 @@ describe('loading a skill',()=>{
   expect(block.loaded.reduce((n,l)=>n+l.chars,0)).toBeLessThanOrEqual(48000);
   expect(block.skipped).toEqual(['d']);
  });
+ it('says why a skill was skipped: no room left, or it could not be read',async()=>{
+  const skills=await skillsIn({'a/SKILL.md':fm('a')+'a'.repeat(24000),'b/SKILL.md':fm('b')+'b'.repeat(24000),'c/SKILL.md':fm('c')+'short'});
+  expect((await loadSkillBlock(skills)).reasons).toEqual({c:'total_cap'});
+  const gone=skills.find(s=>s.name==='c')!;await rm(gone.path);
+  expect((await loadSkillBlock([gone])).reasons).toEqual({c:'unreadable'});
+ });
  it('never reads outside the skill folder, even when a link tries to',async()=>{
   const found=await skillsIn({'x/SKILL.md':fm('x')+'See [secret](../../outside.md) and [up](../other/SKILL.md).\n','outside.md':'TOP SECRET','other/SKILL.md':fm('other')+'private'});
   const block=await loadSkillBlock(found.filter(k=>k.name==='x')); // "other" is a different skill; only x is attached

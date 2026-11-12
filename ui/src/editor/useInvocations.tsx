@@ -10,6 +10,10 @@ import { VISUALIZE_QUESTION } from '../../shared/diagram.ts';
 import { addInk, removeInk, setInk } from './ink.ts';
 import {rememberQuestion} from '../threads/questions.ts';
 import {Thinking} from '../ink/streaming.tsx';
+import {SkillsReviewList} from '../skills/SkillsReviewList.tsx';
+import type {SkillsReview} from '../../shared/node-settings.ts';
+/** The packet the server sends back has a "skills" entry beside the request; the request itself is everything else. */
+const exactRequest=(packet:unknown)=>{const {skills:_skills,...rest}=packet as Record<string,unknown>;return rest;};
 
 interface Draft { input: Invocation; packet?: unknown; error?: string; warnings?: string[] }
 interface Running { id: string; status: string; error?: string }
@@ -118,7 +122,8 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
     {asking && <p className="small muted ask-hint">Enter to ask · Esc to cancel</p>}
     {hasPacket && <details className="what-is-sent"><summary>What will be sent</summary>
       <p className="small muted">The selection is frozen: editing the note will not change this request. {providerLabel === 'Claude' ? 'Claude CLI' : 'ChatGPT plan'} · transcript context: none. Redaction can miss prose secrets, unfamiliar or encoded credentials, and indirect identifiers. Review before sending.</p>
-      <details><summary>Exact redacted request</summary><pre>{JSON.stringify(draft.packet, null, 2)}</pre></details></details>}
+      <SkillsReviewList review={(draft.packet as { skills?: SkillsReview }).skills} />
+      <details><summary>Exact redacted request</summary><pre>{JSON.stringify(exactRequest(draft.packet), null, 2)}</pre></details></details>}
     {hasPacket && <p className="small muted ask-hint">Enter to send · Esc to cancel</p>}
     {draft.error && <p role="alert">{draft.error}</p>}
     {draft.warnings?.map(warning => <p role="note" key={warning}>{warning}</p>)}

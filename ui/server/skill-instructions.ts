@@ -2,7 +2,7 @@
 // It reads each skill's SKILL.md (without front matter) and the markdown files it points to, only inside that skill's folder,
 // removes secrets and user paths, and stops at 24,000 characters per skill and 48,000 in all. It runs nothing.
 import {readFile} from 'node:fs/promises';
-import {SKILL_CAP_EACH,SKILL_CAP_TOTAL,type LoadedSkill,type SkillBlock} from '../shared/instruction.ts';
+import {SKILL_CAP_EACH,SKILL_CAP_TOTAL,type LoadedSkill,type SkillBlock,type SkipReason} from '../shared/instruction.ts';
 import {redact} from './providers/index.ts';
 import {estimateTokens,referencedMarkdown,type SkillInfo} from './skills.ts';
 
@@ -15,11 +15,12 @@ const CUT='\n[cut: this skill is longer than 24,000 characters]';
 
 export async function loadSkillBlock(skills:SkillInfo[]):Promise<SkillBlock>{
  const out:SkillBlock={text:'',loaded:[],skipped:[],truncated:false};
+ const skip=(name:string,reason:SkipReason)=>{out.skipped.push(name);(out.reasons??={})[name]=reason;};
  const sections:string[]=[];let used=0;
  for(const s of skills){
   const room=Math.min(SKILL_CAP_EACH,SKILL_CAP_TOTAL-used);
-  if(room<=0){out.skipped.push(s.name);continue;}
-  let raw='';try{raw=await readFile(s.path,'utf8');}catch{out.skipped.push(s.name);continue;}
+  if(room<=0){skip(s.name,'total_cap');continue;}
+  let raw='';try{raw=await readFile(s.path,'utf8');}catch{skip(s.name,'unreadable');continue;}
   const files=['SKILL.md'];let body=redact(stripFrontmatter(raw)).trim();
   for(const r of await referencedMarkdown(s.dir,raw)){
    if(body.length>=room)break;

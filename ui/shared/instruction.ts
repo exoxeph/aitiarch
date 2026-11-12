@@ -5,7 +5,10 @@ export const SKILL_CAP_EACH=24000,SKILL_CAP_TOTAL=48000;
 export const SKILL_HEADING='User-chosen skill instructions';
 
 export interface LoadedSkill {id:string;name:string;chars:number;tokens:number;truncated:boolean;files:string[]}
-export interface SkillBlock {text:string;loaded:LoadedSkill[];skipped:string[];truncated:boolean}
+export type SkipReason='total_cap'|'unreadable';
+export interface SkillBlock {text:string;loaded:LoadedSkill[];skipped:string[];truncated:boolean;
+ /** Why each skipped skill (by name) was left out: no room under the 48,000-character total, or its file could not be read. */
+ reasons?:Record<string,SkipReason>}
 
 /** Said once, after the skills. A skill may add style and method; it can never change these. */
 export const HARD_RULES=
