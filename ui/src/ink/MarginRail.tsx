@@ -4,6 +4,7 @@ import {ReplyMarkdown} from './ReplyMarkdown.tsx';
 import {DiagramReveal,Streamed,Thinking} from './streaming.tsx';
 import {useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import type {InkItem} from '../../shared/ink.ts';
+import {UsedSkills} from '../skills/PersonaSwitch.tsx';
 import {blobBox,connectorD,connectorVisible,thoughtText,type ThoughtSide} from '../../shared/thoughts.ts';
 export interface PlacedMargin {item:InkItem;top:number;target:number;side:ThoughtSide;height:number;end?:{x:number;lineBottom:number;lineMid?:number;rightX?:number;leftX?:number}}
 interface Geometry {width:number;left:number;right:number}
@@ -50,6 +51,7 @@ export function MarginRail({placed,renderDraft}:{placed:PlacedMargin[];renderDra
     <span className="thought-meta"><span className="thought-dot" aria-hidden="true"/><span className="cm-ink-label">AI</span>{resolved&&<span className="thought-resolved-tag">Resolved</span>}</span>
    </button>
    <div className="thought-text" onClick={e=>{if(!(e.target as HTMLElement).closest('button,input'))e.currentTarget.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:item.id,thought:true}}));}}>{item.generation?.status==='pending'?<Thinking/>:<Streamed text={thoughtText(item)} fresh={fresh.current.has(item.id)} onDone={()=>fresh.current.delete(item.id)}><ReplyMarkdown text={thoughtText(item)}/></Streamed>}</div>
+   <UsedSkills names={item.generation?.skills}/>
    <span className="thought-replies">{item.thread?.followups.filter(r=>r.generation.status==='complete').length??0} {item.thread?.followups.filter(r=>r.generation.status==='complete').length===1?'reply':'replies'}</span>
    <DiagramReveal fresh={fresh.current.has(item.id)}><DiagramSlot diagram={item.generation?.status==='complete'?item.diagram:undefined} invalid={item.diagramIssue} itemId={item.id}/></DiagramReveal>
    <div className="thought-more" onKeyDown={e=>{if(menu!==item.id)return;const items=[...e.currentTarget.querySelectorAll<HTMLElement>('[role=menuitem]')],at=items.indexOf(document.activeElement as HTMLElement);

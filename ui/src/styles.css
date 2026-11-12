@@ -848,6 +848,16 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .chat-review-source { margin-top: 4px; }
 .chat-review-source summary { cursor: pointer; font-size: var(--text-control); }
 .chat-review-est { color: var(--muted); }
+.persona-switch { margin: 0 0 8px; padding: 0; border: 0; min-width: 0; }
+.persona-legend { padding: 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
+.persona-options { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 2px; }
+.persona-option { display: inline-flex; align-items: center; gap: 5px; font: var(--text-control) var(--font-ui); cursor: pointer; }
+.persona-option input:checked + span { font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.persona-option input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.persona-switch:disabled .persona-option { cursor: default; opacity: .7; }
+.persona-line { margin: 2px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
+.used-skills { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); overflow-wrap: anywhere; }
+.used-skills-label { font-weight: 600; }
 .skills-tab h4 { margin: 20px 0 8px; font-size: var(--text-control); font-weight: 600; }
 .skills-search { display: grid; gap: 4px; margin-top: 12px; }
 .skills-search input { width: 100%; }

@@ -11,6 +11,8 @@ import {sessionChoices,type PickedSession} from './session-picker-model.ts';
 import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
 import {Thinking} from '../ink/streaming.tsx';
 import {SkillsReviewList} from '../skills/SkillsReviewList.tsx';
+import {PersonaSwitch,UsedSkills} from '../skills/PersonaSwitch.tsx';
+import {useNodeSettings} from '../skills/useNodeSettings.ts';
 import {DEFAULT_CONTEXT,SUGGESTED_PROMPTS,chatHeader,toggleChip,type ContextChip} from './chat-stub.ts';
 import {applyEvent,buildContext,chipEstimate,errorText,formatCount,fromStored,newTurnId,previewText,usageLine,type Turn} from './chat-model.ts';
 
@@ -58,6 +60,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  const otherNotes=extraNotes.filter(p=>p!==path);
  const [chips,setChips]=useState<ContextChip[]>(()=>DEFAULT_CONTEXT.map(c=>({...c}))),[turns,setTurns]=useState<Turn[]>([]),[draft,setDraft]=useState('');
  const [pending,setPending]=useState<ChatReview|null>(null),[stopAsking,setStopAsking]=useState(false),[busy,setBusy]=useState(false),[peek,setPeek]=useState<ContextChip['id']|null>(null);
+ const persona=useNodeSettings('chat');
  const [usage,setUsage]=useState<ChatUsage|null>(null),[persistence,setPersistence]=useState<'private'|'memory'>('memory'),[notice,setNotice]=useState(''),[adding,setAdding]=useState<string|null>(null);
  const input=useRef<HTMLTextAreaElement>(null),log=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),alive=useRef(true);
  const [inv,setInv]=useState({enabled:false,claude:false,persistence:false}),[investigating,setInvestigating]=useState(false),[addingText,setAddingText]=useState<string|null>(null);
@@ -175,7 +178,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
      {!t.trail&&t.status==='streaming'&&<div className="chat-message chat-ai chat-streaming" data-from="ai" aria-busy="true"><span className="chat-who">AI</span>
       {t.text?<p className="chat-stream">{t.text}<span className="chat-caret" aria-hidden="true"/></p>:<div className="chat-thinking"><Thinking/></div>}
       <div className="chat-message-tools"><button type="button" className="chat-stop" onClick={stop}>Stop</button></div></div>}
-     {!t.trail&&t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span><ReplyMarkdown text={t.text}/>
+     {!t.trail&&t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span><ReplyMarkdown text={t.text}/><UsedSkills names={t.message?.skills}/>
       {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
       <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}>Add to note</button></div></div>}
      {!t.trail&&t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button></div>}
@@ -183,6 +186,8 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
    <span className="chat-sr" role="status">{busy&&!pending?'Claude is replying…':''}</span>
   </div>
   {notice&&<p className="chat-notice" role="alert">{notice} <button type="button" className="ghost" onClick={()=>setNotice('')}>Dismiss</button></p>}
+  <PersonaSwitch id="chat" label="How this chat works with you" value={persona.persona} kept={persona.kept} disabled={!!pending||busy} hint="Change it before you review a message." onChange={p=>void persona.choose(p)}/>
+  {persona.failed&&<p className="chat-notice" role="alert">That choice could not be saved. Nothing was changed.</p>}
   <form className="chat-composer" onSubmit={e=>{e.preventDefault();void submit();}}>
    <textarea ref={input} aria-label="Message Aitiarch AI" rows={1} placeholder={pending?'Review above, then send…':'Ask about this note…'} value={draft} disabled={composing} onChange={e=>setDraft(e.target.value)}
     onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void submit();}}}/>

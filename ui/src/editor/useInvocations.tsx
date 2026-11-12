@@ -11,6 +11,10 @@ import { addInk, removeInk, setInk } from './ink.ts';
 import {rememberQuestion} from '../threads/questions.ts';
 import {Thinking} from '../ink/streaming.tsx';
 import {SkillsReviewList} from '../skills/SkillsReviewList.tsx';
+import {PersonaSwitch} from '../skills/PersonaSwitch.tsx';
+import {useNodeSettings} from '../skills/useNodeSettings.ts';
+import {NODE_LABEL} from '../skills/skills-model.ts';
+import {nodeFor} from '../../shared/node-settings.ts';
 import type {SkillsReview} from '../../shared/node-settings.ts';
 /** The packet the server sends back has a "skills" entry beside the request; the request itself is everything else. */
 const exactRequest=(packet:unknown)=>{const {skills:_skills,...rest}=packet as Record<string,unknown>;return rest;};
@@ -104,6 +108,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   // The ask/review form lives in the margin blob of the frozen selection (Enter to ask or send, Esc to cancel). The top panel
   // only shows it as a fallback when that blob is not on screen (narrow layout), plus the job status lines.
   const sendRef = useRef<HTMLButtonElement>(null), hasPacket = draft?.packet !== undefined;
+  const stepNode = draft ? nodeFor(draft.input.action, draft.input.question) : 'ask', persona = useNodeSettings(stepNode);
   useEffect(() => { if (hasPacket) sendRef.current?.focus(); }, [hasPacket]);
   const asking = !!draft && draft.input.action === 'ask' && !hasPacket && draft.input.question !== VISUALIZE_QUESTION;
   const draftSection = draft ? <section aria-label={`Review ${providerLabel} request`} className="invocation-review"
@@ -119,6 +124,9 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
     {asking && <label>Question for {providerLabel}<input aria-label={`Question for ${providerLabel}`} placeholder="Ask about this selection…" maxLength={8000} autoFocus
       value={draft.input.question} onChange={e => setDraft({ input: { ...draft.input, question: e.target.value } })} /></label>}
     <blockquote>{draft.input.text.slice(draft.input.from, draft.input.to)}</blockquote>
+    <PersonaSwitch id={'step-' + stepNode} label={`How ${NODE_LABEL[stepNode]} works with you`} value={persona.persona} kept={persona.kept} disabled={busy}
+      onChange={p => void persona.choose(p).then(saved => { if (saved && hasPacket) void review(draft.input); })} />
+    {persona.failed && <p role="alert" className="small">That choice could not be saved. Nothing was changed.</p>}
     {asking && <p className="small muted ask-hint">Enter to ask · Esc to cancel</p>}
     {hasPacket && <details className="what-is-sent"><summary>What will be sent</summary>
       <p className="small muted">The selection is frozen: editing the note will not change this request. {providerLabel === 'Claude' ? 'Claude CLI' : 'ChatGPT plan'} · transcript context: none. Redaction can miss prose secrets, unfamiliar or encoded credentials, and indirect identifiers. Review before sending.</p>
