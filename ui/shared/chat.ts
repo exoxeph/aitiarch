@@ -78,7 +78,9 @@ export type ChatEvent=
  |{type:'delta';id:string;text:string;provisional:true}
  |{type:'complete';id:string;message:ChatMessage;persistence:'private'|'memory';usage:ChatUsage}
  |{type:'error';id:string;code:ChatErrorCode;rule?:string;/** For internal errors: the kind of error (for example TypeError), never its message. */errorName?:string;/** For provider_failed: why, in a safe form the page can say in words. */reason?:import('./chat-failure.ts').FailureReason};
-export interface ChatInput {id:string;path:string;question:string;selection?:string;context:ContextChoice[]}
+export interface ChatInput {id:string;path:string;question:string;selection?:string;context:ContextChoice[];
+ /** A harness chat session (the app's id) to send this message in. Absent: the classic one-shot chat. */
+ session?:string}
 export interface ChatReview {
  reviewId:string;requestId:string;path:string;question:string;selection:string;
  sources:(ContextPreview&{text:string})[];historyPairs:number;omittedPairs:number;
@@ -89,6 +91,10 @@ export interface ChatReview {
  /** The node's attached skills: what loaded, what was skipped and why, what is no longer installed. Absent when none are attached. */
  skills?:import('./node-settings.ts').SkillsReview;
  ephemeral?:true;
+ /** Sent in a harness chat session: the earlier conversation lives in the session, so no earlier messages are pasted. */
+ session?:{id:string;label:string;turns:number};
+ /** Notes a session never gets (the notebook file, hidden files, sidecars, state, secrets): named here so the review says so. */
+ excluded?:string[];
 }
 export const CHAT_LIMITS=Object.freeze({noteCharacters:40000,questionCharacters:2000,historyPairs:4,historyCharacters:4000,
  sources:8,otherCharacters:20000,tokenBudget:50000,requestReserve:16000,rollingRequestCap:12,windowMinutes:60});

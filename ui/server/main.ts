@@ -73,7 +73,7 @@ const openProject = async (entry: ProjectEntry) => {
   if (plan) plans.add(plan);
   const usage = new UsageLogs({ notebookRoot: store.rootReal });
   const provider = plan ?? (args.claude ? createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205", usageLog: usage }) : undefined);
-  const app = createApp({ store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, investigator: args.claude ? { claude: new InvestigatorCli({ command: args.claude }) } : undefined });
+  const app = createApp({ store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, investigator: args.claude ? { claude: new InvestigatorCli({ command: args.claude }) } : undefined, harness: args.claude ? { command: args.claude } : undefined });
   return { handle: app.handle, close: async () => { watcher.stop(); await plan?.close(); await app.close(); } };
 };
 const host = createHost({ registry: registry!, security, distDir, openProject, defaultProject: () => defaultId });

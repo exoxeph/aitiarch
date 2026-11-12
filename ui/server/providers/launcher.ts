@@ -3,7 +3,7 @@ import { execFile, spawn, type SpawnOptionsWithoutStdio } from 'node:child_proce
 import { realpathSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { claudeArguments,investigatorArguments } from './claude-arguments.ts';
+import { chatSessionArguments,claudeArguments,investigatorArguments } from './claude-arguments.ts';
 import type { Configuration, ProviderName } from './index.ts';
 
 export function assertLaunch(provider: ProviderName, mode: 'metadata' | 'isolated', args: readonly string[], cwd?: string): void {
@@ -47,6 +47,19 @@ export function spawnInvestigator(config:Target,args:string[],options:SpawnOptio
  if(config.provider!=='claude'||JSON.stringify(args)!==JSON.stringify(investigatorArguments())||!path.isAbsolute(options.cwd)||realpathSync(options.cwd)!==realpathSync(registeredRoot))throw new Error('Investigator launch rejected.');
  if(!path.isAbsolute(config.command)||/\.(?:cmd|bat|ps1)$/i.test(config.command))throw new Error('Native executable required.');
  return spawn(config.command,[...(config.prefixArgs??[]),...args],{...options,shell:false,windowsHide:true,stdio:'pipe'});
+}
+/** A chat harness session turn. The arguments are built here from the profile (never passed in), the working folder must be the project's
+ *  registered, empty session folder, and the instruction file must live outside it. */
+export function spawnChatSession(config:Target,profile:{id:string;resume:boolean;addendumFile:string;model?:string},options:SpawnOptionsWithoutStdio&{cwd:string},registeredCwd:string){
+ assertTarget(config);
+ const reject=()=>{throw new Error('Session launch rejected.');};
+ if(config.provider!=='claude')reject();
+ if(!config.prefixArgs?.length&&(!path.isAbsolute(config.command)||/\.(?:cmd|bat|ps1)$/i.test(config.command)))reject();
+ if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(profile.id)||profile.model!==undefined&&!/^[a-z0-9.-]{1,60}$/i.test(profile.model)||!path.isAbsolute(profile.addendumFile))reject();
+ if(!path.isAbsolute(options.cwd))reject();
+ const cwd=realpathSync(options.cwd);if(cwd!==realpathSync(registeredCwd)||readdirSync(cwd).length)reject();
+ const rel=path.relative(cwd,realpathSync(profile.addendumFile));if(!rel.startsWith('..')&&!path.isAbsolute(rel))reject();
+ return spawn(config.command,[...(config.prefixArgs??[]),...chatSessionArguments(profile)],{...options,cwd,shell:false,windowsHide:true,stdio:'pipe'});
 }
 export async function isolatedOutput(config: Target, args: string[], cwd: string, env: NodeJS.ProcessEnv, input: string): Promise<string> {
   assertTarget(config);

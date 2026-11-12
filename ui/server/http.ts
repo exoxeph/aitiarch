@@ -1,6 +1,6 @@
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
 import {InvestigatorError,type InvestigatorRunner,type AgentName} from '../shared/investigator.ts';
-import {InvestigatorRuntime} from './investigator/runtime.ts';import {PolicyGate} from './investigator/policy.ts';import {Lookups} from './investigator/lookups.ts';import {LedgerStore} from './ledger-store.ts';
+import {InvestigatorRuntime} from './investigator/runtime.ts';import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {PolicyGate} from './investigator/policy.ts';import {Lookups} from './investigator/lookups.ts';import {LedgerStore} from './ledger-store.ts';
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES} from '../shared/chat.ts';
 import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
@@ -51,6 +51,8 @@ export interface AppOptions {
   usage?: {summary():Promise<import('../shared/usage.ts').UsageSummary>};
   /** Where the Skill library looks. Tests pass temp folders; the real app uses the usual places under your home folder and this project. */
   skillRoots?: SkillRoot[];
+  /** Harness chat sessions through the Claude Code CLI. `dir` (tests) overrides the per-project folder under local app data. */
+  harness?: {command:string;prefixArgs?:string[];model?:string;dir?:string};
 }
 
 export const CSP = [
@@ -177,7 +179,8 @@ export function createApp(opts: AppOptions) {
   const investigator=new InvestigatorRuntime(investigatorPolicy,new Lookups(investigatorPolicy),new LedgerStore(store.rootReal),opts.investigator??{},undefined,store.rootReal);
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
   const chatStore=new ChatStore(store.rootReal);
-  const chatReady=inkReady.then(ink=>new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node)));
+  const harnessReady=opts.harness?SessionIndex.open(opts.harness.dir??harnessDirectory(store.rootReal)).then(index=>({index,runner:new ClaudeSessionRunner({command:opts.harness!.command,prefixArgs:opts.harness!.prefixArgs,model:opts.harness!.model,dir:index.dir})})):Promise.resolve(null);
+  const chatReady=Promise.all([inkReady,harnessReady]).then(([ink,harness])=>new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined));
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
@@ -290,6 +293,19 @@ export function createApp(opts: AppOptions) {
     }
     if(url.pathname==='/api/usage'&&req.method==='GET'){
       const chats=(await chatReady).usage();return json(res,200,{...(opts.usage?await opts.usage.summary():{since:new Date().toISOString(),hourlyCap:2,providers:[]}),...(chats.length?{chats}:{})});
+    }
+    // Harness chat sessions: the app's own list for this project, a new one for a note, and a new label. Nothing here talks to the CLI.
+    if(url.pathname==='/api/harness/sessions'&&req.method==='GET'){
+      const h=await harnessReady,note=url.searchParams.get('path')||undefined;if(note)await store.read(note);
+      return json(res,200,{enabled:!!h,sessions:h?await h.index.list({mode:'chat',...(note?{note}:{})}):[]});
+    }
+    if(url.pathname.startsWith('/api/harness/sessions/')&&req.method==='PUT'){
+      const h=await harnessReady,b=await readBody(req) as any;
+      if(!h)return json(res,409,{error:'disabled',message:'Sessions need the Claude Code CLI. Start Aitiarch with --claude.'});
+      try{
+        if(url.pathname==='/api/harness/sessions/new'){if(b?.mode!=='chat'||typeof b.path!=='string')throw new SessionIndexError('Invalid session.');await store.read(b.path);return json(res,200,await h.index.create({mode:'chat',label:b.label,note:b.path}));}
+        if(url.pathname==='/api/harness/sessions/rename')return json(res,200,await h.index.rename(b?.id,b?.label));
+      }catch(e){if(e instanceof SessionIndexError)return json(res,400,{error:'invalid_session',message:e.message});throw e;}
     }
     if(url.pathname==='/api/chat'&&req.method==='GET'){
       const note=url.searchParams.get('path')??'';await store.read(note);
