@@ -90,6 +90,12 @@ if (scenario.startsWith('verified-')) {
     'verified-chat-reply-question':'{"answer":"What makes you sure the budget is 40 dollars and not 60?","claims":[]}',
     // Records the prompt it was given (to <record>.prompt) and answers with a valid structured reply, so Think, Ask and chat all accept it.
     'verified-chat-record':'{"answer":"Synthetic recorded reply.","claims":[]}',
+    // Markdown replies that end with a claims block (all synthetic; the chat-claims tests send a picnic-plan note).
+    'verified-chat-claims-grounded':'The budget differs: 40 in one place, 60 in another.\n\n<claims>[{"source":"N1","quote":"The budget is **40 dollars**"}]</claims>',
+    'verified-chat-claims-missing':'The plan says the venue is the library on Main Street and volunteers bring their own food, with the event starting at noon on the second Saturday of June. The budget is 40 dollars, which looks tight for a library booking.',
+    'verified-chat-claims-none-overlap':'The plan says the venue is the library on Main Street and volunteers bring their own food, with the event starting at noon on the second Saturday of June. The budget is 40 dollars, which looks tight for a library booking.\n<claims>{"none":"no_context_used"}</claims>',
+    'verified-chat-claims-question':'What makes you sure the budget is 40 dollars and not 60?\n<claims>{"none":"question_back"}</claims>',
+    'verified-chat-claims-badquote':'Two points stand out.\n<claims>[{"source":"N1","quote":"The venue is the library"},{"source":"N1","quote":"The budget is 90 dollars"}]</claims>',
     // A prose reply with a key in it, streamed in small pieces (synthetic key shape).
     'verified-chat-reply-secret-split':'The key is sk-abcdefghijklmnopqrstuvwxyz0123 in the file, and nothing else is needed for this.',
     // A reply that recites the instruction it was given (a prompt-injection outcome), built below from the real packet.

@@ -80,11 +80,24 @@ it('other notes are opt-in; module reads are limited, redacted, and individually
  await f.runtime.review({...f.input,context:[{moduleId:'other-notes',ids:['other.md']}]});
  const reads=(await new LedgerStore(f.root).read()).events.filter(e=>e.event==='context_read');expect(reads).toHaveLength(2);expect(reads.every(e=>e.requestId===f.input.id)).toBe(true);
 });
-it('invalid answer clears provisional text, saves no answer or history, and emits only a fixed failure code',async()=>{
+it('a claim whose quote is not in the source is marked not found; the reply is kept and saved',async()=>{
  const f=await fixture();f.provider.answer={answer:'Synthetic bad quote.',claims:[{sourceId:'N1',quote:'Not in the source'}]};
  const r=await f.runtime.review(f.input),events:ChatEvent[]=[];await f.runtime.send({reviewId:r.reviewId,confirmed:true},e=>events.push(e));
- expect(events.at(-1)).toMatchObject({type:'error',code:'validation',rule:'claim_quote_exact'});
- expect((await f.chats.read(f.input.path)).messages).toHaveLength(0);
+ expect(events.at(-1)).toMatchObject({type:'complete',message:{body:'Synthetic bad quote.',evidence:[],claims:[{sourceId:'N1',source:'note',quote:'Not in the source',status:'not_found'}]}});
+ expect((await f.chats.read(f.input.path)).messages).toHaveLength(1);
+});
+// Earlier replies must not act as examples of a different mode: on a persona switch, the pairs from the other mode are left out of the
+// history sent, and the review says how many.
+it('history keeps only the exchanges from the current mode, and the review says how many were left out',async()=>{
+ const f=await fixture();let persona:'plan'|'grill'='plan';
+ const extras=async()=>({persona,skills:{text:'',loaded:[],skipped:[],truncated:false},names:[],missing:[],review:null});
+ const runtime=new ChatRuntime(f.store,f.ink,f.chats,f.provider,[],extras);
+ const ask=async(id:string)=>{const r=await runtime.review({...f.input,id});await runtime.send({reviewId:r.reviewId,confirmed:true},()=>{});return r;};
+ await ask('plan-1');persona='grill';
+ const r2=await ask('grill-1');expect(r2.history).toEqual([]);expect(r2.otherModePairs).toBe(1);expect(f.provider.requests.at(-1)!.turns).toEqual([]);
+ persona='plan';const r3=await ask('plan-2');expect(r3.history.map(h=>h.id)).toEqual(['plan-1']);expect(r3.otherModePairs).toBe(1);
+ expect((await f.chats.read(f.input.path)).messages.map(m=>m.persona)).toEqual(['plan','grill','plan']);
+ await runtime.close();
 });
 it('rolling resend keeps only complete recent pairs, cache-friendly prefix, and starts fresh after reload',async()=>{
  const f=await fixture();

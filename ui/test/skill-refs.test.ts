@@ -30,7 +30,9 @@ describe('skill names on a chat message',()=>{
  it('keeps skills on a message',async()=>{const s=store();await s.append('n.md',msg({skills:['grill-me']}));expect((await s.read('n.md')).messages[0].skills).toEqual(['grill-me']);});
  it('rejects a path as a skill, and any other new key',async()=>{
   await expect(store().append('n.md',msg({skills:['C:\\skills\\a']}))).rejects.toThrow();
-  await expect(store().append('n.md',msg({persona:'plan'}))).rejects.toThrow();
+  // A persona is now a known optional key on a chat message (the mode the reply was written in), so test with a key that is not.
+  await expect(store().append('n.md',msg({personaText:'plan'}))).rejects.toThrow();
+  await expect(store().append('n.md',msg({persona:'decide'}))).rejects.toThrow();
  });
 });
 

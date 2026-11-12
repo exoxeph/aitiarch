@@ -33,6 +33,8 @@ export function answerPrefix(json:string):string {
 export function wireText(raw:string):string{
  if(!raw.trim())return '';
  if(/^\s*[{`\[]/.test(raw))return answerPrefix(raw);
+ // The claims block is not part of the reply text: nothing from it on is shown while streaming (a partial "<cla" is held as an unfinished word).
+ const claims=raw.search(/<claims\b/i);if(claims>=0)raw=raw.slice(0,claims);
  for(let i=raw.indexOf('{');i>=0;i=raw.indexOf('{',i+1)){const rest=raw.slice(i+1).replace(/^\s+/,'');if(rest.startsWith('"answer"')||'"answer"'.startsWith(rest.slice(0,8)))return raw.slice(0,i);}
  return raw;
 }

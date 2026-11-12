@@ -43,10 +43,12 @@ describe('chat',()=>{
   await t.chooseAll({think:'plan',ask:'plan',visualize:'plan',chat:'explain'});await t.chat('m-2');
   expect(t.captured.map(c=>c.persona)).toEqual(['grill','explain']);expect(t.captured[1].instruction).toContain(text('explain'));expect(t.captured[1].instruction).not.toContain(text('grill'));
  },20000);
- it('the persona comes after the output contract and is framed so it wins over the default answer style',async()=>{
+ it('in chat the mode is the whole answer style: none of the Ask style lines, and the format and hard rules come after it',async()=>{
   const t=await boot();await t.chooseAll({think:'plan',ask:'plan',visualize:'plan',chat:'grill'});await t.chat('m-1');
-  const i=t.captured[0].instruction,mode=i.indexOf('Thinking-partner mode: Grill me.');
-  expect(mode).toBeGreaterThan(i.indexOf('Return one JSON object'));expect(i).toMatch(/takes priority over the answer-style guidance above/i);expect(i).toMatch(/required JSON format still applies/i);
+  const i=t.captured[0].instruction,mode=i.indexOf(text('grill'));
+  expect(mode).toBeGreaterThan(-1);expect(i).toMatch(/This is the whole answer style/);
+  for(const askStyle of [/first sentence is the answer/i,/Answer the question directly/i,/ask with 2-3 options/i,/Return one JSON object/i])expect(i,`${askStyle} must not be in a chat instruction`).not.toMatch(askStyle);
+  expect(i.indexOf('<claims>')).toBeGreaterThan(mode);expect(i.indexOf('Rules that always win')).toBeGreaterThan(i.indexOf('<claims>'));
   expect(i.slice(mode),'nothing after the mode tells it to list options').not.toMatch(/show the options/i);
  },20000);
  it('the chat uses the chat step\'s persona, not the Ask or Think one',async()=>{

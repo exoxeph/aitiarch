@@ -87,7 +87,8 @@ it('isolated fake CLI streams on the existing product path; missing partial flag
   const provider=(scenario:string)=>createProvider({provider:'claude',contract:'claude-canary-2.1.205',command:process.execPath,prefixArgs:[script,scenario,path.join(root,'record'),'claude'],failureLog:{write:async()=>{}}});
   const req={id:'synthetic-chat',chat:true,action:'ask' as const,question:'Synthetic?',selection:'',note:'Synthetic source.',decisions:[],turns:[]};
   const chunks:string[]=[];const result=await provider('verified-chat-stream').invoke(req,{onTextDelta:t=>chunks.push(t)});
-  expect(chunks).toHaveLength(2);expect(JSON.parse(chunks.join('')).answer).toBe(result.answer);
+  // The provider hands chat the raw reply; the chat's output gate reads it (server/chat/reply.ts).
+  expect(chunks).toHaveLength(2);expect(result.answer).toBe(chunks.join(''));expect(result.rawReply).toBe(true);
   await expect(provider('missing-partial').invoke(req,{onTextDelta:()=>{throw new Error('Must not stream');}})).rejects.toMatchObject({code:'unsupported_cli'});
   const packet=prepareRequest(req);expect(Object.keys(packet.data).at(-1)).toBe('question');expect(packet.clippedMessages).toBe(0);
  }finally{console.log('CLEANUP TARGET fixture',root);await rm(root,{recursive:true,force:true});}

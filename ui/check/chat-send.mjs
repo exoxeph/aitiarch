@@ -71,12 +71,19 @@ try {
   });
 
   // 1b. A reply in plain prose is shown, quietly labelled, with no claims; JSON the model wrapped in prose or a fence is extracted as a normal reply.
-  await inApp('verified-chat-reply-prose', async ({ page, panel }) => {
+  await inApp('verified-chat-reply-prose', async ({ page, panel, captured }) => {
     await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').waitFor();
     assert.match((await panel.locator('.chat-ai').last().innerText()).replace(/\s+/g, ' '), /budget is 40 dollars in one place and 60 in another/, 'the prose reply is shown');
-    assert.equal((await panel.locator('.chat-unstructured').innerText()).trim(), 'Unstructured reply: no claims to check', 'with the quiet label');
+    // This note is sent and the reply has no claims block: the reply says so in words, with Ask again (through the review).
+    assert.match((await panel.locator('.chat-citation').innerText()).trim(), /^This reply did not say whether it used your note/, 'with the plain citation label');
+    assert.equal(await panel.locator('.chat-citation').getByRole('button', { name: 'Ask again' }).count(), 1, 'and an Ask again button');
+    assert.equal(await panel.locator('.chat-unstructured').count(), 0, 'and no unstructured label any more');
     assert.equal(await panel.locator('.chat-error').count(), 0, 'and it is not an error');
-    await page.screenshot({ path: path.join(out, 'chat-send-unstructured.png') });
+    await page.screenshot({ path: path.join(out, 'chat-send-citation-label.png') });
+    // Ask again goes through the review like any message.
+    await panel.locator('.chat-citation').getByRole('button', { name: 'Ask again' }).click();
+    await panel.getByRole('region', { name: 'What will be sent' }).waitFor();
+    assert.equal(captured.length, 1, 'Ask again sent nothing before the review');
   });
   for (const wrapped of ['verified-chat-reply-wrapped', 'verified-chat-reply-fenced']) await inApp(wrapped, async ({ panel }) => {
     await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').waitFor();

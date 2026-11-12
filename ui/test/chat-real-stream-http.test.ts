@@ -50,11 +50,11 @@ it('a CLI that exits with an error shows its exit code and a sanitized tail, wit
 // The model's final reply does not always come back as exactly {answer, claims}. The chat extracts JSON from a fence or a wrapped object, shows
 // plain prose as an unstructured reply with no claims, and fails closed on JSON-shaped replies that are wrong or cut off.
 const done=(text:string)=>JSON.parse(/event: complete\ndata: (.*)\n/.exec(text)![1]);
-it('a plain-prose reply is shown as an unstructured answer with no claims, and is stored that way',async()=>{
+it('a plain Markdown reply is an ordinary reply: it streams, has no claims, and is stored that way (no context was sent, so nothing is flagged)',async()=>{
  const {text,base,cookie}=await chatWith('verified-chat-reply-prose',true),c=done(text);
  expect(text.indexOf('event: delta'),'prose streams in as it arrives, before the reply is complete').toBeGreaterThan(-1);expect(text.indexOf('event: delta')).toBeLessThan(text.indexOf('event: complete'));
- expect(text).not.toContain('event: error');expect(c.message.unstructured).toBe(true);expect(c.message.body).toContain('budget is 40 dollars');expect(c.message.evidence).toEqual([]);
- const saved=await (await fetch(base+'/api/chat?path=fixture.md',{headers:{cookie}})).json();expect(saved.messages.at(-1)).toMatchObject({unstructured:true,evidence:[]});
+ expect(text).not.toContain('event: error');expect(c.message.unstructured).toBeUndefined();expect(c.message.citation).toBeUndefined();expect(c.message.body).toContain('budget is 40 dollars');expect(c.message.claims).toEqual([]);
+ const saved=await (await fetch(base+'/api/chat?path=fixture.md',{headers:{cookie}})).json();expect(saved.messages.at(-1)).toMatchObject({claims:[],evidence:[]});
 },20000);
 it('a Grill me reply (the answer is one question, no claims) is an ordinary structured reply, not flagged and not an error',async()=>{
  const {text}=await chatWith('verified-chat-reply-question'),c=done(text);

@@ -1,6 +1,6 @@
 // Pure chat state for the panel: turns, streamed events, context chips and the one-line usage summary. No DOM and no network here.
 import {failureText,type FailureReason} from '../../shared/chat-failure.ts';
-import {CHAT_MESSAGES,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatUsage,type ContextChoice} from '../../shared/chat.ts';
+import {CHAT_MESSAGES,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatUsage,type CitationIssue,type ContextChoice} from '../../shared/chat.ts';
 import type {ContextChip} from './chat-stub.ts';
 import type {Trail} from './trail-model.ts';
 
@@ -58,6 +58,12 @@ export function usageLine(u:ChatUsage):string{
 }
 /** Shown quietly under a reply the model gave as plain prose: it has no claims, so there is nothing to check against the note. */
 export const UNSTRUCTURED_LABEL='Unstructured reply: no claims to check';
+/** Shown under a reply whose citations need the person's attention, with an Ask again button that goes through the review. */
+export const CITATION_LABELS:Record<CitationIssue,string>={
+ uncited_overlap:'This reply uses your note but gave no citations',
+ missing_block:'This reply did not say whether it used your note',
+ malformed_block:'This reply\'s citations could not be read',
+};
 /** Shown under a reply that recites a long run of the instructions Aitiarch sent with the question. */
 export const ECHO_LABEL='Part of this reply repeats the instructions Aitiarch sent with your question.';
 /** A failed Claude call says why when the server gave a reason it understands; otherwise the same generic sentence as ever. */

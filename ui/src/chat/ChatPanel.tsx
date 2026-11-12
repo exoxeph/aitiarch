@@ -14,7 +14,7 @@ import {SkillsReviewList} from '../skills/SkillsReviewList.tsx';
 import {PersonaSwitch,UsedSkills} from '../skills/PersonaSwitch.tsx';
 import {useNodeSettings} from '../skills/useNodeSettings.ts';
 import {DEFAULT_CONTEXT,SUGGESTED_PROMPTS,chatHeader,toggleChip,type ContextChip} from './chat-stub.ts';
-import {applyEvent,buildContext,chipEstimate,errorText,formatCount,fromStored,newTurnId,previewText,usageLine,ECHO_LABEL,UNSTRUCTURED_LABEL,type Turn} from './chat-model.ts';
+import {applyEvent,buildContext,chipEstimate,errorText,formatCount,fromStored,newTurnId,previewText,usageLine,CITATION_LABELS,ECHO_LABEL,UNSTRUCTURED_LABEL,type Turn} from './chat-model.ts';
 
 /** Questions are not stored by the server; this session remembers them so a closed and reopened panel still reads as a conversation. */
 const questions=new Map<string,string>();
@@ -45,7 +45,7 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
    <dd>{review.sources.length===0?<span className="chat-review-none">None. Only your question is sent.</span>:review.sources.map(s=>
     <details key={s.id} className="chat-review-source"><summary>{s.label} <span className="chat-review-est">about {formatCount(s.estimatedTokens)} tokens</span></summary><pre>{review.ephemeral?s.text:previewText(s.text,2000)}</pre></details>)}</dd>
    <dt>Earlier messages</dt>
-   <dd>{review.historyPairs===0?'None yet.':`${review.historyPairs} earlier ${review.historyPairs===1?'exchange':'exchanges'} included${review.omittedPairs>0?`, ${review.omittedPairs} older left out`:''}.`}</dd>
+   <dd>{review.historyPairs===0?'None yet.':`${review.historyPairs} earlier ${review.historyPairs===1?'exchange':'exchanges'} included${review.omittedPairs>0?`, ${review.omittedPairs} older left out`:''}.`}{review.otherModePairs?` ${review.otherModePairs} earlier ${review.otherModePairs===1?'exchange':'exchanges'} left out: different mode.`:''}</dd>
   </dl>
   <SkillsReviewList review={review.skills}/>
   <details className="chat-review-source"><summary>Instructions Claude gets</summary><pre>{review.instruction}</pre></details>
@@ -121,15 +121,16 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  const stopAll=()=>void api.investigatorCall('stop',{}).catch(()=>{});
  const addText=async(id:string,text:string)=>{setAddingText(id);try{await onAddText(text);}finally{if(alive.current)setAddingText(null);}};
  const investigatorReady=inv.enabled&&inv.claude;
- const submit=async()=>{
-  const question=draft.trim();if(!question||!path||busy||pending)return;
+ /** `again` re-asks an earlier question through the same review, without touching the draft. */
+ const submit=async(again?:string)=>{
+  const question=(again??draft).trim();if(!question||!path||busy||pending)return;
   if(investigating&&investigatorReady){const id=newTurnId();setNotice('');questions.set(id,question);setTurns(t=>[...t,{id,question,status:'streaming',text:'',trail:emptyTrail()}]);setDraft('');await runInvestigation(id,question);return;}
   const id=newTurnId(),{context,selection}=buildContext(chips,getSelection());setNotice('');setBusy(true);
   try{
    const sessionContext=sessionChoices(pickedSessions);
    const fromMap=otherNotes.length?[{moduleId:'other-notes' as const,ids:otherNotes}]:[];
    const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...fromMap,...sessionContext],...(selection?{selection}:{})});
-   questions.set(id,question);setTurns(t=>[...t,{id,question,status:'review',text:''}]);setDraft('');
+   questions.set(id,question);setTurns(t=>[...t,{id,question,status:'review',text:''}]);if(again===undefined)setDraft('');
    if(review.requiresConfirmation){setPending(review);setBusy(false);return;}
    await send(review,false);
   }catch(e){setNotice(e instanceof ApiError?e.message:'This message could not be prepared. Nothing was sent.');setBusy(false);}
@@ -178,7 +179,8 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
      {!t.trail&&t.status==='streaming'&&<div className="chat-message chat-ai chat-streaming" data-from="ai" aria-busy="true"><span className="chat-who">AI</span>
       {t.text?<p className="chat-stream">{t.text}<span className="chat-caret" aria-hidden="true"/></p>:<div className="chat-thinking"><Thinking/></div>}
       <div className="chat-message-tools"><button type="button" className="chat-stop" onClick={stop}>Stop</button></div></div>}
-     {!t.trail&&t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span><ReplyMarkdown text={t.text}/>{t.message?.unstructured&&<p className="chat-unstructured">{UNSTRUCTURED_LABEL}</p>}{t.message?.echo&&<p className="chat-unstructured chat-echo">{ECHO_LABEL}</p>}<UsedSkills names={t.message?.skills}/>
+     {!t.trail&&t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span><ReplyMarkdown text={t.text}/>{t.message?.unstructured&&<p className="chat-unstructured">{UNSTRUCTURED_LABEL}</p>}{t.message?.echo&&<p className="chat-flag chat-echo">{ECHO_LABEL}</p>}
+      {t.message?.citation&&<p className="chat-flag chat-citation">{CITATION_LABELS[t.message.citation]}{t.question&&<> <button type="button" className="ghost chat-ask-again" disabled={composing} onClick={()=>void submit(t.question!)}>Ask again</button></>}</p>}<UsedSkills names={t.message?.skills}/>
       {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
       <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}>Add to note</button></div></div>}
      {!t.trail&&t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason,t.error.errorName)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button></div>}

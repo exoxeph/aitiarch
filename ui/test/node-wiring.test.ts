@@ -13,6 +13,7 @@ import {prepareRequest,type Provider,type Request} from '../server/providers/ind
 import {Store} from '../server/store.ts';
 import {VISUALIZE_QUESTION} from '../shared/diagram.ts';
 import {HARD_RULES,SKILL_HEADING} from '../shared/instruction.ts';
+import {CHAT_HARD_RULES} from '../server/chat/request.ts';
 import type {PersonaNode} from '../shared/persona.ts';
 
 // A node's persona and attached skills ride on every request that node makes, and the names of the skills that were used are
@@ -78,7 +79,7 @@ describe('chat',()=>{
  };
  it('the review already shows the skill text, and the request carries persona and skills',async()=>{
   const {provider,extras,runtime,review}=await chat(['grill-me']);
-  expect(extras.mock.calls[0][0]).toBe('chat');expect(review.instruction).toContain(SKILL_HEADING);expect(review.instruction.endsWith(HARD_RULES)).toBe(true);
+  expect(extras.mock.calls[0][0]).toBe('chat');expect(review.instruction).toContain(SKILL_HEADING);expect(review.instruction.endsWith(CHAT_HARD_RULES)).toBe(true);
   await runtime.send({reviewId:review.reviewId,confirmed:true},()=>{});
   expect(provider.requests[0].persona).toBe('grill');expect(provider.requests[0].skills?.loaded.map(l=>l.name)).toEqual(['grill-me']);await runtime.close();
  });

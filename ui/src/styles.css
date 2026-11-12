@@ -891,7 +891,8 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .persona-line { margin: 6px 0 0; color: var(--muted); font: 12px/1.45 var(--font-ui); }
 @media (prefers-reduced-motion: reduce) { .persona-seg { transition: none; } }
 /* Quiet, in words, inside the reply: plain sans type, muted, no box or stripe. */
-.chat-ai p.chat-unstructured, .chat-unstructured { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
+.chat-ai p.chat-unstructured, .chat-unstructured, .chat-ai p.chat-flag, .chat-flag { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
+.chat-flag .chat-ask-again { font: inherit; margin-left: 4px; }
 .chat-ai p.used-skills { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
 .used-skills { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); overflow-wrap: anywhere; }
 .used-skills-label { font-weight: 600; }

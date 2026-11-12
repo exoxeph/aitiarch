@@ -1,6 +1,7 @@
 import {describe,expect,it} from 'vitest';
 import {prepareRequest,type Request} from '../server/providers/index.ts';
 import {composeInstruction,HARD_RULES,SKILL_HEADING,type SkillBlock} from '../shared/instruction.ts';
+import {CHAT_FORMAT,CHAT_HARD_RULES,CHAT_INVARIANTS,chatMode} from '../server/chat/request.ts';
 import {personaInstruction} from '../shared/persona.ts';
 
 // A node's persona mode and attached skills reach the prompt through prepareRequest, and change nothing when absent.
@@ -16,11 +17,14 @@ describe('without a persona or skills',()=>{
 });
 
 describe('with a persona mode',()=>{
- it('adds the mode after the existing instruction, for Ask, Think and chat',()=>{
-  for(const extra of [{},{action:'think' as const,question:''},{chat:true}]){
+ it('adds the mode after the existing instruction, for Ask and Think',()=>{
+  for(const extra of [{},{action:'think' as const,question:''}]){
    const plain=prepareRequest({...base,...extra}).instruction,withMode=prepareRequest({...base,...extra,persona:'grill'}).instruction;
    expect(withMode.startsWith(plain)).toBe(true);expect(withMode).toContain(personaInstruction('grill'));
   }
+  // Chat builds its own prompt (server/chat/request.ts): the mode is the answer style, right after what the data is, and before the format.
+  const chat=prepareRequest({...base,chat:true,persona:'grill'}).instruction;
+  expect(chat.startsWith(CHAT_INVARIANTS)).toBe(true);expect(chat).toContain(chatMode('grill'));expect(chat.indexOf(chatMode('grill'))).toBeLessThan(chat.indexOf(CHAT_FORMAT));
  });
 });
 
@@ -34,8 +38,9 @@ describe('with attached skills',()=>{
   const packet=prepareRequest({...base,skills});
   expect(JSON.stringify(packet.data)).not.toContain('Use a table when it helps.');
  });
- it('works in chat too, and still puts the rules after the skill',()=>{
+ it('works in chat too, and still puts the rules after the skill (the chat has its own rules, always last)',()=>{
   const t=prepareRequest({...base,chat:true,skills}).instruction;
-  expect(t.indexOf(SKILL_HEADING)).toBeLessThan(t.indexOf(HARD_RULES));expect(t.endsWith(HARD_RULES)).toBe(true);
+  expect(t.indexOf(SKILL_HEADING)).toBeLessThan(t.indexOf(CHAT_HARD_RULES));expect(t.endsWith(CHAT_HARD_RULES)).toBe(true);
+  expect(prepareRequest({...base,chat:true}).instruction.endsWith(CHAT_HARD_RULES),'and also when no skill is attached').toBe(true);
  });
 });

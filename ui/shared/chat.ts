@@ -12,6 +12,24 @@ export interface ContextModule {
  preview(sources:readonly ContextSource[]):ContextPreview[];
  estimateTokens(text:string):number;
 }
+/** Where a claim's quote comes from: the note (N1), the selection (S1), threads (T1), another note (O1...) or a session (C1.../X1...). */
+export type ClaimSourceKind='note'|'selection'|'thread'|'other_note'|'session';
+/** One claim from the reply's claims block, checked against its source after whitespace and Markdown normalisation. */
+export interface ChatClaim {sourceId:string;source:ClaimSourceKind;quote:string;status:'found'|'not_found';/** Only when found. */sourceHash?:string}
+/** Why a reply cites nothing, from a fixed list the model must choose from. */
+export const NO_CITATION_REASONS=['opinion','question_back','no_context_used'] as const;
+export type NoCitationReason=typeof NO_CITATION_REASONS[number];
+/** A reply that leans on the sources but cites nothing (uncited_overlap), gave no claims block (missing_block), or an unreadable one. */
+export const CITATION_ISSUES=['uncited_overlap','missing_block','malformed_block'] as const;
+export type CitationIssue=typeof CITATION_ISSUES[number];
+const CLAIM_KINDS:readonly string[]=['note','selection','thread','other_note','session'];
+export function validClaims(v:unknown):v is ChatClaim[]{
+ return Array.isArray(v)&&v.length<=32&&v.every(c=>{
+  if(!c||typeof c!=='object'||Array.isArray(c))return false;const k=Object.keys(c).sort().join(),x=c as ChatClaim;
+  return (k==='quote,source,sourceId,status'&&x.status==='not_found'||k==='quote,source,sourceHash,sourceId,status'&&x.status==='found'&&typeof x.sourceHash==='string'&&/^[a-f0-9]{64}$/.test(x.sourceHash))
+   &&typeof x.sourceId==='string'&&/^[A-Z][0-9]{1,3}$/.test(x.sourceId)&&CLAIM_KINDS.includes(x.source)&&typeof x.quote==='string'&&x.quote.length<=240;
+ });
+}
 export interface ChatMessage {
  id:string;role:'assistant';body:string;at:string;provider:'claude';model:string|null;
  evidence:{sourceId:string;sourceHash:string;quote:string}[];
@@ -19,6 +37,14 @@ export interface ChatMessage {
  insertionBlocked:boolean;
  /** The model replied in plain prose, not as {answer, claims}: shown as an answer with no claims to check, stored with no evidence. */
  unstructured?:true;
+ /** Every claim from the reply's claims block with its source and match status. Absent in older files. */
+ claims?:ChatClaim[];
+ /** The reason the reply gave for citing nothing. */
+ noCitation?:NoCitationReason;
+ /** Set when the reply's citations need the person's attention; shown in words, with Ask again. */
+ citation?:CitationIssue;
+ /** The thinking-partner mode the reply was written in. Absent in older files. */
+ persona?:import('./persona.ts').PersonaMode;
  /** The reply recites a long run of the instructions Aitiarch sent (persona, skills, rules). Shown with a note; absent otherwise. */
  echo?:true;
  /** Names of the skills that shaped this reply. Absent in older files. Names only: never paths or skill text. */
@@ -51,6 +77,8 @@ export interface ChatReview {
  sources:(ContextPreview&{text:string})[];historyPairs:number;omittedPairs:number;
  instruction:string;history:{id:string;user:string;assistant:string}[];
  estimatedTokens:number;requiresConfirmation:boolean;
+ /** Earlier exchanges left out because they were written in a different mode, so they cannot act as examples of the wrong style. */
+ otherModePairs?:number;
  /** The node's attached skills: what loaded, what was skipped and why, what is no longer installed. Absent when none are attached. */
  skills?:import('./node-settings.ts').SkillsReview;
  ephemeral?:true;
