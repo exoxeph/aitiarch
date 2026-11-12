@@ -27,6 +27,11 @@ describe('what each mode asks of the model',()=>{
   const t=PERSONAS.grill.instruction;
   expect(t).toMatch(/one (probing )?question at a time/i);expect(t).toMatch(/until the idea holds up/i);expect(t).toMatch(/do not answer your own question/i);
  });
+ it('Grill me: exactly one question and nothing else, no summary, no options, no answering for the user',()=>{
+  const t=PERSONAS.grill.instruction;
+  expect(t).toMatch(/exactly one probing question/i);expect(t).toMatch(/weakest assumption/i);expect(t).toMatch(/and nothing else/i);
+  expect(t).toMatch(/do not summari[sz]e the note, list options, or answer the question for the user/i);expect(t).toMatch(/stop and wait/i);
+ });
  it('Explain: the answer first, then only what helps',()=>{
   const t=PERSONAS.explain.instruction;expect(t).toMatch(/answer first/i);expect(t).toMatch(/only what helps/i);
  });
@@ -42,6 +47,13 @@ describe('what holds in every mode',()=>{
   expect(PERSONA_ALWAYS).toMatch(/label (a |any )?hypothes[ie]s/i);
   expect(PERSONA_ALWAYS).toMatch(/never claim[^.]*(note|text)[^.]*(without|did not) (seeing|see)/i);
   expect(PERSONA_ALWAYS).toMatch(/length caps/i);
+ });
+ it('the always-on rules do not tell Grill me or Explain to list options (only Plan with me does)',()=>{
+  expect(PERSONA_ALWAYS).not.toMatch(/show the options/i);expect(PERSONA_ALWAYS).toMatch(/where a choice is theirs, leave it with them/i);
+  expect(PERSONAS.plan.instruction).toMatch(/options/i);expect(PERSONAS.grill.instruction).not.toMatch(/show the options/i);expect(PERSONAS.explain.instruction).not.toMatch(/options/i);
+ });
+ it('a mode says it takes priority over the default answer style, and that the required JSON format still applies',()=>{
+  for(const m of PERSONA_ORDER){const t=personaInstruction(m);expect(t).toMatch(/takes priority over the answer-style guidance above/i);expect(t).toMatch(/required JSON format still applies/i);}
  });
  it('personaInstruction names the mode and always carries the rules',()=>{
   for(const m of PERSONA_ORDER){const t=personaInstruction(m);expect(t).toContain(PERSONAS[m].label);expect(t).toContain(PERSONAS[m].instruction);expect(t).toContain(PERSONA_ALWAYS);}

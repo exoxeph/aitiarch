@@ -51,6 +51,10 @@ it('a plain-prose reply is shown as an unstructured answer with no claims, and i
  expect(text).not.toContain('event: error');expect(c.message.unstructured).toBe(true);expect(c.message.body).toContain('budget is 40 dollars');expect(c.message.evidence).toEqual([]);
  const saved=await (await fetch(base+'/api/chat?path=fixture.md',{headers:{cookie}})).json();expect(saved.messages.at(-1)).toMatchObject({unstructured:true,evidence:[]});
 },20000);
+it('a Grill me reply (the answer is one question, no claims) is an ordinary structured reply, not flagged and not an error',async()=>{
+ const {text}=await chatWith('verified-chat-reply-question'),c=done(text);
+ expect(text).not.toContain('event: error');expect(c.message.body).toBe('What makes you sure the budget is 40 dollars and not 60?');expect(c.message.evidence).toEqual([]);expect(c.message.unstructured).toBeUndefined();
+},20000);
 it.each(['verified-chat-reply-wrapped','verified-chat-reply-fenced'])('%s: the JSON is extracted and the reply is structured, not flagged',async(scenario)=>{
  const c=done((await chatWith(scenario)).text);expect(c.message.body).toBe('Yes: 40 vs 60.');expect(c.message.unstructured).toBeUndefined();
 },20000);

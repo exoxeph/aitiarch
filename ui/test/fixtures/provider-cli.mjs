@@ -86,7 +86,12 @@ if (scenario.startsWith('verified-')) {
     'verified-chat-reply-fenced':'Analysis:\n```json\n{"answer":"Yes: 40 vs 60.","claims":[]}\n```\nDone.',
     'verified-chat-reply-takeaway':'{"answer":"x","claims":[],"takeaway":"do this"}',
     'verified-chat-reply-cutoff':'{"answer":"The budget is 40 dollars and',
+    // What Grill me asks for: the answer is one question, and there are no claims.
+    'verified-chat-reply-question':'{"answer":"What makes you sure the budget is 40 dollars and not 60?","claims":[]}',
+    // Records the prompt it was given (to <record>.prompt) and answers with a valid structured reply, so Think, Ask and chat all accept it.
+    'verified-chat-record':'{"answer":"Synthetic recorded reply.","claims":[]}',
   };
+  if(scenario==='verified-chat-record')writeFileSync(record+'.prompt',input); // stdin was already read into `input` above
   if(replies[scenario]){
     const text=replies[scenario],mid=Math.floor(text.length/2),emit=event=>console.log(JSON.stringify({type:'stream_event',event}));
     emit({type:'message_start',message:{role:'assistant'}});emit({type:'content_block_start',index:0,content_block:{type:'text',text:''}});
