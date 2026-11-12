@@ -207,6 +207,14 @@ function drawingMatcher(svg:El){
  return (selector:string)=>selector.trim().split(/\s*[>+~]\s*|\s+/).filter(Boolean).every(compound);
 }
 
+const NUMBER=/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i;
+function sizeFromViewBox(viewBox:string|undefined):string{
+ const n=(viewBox??'').trim().split(/[\s,]+/);if(n.length!==4||!n.every(x=>NUMBER.test(x)))return '';
+ const w=Number(n[2]),h=Number(n[3]);
+ if(!(w>0&&h>0&&w<=100000&&h<=100000))return '';
+ return ` width="${Number(w.toFixed(3))}" height="${Number(h.toFixed(3))}"`;
+}
+
 /** The single top-level <svg> of a skill's reply, rebuilt from allowlisted parts. Refuses, in plain words, anything missing, too large or too complex. */
 export function sanitizeSvgDocument(document:string):SvgResult{
  const no=(reason:SvgIssue):SvgResult=>({ok:false,reason,text:SVG_ISSUE_TEXT[reason]});
@@ -248,7 +256,9 @@ export function sanitizeSvgDocument(document:string):SvgResult{
   const b=rebuild(svg,vars);
   const body=b.emit(svg,1); // <svg ...>...</svg> with the attributes of the page's own root
   const open=/^<svg((?: [^>]*?)?)(\/?)>/.exec(body);if(!open)return no('svg_none');
-  const rootAttrs=open[1],rest=open[2]==='/'?'':body.slice(open[0].length,body.length-'</svg>'.length);
+  const rest=open[2]==='/'?'':body.slice(open[0].length,body.length-'</svg>'.length);
+  // An image needs a size of its own. With a viewBox but neither width nor height, the app adds both from the viewBox (numbers it computes, not text it copies).
+  const rootAttrs=open[1]+(/\s(width|height)="/.test(open[1])?'':sizeFromViewBox(/\sviewBox="([^"]*)"/.exec(open[1])?.[1]));
   const out=`<svg xmlns="${NS}"${b.xlink()?` xmlns:xlink="${XLINK}"`:''}${rootAttrs}>${styleText?`<style>${escText(styleText)}</style>`:''}${paper?`<rect width="100%" height="100%" fill="${escAttr(paper)}"/>`:''}${rest}</svg>`;
   if(Buffer.byteLength(out)>SVG_LIMITS.bytes)return no('svg_too_large');
   return {ok:true,svg:out};

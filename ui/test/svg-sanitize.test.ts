@@ -91,7 +91,7 @@ describe('every kind of thing that must not survive',()=>{
  });
  it('a link is unwrapped, not dropped with its drawing',()=>{expect(ok(svg('<a href="https://evil.test"><rect id="in-link" x="1" y="1" width="2" height="2"/></a>'))).toContain('<rect id="in-link"');});
  it('writes the root namespace itself and ignores the one the page gave it',()=>{
-  const out=ok('<svg xmlns="http://evil.test/ns" xmlns:x="http://evil.test/x" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>');expect(out.startsWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1">')).toBe(true);expect(out).not.toContain('evil');
+  const out=ok('<svg xmlns="http://evil.test/ns" xmlns:x="http://evil.test/x" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>');expect(out.startsWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" width="1" height="1">')).toBe(true);expect(out).not.toContain('evil'); // width and height are added from the viewBox (see svg-sanitize-size.test.ts)
  });
  it('text is escaped on the way out, so text cannot become markup',()=>{
   const out=ok(svg('<text x="1" y="1">a &lt;/text&gt;&lt;script&gt;alert(1)&lt;/script&gt; &amp; b</text>'));expect(out).toContain('a &lt;/text&gt;&lt;script&gt;alert(1)&lt;/script&gt; &amp; b');expect(out).not.toMatch(/<script/);
