@@ -9,7 +9,7 @@ export interface ClaimChipsProps {
  /** Inserts a citation link to the note (and heading) at the cursor; false when it could not. */
  onCite:(heading:{text:string;slug:string;level:number}|null)=>boolean;
 }
-const KIND_WORDS={N:'Note',T:'Thread',S:'Selection',O:'Another note',C:'Session'} as const;
+const KIND_WORDS={N:'Note',T:'Thread',S:'Selection',O:'Another note',C:'Session',F:'File in the repo'} as const;
 export const QUOTE_MOVED='Quote not found in the current note.';
 
 /**

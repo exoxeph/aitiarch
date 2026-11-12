@@ -74,6 +74,7 @@ export interface ClaimLine {state:ChatClaim['status'];text:string;quote:string}
 /** Every claim in the reply, in words. Nothing is left out; a claim with no valid source says so and is never worded as found. */
 export function claimLines(claims:readonly ChatClaim[]|undefined):ClaimLine[]{
  return (claims??[]).map(c=>c.status==='no_valid_source'?{state:c.status,text:'Claim had no valid source',quote:c.quote}
+  :c.source==='file'?{state:c.status,text:c.status==='found'?`Found in ${c.path}`:`Quote not found in ${c.path}`,quote:c.quote}
   :{state:c.status,text:c.status==='found'?`Found in ${SOURCE_WORDS[c.source]}`:`Quote not found in ${SOURCE_WORDS[c.source]}`,quote:c.quote});
 }
 /** Shown under a reply that recites a long run of the instructions Aitiarch sent with the question. */

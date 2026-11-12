@@ -8,7 +8,7 @@ export type ChipState=ChatClaim['status'];
 export interface ClaimChip {
  key:number;state:ChipState;
  /** N note, T thread, S selection, O another note, C session; null when the source id was not a valid one. */
- kind:'N'|'T'|'S'|'O'|'C'|null;
+ kind:'N'|'T'|'S'|'O'|'C'|'F'|null;
  /** "decisions › Setup choices", "Thread", "Selection"... */
  label:string;
  /** The state in words: the chip never relies on colour or line style alone. */
@@ -35,6 +35,7 @@ function headingAt(text:string,from:number):Heading|null{
 export function claimChips(claims:readonly ChatClaim[]|undefined,note:{path:string|null;text:string}):ClaimChip[]{
  return (claims??[]).map((c,key)=>{
   if(c.status==='no_valid_source')return {key,state:c.status,kind:null,label:'Unrecognised source',stateWords:WORDS[c.status],quote:c.quote,heading:null,canShow:false,canCite:false};
+  if(c.source==='file')return {key,state:c.status,kind:'F',label:`${c.path}:${c.line}`,stateWords:WORDS[c.status],quote:c.quote,heading:null,canShow:false,canCite:false};
   const isNote=c.source==='note',range=isNote?findQuote(note.text,c.quote):null,heading=range?headingAt(note.text,range.from):null;
   const label=isNote?noteName(note.path)+(heading?' › '+heading.text:''):OTHER_LABEL[c.source];
   return {key,state:c.status,kind:KIND[c.source],label,stateWords:WORDS[c.status],quote:c.quote,heading,
