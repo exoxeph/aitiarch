@@ -148,6 +148,34 @@ function rebuild(svg:El,vars:Map<string,string>){
  return {emit,xlink:()=>usesXlink};
 }
 
+// ---- page-level selectors ----------------------------------------------------------------------------------------------------------------
+// Skills keep their palette in custom properties on selectors like `:root, [data-theme="dark"]` or `html[data-preset="x"]`. Such a selector is READ for its
+// declarations only (never written out), and counts when it matches the page the way a browser would: against the attributes of <html>, <body> and the svg root.
+interface PageSel {tag:string|null;root:boolean;attrs:{name:string;op:string|null;value:string}[]}
+const ATTR_SEL=/\[\s*([A-Za-z_:][\w:.-]*)\s*(?:([~|^$*]?)=\s*(?:"([^"]*)"|'([^']*)'|([^\]\s"']+))(?:\s+[iIsS])?)?\s*\]/y;
+function parsePageSelector(selector:string):PageSel|null{
+ const s=selector.trim();if(!s||s.length>200)return null;
+ if(/^html\s+body$/i.test(s))return {tag:'html body',root:false,attrs:[]};
+ const head=/^(html|body|svg|\*)?(:root)?/i.exec(s)!;let i=head[0].length;const attrs:PageSel['attrs']=[];
+ while(i<s.length){ATTR_SEL.lastIndex=i;const a=ATTR_SEL.exec(s);if(!a)return null;const value=a[3]??a[4]??a[5];attrs.push({name:a[1],op:value===undefined?null:a[2]??'',value:value??''});i=ATTR_SEL.lastIndex;}
+ const tag=head[1]?head[1].toLowerCase():null,root=!!head[2];
+ return tag||root||attrs.length?{tag,root,attrs}:null;
+}
+const specificity=(p:PageSel)=>(p.attrs.length+(p.root?1:0))*100+(p.tag&&p.tag!=='*'?1:0);
+const attrOf=(e:El,name:string)=>e.attrs.find(([n])=>n.toLowerCase()===name.toLowerCase())?.[1];
+function attrHolds(e:El,a:PageSel['attrs'][number]):boolean{
+ const v=attrOf(e,a.name);if(v===undefined)return false;if(a.op===null)return true;
+ switch(a.op){case '':return v===a.value;case '~':return v.split(/\s+/).includes(a.value);case '|':return v===a.value||v.startsWith(a.value+'-');
+  case '^':return !!a.value&&v.startsWith(a.value);case '$':return !!a.value&&v.endsWith(a.value);case '*':return !!a.value&&v.includes(a.value);default:return false;}
+}
+function matchesPage(p:PageSel,pg:{html?:El;body?:El;svg:El}):boolean{
+ const els:(El|undefined)[]=p.tag==='html'||(p.root&&!p.tag)?[pg.html??pg.svg]:p.tag==='body'||p.tag==='html body'?[pg.body]:p.tag==='svg'?[pg.svg]:[pg.html,pg.body,pg.svg];
+ return els.some(e=>!!e&&p.attrs.every(a=>attrHolds(e,a)));
+}
+const findEl=(e:El,name:string):El|undefined=>{for(const k of e.kids)if(typeof k!=='string'){if(k.name.toLowerCase()===name)return k;const f=findEl(k,name);if(f)return f;}return undefined;};
+interface Win {v:string;spec:number}
+const win=(m:Map<string,Win>,k:string,v:string,spec:number)=>{const cur=m.get(k);if(!cur||spec>=cur.spec)m.set(k,{v,spec});}; // equal specificity: the later rule wins
+
 /** The single top-level <svg> of a skill's reply, rebuilt from allowlisted parts. Refuses, in plain words, anything missing, too large or too complex. */
 export function sanitizeSvgDocument(document:string):SvgResult{
  const no=(reason:SvgIssue):SvgResult=>({ok:false,reason,text:SVG_ISSUE_TEXT[reason]});
@@ -156,20 +184,26 @@ export function sanitizeSvgDocument(document:string):SvgResult{
   const svg=found.reduce((best,c)=>size(c)>size(best)?c:best);
   // Page styling the drawing relied on. Custom properties come from page-level rules (:root, html, body, *, svg) and the root's own style.
   const css=allStyles(tree).join('\n');if(css.length>SVG_LIMITS.styleBytes*4)throw new Complex();
-  const rules=cssRules(css),vars=new Map<string,string>(),page:[string,string][]=[];
-  const collect=(decls:[string,string][])=>{for(const [n,v] of decls)if(n.startsWith('--'))vars.set(n,v);};
-  for(const r of rules)if(r.selector.split(',').every(s=>PAGE_SELECTOR.test(s.trim())||s.trim()==='svg'))collect(declarations(r.body));
-  collect(declarations(svg.attrs.find(([n])=>n.toLowerCase()==='style')?.[1]??''));
+  const rules=cssRules(css),pg={html:findEl(tree,'html'),body:findEl(tree,'body'),svg},vw=new Map<string,Win>(),pw=new Map<string,Win>();
   for(const r of rules){
-   const sels=r.selector.split(',').map(s=>s.trim());
-   if(sels.every(s=>PAGE_SELECTOR.test(s)))page.push(...declarations(r.body));
+   // A rule counts through the BEST page-level selector in its list that matches this page; properties come from any list that has one.
+   let vspec=-1,pspec=-1;
+   for(const s of r.selector.split(',')){const p=parsePageSelector(s);if(!p||!matchesPage(p,pg))continue;const sp=specificity(p);vspec=Math.max(vspec,sp);if(p.tag!=='svg')pspec=Math.max(pspec,sp);}
+   if(vspec<0)continue;
+   for(const [n,v] of declarations(r.body)){
+    if(n.startsWith('--'))win(vw,n,v,vspec);
+    else if(pspec>=0&&(n==='color'||n==='font-family'))win(pw,n,v,pspec);
+    else if(pspec>=0&&(n==='background'||n==='background-color'))win(pw,'paper',v,pspec);
+   }
   }
-  const inherit=keepDecls(page.filter(([n])=>n==='color'||n==='font-family'),vars).sort((a,b)=>a[0]<b[0]?-1:1);
+  for(const [n,v] of declarations(svg.attrs.find(([k])=>k.toLowerCase()==='style')?.[1]??''))if(n.startsWith('--'))win(vw,n,v,100000); // the root's own style attribute beats any rule
+  const vars=new Map([...vw].map(([k,w])=>[k,w.v] as [string,string]));
+  const inherit=keepDecls((['color','font-family'] as const).flatMap(n=>pw.has(n)?[[n,pw.get(n)!.v] as [string,string]]:[]),vars).sort((a,b)=>a[0]<b[0]?-1:1);
   let paper:string|null=null;
-  for(const [n,v] of page)if(n==='background'||n==='background-color'){const r=resolveVars(v,vars);if(r!==null&&safeValue(r)&&COLOR.test(r.trim()))paper=r.trim();}
+  const bg=pw.get('paper');if(bg){const r=resolveVars(bg.v,vars);if(r!==null&&safeValue(r)&&COLOR.test(r.trim()))paper=r.trim();}
   const styleRules:string[]=inherit.length?[`svg{${declText(inherit)}}`]:[];
   for(const r of rules){
-   const sels=r.selector.split(',').map(s=>s.trim()).filter(s=>!PAGE_SELECTOR.test(s)&&safeSelector(s));if(!sels.length)continue;
+   const sels=r.selector.split(',').map(s=>s.trim()).filter(s=>{const p=parsePageSelector(s);return (!p||p.tag==='svg')&&safeSelector(s);});if(!sels.length)continue; // page-level selectors were read above and are never written out
    const d=keepDecls(declarations(r.body),vars);if(d.length)styleRules.push(`${sels.join(',')}{${declText(d)}}`);
   }
   const styleText=styleRules.join('\n');if(styleText.length>SVG_LIMITS.styleBytes)throw new Complex();
