@@ -14,7 +14,6 @@ import { chatInstruction } from '../chat/request.ts';
 import { parseAnswerJson } from './answer-json.ts';
 import {ClaudeChatStream} from './chat-stream.ts';
 import {isolationPasses} from './claude-events.ts';
-import {secretKinds} from '../chat/secrets.ts';
 import {composeInstruction,type SkillBlock} from '../../shared/instruction.ts';
 import {skillDiagramInstruction} from '../../shared/skill-diagram.ts';
 import {personaInstruction,type PersonaMode} from '../../shared/persona.ts';
@@ -59,9 +58,6 @@ export class ProviderError extends Error {
 export interface Result {
   id: string; provider: ProviderName; model: string | null; answer: string;
   claims: unknown[]; diagram?:unknown; usage: { inputTokens: number; outputTokens: number; cachedTokens?:number } | null;
-  insertionBlocked?:boolean;
-  /** Chat only: the model's reply was plain prose, not {answer, claims}. It is shown as an answer with no claims to check. */
-  unstructured?:true;
   /** Chat only: `answer` is the model's raw reply (Markdown and its claims block), read by the chat's output gate. */
   rawReply?:true;
 }
@@ -169,7 +165,7 @@ export function validateProviderResponse(response:unknown) {
 }
 function parseResult(provider: ProviderName, id: string, stdout: string, stream = false, chat = false): Result {
   try {
-    let response: unknown, model: string | null = null, usage: Result['usage'] = null, unstructured = false;
+    let response: unknown, model: string | null = null, usage: Result['usage'] = null;
     if (provider === 'claude') {
       const events = stream ? stdout.trim().split(/\r?\n/).map(line => JSON.parse(line)) : [];
       // Chat uses the tolerant normalizer (only harmful events are fatal); Think and Ask keep the canary's stricter check for now.
@@ -198,11 +194,10 @@ function parseResult(provider: ProviderName, id: string, stdout: string, stream 
       if (messages !== 1 || completed !== 1) throw new Error();
     }
     if(chat&&(!response||typeof response!=='object'||Object.keys(response).sort().join()!=='answer,claims'))throw new Error('the answer did not have exactly answer and claims');
-    const blocked=chat&&typeof (response as any)?.answer==='string'&&secretKinds((response as any).answer).length>0;
     // A chat reply is raw Markdown with its claims block: redacting it here would be redacting before parsing (the bug fixed for JSON). The
     // chat's output gate redacts the body and each claim after it has read them.
     const safe = chat ? (validateResponseSchema(response), response as {answer:string;claims:unknown[];diagram?:unknown}) : validateProviderResponse(response);
-    return { id, provider, model, answer: safe.answer, claims: safe.claims, ...(safe.diagram===undefined?{}:{diagram:safe.diagram}), usage,...(chat?{insertionBlocked:blocked,rawReply:true as const}:{}),...(unstructured?{unstructured:true as const}:{}) };
+    return { id, provider, model, answer: safe.answer, claims: safe.claims, ...(safe.diagram===undefined?{}:{diagram:safe.diagram}), usage,...(chat?{rawReply:true as const}:{}) };
   } catch(error) {
     const failure=new ProviderError('invalid_response');
     if(error instanceof ProductValidationError)failure.validation=error.record;

@@ -1,7 +1,7 @@
 import {describe,expect,it} from 'vitest';
-import {DEFAULT_CONTEXT,STUB_REPLY,SUGGESTED_PROMPTS,chatHeader,noteTitle,toggleChip} from '../src/chat/chat-stub.ts';
+import {DEFAULT_CONTEXT,SUGGESTED_PROMPTS,chatHeader,noteTitle,toggleChip} from '../src/chat/chat-stub.ts';
 
-// The chat panel is a shell in this milestone: header, context chips, suggestions and a stub reply. No provider is ever called.
+// The chat panel's static data: header, context chips and suggestions. No provider is ever called.
 describe('chat shell data',()=>{
  it('names the note from its path, without folders or the .md extension',()=>{
   expect(noteTitle('notes/On Bloom.md')).toBe('On Bloom');expect(noteTitle('decisions.MD')).toBe('decisions');expect(noteTitle(null)).toBe('no note open');
@@ -15,7 +15,7 @@ describe('chat shell data',()=>{
   expect(next.find(c=>c.id==='selection')?.on).toBe(true);expect(next.filter(c=>c.id!=='selection')).toEqual(DEFAULT_CONTEXT.filter(c=>c.id!=='selection'));
   expect(DEFAULT_CONTEXT.find(c=>c.id==='selection')?.on).toBe(false);
  });
- it('offers exactly three distinct suggested prompts, and the stub reply says nothing was sent',()=>{
-  expect(SUGGESTED_PROMPTS).toHaveLength(3);expect(new Set(SUGGESTED_PROMPTS).size).toBe(3);expect(STUB_REPLY).toMatch(/nothing was sent/i);
+ it('offers exactly three distinct suggested prompts',()=>{
+  expect(SUGGESTED_PROMPTS).toHaveLength(3);expect(new Set(SUGGESTED_PROMPTS).size).toBe(3);
  });
 });
