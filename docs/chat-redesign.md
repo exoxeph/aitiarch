@@ -183,6 +183,18 @@ A violation is never hidden, rewritten or retried:
    - `check/persona.mjs` gains a violation scenario.
 6. **Delete.** Remove the items in (g) and update the tests.
 
+   Done in three commits. Most of (g) had already gone in stages 2 to 4 (the strict stream parser, the second canary pass, `answerPrefix` in the runtime, the chat suffix in `prepareRequest()`). What stage 6 removed:
+   - `STUB_REPLY` in `chat-stub.ts` (no caller).
+   - `Result.unstructured` (never set) and `Result.insertionBlocked` (the runtime already computes it from the answer).
+   - The fenced and wrapped JSON extraction in `parseChatReply()`, with its streaming counterparts in `gate.ts` (the fence-start allowance and the mid-prose `{"answer"` hold-back). Such replies are now shown as written.
+
+   Kept on purpose:
+   - An exact `{answer, claims}` reply is still accepted (and streams as its answer), and JSON-shaped text that is wrong or cut off still fails closed.
+   - The runtime's exact-key check, which `chat-backend.test.ts` pins as the "owned fields are never accepted" guard.
+   - `ChatMessage.unstructured`, its label and the store validators, so old chat files still load.
+   - The hand-kept event sets in `failure-metrics.ts`, which Think and Ask still use.
+   - `ClaudeChatStream.unknown`, `mismatch` and `finalText`, which only tests read.
+
 Each stage runs its own tests plus the neighbouring chat tests, `tsc` for both configs, `check/chat-send.mjs` and `check/persona.mjs`.
 
 ## j. Risks, and what only a real model call can show
