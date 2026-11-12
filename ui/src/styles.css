@@ -983,6 +983,13 @@ button.claim-chip:focus-visible, .claim-action:focus-visible { outline: 2px soli
 .chat-chip-solo { border-radius: 999px; }
 .chat-chip[aria-disabled="true"] { color: var(--muted); border-style: dashed; }
 .chat-investigating { margin: 0 16px 8px; color: var(--muted); font-size: var(--text-meta); line-height: 1.45; }
+/* Which conversation a message goes to: the one-off chat or a named Claude Code session the app keeps. */
+.chat-sessions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 16px 8px; font: var(--text-meta)/1.4 var(--font-ui); color: var(--muted); }
+.chat-sessions-pick { display: inline-flex; align-items: center; gap: 6px; }
+.chat-sessions-pick select { max-width: 22ch; font: inherit; color: var(--ink-text); }
+.chat-sessions-name { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.chat-sessions-name input { min-width: 0; width: 22ch; font: inherit; }
+.chat-sessions-note { flex-basis: 100%; margin: 0; }
 .trail { display: flex; flex-direction: column; gap: 8px; }
 .trail-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; }
 .trail-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--muted); font-size: var(--text-meta); cursor: pointer; }

@@ -16,6 +16,7 @@ import {useNodeSettings} from '../skills/useNodeSettings.ts';
 import {DEFAULT_CONTEXT,SUGGESTED_PROMPTS,chatHeader,toggleChip,type ContextChip} from './chat-stub.ts';
 import {applyEvent,buildContext,chipEstimate,errorText,formatCount,fromStored,newTurnId,previewText,usageLine,ECHO_LABEL,UNSTRUCTURED_LABEL,type Turn} from './chat-model.ts';
 import {ReplyNotes} from './ReplyNotes.tsx';
+import {ChatSessions} from './ChatSessions.tsx';
 
 /** Questions are not stored by the server; this session remembers them so a closed and reopened panel still reads as a conversation. */
 const questions=new Map<string,string>();
@@ -47,8 +48,9 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
    <dt>Context</dt>
    <dd>{review.sources.length===0?<span className="chat-review-none">None. Only your question is sent.</span>:review.sources.map(s=>
     <details key={s.id} className="chat-review-source"><summary>{s.label} <span className="chat-review-est">about {formatCount(s.estimatedTokens)} tokens</span></summary><pre>{review.ephemeral?s.text:previewText(s.text,2000)}</pre></details>)}</dd>
+   {review.excluded&&review.excluded.length>0&&<><dt>Left out</dt><dd>{review.excluded.join(', ')}: a conversation never gets the notebook file, hidden files, Aitiarch's own files or secrets.</dd></>}
    <dt>Earlier messages</dt>
-   <dd>{review.historyPairs===0?'None yet.':`${review.historyPairs} earlier ${review.historyPairs===1?'exchange':'exchanges'} included${review.omittedPairs>0?`, ${review.omittedPairs} older left out`:''}.`}{review.otherModePairs?` ${review.otherModePairs} earlier ${review.otherModePairs===1?'exchange':'exchanges'} left out: different mode.`:''}</dd>
+   <dd>{review.session?`Kept in the conversation “${review.session.label}” (${review.session.turns} so far), not pasted again.`:review.historyPairs===0?'None yet.':`${review.historyPairs} earlier ${review.historyPairs===1?'exchange':'exchanges'} included${review.omittedPairs>0?`, ${review.omittedPairs} older left out`:''}.`}{review.otherModePairs?` ${review.otherModePairs} earlier ${review.otherModePairs===1?'exchange':'exchanges'} left out: different mode.`:''}</dd>
   </dl>
   <SkillsReviewList review={review.skills}/>
   <details className="chat-review-source"><summary>Instructions Claude gets</summary><pre>{review.instruction}</pre></details>
@@ -68,7 +70,8 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  const input=useRef<HTMLTextAreaElement>(null),log=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),alive=useRef(true);
  const [inv,setInv]=useState({enabled:false,claude:false,persistence:false}),[investigating,setInvestigating]=useState(false),[addingText,setAddingText]=useState<string|null>(null);
  const [pickedSessions,setPickedSessions]=useState<PickedSession[]>([]);
- useEffect(()=>{setPickedSessions([]);},[path]);
+ const [conversation,setConversation]=useState(''); // a harness chat session id; '' is the one-off chat
+ useEffect(()=>{setPickedSessions([]);setConversation('');},[path]);
  const chatId=useRef(crypto.randomUUID()); // "this chat" for permissions lasts as long as this panel stays open
  useEffect(()=>{let off=false;api.investigator().then((s:any)=>{if(!off)setInv({enabled:!!s.policy?.enabled,claude:!!s.claudeConfigured,persistence:!!s.persistence});}).catch(()=>{});return()=>{off=true;};},[settingsVersion]);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;abort.current?.abort();};},[]);
@@ -132,7 +135,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
   try{
    const sessionContext=sessionChoices(pickedSessions);
    const fromMap=otherNotes.length?[{moduleId:'other-notes' as const,ids:otherNotes}]:[];
-   const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...fromMap,...sessionContext],...(selection?{selection}:{})});
+   const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...fromMap,...sessionContext],...(selection?{selection}:{}),...(conversation?{session:conversation}:{})});
    questions.set(id,question);setTurns(t=>[...t,{id,question,status:'review',text:''}]);if(again===undefined)setDraft('');
    if(review.requiresConfirmation){setPending(review);setBusy(false);return;}
    await send(review,false);
@@ -168,6 +171,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
    <span className="chat-context-total">About {formatCount(total)} tokens of context</span>
    {path&&<SessionPicker key={path} path={path} selected={pickedSessions} onChange={setPickedSessions} disabled={composing||investigating} budget={usage?.tokenBudget??50000}/>}
   </div>
+  {path&&!investigating&&<ChatSessions path={path} value={conversation} onChange={setConversation} disabled={composing} refresh={turns.filter(t=>t.status==='complete').length}/>}
   {investigating&&investigatorReady&&<p className="chat-investigating">Investigating: agents may read files in your registered folders, read-only. Nothing is written.</p>}
   {peek&&<div className="chat-peek" role="region" aria-label={`Preview of ${chips.find(c=>c.id===peek)?.label}`}><pre>{previewText(peekText[peek],1200)}</pre></div>}
   <div className="chat-log" role="log" aria-label="Conversation" ref={log}>
