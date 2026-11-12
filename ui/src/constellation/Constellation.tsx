@@ -25,7 +25,7 @@ export default function Constellation({active,onClose,onOpen,onUseAsContext,subs
  const reduced=useRef(typeof matchMedia!=='undefined'&&matchMedia('(prefers-reduced-motion: reduce)').matches);
  const positions=useRef<Record<string,[number,number]>>({}),hovered=useRef<string|null>(null),lasso=useRef<{x:number;y:number}[]|null>(null);
  const drag=useRef<{path:string;sx:number;sy:number;moved:boolean;shift:boolean}|null>(null),pan=useRef<{sx:number;sy:number;cam:Camera}|null>(null);
- const dirty=useRef(true),frames=useRef<number[]>([]),fitted=useRef(false),privacyHint=useRef(false);
+ const dirty=useRef(true),frames=useRef<number[]>([]),fitted=useRef(false),privacyHint=useRef(false),viewKey=useRef<string|null>(null),refit=useRef(false);
 
  // ---- data: loaded on open and again (briefly after) whenever a note or the tree changes on disk
  const load=useCallback(()=>api.graph().then(g=>{positions.current={...g.positions,...positions.current};setGraph(g);setFailed('');}).catch(e=>setFailed(e instanceof ApiError?e.message:'The constellation could not be loaded.')),[]);
@@ -57,8 +57,10 @@ export default function Constellation({active,onClose,onOpen,onUseAsContext,subs
    const focus=ui.current.chosen&&byPath.get(ui.current.chosen);
    cam.current=focus?{x:focus.x??0,y:focus.y??0,k:1.25}:fit(list.map(t=>({x:t.x??0,y:t.y??0})),size.current);fitted.current=true;
   }
+  // A different view (Local/Global, a filter): frame all of it once the layout has settled.
+  const key=`${mode}|${folder}|${stateF}`;if(key!==viewKey.current){if(viewKey.current!==null)refit.current=true;viewKey.current=key;}
   dirty.current=true;
- },[shown,clustered]);
+ },[shown,clustered]); // eslint-disable-line react-hooks/exhaustive-deps
 
  // ---- the frame loop: settle the layout, glide the camera, drift the far stars; draw only what changed
  useEffect(()=>{
@@ -67,6 +69,8 @@ export default function Constellation({active,onClose,onOpen,onUseAsContext,subs
    raf=requestAnimationFrame(frame);
    const s=sim.current,motion=!reduced.current;
    if(s&&s.alpha()>s.alphaMin()&&motion){s.tick();dirty.current=true;}
+   if(refit.current&&(!s||s.alpha()<=s.alphaMin()+0.002||!motion)){refit.current=false;const to=fit(stars.current.map(t=>({x:t.x??0,y:t.y??0})),size.current);
+    if(motion)fly.current={from:{...cam.current},to,start:now};else cam.current=to;dirty.current=true;}
    const f=fly.current;if(f){const t=(now-f.start)/FLY_MS;cam.current=flight(f.from,f.to,t);if(t>=1)fly.current=null;dirty.current=true;}
    if(motion)dirty.current=true; // the far layers drift
    const c=canvas.current,ctx=c?.getContext('2d');

@@ -539,8 +539,9 @@ export default function App() {
         <Tabs tabs={tabs} active={active} status={status} onSelect={setActive} onClose={(p) => void closeTab(p)} />
         <span className="spacer" />
         <select className="theme-toggle" aria-label="Theme" value={theme} onChange={e=>chooseTheme(e.target.value as typeof theme)}><option value="ember">Ember</option><option value="moss">Moss</option></select>
-        <button className="ghost" onClick={() => setOverlay("palette")} title="Command palette (Ctrl+K; Ctrl+P)">
-          Commands
+        <button className="ghost commands-btn" aria-label="Commands" onClick={() => setOverlay("palette")} title="Command palette (Ctrl+K; Ctrl+P)">
+          <span className="commands-label">Commands</span>
+          <svg className="commands-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M5.5 5.5v5M10.5 5.5v5M5.5 5.5h5M5.5 10.5h5M5.5 5.5a2 2 0 1 1-2-2 2 2 0 0 1 2 2Zm5 0a2 2 0 1 1 2-2 2 2 0 0 1-2 2Zm-5 5a2 2 0 1 0-2 2 2 2 0 0 0 2-2Zm5 0a2 2 0 1 0 2 2 2 2 0 0 0-2-2Z"/></svg>
         </button>
         {backlinks.length > 0 && <button type="button" className="ghost backlinks-pill" aria-label={`${backlinks.length} ${backlinks.length === 1 ? "note links" : "notes link"} here. Show backlinks`} title="Backlinks" onClick={() => setNoteMenuOpen(true)}>↩ {backlinks.length}</button>}
         <NoteMenu open={noteMenuOpen} setOpen={setNoteMenuOpen} count={orphanCount} buttonRef={noteMenuRef}>
@@ -561,9 +562,9 @@ export default function App() {
             <div className="attach-actions"><button onClick={() => void saveAttach()}>Save re-attachment</button><button onClick={() => setAttachDraft(null)}>Cancel</button></div>
           </section>}
         </NoteMenu>
-        <button ref={mapButtonRef} type="button" className="map-pill" aria-expanded={mapOpen} onClick={() => setMapOpen(v => !v)} title="Your notes as a map of linked stars">
+        <button ref={mapButtonRef} type="button" className="map-pill" aria-label="Constellation" aria-expanded={mapOpen} onClick={() => setMapOpen(v => !v)} title="Your notes as a map of linked stars">
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"><circle cx="3.5" cy="11.5" r="1.6" fill="currentColor"/><circle cx="8" cy="4" r="2" fill="currentColor"/><circle cx="12.8" cy="10" r="1.3" fill="currentColor"/><path d="M4.6 10.2 7 5.6M9.6 5.2l2.4 3.6M5.1 11.4l6.3-1.2"/></svg>
-          Constellation
+          <span className="map-pill-label">Constellation</span>
         </button>
         <button ref={chatPillRef} type="button" className="chat-pill" aria-expanded={chatOpen} aria-controls="chat-panel" onClick={() => setChatOpen(v => !v)}><span className="chat-pill-dot" aria-hidden="true" />Chat</button>
       </header>

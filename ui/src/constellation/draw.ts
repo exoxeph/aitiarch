@@ -44,12 +44,14 @@ export function draw(ctx:CanvasRenderingContext2D,p:Palette,sc:Scene){
  });
  const at=new Map(sc.stars.map(s=>[s.path,toScreen(cam,size,{x:s.x??0,y:s.y??0})]));
  // Folder nebulae: a soft glow around each folder's stars, its name faint at the top.
+ // Many overlapping glows would wash the sky out, so each is fainter when there are many stars.
+ const glow=0.075*Math.min(1,Math.sqrt(60/Math.max(60,sc.stars.length)));
  const groups=new Map<string,Star[]>();for(const s of sc.stars){const g=groups.get(s.folder);if(g)g.push(s);else groups.set(s.folder,[s]);}
  for(const [folder,list] of groups){
   if(list.length<2)continue;
   let cx=0,cy=0;for(const s of list){const q=at.get(s.path)!;cx+=q.x;cy+=q.y;}cx/=list.length;cy/=list.length;
   let r=0;for(const s of list){const q=at.get(s.path)!;r=Math.max(r,Math.hypot(q.x-cx,q.y-cy));}r+=50*cam.k;
-  const g=ctx.createRadialGradient(cx,cy,0,cx,cy,r);g.addColorStop(0,alpha(p.accent,0.075));g.addColorStop(1,alpha(p.accent,0));
+  const g=ctx.createRadialGradient(cx,cy,0,cx,cy,r);g.addColorStop(0,alpha(p.accent,glow));g.addColorStop(1,alpha(p.accent,0));
   ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
   if(folder&&cam.k<2.2){ctx.font=`500 11px ${p.font}`;ctx.textAlign='center';ctx.fillStyle=alpha(p.muted,0.75);ctx.fillText(folder,cx,cy-r+16);}
  }
@@ -80,7 +82,8 @@ export function draw(ctx:CanvasRenderingContext2D,p:Palette,sc:Scene){
   if(sc.selected.has(s.path)||sc.path.has(s.path)){ctx.strokeStyle=p.focus;ctx.lineWidth=2;ctx.beginPath();ctx.arc(q.x,q.y,r+7,0,Math.PI*2);ctx.stroke();}
   const n=sc.order?.get(s.path);
   if(n!==undefined){ctx.font=`600 10px ${p.font}`;ctx.textAlign='center';ctx.fillStyle=p.accentHi;ctx.fillText(String(n),q.x,q.y-r-9);}
-  const label=s.path===sc.hovered||s.path===sc.center||sc.selected.has(s.path)||cam.k>=1.6||(cam.k>=1.05&&s.r>=7);
+  // Names: always in a small map, on a found path, for the star you are on, hovering or have selected; in a big map, once zoomed in.
+  const label=sc.stars.length<=60||sc.path.has(s.path)||s.path===sc.hovered||s.path===sc.center||sc.selected.has(s.path)||cam.k>=1.6||(cam.k>=1.05&&s.r>=7);
   if(label){
    ctx.font=`${s.path===sc.hovered||s.path===sc.center?600:500} 12px ${p.font}`;ctx.textAlign='left';
    ctx.lineWidth=3;ctx.strokeStyle=alpha(p.canvas,0.85);ctx.strokeText(s.title,q.x+r+6,q.y+4);
