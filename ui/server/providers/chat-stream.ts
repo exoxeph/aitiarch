@@ -14,7 +14,7 @@ export class ClaudeChatStream {
  private event(e:any){
   // The message names the unexpected event by its type words only (never its contents), so it is safe to show.
   const word=(v:unknown)=>typeof v==='string'&&/^[a-z_]{1,40}$/.test(v)?v:'?';
-  const reject=()=>{throw new Error('Invalid chat stream: unexpected '+(e&&typeof e==='object'?[word(e.type),e.subtype!==undefined?word(e.subtype):null,e.type==='stream_event'&&e.event?word(e.event.type):null].filter(Boolean).join('/'):'event'));};
+  const reject=()=>{throw new Error('Invalid chat stream: unexpected '+(e&&typeof e==='object'?[word(e.type),e.subtype!==undefined?word(e.subtype):null,e.type==='stream_event'&&e.event?word(e.event.type):null,e.type==='stream_event'&&(e.event?.delta?.type??e.event?.content_block?.type)!==undefined?word(e.event.delta?.type??e.event.content_block?.type):null].filter(Boolean).join('/'):'event'));};
   if(!e||typeof e!=='object'||this.ended)reject();
   const check=inspectClaudeCanary([e],[]);
   if(check.toolAttempts||check.hookEvents||check.unknownEvents)reject();
@@ -42,8 +42,12 @@ export class ClaudeChatStream {
     if(this.block===null||event.index!==this.block)reject();
     const d=event.delta;
     if(this.kind==='thinking'){
-     const ok=d?.type==='thinking_delta'?typeof d.thinking==='string'&&Object.keys(d).sort().join()==='thinking,type':d?.type==='signature_delta'?typeof d.signature==='string'&&Object.keys(d).sort().join()==='signature,type':false;
-     if(!ok)reject();this.thinkingChars+=(d.thinking??d.signature).length;if(this.thinkingChars>200000)reject();break; // never emitted, never part of the answer
+     // A thinking delta is exactly its text. A signature delta may carry other plain fields (the investigator, which reads the same real
+     // stream, accepts any signature delta); nested values, odd key names and large payloads are still refused.
+     let size=0;
+     const plain=(x:any)=>x&&typeof x==='object'&&Object.entries(x).every(([k,v])=>k==='type'||(/^[a-z_]{1,30}$/.test(k)&&(typeof v==='string'?(size+=v.length,true):typeof v==='number'||typeof v==='boolean'||v===null)));
+     const ok=d?.type==='thinking_delta'?typeof d.thinking==='string'&&Object.keys(d).sort().join()==='thinking,type'&&(size=d.thinking.length,true):d?.type==='signature_delta'?typeof d.signature==='string'&&plain(d):false;
+     if(!ok)reject();this.thinkingChars+=size;if(this.thinkingChars>200000)reject();break; // never emitted, never part of the answer
     }
     if(d?.type!=='text_delta'||typeof d.text!=='string'||Object.keys(d).sort().join()!=='text,type')reject();
     this.text+=d.text;if(this.text.length>100000)reject();this.emit(d.text);break;

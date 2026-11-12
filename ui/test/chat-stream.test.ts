@@ -39,6 +39,23 @@ it.each([
  ['a status event with a payload',{type:'system',subtype:'status',status:'requesting',payload:'x',...ids}],
  ['a status that is not a plain word',{type:'system',subtype:'status',status:'Requesting now!',...ids}],
 ])('still rejects %s',(_n,status)=>{expect(()=>new ClaudeChatStream(()=>{}).push(Buffer.from(realStream({status})))).toThrow();});
+// The investigator already reads the same real stream and accepts any signature_delta. A signature delta may carry more than its signature:
+// extra plain fields are tolerated (they are never shown), but nested values and oversized ones are not.
+it('tolerates extra plain fields on a signature delta, as the real CLI evidently sends',()=>{
+ const texts:string[]=[],s=new ClaudeChatStream(t=>texts.push(t));
+ s.push(Buffer.from(realStream({thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'sig',encoding:'base64',length:3}}})));s.finish();
+ expect(texts).toEqual(['{"answer":"Hi","claims":[]}']);
+});
+it('names the inner delta or block type of an unexpected event, so a mismatch says exactly what it was',()=>{
+ const over={thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'x',extra:1}}};
+ expect(()=>{const s=new ClaudeChatStream(()=>{});s.push(Buffer.from(realStream(over)));s.finish();}).toThrow(/stream_event\/content_block_delta\/thinking_delta/);
+});
+it.each([
+ ['a nested value in a signature delta',{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'sig',more:{a:1}}}],
+ ['an array in a signature delta',{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'sig',more:[1]}}],
+ ['an oversized signature delta',{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'x'.repeat(250000)}}],
+ ['a signature delta key that is not a plain name',{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'sig','C:\\secret':'x'}}],
+])('still rejects %s',(_n,thinkingDelta)=>{expect(()=>{const s=new ClaudeChatStream(()=>{});s.push(Buffer.from(realStream({thinkingDelta})));s.finish();}).toThrow();});
 it.each([
  ['a thinking block that starts with text',{thinkingStart:{type:'content_block_start',index:0,content_block:{type:'thinking',thinking:'already',signature:''}}}],
  ['a thinking block with an extra field',{thinkingStart:{type:'content_block_start',index:0,content_block:{type:'thinking',thinking:'',signature:'',extra:1}}}],
