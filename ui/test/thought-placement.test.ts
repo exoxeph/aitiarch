@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {bringToFront,dimFor,normalizeOrder,overlapDepths,placeThoughts} from '../shared/thought-placement.ts';
+import {bringToFront,dimFor,normalizeOrder,overlapDepths,overlappingIds,placeThoughts} from '../shared/thought-placement.ts';
 import {layoutThoughts} from '../shared/thoughts.ts';
 
 // Where AI thought blobs go in the margin. Pure numbers, no browser.
@@ -91,7 +91,11 @@ describe('layers: the blobs behind get linearly darker',()=>{
   const d=overlapDepths([rect('a',0,0),rect('b',20,20),rect('c',600,600)],['a','b','c']);expect(d.get('a')).toBe(1);expect(d.get('c')).toBe(0);
  });
  it('darkening is linear, never pure black, and never changes the front blob',()=>{
-  expect(dimFor(0)).toBe(1);expect(dimFor(1)).toBeCloseTo(0.84);expect(dimFor(2)).toBeCloseTo(0.68);expect(dimFor(3)).toBeCloseTo(0.52);expect(dimFor(50)).toBeGreaterThanOrEqual(0.4);
+  expect(dimFor(0)).toBe(1);expect(dimFor(1)).toBeCloseTo(0.78);expect(dimFor(2)).toBeCloseTo(0.56);expect(dimFor(3)).toBeCloseTo(0.35);expect(dimFor(50)).toBeGreaterThanOrEqual(0.35);
+ });
+ it('knows which blobs are part of a stack at all, in front or behind, so only those are drawn as cards',()=>{
+  const ids=overlappingIds([rect('a',0,0),rect('b',20,20),rect('c',600,600),rect('e',0,-100)]);
+  expect([...ids].sort()).toEqual(['a','b']); // c is alone; e only touches the top edge of a
  });
  it('choosing a blob brings it to the front; the order of the others is kept',()=>{
   expect(bringToFront(['a','b','c'],'a')).toEqual(['b','c','a']);expect(bringToFront(['a','b'],'z')).toEqual(['a','b','z']);expect(bringToFront(['a','b','c'],'c')).toEqual(['a','b','c']);

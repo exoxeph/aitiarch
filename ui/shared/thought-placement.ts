@@ -66,8 +66,14 @@ export function overlapDepths(boxes:readonly Box[],order:readonly string[]):Map<
  for(const a of boxes)out.set(a.id,boxes.filter(b=>b.id!==a.id&&rank(b.id)>rank(a.id)&&cover(a,b)).length);
  return out;
 }
-/** Brightness of a blob that has `depth` blobs over it: a straight line down by 16% a step, never darker than 40%. */
-export const dimFor=(depth:number)=>Math.max(0.4,1-0.16*depth);
+/** Ids of the blobs that overlap at least one other, in front or behind. Only these are drawn as cards with an edge and a shadow. */
+export function overlappingIds(boxes:readonly Box[]):Set<string>{
+ const out=new Set<string>();
+ for(const a of boxes)if(boxes.some(b=>b.id!==a.id&&cover(a,b)))out.add(a.id);
+ return out;
+}
+/** Brightness of a blob that has `depth` blobs over it: a straight line down by 22% a step, never darker than 35%. */
+export const dimFor=(depth:number)=>Math.max(0.35,1-0.22*depth);
 export const bringToFront=(order:readonly string[],id:string)=>[...order.filter(x=>x!==id),id];
 /** Keep the saved order for blobs that still exist. Blobs nobody has chosen yet sit behind the ones that were chosen. */
 export function normalizeOrder(saved:readonly string[],ids:readonly string[]):string[]{

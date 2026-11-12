@@ -5,7 +5,7 @@ import {DiagramReveal,Streamed,Thinking} from './streaming.tsx';
 import {useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import type {InkItem} from '../../shared/ink.ts';
 import {UsedSkills} from '../skills/PersonaSwitch.tsx';
-import {bringToFront,dimFor,normalizeOrder,overlapDepths} from '../../shared/thought-placement.ts';
+import {bringToFront,dimFor,normalizeOrder,overlapDepths,overlappingIds} from '../../shared/thought-placement.ts';
 import type {KeyboardEvent as ReactKeyboardEvent,PointerEvent as ReactPointerEvent} from 'react';
 import {blobBox,connectorD,connectorVisible,thoughtText,type ThoughtSide} from '../../shared/thoughts.ts';
 export interface PlacedMargin {item:InkItem;top:number;target:number;side:ThoughtSide;height:number;end?:{x:number;lineBottom:number;lineMid?:number;rightX?:number;leftX?:number};
@@ -32,7 +32,7 @@ export function MarginRail({placed,renderDraft,blobs}:{placed:PlacedMargin[];ren
   setGeometry(g=>g&&g.width===next.width&&Math.abs(g.left-next.left)<.5&&Math.abs(g.right-next.right)<.5?g:next);
  },[placed]);
  useLayoutEffect(()=>{
-  const measure=()=>{let changed=false;rail.current?.querySelectorAll<HTMLElement>('.thought-blob').forEach(el=>{const h=el.getBoundingClientRect().height;if(sizes.current.get(el.dataset.inkId!)!==h){sizes.current.set(el.dataset.inkId!,h);changed=true;}});if(changed)rail.current?.dispatchEvent(new CustomEvent('thought-size',{bubbles:true}));};
+  const measure=()=>{let changed=false;rail.current?.querySelectorAll<HTMLElement>('.thought-blob').forEach(el=>{el.style.setProperty('--gutter',(el.offsetWidth-el.clientWidth)+'px');const h=el.getBoundingClientRect().height;if(sizes.current.get(el.dataset.inkId!)!==h){sizes.current.set(el.dataset.inkId!,h);changed=true;}});if(changed)rail.current?.dispatchEvent(new CustomEvent('thought-size',{bubbles:true}));};
   rail.current?.dispatchEvent(new CustomEvent('thought-layout',{bubbles:true}));
   const observer=new ResizeObserver(measure);rail.current?.querySelectorAll('.thought-blob').forEach(el=>observer.observe(el));measure();return()=>observer.disconnect();
  },[placed]);
@@ -51,7 +51,8 @@ export function MarginRail({placed,renderDraft,blobs}:{placed:PlacedMargin[];ren
  const frameOf=(id:string)=>frames.find(f=>f.p.item.id===id);
  // Layers run back to front. Where blobs overlap, each one behind gets a step darker.
  const stack=normalizeOrder(blobs?.order??[],placed.map(p=>p.item.id));
- const depths=overlapDepths(frames.map(f=>({id:f.p.item.id,left:f.left,top:f.top,width:f.width,height:f.p.height})),live?bringToFront(stack,live.id):stack);
+ const boxes=frames.map(f=>({id:f.p.item.id,left:f.left,top:f.top,width:f.width,height:f.p.height}));
+ const depths=overlapDepths(boxes,live?bringToFront(stack,live.id):stack),stacked=overlappingIds(boxes);
  const setBoth=(v:typeof live)=>{liveRef.current=v;setLive(v);};
  const gripDown=(e:ReactPointerEvent<HTMLButtonElement>,id:string)=>{
   const f=frameOf(id);if(!f||!blobs||e.button!==0)return;e.preventDefault();e.currentTarget.setPointerCapture(e.pointerId);
@@ -83,8 +84,8 @@ export function MarginRail({placed,renderDraft,blobs}:{placed:PlacedMargin[];ren
   </svg>}
   {placed.map(({item,top,side,manual})=>{const fr=frameOf(item.id),depth=depths.get(item.id)??0,moved=!!blobs&&!!manual;
    const resolved=!!item.thread?.resolvedAt;
-   return <article key={item.id} className={'margin-card thought-blob'+(resolved?' thought-resolved':'')} data-resolved={resolved?'true':undefined} data-side={fr?.side??side} data-depth={blobs?depth:undefined} data-moved={moved?'true':undefined} data-moving={fr?.moving?'true':undefined}
-    style={{top:0,transform:`translateY(${fr?.top??top}px)`,...(fr?{left:fr.left,width:fr.width,right:'auto'}:{}),...(blobs?{zIndex:fr?.moving?1000:1+stack.indexOf(item.id)}:{}),...(depth>0?{filter:`brightness(${dimFor(depth)})`}:{})}} data-ink-id={item.id} data-generated-complete={item.generation?.status==='complete'?'true':undefined}
+   return <article key={item.id} className={'margin-card thought-blob'+(resolved?' thought-resolved':'')} data-resolved={resolved?'true':undefined} data-side={fr?.side??side} data-depth={blobs?depth:undefined} data-stacked={blobs&&stacked.has(item.id)?'true':undefined} data-moved={moved?'true':undefined} data-moving={fr?.moving?'true':undefined}
+    style={{top:0,transform:`translateY(${fr?.top??top}px)`,...(fr?{left:fr.left,width:fr.width,right:'auto'}:{}),...(blobs?{zIndex:fr?.moving?1000:1+stack.indexOf(item.id)}:{}),...(depth>0?{filter:`brightness(${dimFor(depth)})`}:{}),...(blobs?{['--depth' as string]:depth}:{})}} data-ink-id={item.id} data-generated-complete={item.generation?.status==='complete'?'true':undefined}
    onPointerDownCapture={()=>{if(blobs&&stack.at(-1)!==item.id)blobs.onFront(item.id);}}
    onMouseEnter={()=>{highlight(item.id,true);setActive(item.id);}} onMouseLeave={()=>{highlight(item.id,false);setActive(null);}} onFocus={()=>{highlight(item.id,true);setFocused(item.id);}} onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget)){highlight(item.id,false);setFocused(null);}}}>
    {blobs&&<button type="button" className="thought-grip" aria-label="Move this blob" title="Drag to move it. Arrow keys move it too; Home puts it back."

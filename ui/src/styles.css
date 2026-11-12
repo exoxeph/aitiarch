@@ -850,14 +850,29 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .chat-review-source summary { cursor: pointer; font-size: var(--text-control); }
 .chat-review-est { color: var(--muted); }
 /* A blob can be moved: a quiet grip appears on hover or focus, and a blob being carried lifts above the rest. */
-.thought-grip { position: absolute; top: 2px; right: 2px; z-index: 1; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); opacity: 0; cursor: grab; touch-action: none; }
+.thought-grip { position: absolute; top: 0; left: calc(50% + var(--gutter, 0px) / 2); translate: -50% 0; z-index: 1; display: grid; place-items: center; width: 56px; height: 16px; padding: 0; border: 1px solid transparent; border-top: 0; border-radius: 0 0 9px 9px; background: none; color: var(--muted); opacity: 0; cursor: grab; touch-action: none; transition: opacity .15s ease-out, border-color .15s ease-out, background-color .15s ease-out; }
 /* Six dots drawn in CSS, not an svg: other checks and code count the svg inside a blob as the diagram. */
-.thought-grip-dots { width: 8px; height: 15px; background: radial-gradient(circle at 50% 50%, currentColor 1.1px, transparent 1.5px) 0 0 / 4px 5px; }
-.thought-blob:hover .thought-grip, .thought-grip:focus-visible { opacity: .9; }
-.thought-grip:hover { background: var(--accent-soft); color: var(--ink-text); }
-.thought-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.thought-blob[data-moving="true"] { box-shadow: 0 10px 28px rgba(0, 0, 0, .5); user-select: none; }
-.thought-blob[data-moving="true"] .thought-grip { opacity: 1; cursor: grabbing; }
+.thought-grip-dots { width: 18px; height: 8px; background: radial-gradient(circle at 50% 50%, currentColor 1.3px, transparent 1.8px) 0 0 / 6px 4px; }
+.thought-blob:hover .thought-grip, .thought-blob:focus-within .thought-grip { opacity: .85; }
+.thought-grip:hover { opacity: 1; border-color: var(--accent); background: var(--accent-soft); color: var(--ink-text); }
+.thought-grip:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+/* A hovered blob lifts like a card: a body that reaches a little past its text, a fine border, and a soft drop shadow underneath. It is drawn
+   with box-shadow, a background and a radius only: it never moves or resizes (a lift that moved the blob would slip out from under the
+   pointer at its edge and flicker), so the position, layer and darkening that the placement code sets are untouched, and a blob behind
+   others lifts the same way when it is chosen. At rest a blob that overlaps nothing stays quiet. */
+/* Blobs that overlap are drawn as cards at different heights, so a stack reads as one card in front of another and not as one smear. In a
+   dark interface height is shown by a lighter surface, so the front card is the lightest and each card behind steps darker (--depth is how
+   many cards are over it); every card in a stack gets a fine edge and casts a shadow onto the ones behind it; the ones behind sit a little
+   smaller, so they feel further away. A blob on its own is not touched. :where keeps this weaker than the hover and carry states below. */
+.thought-rails .margin-card.thought-blob:where([data-stacked="true"]) { border-radius: 12px; background: color-mix(in srgb, var(--paper-2), black calc(var(--depth, 0) * 22%)); scale: calc(1 - var(--depth, 0) * .025);
+  box-shadow: 0 0 0 1px var(--control-border), 0 12px 24px -6px rgba(0, 0, 0, .75), 0 3px 8px rgba(0, 0, 0, .5); }
+.thought-rails .margin-card.thought-blob { transition: box-shadow .18s ease-out, background-color .18s ease-out, border-radius .18s ease-out, translate .18s ease-out; }
+.thought-rails .margin-card.thought-blob:hover, .thought-rails .margin-card.thought-blob:focus-within { border-radius: 12px; background: var(--paper-2);
+  box-shadow: 0 0 0 4px var(--paper-2), 0 0 0 5px var(--control-border), 0 14px 28px -4px rgba(0, 0, 0, .65), 0 4px 8px rgba(0, 0, 0, .4); }
+.thought-rails .margin-card.thought-blob[data-moving="true"] { border-radius: 12px; background: var(--paper-2); user-select: none;
+  box-shadow: 0 0 0 4px var(--paper-2), 0 0 0 5px var(--accent), 0 24px 44px -6px rgba(0, 0, 0, .7), 0 6px 12px rgba(0, 0, 0, .45); }
+.thought-rails .margin-card.thought-blob[data-moving="true"] .thought-grip { opacity: 1; cursor: grabbing; }
+@media (prefers-reduced-motion: reduce) { .thought-rails .margin-card.thought-blob, .thought-grip { transition: none; } }
 .persona-switch { margin: 0 0 8px; padding: 0; border: 0; min-width: 0; }
 #chat-panel > .persona-switch { margin: 10px 15px 8px; }
 .persona-legend { padding: 0; margin-bottom: 6px; color: var(--muted); font: 12px/1.4 var(--font-ui); }
