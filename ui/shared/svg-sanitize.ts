@@ -3,13 +3,8 @@
 // known-safe elements and attributes only, so anything the original carried can only survive if it was on the list. Page styling that the drawing
 // relied on (custom properties, rules, the page background and font) is resolved into a style block of allowlisted properties. Pure and deterministic:
 // the same input always gives the same bytes. The result is shown only as an <img>, which also cannot run scripts or load anything.
-export type SvgIssue='svg_none'|'svg_too_large'|'svg_too_complex';
-/** Plain words for the person; never the skill's own text. */
-export const SVG_ISSUE_TEXT:Record<SvgIssue,string>={
- svg_none:'the skill did not draw a picture the app can show',
- svg_too_large:'the drawing is too large to show as an image',
- svg_too_complex:'the drawing has too many parts or is nested too deeply',
-};
+import {SVG_ISSUE_TEXT,type SvgIssue} from './skill-diagram.ts'; // the reasons live with the client-safe module, so the page need not load this file
+export {SVG_ISSUE_TEXT};export type {SvgIssue};
 export const SVG_LIMITS=Object.freeze({parsedElements:20000,parseDepth:200,elements:2000,depth:32,bytes:300*1024,styleBytes:40*1024,attributes:48,valueLength:2000,pathLength:60000,textLength:4000});
 export type SvgResult={ok:true;svg:string}|{ok:false;reason:SvgIssue;text:string};
 

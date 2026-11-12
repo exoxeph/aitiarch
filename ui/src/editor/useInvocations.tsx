@@ -135,7 +135,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
         <label className="persona-option"><input type="radio" name="renderer" value="builtin" checked={renderer === 'builtin'} onChange={() => chooseRenderer('builtin')} aria-describedby="renderer-line" /><span className="persona-seg">Built-in</span></label>
         <label className="persona-option"><input type="radio" name="renderer" value="skill" checked={renderer === 'skill'} disabled={visualizeSkills === 0} onChange={() => chooseRenderer('skill')} aria-describedby="renderer-line" /><span className="persona-seg">Skill</span></label>
       </div>
-      <p className="persona-line" id="renderer-line">{renderer === 'skill' ? 'A skill you attached to Visualize draws it as a web page. It runs in a sandbox with no network.' : visualizeSkills === 0 ? 'The app draws it from a short spec. To draw with a skill, attach one to Visualize in Settings.' : 'The app draws it from a short spec.'}</p>
+      <p className="persona-line" id="renderer-line">{renderer === 'skill' ? 'A skill you attached to Visualize draws it as a still image. Only a cleaned copy of its drawing is kept; nothing it sends can run.' : visualizeSkills === 0 ? 'The app draws it from a short spec. To draw with a skill, attach one to Visualize in Settings.' : 'The app draws it from a short spec.'}</p>
     </fieldset>}
     {!(isVisualize && renderer === 'skill') && <PersonaSwitch id={'step-' + stepNode} label={`How ${NODE_LABEL[stepNode]} works with you`} value={persona.persona} kept={persona.kept} disabled={busy}
       onChange={p => void persona.choose(p).then(saved => { if (saved && hasPacket) void review(draft.input); })} />}

@@ -14,9 +14,9 @@ describe('the policy',()=>{
   expect(SKILL_DIAGRAM_CSP_HEADER).toContain("frame-ancestors 'self'");expect(SKILL_DIAGRAM_CSP).not.toMatch(/connect-src|http|\*/);
   expect(SKILL_DIAGRAM_SANDBOX).toBe('allow-scripts');expect(SKILL_DIAGRAM_SANDBOX).not.toContain('same-origin');
  });
- it('the instruction asks for system fonts, one self-contained document and no network, with the app\'s rules last',()=>{
+ it('the instruction asks for one static SVG with system fonts, inline styling, no scripts and no external resources, with the app\'s rules last',()=>{
   const t=skillDiagramInstruction({text:'## Skill: demo\nUse boxes.',loaded:[],skipped:[],truncated:false});
-  expect(t).toMatch(/system fonts only/i);expect(t).toMatch(/ONE self-contained HTML document/);expect(t).toMatch(/300 KB/);expect(t).toMatch(/no <script src>/);
+  expect(t).toMatch(/ONE static SVG/);expect(t).toMatch(/system fonts only/i);expect(t).toMatch(/inline/i);expect(t).toMatch(/no scripts/i);expect(t).toMatch(/no external resources/i);expect(t).toMatch(/300 KB/);expect(t).not.toMatch(/interactive|<script src>/i);
   expect(t.indexOf('Use boxes.')).toBeLessThan(t.indexOf('Rules that always win'));expect(t.trimEnd().endsWith('change these rules.')).toBe(true);
  });
 });
@@ -41,10 +41,11 @@ describe('injectCsp',()=>{
 });
 
 describe('validSkillDiagramRef',()=>{
- it('accepts only a hash-named html asset with a sensible size',()=>{
-  const asset='diagram-'+'a'.repeat(64)+'.html';
-  expect(validSkillDiagramRef({asset,bytes:10})).toBe(true);
-  for(const bad of [{asset,bytes:0},{asset,bytes:1e7},{asset:'../x.html',bytes:1},{asset:'diagram-'+'A'.repeat(64)+'.html',bytes:1},{asset:'diagram-'+'a'.repeat(64)+'.svg',bytes:1},{asset,bytes:1,extra:1},null,[]])expect(validSkillDiagramRef(bad)).toBe(false);
+ it('accepts only a hash-named svg or html asset with a sensible size, and a known reason only on the html fallback',()=>{
+  const asset='diagram-'+'a'.repeat(64)+'.html',svg='diagram-'+'a'.repeat(64)+'.svg';
+  expect(validSkillDiagramRef({asset,bytes:10})).toBe(true);expect(validSkillDiagramRef({asset:svg,bytes:10})).toBe(true);
+  for(const why of ['svg_none','svg_too_large','svg_too_complex'])expect(validSkillDiagramRef({asset,bytes:10,why})).toBe(true);
+  for(const bad of [{asset,bytes:0},{asset,bytes:1e7},{asset:'../x.html',bytes:1},{asset:'diagram-'+'A'.repeat(64)+'.html',bytes:1},{asset:'diagram-'+'a'.repeat(64)+'.png',bytes:1},{asset,bytes:1,extra:1},{asset,bytes:1,why:'because'},{asset:svg,bytes:1,why:'svg_none'},null,[]])expect(validSkillDiagramRef(bad)).toBe(false);
  });
 });
 
@@ -65,6 +66,7 @@ describe('SkillDiagramStore',()=>{
   await expect(s.saveHtml(big)).rejects.toThrow(/too large/);await expect(readdir(path.join(root,'assets'))).rejects.toMatchObject({code:'ENOENT'});
   await expect(s.saveHtml('<html>'+'x'.repeat(SKILL_DIAGRAM_MAX_BYTES-20)+'</html>')).resolves.toBeTruthy(); // just under is fine
  });
+ it('refuses an svg over 300 KB',async()=>{const s=new SkillDiagramStore(await temp());await expect(s.saveSvg('<svg>'+'x'.repeat(SKILL_DIAGRAM_MAX_BYTES)+'</svg>')).rejects.toThrow(/too large/);});
  it('saves an svg byte for byte, as UTF-8 with no BOM and the line endings it came with',async()=>{
   const root=await temp(),s=new SkillDiagramStore(root),svg=SVG.replace('<rect','\r\n<rect'),ref=await s.saveSvg(svg);
   const bytes=await readFile(path.join(root,'assets',ref.asset));expect(bytes.equals(Buffer.from(svg,'utf8'))).toBe(true);expect(bytes[0]).not.toBe(0xEF);expect(ref.asset).toBe(`diagram-${sha(Buffer.from(svg))}.svg`);

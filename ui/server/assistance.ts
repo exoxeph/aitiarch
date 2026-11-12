@@ -8,7 +8,8 @@ import { textHash } from './anchor-cache.ts';
 import { Store } from './store.ts';
 import { normalizeRel, PathError } from './paths.ts';
 import { SkillDiagramStore } from './skill-diagram-store.ts';
-import { SKILL_DIAGRAM_FAILED_BODY, SKILL_DIAGRAM_MAX_BYTES, extractDocument, skillDiagramBody, type SkillDiagramRef } from '../shared/skill-diagram.ts';
+import { SKILL_DIAGRAM_FAILED_BODY, SKILL_DIAGRAM_MAX_BYTES, extractDocument, skillDiagramBody, skillDiagramFallbackBody, type SkillDiagramRef } from '../shared/skill-diagram.ts';
+import { sanitizeSvgDocument } from '../shared/svg-sanitize.ts';
 import { LedgerStore } from './ledger-store.ts';
 import { prepareRequest, ProviderError, redact, type Provider, type Request } from './providers/index.ts';
 import { ProductValidationError, validateProductResult, validationCounts, type ValidationLog, type ValidationRecord } from './product-validation.ts';
@@ -50,7 +51,10 @@ export class Assistance {
     const document = extractDocument(redact(result.answer));
     if (!document) return failed('skill_no_document');
     if (Buffer.byteLength(document) > SKILL_DIAGRAM_MAX_BYTES) return failed('skill_too_large');
-    return { body: skillDiagramBody(skills), model, skillDiagram: await this.skillDiagrams.saveHtml(document) as SkillDiagramRef | undefined, diagramIssue: undefined as DiagramIssue | undefined };
+    // A static image is the product: only the sanitizer's rebuilt svg is kept. The page itself is saved (for a click-only interactive version) only when no valid svg could be made.
+    const svg = sanitizeSvgDocument(document);
+    if (svg.ok) return { body: skillDiagramBody(skills), model, skillDiagram: await this.skillDiagrams.saveSvg(svg.svg) as SkillDiagramRef | undefined, diagramIssue: undefined as DiagramIssue | undefined };
+    return { body: skillDiagramFallbackBody(skills, svg.reason), model, skillDiagram: { ...await this.skillDiagrams.saveHtml(document), why: svg.reason } as SkillDiagramRef | undefined, diagramIssue: undefined as DiagramIssue | undefined };
   }
   async availability() { return { ...await this.provider.checkAvailability(), provider:this.provider.name??'claude' }; }
   private extras?: ExtrasFor;

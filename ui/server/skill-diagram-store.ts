@@ -31,6 +31,7 @@ export class SkillDiagramStore {
  }
  /** A stand-alone <svg> exactly as the skill wrote it: no change to a single byte. */
  async saveSvg(svg:string):Promise<SkillDiagramRef>{
+  if(Buffer.byteLength(svg)>SKILL_DIAGRAM_MAX_BYTES)throw new Error('The diagram is too large.');
   const bytes=Buffer.from(svg,'utf8'),asset=`diagram-${sha(bytes)}.svg`;await this.write(asset,bytes);return {asset,bytes:bytes.length};
  }
  async read(name:string):Promise<Buffer>{

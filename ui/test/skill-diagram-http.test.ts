@@ -3,7 +3,9 @@ import {mkdtemp,readdir,readFile,rm,writeFile} from 'node:fs/promises';
 import path from 'node:path';import os from 'node:os';
 import {createApp} from '../server/http.ts';import {Store} from '../server/store.ts';import {NoteWatcher} from '../server/watch.ts';
 import {VISUALIZE_QUESTION} from '../shared/diagram.ts';
-import {SKILL_DIAGRAM_CSP,SKILL_DIAGRAM_CSP_HEADER,SKILL_DIAGRAM_MAX_BYTES} from '../shared/skill-diagram.ts';
+import {SKILL_DIAGRAM_CSP,SKILL_DIAGRAM_CSP_HEADER,SKILL_DIAGRAM_MAX_BYTES,SKILL_DIAGRAM_SVG_CSP_HEADER} from '../shared/skill-diagram.ts';
+import {sanitizeSvgDocument,SVG_ISSUE_TEXT,SVG_LIMITS} from '../shared/svg-sanitize.ts';
+import {PAGE} from './fixtures/skill-page.ts';
 import type {Request,Provider} from '../server/providers/index.ts';
 import {prepareRequest} from '../server/providers/index.ts';
 
@@ -37,13 +39,32 @@ async function boot(reply:(r:Request)=>string,opts:{skill?:boolean;providerName?
  return {root,base,seen,put,get,run,input};
 }
 describe('the Skill renderer',()=>{
- it('saves the document under assets/, records the skill name, and keeps the model\'s words off the thought',async()=>{
+ it('a page with a drawing becomes a static svg under assets/, byte for byte what the sanitizer returns; no html is saved',async()=>{
+  const expected=sanitizeSvgDocument(PAGE) as {ok:true;svg:string},t=await boot(()=>'Here you go:\n```html\n'+PAGE+'\n```\nHope it helps.'),{item}=await t.run('svg-1') as any;
+  expect(expected.ok).toBe(true);expect(item.generation.status).toBe('complete');expect(item.generation.skills).toEqual(['diagram-design']);
+  expect(item.skillDiagram).toEqual({asset:expect.stringMatching(/^diagram-[a-f0-9]{64}\.svg$/),bytes:Buffer.byteLength(expected.svg)});expect(item.diagram).toBeUndefined();expect(item.diagramIssue).toBeUndefined();
+  expect(item.body).toBe('Diagram drawn by the diagram-design skill. It is shown as a static image.');expect(item.body).not.toMatch(/Hope it helps|Release flow/);
+  const files=await readdir(path.join(t.root,'assets'));expect(files).toEqual([item.skillDiagram.asset]);
+  expect((await readFile(path.join(t.root,'assets',files[0]))).equals(Buffer.from(expected.svg,'utf8'))).toBe(true);
+ });
+ it('a hostile svg is saved only in its sanitized form',async()=>{
+  const hostile='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9" onload="alert(1)"><script>fetch("https://evil.test")</script><image href="https://evil.test/i.png"/><rect x="1" y="1" width="3" height="3"/></svg>';
+  const t=await boot(()=>hostile),{item}=await t.run('svg-2') as any,saved=await readFile(path.join(t.root,'assets',item.skillDiagram.asset),'utf8');
+  expect(saved).toContain('<rect x="1" y="1" width="3" height="3"/>');expect(saved).not.toMatch(/script|onload|image|evil|alert/i);
+ });
+ it('a page with no drawing falls back to the html document, saved with the CSP, with a plain-words reason; the model\'s words are not kept',async()=>{
   const t=await boot(()=>'Here you go:\n```html\n'+DOC+'\n```\nHope it helps.'),{item}=await t.run('skill-1') as any;
   expect(item.generation.status).toBe('complete');expect(item.generation.skills).toEqual(['diagram-design']);
-  expect(item.skillDiagram).toMatchObject({asset:expect.stringMatching(/^diagram-[a-f0-9]{64}\.html$/)});expect(item.diagram).toBeUndefined();expect(item.diagramIssue).toBeUndefined();
-  expect(item.body).toBe('Diagram drawn by the diagram-design skill. It runs in a sandbox with no network access.');expect(item.body).not.toMatch(/Hope it helps|Release flow/);
+  expect(item.skillDiagram).toMatchObject({asset:expect.stringMatching(/^diagram-[a-f0-9]{64}\.html$/),why:'svg_none'});expect(item.diagram).toBeUndefined();expect(item.diagramIssue).toBeUndefined();
+  expect(item.body).toBe(`Diagram drawn by the diagram-design skill. It could not be shown as an image: ${SVG_ISSUE_TEXT.svg_none}. An interactive version is available.`);expect(item.body).not.toMatch(/Hope it helps|Release flow/);
   const files=await readdir(path.join(t.root,'assets'));expect(files).toEqual([item.skillDiagram.asset]);
-  const saved=await readFile(path.join(t.root,'assets',files[0]),'utf8');expect(saved).toContain('<h1>Release flow</h1>');expect(saved).not.toContain('Hope it helps');
+  const saved=await readFile(path.join(t.root,'assets',files[0]),'utf8');expect(saved.startsWith('<!doctype html><meta http-equiv="Content-Security-Policy"')).toBe(true);expect(saved).toContain('<h1>Release flow</h1>');expect(saved).not.toContain('Hope it helps');
+ });
+ it('a drawing with too many parts falls back to the html with that reason, and writes no svg',async()=>{
+  const busy='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 9 9">'+'<rect width="1" height="1"/>'.repeat(SVG_LIMITS.elements+20)+'</svg>';
+  const t=await boot(()=>busy),{item}=await t.run('busy-1') as any;
+  expect(item.skillDiagram).toMatchObject({asset:expect.stringMatching(/\.html$/),why:'svg_too_complex'});expect(item.body).toContain(SVG_ISSUE_TEXT.svg_too_complex);
+  expect((await readdir(path.join(t.root,'assets'))).every(f=>f.endsWith('.html'))).toBe(true);
  });
  it('sends a skill-render request: the skill text and the document contract, not the JSON diagram contract',async()=>{
   const t=await boot(()=>DOC);await t.run('skill-2');const sent=t.seen[0];
@@ -75,7 +96,13 @@ describe('the Skill renderer',()=>{
  it('is refused for a question that is not Visualize',async()=>{
   const t=await boot(()=>DOC),r=await t.put('/api/assistance/invoke',{...t.input('ask-1','skill'),question:'Why?'});expect(r.status).not.toBe(202);expect(t.seen).toHaveLength(0);
  });
- it('serves the saved document with the CSP in the header and in the document, and refuses every other name',async()=>{
+ it('serves the saved svg as an image under a locked-down policy',async()=>{
+  const t=await boot(()=>PAGE),{item}=await t.run('serve-svg') as any,res=await t.get('/api/skill-diagram?name='+item.skillDiagram.asset);
+  expect(res.status).toBe(200);expect(res.headers.get('content-type')).toBe('image/svg+xml');expect(res.headers.get('content-security-policy')).toBe("default-src 'none'; style-src 'unsafe-inline'; sandbox");
+  expect(SKILL_DIAGRAM_SVG_CSP_HEADER).toBe("default-src 'none'; style-src 'unsafe-inline'; sandbox");expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+  expect((await res.text()).startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true);
+ });
+ it('serves the saved html fallback with the CSP in the header and in the document, and refuses every other name',async()=>{
   const t=await boot(()=>DOC),{item}=await t.run('serve-1') as any,res=await t.get('/api/skill-diagram?name='+item.skillDiagram.asset),body=await res.text();
   expect(res.status).toBe(200);expect(res.headers.get('content-security-policy')).toBe(SKILL_DIAGRAM_CSP_HEADER);expect(res.headers.get('content-security-policy')!.startsWith(SKILL_DIAGRAM_CSP)).toBe(true);
   expect(res.headers.get('content-type')).toMatch(/^text\/html/);expect(res.headers.get('x-content-type-options')).toBe('nosniff');expect(res.headers.get('referrer-policy')).toBe('no-referrer');

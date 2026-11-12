@@ -14,7 +14,10 @@
 .diagram-large svg { display: block; max-width: none; }
 .diagram-large .diagram-tools { margin-block: 12px; }
 
-/* A skill's diagram lives only in a sandboxed iframe. It is an unknown page, so it gets a plain frame in the app's colours and nothing else. */
+/* A skill's diagram is a still image on a light plate (its own colours are unknown, and a transparent drawing must stay readable on the dark page). The
+   click-only interactive fallback is an unknown page, so it gets a plain frame in the app's colours and nothing else. */
+.skill-diagram-image { display: block; max-width: 100%; height: auto; box-sizing: border-box; padding: 8px; border: 1px solid var(--control-border); border-radius: 6px; background: var(--ink-text); }
+.skill-diagram-image-large { max-width: min(1100px, 90vw); max-height: 78vh; width: auto; }
 .skill-diagram-frame { display: block; width: 100%; height: 320px; border: 1px solid var(--control-border); border-radius: 6px; background: var(--paper); }
 .skill-diagram-frame-large { width: min(1100px, 90vw); height: 78vh; }
 .skill-diagram-large { width: fit-content; }

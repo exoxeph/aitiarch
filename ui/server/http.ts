@@ -5,7 +5,7 @@ import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES} from '../shared/chat.ts';
 import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
 import {InsertionStore} from './insertion-store.ts';
-import {SKILL_DIAGRAM_CSP_HEADER} from '../shared/skill-diagram.ts';
+import {SKILL_DIAGRAM_CSP_HEADER,SKILL_DIAGRAM_SVG_CSP_HEADER} from '../shared/skill-diagram.ts';
 import { UiStateStore } from './ui-state-store.ts';
 import {ThreadStore} from './thread-store.ts';
 import {ThreadRuntime,type ThreadRequest} from './thread-runtime.ts';
@@ -333,7 +333,7 @@ export function createApp(opts: AppOptions) {
     if(url.pathname==='/api/insertions'&&req.method==='GET')return json(res,200,await (await insertionsReady).reconcile(url.searchParams.get('path')??''));
     // A skill's diagram: served only to be framed by this app, under a CSP that blocks all network (also injected in the document itself).
     if(url.pathname==='/api/skill-diagram'&&req.method==='GET'){
-      try{const bytes=await (await assistance).skillDiagrams.read(url.searchParams.get('name')??'');res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':SKILL_DIAGRAM_CSP_HEADER,'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Cache-Control':'private, max-age=31536000, immutable'});return res.end(bytes);}catch{return json(res,404,{error:'not_found'});}
+      try{const name=url.searchParams.get('name')??'',bytes=await (await assistance).skillDiagrams.read(name),svg=name.endsWith('.svg');res.writeHead(200,{'Content-Type':svg?'image/svg+xml':'text/html; charset=utf-8','Content-Security-Policy':svg?SKILL_DIAGRAM_SVG_CSP_HEADER:SKILL_DIAGRAM_CSP_HEADER,'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Cache-Control':'private, max-age=31536000, immutable'});return res.end(bytes);}catch{return json(res,404,{error:'not_found'});}
     }
     if(url.pathname==='/api/diagram-asset'&&req.method==='GET'){
       try{const bytes=await (await insertionsReady).asset(url.searchParams.get('name')??'');res.writeHead(200,{'Content-Type':'image/svg+xml','Content-Security-Policy':"default-src 'none'; sandbox",'X-Content-Type-Options':'nosniff','Cache-Control':'private, max-age=31536000, immutable'});return res.end(bytes);}catch{return json(res,404,{error:'not_found'});}
