@@ -849,6 +849,7 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .chat-review-source summary { cursor: pointer; font-size: var(--text-control); }
 .chat-review-est { color: var(--muted); }
 .persona-switch { margin: 0 0 8px; padding: 0; border: 0; min-width: 0; }
+#chat-panel > .persona-switch { margin-inline: 15px; }
 .persona-legend { padding: 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
 .persona-options { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 2px; }
 .persona-option { display: inline-flex; align-items: center; gap: 5px; font: var(--text-control) var(--font-ui); cursor: pointer; }
