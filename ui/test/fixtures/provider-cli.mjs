@@ -90,6 +90,8 @@ if (scenario.startsWith('verified-')) {
     'verified-chat-reply-question':'{"answer":"What makes you sure the budget is 40 dollars and not 60?","claims":[]}',
     // Records the prompt it was given (to <record>.prompt) and answers with a valid structured reply, so Think, Ask and chat all accept it.
     'verified-chat-record':'{"answer":"Synthetic recorded reply.","claims":[]}',
+    // An answer that mentions an Authorization header and a Windows user path: redaction must change the text, not break parsing.
+    'verified-chat-reply-auth':JSON.stringify({answer:'Send it in the Authorization: Bearer header.\nYour copy is at C:\\Users\\someone\\notes\\x.md today.',claims:[]}),
   };
   if(scenario==='verified-chat-record')writeFileSync(record+'.prompt',input); // stdin was already read into `input` above
   if(replies[scenario]){
@@ -154,6 +156,8 @@ if (scenario.startsWith('verified-')) {
   if(scenario==='verified-fence-unclosed')answerResult='```json\n'+answerResult;
   if(scenario==='verified-fence-in-string')answerResult='```json\n'+JSON.stringify({answer:'Nested ``` fence',claims:[]})+'\n```';
   if(scenario==='verified-fence-wrong-keys')answerResult='```json\n'+JSON.stringify({wrong:'Synthetic'})+'\n```';
+  // An answer that mentions an Authorization header and a Windows user path (all synthetic). Redaction must change the text, not break parsing.
+  if(scenario==='verified-auth-answer')answerResult=JSON.stringify({answer:'Send it in the Authorization: Bearer header.\nYour copy is at C:\\Users\\someone\\notes\\x.md today.',claims:[]});
   if (scenario !== 'verified-incomplete') console.log(JSON.stringify({ type: 'result', subtype: 'success',
     result: scenario==='verified-empty-result'?'':answerResult, usage: { input_tokens: 12, output_tokens: 8 } }));
   if(scenario==='verified-nonzero'){process.stderr.write('Failure TOKEN_SENTINEL /private/fixture.md');process.exit(9);}

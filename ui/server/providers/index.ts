@@ -146,8 +146,17 @@ function environment(): NodeJS.ProcessEnv {
   result.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
   return result;
 }
+/** Redacts every string value of a parsed reply, keeping its structure. Redacting the serialized JSON instead broke parsing: a rule such as
+ *  "authorization: ... to the end of the line" swallowed the rest of the object, and paths were missed because JSON doubles backslashes. */
+export function redactStrings(value:unknown,depth=0):unknown {
+  if(depth>32)throw new Error('the reply is nested too deeply');
+  if(typeof value==='string')return redact(value);
+  if(Array.isArray(value))return value.map(v=>redactStrings(v,depth+1));
+  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,redactStrings(v,depth+1)]));
+  return value;
+}
 export function validateProviderResponse(response:unknown) {
-  const safe=JSON.parse(redact(JSON.stringify(response)));
+  const safe=redactStrings(JSON.parse(JSON.stringify(response)));
   validateResponseSchema(safe);
   return safe as {answer:string;claims:unknown[];diagram?:unknown};
 }
