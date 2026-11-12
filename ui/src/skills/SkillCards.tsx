@@ -2,7 +2,8 @@ import type {ReactNode} from 'react';
 import type {PublicSkill} from '../../server/skill-library.ts';
 import type {RecommendedState} from '../../server/skill-recommended.ts';
 import {MAX_NODE_SKILLS,NODES,type NodeSetting,type NodeSettings} from '../../shared/node-settings.ts';
-import {PERSONAS,PERSONA_ORDER,type PersonaMode,type PersonaNode} from '../../shared/persona.ts';
+import type {PersonaMode,PersonaNode} from '../../shared/persona.ts';
+import {PersonaSwitch} from './PersonaSwitch.tsx';
 import {NODE_LABEL,badgeFor,engineLines} from './skills-model.ts';
 
 // The cards of the Skills tab. Every state is written in words, never colour alone. Nothing here installs, downloads or runs anything:
@@ -48,12 +49,7 @@ export function RecommendedCard({rec,onCopy,copied}:{rec:RecommendedState;onCopy
 export function StepSettings({node,setting,attached,persisted,onPersona,onRemove}:{node:PersonaNode;setting:NodeSetting;attached:ReadonlyMap<string,PublicSkill>;persisted:boolean|null;onPersona:(node:PersonaNode,persona:PersonaMode)=>void;onRemove:(node:PersonaNode,skillId:string)=>void}){
  return <section className="skill-step" aria-label={`${NODE_LABEL[node]} settings`}>
   <h4 className="skill-step-title">{NODE_LABEL[node]}</h4>
-  <fieldset className="skill-persona"><legend>How it works with you</legend>
-   {PERSONA_ORDER.map(p=><label key={p} className="skill-persona-option">
-    <input type="radio" name={`persona-${node}`} value={p} checked={setting.persona===p} onChange={()=>onPersona(node,p)}/>
-    <span className="skill-persona-name">{PERSONAS[p].label}</span> <span className="skill-persona-line">{PERSONAS[p].oneLine}</span>
-   </label>)}
-  </fieldset>
+  <PersonaSwitch id={`settings-${node}`} label="How it works with you" value={setting.persona} onChange={p=>onPersona(node,p)}/>
   <p className="skill-step-count">{setting.skills.length} of {MAX_NODE_SKILLS} skills{persisted===false&&<span className="skill-kept"> · Kept until you close Aitiarch</span>}</p>
   {setting.skills.length>0&&<ul className="skill-step-list" aria-label={`Skills used by ${NODE_LABEL[node]}`}>{setting.skills.map(id=>{const s=attached.get(id);
    return <li key={id}><span className="skill-step-name">{s?s.name:`A skill that is not installed (id ${id})`}</span>

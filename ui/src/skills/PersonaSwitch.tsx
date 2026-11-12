@@ -7,7 +7,7 @@ export function PersonaSwitch({id,label,value,onChange,disabled,hint,kept}:{id:s
   <div className="persona-options">
    {PERSONA_ORDER.map(p=><label key={p} className="persona-option">
     <input type="radio" name={`persona-${id}`} value={p} checked={value===p} onChange={()=>onChange(p)} aria-describedby={`persona-line-${id}`}/>
-    <span>{PERSONAS[p].label}</span>
+    <span className="persona-seg">{PERSONAS[p].label}</span>
    </label>)}
   </div>
   <p className="persona-line" id={`persona-line-${id}`}>{PERSONAS[value].oneLine}{kept===true&&' · Kept until you close Aitiarch'}</p>

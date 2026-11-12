@@ -850,17 +850,22 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .chat-review-source summary { cursor: pointer; font-size: var(--text-control); }
 .chat-review-est { color: var(--muted); }
 .persona-switch { margin: 0 0 8px; padding: 0; border: 0; min-width: 0; }
-#chat-panel > .persona-switch { margin-inline: 15px; }
-/* The ask/review panel styles every input as a full-width block and every label as a grid; a radio and its words stay on one line. */
-.invocation-review .persona-switch .persona-option, .thought-ask .invocation-review .persona-switch .persona-option { display: inline-flex; gap: 5px; align-items: center; }
-.invocation-review .persona-switch input { display: inline-block; width: auto; margin: 0; padding: 0; }
-.persona-legend { padding: 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
-.persona-options { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 2px; }
-.persona-option { display: inline-flex; align-items: center; gap: 5px; font: var(--text-control) var(--font-ui); cursor: pointer; }
-.persona-option input:checked + span { font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
-.persona-option input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.persona-switch:disabled .persona-option { cursor: default; opacity: .7; }
-.persona-line { margin: 2px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
+#chat-panel > .persona-switch { margin: 10px 15px 8px; }
+.persona-legend { padding: 0; margin-bottom: 6px; color: var(--muted); font: 12px/1.4 var(--font-ui); }
+/* One segmented control: three equal segments in a quiet track. The chosen segment is filled, outlined and bold, so it never relies on
+   colour alone. The native radio stays on top of its segment (invisible), so mouse, touch, arrow keys and screen readers all work.
+   The doubled class beats the ask/review panel, which styles every input as a full-width block and every label as a grid. */
+.persona-switch .persona-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; border: 1px solid var(--rule); border-radius: 10px; background: var(--paper); }
+.persona-switch.persona-switch .persona-option { position: relative; display: block; min-width: 0; cursor: pointer; }
+.persona-switch.persona-switch .persona-option input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; opacity: 0; cursor: inherit; }
+.persona-seg { display: flex; align-items: center; justify-content: center; min-height: 30px; padding: 0 6px; border: 1px solid transparent; border-radius: 7px; color: var(--muted); font: 500 var(--text-control) var(--font-ui); white-space: nowrap; transition: background-color .15s ease-out, border-color .15s ease-out, color .15s ease-out; }
+.persona-option:hover .persona-seg { color: var(--ink-text); background: var(--paper-2); }
+.persona-option input:checked + .persona-seg { border-color: var(--accent); background: var(--accent-soft); color: var(--ink-text); font-weight: 600; }
+.persona-option input:focus-visible + .persona-seg { outline: 2px solid var(--accent); outline-offset: 1px; }
+.persona-switch:disabled .persona-option { cursor: default; }
+.persona-switch:disabled .persona-seg { opacity: .55; }
+.persona-line { margin: 6px 0 0; color: var(--muted); font: 12px/1.45 var(--font-ui); }
+@media (prefers-reduced-motion: reduce) { .persona-seg { transition: none; } }
 .used-skills { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); overflow-wrap: anywhere; }
 .used-skills-label { font-weight: 600; }
 .skills-tab h4 { margin: 20px 0 8px; font-size: var(--text-control); font-weight: 600; }
@@ -883,11 +888,7 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .skill-cmd { display: block; padding: 6px 8px; border-radius: var(--radius-small); background: var(--paper); font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
 .skill-step { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--rule); }
 .skill-step-title { margin: 0 0 6px; }
-.skill-persona { margin: 0; padding: 0; border: 0; display: grid; gap: 4px; }
-.skill-persona legend { padding: 0; color: var(--muted); font-size: 12px; }
-.skill-persona-option { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
-.skill-persona-name { font-weight: 600; }
-.skill-persona-line, .skill-step-count, .skill-kept { color: var(--muted); font-size: 12px; }
+.skill-step-count, .skill-kept { color: var(--muted); font-size: 12px; }
 .skill-step-count { margin: 8px 0 4px; }
 .skill-step-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
 .skill-step-list li { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; }
