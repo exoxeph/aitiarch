@@ -5,7 +5,7 @@
 // the same input always gives the same bytes. The result is shown only as an <img>, which also cannot run scripts or load anything.
 import {SVG_ISSUE_TEXT,type SvgIssue} from './skill-diagram.ts'; // the reasons live with the client-safe module, so the page need not load this file
 export {SVG_ISSUE_TEXT};export type {SvgIssue};
-export const SVG_LIMITS=Object.freeze({parsedElements:20000,parseDepth:200,elements:2000,depth:32,bytes:300*1024,styleBytes:40*1024,attributes:48,valueLength:2000,pathLength:60000,textLength:4000});
+export const SVG_LIMITS=Object.freeze({pageCssBytes:3*1024*1024,parsedElements:20000,parseDepth:200,elements:2000,depth:32,bytes:300*1024,styleBytes:40*1024,attributes:48,valueLength:2000,pathLength:60000,textLength:4000});
 export type SvgResult={ok:true;svg:string}|{ok:false;reason:SvgIssue;text:string};
 
 interface El{name:string;attrs:[string,string][];kids:(El|string)[]}
@@ -51,7 +51,7 @@ function parse(src:string):El{
 }
 const size=(e:El):number=>1+e.kids.reduce((a:number,k)=>a+(typeof k==='string'?0:size(k)),0);
 function topSvgs(e:El,out:El[]=[]){for(const k of e.kids)if(typeof k!=='string'){if(k.name.toLowerCase()==='svg')out.push(k);else topSvgs(k,out);}return out;}
-function allStyles(e:El,out:string[]=[]){for(const k of e.kids)if(typeof k!=='string'){if(k.name.toLowerCase()==='style')out.push(k.kids.filter((x):x is string=>typeof x==='string').join('').replace(/<!\[CDATA\[|\]\]>/g,''));else allStyles(k,out);}return out;}
+function allStyles(e:El,out:string[]=[],skip?:El){for(const k of e.kids)if(typeof k!=='string'&&k!==skip){if(k.name.toLowerCase()==='style')out.push(k.kids.filter((x):x is string=>typeof x==='string').join('').replace(/<!\[CDATA\[|\]\]>/g,''));else allStyles(k,out);}return out;}
 
 // ---- CSS ---------------------------------------------------------------------------------------------------------------------------------
 const CSS_PROPS=new Set(['fill','stroke','stroke-width','stroke-dasharray','stroke-dashoffset','stroke-linecap','stroke-linejoin','stroke-miterlimit','stroke-opacity','fill-opacity','fill-rule','clip-rule','opacity','color','stop-color','stop-opacity','font','font-family','font-size','font-weight','font-style','font-stretch','letter-spacing','word-spacing','text-anchor','text-decoration','dominant-baseline','alignment-baseline','paint-order','visibility','display','marker-start','marker-mid','marker-end','clip-path','mask','transform','transform-origin','transform-box','vector-effect','shape-rendering','text-rendering']);
@@ -176,6 +176,35 @@ const findEl=(e:El,name:string):El|undefined=>{for(const k of e.kids)if(typeof k
 interface Win {v:string;spec:number}
 const win=(m:Map<string,Win>,k:string,v:string,spec:number)=>{const cur=m.get(k);if(!cur||spec>=cur.spec)m.set(k,{v,spec});}; // equal specificity: the later rule wins
 
+// ---- pruning the page's CSS --------------------------------------------------------------------------------------------------------------
+// A page carries the CSS of its whole interface. Only rules that can match an element of THE DRAWING are worth keeping: every step of the selector (tag, ids,
+// classes) must be satisfiable by some element inside the svg. A rule whose ancestor is the page (".panel .box", "body .label") can never match in an image.
+// This can only ever drop rules, never add any.
+function drawingMatcher(svg:El){
+ const sigs:{tag:string;id:string|null;classes:Set<string>}[]=[],byTag=new Map<string,number[]>(),byClass=new Map<string,number[]>(),byId=new Map<string,number[]>();
+ const add=(m:Map<string,number[]>,k:string,i:number)=>{const l=m.get(k);if(l)l.push(i);else m.set(k,[i]);};
+ const walk=(e:El)=>{
+  const i=sigs.length,classes=new Set((attrOf(e,'class')??'').split(/\s+/).filter(Boolean)),id=attrOf(e,'id')??null,tag=e.name.toLowerCase();
+  sigs.push({tag,id,classes});add(byTag,tag,i);for(const c of classes)add(byClass,c,i);if(id)add(byId,id,i);
+  for(const k of e.kids)if(typeof k!=='string')walk(k);
+ };
+ walk(svg);
+ const cache=new Map<string,boolean>();
+ const compound=(c:string):boolean=>{
+  const hit=cache.get(c);if(hit!==undefined)return hit;
+  const body=c.replace(/::?[a-z-]+(?:\([^)]*\))?/gi,''),tag=/^[A-Za-z][\w-]*/.exec(body)?.[0].toLowerCase()??null;
+  const ids=[...body.matchAll(/#([\w-]+)/g)].map(m=>m[1]),classes=[...body.matchAll(/\.([\w-]+)/g)].map(m=>m[1]);
+  let pool:number[]|undefined;
+  if(ids.length)pool=byId.get(ids[0]);
+  else if(classes.length)pool=classes.map(k=>byClass.get(k)).reduce((a,b)=>!a||!b?undefined:a.length<=b.length?a:b);
+  else if(tag)pool=byTag.get(tag);
+  else pool=sigs.map((_,i)=>i); // "*"
+  const ok=!!pool&&pool.some(i=>{const s=sigs[i];return (!tag||s.tag===tag)&&ids.every(x=>s.id===x)&&classes.every(k=>s.classes.has(k));});
+  cache.set(c,ok);return ok;
+ };
+ return (selector:string)=>selector.trim().split(/\s*[>+~]\s*|\s+/).filter(Boolean).every(compound);
+}
+
 /** The single top-level <svg> of a skill's reply, rebuilt from allowlisted parts. Refuses, in plain words, anything missing, too large or too complex. */
 export function sanitizeSvgDocument(document:string):SvgResult{
  const no=(reason:SvgIssue):SvgResult=>({ok:false,reason,text:SVG_ISSUE_TEXT[reason]});
@@ -183,8 +212,10 @@ export function sanitizeSvgDocument(document:string):SvgResult{
   const tree=parse(document),found=topSvgs(tree);if(!found.length)return no('svg_none');
   const svg=found.reduce((best,c)=>size(c)>size(best)?c:best);
   // Page styling the drawing relied on. Custom properties come from page-level rules (:root, html, body, *, svg) and the root's own style.
-  const css=allStyles(tree).join('\n');if(css.length>SVG_LIMITS.styleBytes*4)throw new Complex();
-  const rules=cssRules(css),pg={html:findEl(tree,'html'),body:findEl(tree,'body'),svg},vw=new Map<string,Win>(),pw=new Map<string,Win>();
+  // The page's own CSS (outside the drawing) is pruned below before any size check; the drawing's own <style> is its own and is checked as it is.
+  const pageCss=allStyles(tree,[],svg).join('\n'),ownCss=allStyles(svg).join('\n');
+  if(ownCss.length>SVG_LIMITS.styleBytes||pageCss.length>SVG_LIMITS.pageCssBytes)throw new Complex();
+  const pageRules=cssRules(pageCss),ownRules=cssRules(ownCss),rules=[...pageRules,...ownRules],pg={html:findEl(tree,'html'),body:findEl(tree,'body'),svg},vw=new Map<string,Win>(),pw=new Map<string,Win>();
   for(const r of rules){
    // A rule counts through the BEST page-level selector in its list that matches this page; properties come from any list that has one.
    let vspec=-1,pspec=-1;
@@ -202,8 +233,10 @@ export function sanitizeSvgDocument(document:string):SvgResult{
   let paper:string|null=null;
   const bg=pw.get('paper');if(bg){const r=resolveVars(bg.v,vars);if(r!==null&&safeValue(r)&&COLOR.test(r.trim()))paper=r.trim();}
   const styleRules:string[]=inherit.length?[`svg{${declText(inherit)}}`]:[];
-  for(const r of rules){
-   const sels=r.selector.split(',').map(s=>s.trim()).filter(s=>{const p=parsePageSelector(s);return (!p||p.tag==='svg')&&safeSelector(s);});if(!sels.length)continue; // page-level selectors were read above and are never written out
+  const canMatch=drawingMatcher(svg);
+  for(const [idx,r] of rules.entries()){
+   const own=idx>=pageRules.length;
+   const sels=r.selector.split(',').map(s=>s.trim()).filter(s=>{const p=parsePageSelector(s);return (!p||p.tag==='svg')&&safeSelector(s)&&(own||canMatch(s));});if(!sels.length)continue; // page-level selectors were read above and are never written out
    const d=keepDecls(declarations(r.body),vars);if(d.length)styleRules.push(`${sels.join(',')}{${declText(d)}}`);
   }
   const styleText=styleRules.join('\n');if(styleText.length>SVG_LIMITS.styleBytes)throw new Complex();
