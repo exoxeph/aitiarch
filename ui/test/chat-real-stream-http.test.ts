@@ -1,6 +1,6 @@
 import {afterEach,expect,it} from 'vitest';
 import {mkdtemp,rm,writeFile} from 'node:fs/promises';
-import path from 'node:path';import os from 'node:os';import {fileURLToPath} from 'node:url';
+import path from 'node:path';import os from 'node:os';import {fileURLToPath} from 'node:url';import {execFileSync} from 'node:child_process';import {readFile,readdir} from 'node:fs/promises';
 import {createApp} from '../server/http.ts';import {createProvider} from '../server/providers/index.ts';
 import {Store} from '../server/store.ts';import {NoteWatcher} from '../server/watch.ts';
 
@@ -9,8 +9,9 @@ import {Store} from '../server/store.ts';import {NoteWatcher} from '../server/wa
 const clean:{root:string;app:ReturnType<typeof createApp>;watcher:NoteWatcher}[]=[];
 afterEach(async()=>{for(const f of clean.splice(0)){f.watcher.stop();await f.app.close();await rm(f.root,{recursive:true,force:true,maxRetries:5,retryDelay:100});}});
 const QUESTION='Private budget question for the volunteer picnic';
-async function chatWith(scenario:string){
+async function chatWith(scenario:string,persist=false){
  const root=await mkdtemp(path.join(os.tmpdir(),'aitiarch-chat-real-'));await writeFile(path.join(root,'fixture.md'),'Synthetic note.');
+ if(persist){execFileSync('git',['init','-q'],{cwd:root,stdio:'pipe'});await writeFile(path.join(root,'.gitignore'),'/chat/\n');} // chat replies are saved to disk only when /chat/ is git-ignored
  const script=fileURLToPath(new URL('./fixtures/provider-cli.mjs',import.meta.url));
  const provider=createProvider({provider:'claude',contract:'claude-canary-2.1.205',command:process.execPath,prefixArgs:[script,scenario,path.join(root,'record'),'claude'],failureLog:{write:async()=>{}}});
  const store=await Store.open(root),watcher=new NoteWatcher(store),app=createApp({store,watcher,distDir:root,provider});clean.push({root,app,watcher});
@@ -18,7 +19,7 @@ async function chatWith(scenario:string){
  const headers={cookie,origin:base,'content-type':'application/json','x-aitiarch':'1'},call=(url:string,body:unknown)=>fetch(base+url,{method:'PUT',headers,body:JSON.stringify(body)});
  const review=await (await call('/api/chat/review',{id:'message-one',path:'fixture.md',question:QUESTION,context:[]})).json();
  const sent=await call('/api/chat/send',{reviewId:review.reviewId,confirmed:true});
- return {text:await sent.text()};
+ return {text:await sent.text(),root,base,cookie};
 }
 
 // When the call fails, the error event says why (a safe reason), and never carries the question.
@@ -39,6 +40,18 @@ it('a CLI that exits with an error shows its exit code and a sanitized tail, wit
  const {text}=await chatWith('verified-chat-exit'),e=failure(text);
  expect(e.reason).toMatchObject({kind:'exited',exitCode:3});expect(e.reason.detail).toContain('boom: something broke');
  expect(text).not.toMatch(/someone|supersecretvalue|private\\x\.md/);
+},20000);
+
+// A thinking delta that carries extra fields (signature, index, counters), as the real CLI sends it: the reply still arrives, and the
+// thinking text is ignored everywhere - not streamed to the page, not in the saved message, not on disk, not in the ledger.
+it('ignores a thinking delta with extra fields: never displayed, never stored',async()=>{
+ const secret='SECRET-THINKING-TEXT-42',{text,root,base,cookie}=await chatWith('verified-chat-thinking-extras',true);
+ expect(text,text.slice(0,300)).toContain('event: complete');expect(text).not.toContain('event: error');expect(text).not.toContain(secret);
+ const snapshot=JSON.stringify(await (await fetch(base+'/api/chat?path=fixture.md',{headers:{cookie}})).json());expect(snapshot).toContain('real-shape reply');expect(snapshot).not.toContain(secret);
+ const files=async(dir:string):Promise<string[]>=>(await readdir(dir,{withFileTypes:true}).catch(()=>[])).flatMap(e=>e.isDirectory()?[]:[path.join(dir,e.name)]);
+ const stored=[...await files(root),...await files(path.join(root,'chat'))].filter(f=>!f.endsWith('record')&&!f.includes('.git'));
+ expect(stored.some(f=>f.includes('chat')&&f.endsWith('.chat.json')),'the reply was saved to disk, so this checks real storage').toBe(true);
+ for(const f of stored)expect(await readFile(f,'utf8'),f).not.toContain(secret);
 },20000);
 
 it('a message gets its streamed reply when the CLI emits a status event and a thinking block, as the installed Claude CLI does',async()=>{

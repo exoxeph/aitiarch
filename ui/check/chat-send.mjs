@@ -46,7 +46,8 @@ async function inApp(scenario, run) {
 
 try {
   // 1. The reply streams in, even though the CLI sends a status event and a thinking block first.
-  await inApp('verified-chat-real-stream', async ({ page, panel }) => {
+  // The second CLI sends the thinking delta the way the real one does on the owner's machine: with a signature, an index and counters.
+  for (const ok of ['verified-chat-real-stream', 'verified-chat-thinking-extras']) await inApp(ok, async ({ page, panel }) => {
     const reply = panel.locator('.chat-ai').last();
     // First the text streams in plainly (with a Stop button); when the reply is complete it is formatted and offers Add to note.
     await page.waitForFunction(() => /real-shape reply/.test(document.querySelector('#chat-panel .chat-ai')?.textContent ?? ''));
@@ -56,7 +57,8 @@ try {
     assert.equal(await panel.locator('.chat-error').count(), 0, 'no error is shown');
     assert(!(await panel.innerText()).includes('could not complete'), 'and nothing says the call failed');
     assert(!(await panel.innerText()).includes('private reasoning'), 'the model\'s private reasoning never reaches the page');
-    await page.screenshot({ path: path.join(out, 'chat-send-ok.png') });
+    assert(!(await page.content()).includes('SECRET-THINKING-TEXT-42'), 'thinking text is nowhere on the page, not even hidden');
+    await page.screenshot({ path: path.join(out, `chat-send-ok-${ok}.png`) });
   });
 
   // 2. Failures say why, in words, and keep "No retry was made." and Dismiss.
@@ -82,5 +84,5 @@ try {
     });
   }
   assert.deepEqual(external, [], 'no request left this machine');
-  console.log(JSON.stringify({ passed: true, scenarios: ['verified-chat-real-stream', ...failing.map(f => f[0])] }, null, 1));
+  console.log(JSON.stringify({ passed: true, scenarios: ['verified-chat-real-stream', 'verified-chat-thinking-extras', ...failing.map(f => f[0])] }, null, 1));
 } finally { await browser.close(); }

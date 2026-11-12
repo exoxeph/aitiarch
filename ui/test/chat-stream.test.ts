@@ -46,8 +46,16 @@ it('tolerates extra plain fields on a signature delta, as the real CLI evidently
  s.push(Buffer.from(realStream({thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'sig',encoding:'base64',length:3}}})));s.finish();
  expect(texts).toEqual(['{"answer":"Hi","claims":[]}']);
 });
+// The real CLI sends more than the thinking text in a thinking delta. Observed on the owner's machine: the reason read
+// "unexpected stream_event/content_block_delta/thinking_delta". Extra plain fields (an index, a signature, counters) are tolerated; the
+// thinking text is never streamed to the page and never becomes part of the answer.
+it('ignores a thinking delta that carries extra index, signature and counter fields, and never emits its text',()=>{
+ const texts:string[]=[],secret='SECRET-THINKING-TEXT-42',s=new ClaudeChatStream(t=>texts.push(t));
+ s.push(Buffer.from(realStream({thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:secret,signature:'sig-field',index:0,thinking_tokens:5,partial:true,note:null}}})));s.finish();
+ expect(texts).toEqual(['{"answer":"Hi","claims":[]}']);expect(texts.join('')).not.toContain(secret);
+});
 it('names the inner delta or block type of an unexpected event, so a mismatch says exactly what it was',()=>{
- const over={thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'x',extra:1}}};
+ const over={thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'x',more:{a:1}}}};
  expect(()=>{const s=new ClaudeChatStream(()=>{});s.push(Buffer.from(realStream(over)));s.finish();}).toThrow(/stream_event\/content_block_delta\/thinking_delta/);
 });
 it.each([
@@ -59,7 +67,10 @@ it.each([
 it.each([
  ['a thinking block that starts with text',{thinkingStart:{type:'content_block_start',index:0,content_block:{type:'thinking',thinking:'already',signature:''}}}],
  ['a thinking block with an extra field',{thinkingStart:{type:'content_block_start',index:0,content_block:{type:'thinking',thinking:'',signature:'',extra:1}}}],
- ['a thinking delta with an extra field',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'x',extra:1}}}],
+ ['a thinking delta with a nested value',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'x',more:{a:1}}}}],
+ ['a thinking delta with an array value',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'x',more:[1]}}}],
+ ['a thinking delta with no thinking text',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',signature:'sig'}}}],
+ ['a thinking delta key that is not a plain name',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'x','C:\\secret':'y'}}}],
  ['an oversized thinking block',{thinkingDelta:{type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'x'.repeat(250000)}}}],
 ])('still rejects %s',(_n,over)=>{expect(()=>{const s=new ClaudeChatStream(()=>{});s.push(Buffer.from(realStream(over)));s.finish();}).toThrow();});
 it('rejects truncated streams, nonempty tools, post-result events, and mismatched final output',()=>{

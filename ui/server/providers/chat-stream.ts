@@ -42,11 +42,12 @@ export class ClaudeChatStream {
     if(this.block===null||event.index!==this.block)reject();
     const d=event.delta;
     if(this.kind==='thinking'){
-     // A thinking delta is exactly its text. A signature delta may carry other plain fields (the investigator, which reads the same real
-     // stream, accepts any signature delta); nested values, odd key names and large payloads are still refused.
+     // The real CLI sends more than the text in these deltas (a signature, an index, counters). A thinking delta needs its thinking text and a
+     // signature delta its signature; any other plain field is tolerated, because none of it is ever shown or kept. Nested values, odd key
+     // names and large payloads are still refused.
      let size=0;
      const plain=(x:any)=>x&&typeof x==='object'&&Object.entries(x).every(([k,v])=>k==='type'||(/^[a-z_]{1,30}$/.test(k)&&(typeof v==='string'?(size+=v.length,true):typeof v==='number'||typeof v==='boolean'||v===null)));
-     const ok=d?.type==='thinking_delta'?typeof d.thinking==='string'&&Object.keys(d).sort().join()==='thinking,type'&&(size=d.thinking.length,true):d?.type==='signature_delta'?typeof d.signature==='string'&&plain(d):false;
+     const ok=d?.type==='thinking_delta'?typeof d.thinking==='string'&&plain(d):d?.type==='signature_delta'?typeof d.signature==='string'&&plain(d):false;
      if(!ok)reject();this.thinkingChars+=size;if(this.thinkingChars>200000)reject();break; // never emitted, never part of the answer
     }
     if(d?.type!=='text_delta'||typeof d.text!=='string'||Object.keys(d).sort().join()!=='text,type')reject();

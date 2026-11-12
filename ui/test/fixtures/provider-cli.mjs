@@ -86,8 +86,10 @@ if (scenario.startsWith('verified-')) {
   if(scenario==='verified-chat-unknown-event'){console.log(JSON.stringify({type:'system',subtype:'brand_new_kind',note:'synthetic'}));setTimeout(()=>process.exit(0),3000);}
   // The stream the installed Claude CLI really produces with --include-partial-messages (event names and key sets captured from a
   // real call; all text here is synthetic): a "requesting" status event, then a thinking block before the text block.
-  if(scenario==='verified-chat-real-stream'){
+  if(scenario==='verified-chat-real-stream'||scenario==='verified-chat-thinking-extras'){
     if(!args.includes('--include-partial-messages'))process.exit(94);
+    // As seen from the real CLI on the owner's machine: the thinking delta carries more than its text (signature, index, counters).
+    const extras=scenario==='verified-chat-thinking-extras',think=extras?'SECRET-THINKING-TEXT-42':'synthetic private reasoning';
     const result=JSON.stringify({answer:'**Synthetic** real-shape reply.',claims:[]});
     const ids={uuid:'11111111-1111-4111-8111-111111111111',session_id:'22222222-2222-4222-8222-222222222222'};
     const emit=event=>console.log(JSON.stringify({type:'stream_event',event,...ids}));
@@ -96,9 +98,9 @@ if (scenario.startsWith('verified-')) {
     emit({type:'message_start',message:{role:'assistant',content:[]}});
     emit({type:'content_block_start',index:0,content_block:{type:'thinking',thinking:'',signature:''}});
     console.log(JSON.stringify({type:'system',subtype:'thinking_tokens',estimated_tokens:12,estimated_tokens_delta:12,...ids}));
-    emit({type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:'synthetic private reasoning'}});
-    emit({type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'synthetic-signature'}});
-    console.log(JSON.stringify({type:'assistant',message:{content:[{type:'thinking',thinking:'synthetic private reasoning',signature:'synthetic-signature'}]},...ids}));
+    emit({type:'content_block_delta',index:0,delta:{type:'thinking_delta',thinking:think,...(extras?{signature:'sig-field',index:0,thinking_tokens:5}:{})}});
+    emit({type:'content_block_delta',index:0,delta:{type:'signature_delta',signature:'synthetic-signature',...(extras?{index:0}:{})}});
+    console.log(JSON.stringify({type:'assistant',message:{content:[{type:'thinking',thinking:think,signature:'synthetic-signature'}]},...ids}));
     emit({type:'content_block_stop',index:0});
     emit({type:'content_block_start',index:1,content_block:{type:'text',text:''}});
     emit({type:'content_block_delta',index:1,delta:{type:'text_delta',text:result.slice(0,20)}});
