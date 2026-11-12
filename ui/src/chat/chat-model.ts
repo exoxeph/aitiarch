@@ -6,7 +6,7 @@ import type {Trail} from './trail-model.ts';
 
 export type TurnStatus='review'|'streaming'|'complete'|'error';
 /** One question and its answer. `text` is provisional while streaming and the accepted message body once complete. */
-export interface Turn {id:string;question:string|null;status:TurnStatus;text:string;message?:ChatMessage;error?:{code:ChatErrorCode;rule?:string;reason?:FailureReason};/** Set when this turn is an investigation: the cards, steps and answer come from the M4 events. */trail?:Trail}
+export interface Turn {id:string;question:string|null;status:TurnStatus;text:string;message?:ChatMessage;error?:{code:ChatErrorCode;rule?:string;reason?:FailureReason;errorName?:string};/** Set when this turn is an investigation: the cards, steps and answer come from the M4 events. */trail?:Trail}
 
 export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
  if(!turns.some(t=>t.id===event.id))return [...turns];
@@ -16,7 +16,7 @@ export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
    case 'start':return {...t,status:'streaming'};
    case 'delta':return {...t,status:'streaming',text:t.text+event.text};
    case 'complete':return {...t,status:'complete',text:event.message.body,message:event.message};
-   case 'error':{const {message:_dropped,...rest}=t;return {...rest,status:'error',text:'',error:{code:event.code,...(event.rule?{rule:event.rule}:{}),...(event.reason?{reason:event.reason}:{})}};} // a partial reply is never kept
+   case 'error':{const {message:_dropped,...rest}=t;return {...rest,status:'error',text:'',error:{code:event.code,...(event.rule?{rule:event.rule}:{}),...(event.reason?{reason:event.reason}:{}),...(event.errorName?{errorName:event.errorName}:{})}};} // a partial reply is never kept
   }
  });
 }
@@ -56,8 +56,11 @@ export function usageLine(u:ChatUsage):string{
  const calls=u.calls===0?'No calls yet':`${u.calls} ${u.calls===1?'call':'calls'} · ${formatCount(u.input+u.cached)} in · ${formatCount(u.output)} out`;
  return `${calls} · ${formatCount(u.spent)} of ${formatCount(u.tokenBudget)} tokens`+(u.unreportedCalls>0?' (some counts unreported)':'');
 }
+/** Shown quietly under a reply the model gave as plain prose: it has no claims, so there is nothing to check against the note. */
+export const UNSTRUCTURED_LABEL='Unstructured reply: no claims to check';
 /** A failed Claude call says why when the server gave a reason it understands; otherwise the same generic sentence as ever. */
-export function errorText(code:ChatErrorCode,reason?:FailureReason):string{
+export function errorText(code:ChatErrorCode,reason?:FailureReason,errorName?:string):string{
+ if(code==='internal'&&typeof errorName==='string'&&/^[A-Za-z]{1,40}$/.test(errorName))return `Something went wrong inside Aitiarch while handling this request (${errorName}). No retry was made.`;
  if(code==='provider_failed'&&reason&&typeof reason==='object'&&typeof reason.kind==='string'){
   const why=failureText(reason);if(typeof why==='string')return `Claude could not complete this request. ${why} No retry was made.`;
  }

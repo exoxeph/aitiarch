@@ -10,6 +10,7 @@ import type { Availability } from './capabilities.ts';
 import { claudeArguments, inspectClaudeCanary } from './claude-canary.ts';
 import { failureMetadata, privateFailureLog, type FailureLog, type FailureMetadata } from './failure-metrics.ts';
 import { flagFrom, safeTail, type FailureReason } from '../../shared/chat-failure.ts';
+import { parseChatReply } from './answer-json.ts';
 import { parseAnswerJson } from './answer-json.ts';
 import {ClaudeChatStream} from './chat-stream.ts';
 import {secretKinds} from '../chat/secrets.ts';
@@ -55,6 +56,8 @@ export interface Result {
   id: string; provider: ProviderName; model: string | null; answer: string;
   claims: unknown[]; diagram?:unknown; usage: { inputTokens: number; outputTokens: number; cachedTokens?:number } | null;
   insertionBlocked?:boolean;
+  /** Chat only: the model's reply was plain prose, not {answer, claims}. It is shown as an answer with no claims to check. */
+  unstructured?:true;
 }
 export interface InvokeOptions { signal?: AbortSignal; timeoutMs?: number; retry503?:boolean; onTextDelta?:(text:string)=>void }
 export interface Provider {
@@ -150,13 +153,18 @@ export function validateProviderResponse(response:unknown) {
 }
 function parseResult(provider: ProviderName, id: string, stdout: string, stream = false, chat = false): Result {
   try {
-    let response: unknown, model: string | null = null, usage: Result['usage'] = null;
+    let response: unknown, model: string | null = null, usage: Result['usage'] = null, unstructured = false;
     if (provider === 'claude') {
       const events = stream ? stdout.trim().split(/\r?\n/).map(line => JSON.parse(line)) : [];
       if (stream && !inspectClaudeCanary(events, []).passed) throw new Error('the stream failed the isolation check');
       const envelope = stream ? events.find(e => e.type === 'result') : JSON.parse(stdout);
       if (envelope.is_error || envelope.subtype !== 'success') throw new Error('the final result was not a success');
-      response = parseAnswerJson(envelope.result); model = typeof envelope.model === 'string' ? envelope.model : null;
+      if (chat) {
+        // The chat shows a prose reply as an unstructured answer with no claims; JSON-shaped replies that are wrong still fail closed.
+        const reply = parseChatReply(envelope.result);
+        if (reply.kind === 'prose') { response = { answer: reply.text, claims: [] }; unstructured = true; } else response = reply.value;
+      } else response = parseAnswerJson(envelope.result);
+      model = typeof envelope.model === 'string' ? envelope.model : null;
       if (Number.isFinite(envelope.usage?.input_tokens) && Number.isFinite(envelope.usage?.output_tokens))
         usage = { inputTokens: envelope.usage.input_tokens, outputTokens: envelope.usage.output_tokens,
           ...(Number.isFinite(envelope.usage.cache_read_input_tokens)?{cachedTokens:envelope.usage.cache_read_input_tokens}:{}) };
@@ -177,13 +185,14 @@ function parseResult(provider: ProviderName, id: string, stdout: string, stream 
     if(chat&&(!response||typeof response!=='object'||Object.keys(response).sort().join()!=='answer,claims'))throw new Error('the answer did not have exactly answer and claims');
     const blocked=chat&&typeof (response as any)?.answer==='string'&&secretKinds((response as any).answer).length>0;
     const safe = validateProviderResponse(response);
-    return { id, provider, model, answer: safe.answer, claims: safe.claims, ...(safe.diagram===undefined?{}:{diagram:safe.diagram}), usage,...(chat?{insertionBlocked:blocked}:{}) };
+    return { id, provider, model, answer: safe.answer, claims: safe.claims, ...(safe.diagram===undefined?{}:{diagram:safe.diagram}), usage,...(chat?{insertionBlocked:blocked}:{}),...(unstructured?{unstructured:true as const}:{}) };
   } catch(error) {
     const failure=new ProviderError('invalid_response');
     if(error instanceof ProductValidationError)failure.validation=error.record;
     // Only our own fixed sentences are shown; a JSON syntax error can quote the reply, so it never is.
     const own=['the stream failed the isolation check','the final result was not a success','the answer did not have exactly answer and claims'];
-    failure.reason={kind:'unparseable',detail:error instanceof Error&&own.includes(error.message)?error.message:error instanceof ProductValidationError?'the answer did not pass validation':'the reply could not be read'};
+    const shape:Record<string,string>={'Invalid answer shape.':'the reply was JSON with the wrong fields','Invalid answer formatting.':'the reply looked like JSON but was incomplete or malformed'};
+    failure.reason={kind:'unparseable',detail:error instanceof Error&&own.includes(error.message)?error.message:error instanceof Error&&shape[error.message]?shape[error.message]:error instanceof ProductValidationError?'the answer did not pass validation':'the reply could not be read'};
     throw failure;
   }
 }

@@ -890,6 +890,9 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .persona-switch:disabled .persona-seg { opacity: .55; }
 .persona-line { margin: 6px 0 0; color: var(--muted); font: 12px/1.45 var(--font-ui); }
 @media (prefers-reduced-motion: reduce) { .persona-seg { transition: none; } }
+/* Quiet, in words, inside the reply: plain sans type, muted, no box or stripe. */
+.chat-ai p.chat-unstructured, .chat-unstructured { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
+.chat-ai p.used-skills { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); }
 .used-skills { margin: 6px 0 0; color: var(--muted); font: 12px/1.4 var(--font-ui); overflow-wrap: anywhere; }
 .used-skills-label { font-weight: 600; }
 .skills-tab h4 { margin: 20px 0 8px; font-size: var(--text-control); font-weight: 600; }

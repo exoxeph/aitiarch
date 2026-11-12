@@ -79,6 +79,22 @@ if (scenario.startsWith('verified-')) {
     console.log(JSON.stringify({type:'assistant',message:{content:[{type:'text',text:result}]}}));
     console.log(JSON.stringify({type:'result',subtype:'success',result,usage:{input_tokens:20,output_tokens:10}}));process.exit(0);
   }
+  // The model's final reply in different formats (all text synthetic). The stream and the final result carry the same text.
+  const replies={
+    'verified-chat-reply-prose':'Yes. The budget is 40 dollars in one place and 60 in another.',
+    'verified-chat-reply-wrapped':'Here is my analysis: {"answer":"Yes: 40 vs 60.","claims":[]} Hope that helps.',
+    'verified-chat-reply-fenced':'Analysis:\n```json\n{"answer":"Yes: 40 vs 60.","claims":[]}\n```\nDone.',
+    'verified-chat-reply-takeaway':'{"answer":"x","claims":[],"takeaway":"do this"}',
+    'verified-chat-reply-cutoff':'{"answer":"The budget is 40 dollars and',
+  };
+  if(replies[scenario]){
+    const text=replies[scenario],mid=Math.floor(text.length/2),emit=event=>console.log(JSON.stringify({type:'stream_event',event}));
+    emit({type:'message_start',message:{role:'assistant'}});emit({type:'content_block_start',index:0,content_block:{type:'text',text:''}});
+    emit({type:'content_block_delta',index:0,delta:{type:'text_delta',text:text.slice(0,mid)}});emit({type:'content_block_delta',index:0,delta:{type:'text_delta',text:text.slice(mid)}});
+    emit({type:'content_block_stop',index:0});emit({type:'message_stop'});
+    console.log(JSON.stringify({type:'assistant',message:{content:[{type:'text',text}]}}));
+    console.log(JSON.stringify({type:'result',subtype:'success',result:text,usage:{input_tokens:20,output_tokens:10}}));process.exit(0);
+  }
   // Ways a real CLI can fail while the chat is waiting for a reply (all text synthetic).
   if(scenario==='verified-chat-flag-rejected'){process.stderr.write("error: unknown option '--include-partial-messages'\n");process.exit(2);}
   if(scenario==='verified-chat-login'){process.stderr.write('Not logged in. Please log in.\n');process.exit(1);}

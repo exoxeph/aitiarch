@@ -93,7 +93,7 @@ export class ChatRuntime {
   s.running=true;s.serial++;s.usage.reserved=frozen.reservation;this.reviews.delete(input.reviewId);
   const controller=new AbortController();s.controller=controller;const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   let resolve!:()=>void;const done=new Promise<void>(r=>{resolve=r;});this.jobs.add(done);
-  let called=false,charged=false;
+  let called=false,charged=false,stage:'run'|'save'='run';
   try{
    const available=await this.provider.checkAvailability();if(!available.available||available.textStreaming===false)throw new ChatError('disabled');
    if(controller.signal.aborted)throw new ChatError('cancelled');
@@ -105,7 +105,9 @@ export class ChatRuntime {
    const result=await this.provider.invoke(request,{signal:controller.signal,onTextDelta:text=>{
     json+=text;if(json.length>100000)throw new ProviderError('output_limit');
     if(estimateTokens(json)>outputRoom)throw new ChatError('budget_reached');
-    const prefix=answerPrefix(json);if(prefix.length>sent.length){const delta=prefix.slice(sent.length);sent=prefix;emit({type:'delta',id:request.id,text:delta,provisional:true});}
+    // A structured reply streams its answer field. A reply that starts as plain prose streams as written (the final message replaces it).
+    const prose=json.trim()!==''&&!/^\s*[{`\[]/.test(json),prefix=prose?json:answerPrefix(json);
+    if(prefix.length>sent.length){const delta=prefix.slice(sent.length);sent=prefix;emit({type:'delta',id:request.id,text:delta,provisional:true});}
    }});
    if(controller.signal.aborted)throw new ChatError('cancelled');
    if(result.usage){for(const n of Object.values(result.usage))if(typeof n!=='number'||!Number.isFinite(n)||n<0)throw new ChatError('validation');
@@ -113,9 +115,10 @@ export class ChatRuntime {
     s.usage.spent+=result.usage.inputTokens+(result.usage.cachedTokens??0)+result.usage.outputTokens;
    }else{s.usage.spent+=frozen.reservation;s.usage.unreportedCalls++;}charged=true;
    // Enforce exact keys for fake/adapted providers too; never accept owned fields or aliases.
-   if(!Array.isArray(result.claims)||result.claims.some(c=>!c||typeof c!=='object'||Object.keys(c).sort().join()!=='quote,sourceId')||Object.keys(result).some(k=>!['id','provider','model','answer','claims','usage','insertionBlocked'].includes(k)))throw new ChatError('validation');
+   if(!Array.isArray(result.claims)||result.claims.some(c=>!c||typeof c!=='object'||Object.keys(c).sort().join()!=='quote,sourceId')||Object.keys(result).some(k=>!['id','provider','model','answer','claims','usage','insertionBlocked','unstructured'].includes(k)))throw new ChatError('validation');
    const validated=validateProductResult(result,request.id,request,redact,hash,'claude');
-   const message:ChatMessage={id:request.id,role:'assistant',body:validated.body,at:new Date().toISOString(),provider:'claude',model:validated.model,evidence:validated.evidence,usage:result.usage,insertionBlocked:!!s.privateContext||result.insertionBlocked===true||secretKinds(result.answer).length>0,...(frozen.skillNames.length?{skills:frozen.skillNames}:{}),...(s.privateContext?{ephemeral:true as const}:{})};
+   const message:ChatMessage={id:request.id,role:'assistant',body:validated.body,at:new Date().toISOString(),provider:'claude',model:validated.model,evidence:validated.evidence,usage:result.usage,insertionBlocked:!!s.privateContext||result.insertionBlocked===true||secretKinds(result.answer).length>0,...(result.unstructured?{unstructured:true as const}:{}),...(frozen.skillNames.length?{skills:frozen.skillNames}:{}),...(s.privateContext?{ephemeral:true as const}:{})};
+   stage='save'; // from here on, a failure is about saving the reply
    let persistence:'memory'|'private';
    if(s.privateContext){const messages=this.ephemeral.get(review.path)??[];if(messages.length>=200)throw new ChatError('budget_reached');messages.push(message);this.ephemeral.set(review.path,messages);persistence='memory';}
    else persistence=await this.chats.append(review.path,message);
@@ -125,9 +128,9 @@ export class ChatRuntime {
    emit({type:'complete',id:request.id,message,persistence,usage:{...s.usage,reserved:0}});
   }catch(e){
    if(called&&!charged){s.usage.spent+=frozen.reservation;s.usage.unreportedCalls++;}
-   const code:ChatErrorCode=e instanceof ChatError?e.code:e instanceof ProductValidationError?'validation':e instanceof ProviderError&&e.code==='cancelled'?'cancelled':e instanceof ProviderError?'provider_failed':'persistence';
+   const code:ChatErrorCode=e instanceof ChatError?e.code:e instanceof ProductValidationError?'validation':e instanceof ProviderError&&e.code==='cancelled'?'cancelled':e instanceof ProviderError?'provider_failed':stage==='save'?'persistence':'internal';
    try{await this.audit(review.path,request.id,'chat_failed');}catch{/* No text or exceptions are logged. */}
-   emit({type:'error',id:request.id,code,...(e instanceof ProductValidationError?{rule:e.record.rule}:{}),...(code==='provider_failed'&&e instanceof ProviderError?{reason:describeFailure(e.code,e.reason)}:{})});
+   emit({type:'error',id:request.id,code,...(e instanceof ProductValidationError?{rule:e.record.rule}:{}),...(code==='provider_failed'&&e instanceof ProviderError?{reason:describeFailure(e.code,e.reason)}:{}),...(code==='internal'&&e instanceof Error&&/^[A-Za-z]{1,40}$/.test(e.name)?{errorName:e.name}:{})});
   }finally{s.running=false;s.controller=undefined;s.usage.reserved=0;signal?.removeEventListener('abort',abort);resolve();this.jobs.delete(done);}
  }
  private audit(note:string,id:string,event:'chat_started'|'chat_completed'|'chat_failed'){return this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(note),requestId:id,note,event,at:new Date().toISOString()});}

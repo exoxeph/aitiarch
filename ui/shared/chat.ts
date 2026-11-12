@@ -17,6 +17,8 @@ export interface ChatMessage {
  evidence:{sourceId:string;sourceHash:string;quote:string}[];
  usage:{inputTokens:number;outputTokens:number;cachedTokens?:number}|null;
  insertionBlocked:boolean;
+ /** The model replied in plain prose, not as {answer, claims}: shown as an answer with no claims to check, stored with no evidence. */
+ unstructured?:true;
  /** Names of the skills that shaped this reply. Absent in older files. Names only: never paths or skill text. */
  skills?:string[];
  /** Session-derived replies never enter the repository or Add to note. */
@@ -26,13 +28,13 @@ export interface ChatUsage {
  note:string;calls:number;input:number;cached:number;output:number;unreportedCalls:number;
  tokenBudget:number;spent:number;reserved:number;rollingRequestCap:number;windowMinutes:number;
 }
-export type ChatErrorCode='invalid_chat'|'review_required'|'stale_review'|'busy'|'budget_reached'|'hourly_cap'|'disabled'|'cancelled'|'validation'|'provider_failed'|'persistence'|'secrets_blocked'|'session_format'|'session_limit'|'session_selection';
+export type ChatErrorCode='invalid_chat'|'review_required'|'stale_review'|'busy'|'budget_reached'|'hourly_cap'|'disabled'|'cancelled'|'validation'|'provider_failed'|'internal'|'persistence'|'secrets_blocked'|'session_format'|'session_limit'|'session_selection';
 export const CHAT_MESSAGES:Record<ChatErrorCode,string>={
  invalid_chat:'Invalid chat request. Nothing was sent.',review_required:'Review what will be sent before sending.',stale_review:'The chat changed. Review this message again.',
  busy:'A request is already running. Wait or cancel it.',budget_reached:'This chat has reached its token budget. Review the budget before sending more.',
  hourly_cap:'This chat has reached its rolling hourly request cap.',disabled:'Chat requires the verified isolated Claude CLI provider with partial-message streaming.',
  cancelled:'Chat request cancelled. No partial reply was accepted.',validation:'The reply failed validation. No partial reply was accepted.',
- provider_failed:'Claude could not complete this request. No retry was made.',persistence:'The reply or its ledger entry could not be saved. Do not resend automatically.',
+ provider_failed:'Claude could not complete this request. No retry was made.',internal:'Something went wrong inside Aitiarch while handling this request. No retry was made.',persistence:'The reply or its ledger entry could not be saved. Do not resend automatically.',
  secrets_blocked:'Add to note blocked: this reply may contain a secret or private key. Nothing was inserted.',
  session_format:'Session format changed or could not be verified. Nothing was sent. Select another session.',
  session_limit:'Session exceeds the safe size limit. Choose a smaller session.',session_selection:'Choose a session from this project first.'};
@@ -40,7 +42,7 @@ export type ChatEvent=
  |{type:'start';id:string}
  |{type:'delta';id:string;text:string;provisional:true}
  |{type:'complete';id:string;message:ChatMessage;persistence:'private'|'memory';usage:ChatUsage}
- |{type:'error';id:string;code:ChatErrorCode;rule?:string;/** For provider_failed: why, in a safe form the page can say in words. */reason?:import('./chat-failure.ts').FailureReason};
+ |{type:'error';id:string;code:ChatErrorCode;rule?:string;/** For internal errors: the kind of error (for example TypeError), never its message. */errorName?:string;/** For provider_failed: why, in a safe form the page can say in words. */reason?:import('./chat-failure.ts').FailureReason};
 export interface ChatInput {id:string;path:string;question:string;selection?:string;context:ContextChoice[]}
 export interface ChatReview {
  reviewId:string;requestId:string;path:string;question:string;selection:string;

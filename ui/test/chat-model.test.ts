@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import type {ChatEvent,ChatMessage,ChatUsage} from '../shared/chat.ts';
-import {applyEvent,buildContext,chipEstimate,fromStored,newTurnId,previewText,sseFrames,usageLine,formatCount,errorText,type Turn} from '../src/chat/chat-model.ts';
+import {applyEvent,buildContext,chipEstimate,fromStored,newTurnId,previewText,sseFrames,usageLine,formatCount,errorText,UNSTRUCTURED_LABEL,type Turn} from '../src/chat/chat-model.ts';
 
 // Pure chat state: no DOM, no network. The panel only renders what these functions return.
 const message=(id:string,body='Hello **world**.'):ChatMessage=>({id,role:'assistant',body,at:'2026-01-01T00:00:00.000Z',provider:'claude',model:null,evidence:[],usage:{inputTokens:20,outputTokens:10},insertionBlocked:false});
@@ -34,6 +34,12 @@ describe('streamed turns',()=>{
   expect(errorText('provider_failed',null as any)).toBe('Claude could not complete this request. No retry was made.');
   expect(errorText('busy',{kind:'timeout'})).toBe(errorText('busy'));
  });
+ it('says an internal error without blaming saving, and names only the kind of error',()=>{
+  expect(errorText('internal')).toMatch(/inside Aitiarch/);expect(errorText('internal')).not.toMatch(/saved|ledger/i);expect(errorText('internal').endsWith('No retry was made.')).toBe(true);
+  expect(errorText('internal',undefined,'TypeError')).toContain('(TypeError)');expect(errorText('internal',undefined,'not a name!')).not.toContain('not a name');
+  expect(applyEvent([turn('a')],{type:'error',id:'a',code:'internal',errorName:'TypeError'})[0].error).toEqual({code:'internal',errorName:'TypeError'});
+ });
+ it('labels an unstructured reply in plain words',()=>{expect(UNSTRUCTURED_LABEL).toBe('Unstructured reply: no claims to check');});
  it('ignores events for a turn that is not there',()=>{const t=[turn('a')];expect(applyEvent(t,{type:'delta',id:'zzz',text:'x',provisional:true})).toEqual(t);});
  it('marks a started turn as streaming',()=>{expect(applyEvent([turn('a',{status:'review'})],{type:'start',id:'a'})[0].status).toBe('streaming');});
 });

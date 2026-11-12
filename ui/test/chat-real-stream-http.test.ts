@@ -42,6 +42,22 @@ it('a CLI that exits with an error shows its exit code and a sanitized tail, wit
  expect(text).not.toMatch(/someone|supersecretvalue|private\\x\.md/);
 },20000);
 
+// The model's final reply does not always come back as exactly {answer, claims}. The chat extracts JSON from a fence or a wrapped object, shows
+// plain prose as an unstructured reply with no claims, and fails closed on JSON-shaped replies that are wrong or cut off.
+const done=(text:string)=>JSON.parse(/event: complete\ndata: (.*)\n/.exec(text)![1]);
+it('a plain-prose reply is shown as an unstructured answer with no claims, and is stored that way',async()=>{
+ const {text,base,cookie}=await chatWith('verified-chat-reply-prose',true),c=done(text);
+ expect(text.indexOf('event: delta'),'prose streams in as it arrives, before the reply is complete').toBeGreaterThan(-1);expect(text.indexOf('event: delta')).toBeLessThan(text.indexOf('event: complete'));
+ expect(text).not.toContain('event: error');expect(c.message.unstructured).toBe(true);expect(c.message.body).toContain('budget is 40 dollars');expect(c.message.evidence).toEqual([]);
+ const saved=await (await fetch(base+'/api/chat?path=fixture.md',{headers:{cookie}})).json();expect(saved.messages.at(-1)).toMatchObject({unstructured:true,evidence:[]});
+},20000);
+it.each(['verified-chat-reply-wrapped','verified-chat-reply-fenced'])('%s: the JSON is extracted and the reply is structured, not flagged',async(scenario)=>{
+ const c=done((await chatWith(scenario)).text);expect(c.message.body).toBe('Yes: 40 vs 60.');expect(c.message.unstructured).toBeUndefined();
+},20000);
+it.each(['verified-chat-reply-takeaway','verified-chat-reply-cutoff'])('%s: a JSON-shaped reply that is wrong or cut off fails closed with a reason',async(scenario)=>{
+ const {text}=await chatWith(scenario);expect(text).not.toContain('event: complete');const e=failure(text);expect(e.code).toBe('provider_failed');expect(e.reason.kind).toBe('unparseable');
+},20000);
+
 // A thinking delta that carries extra fields (signature, index, counters), as the real CLI sends it: the reply still arrives, and the
 // thinking text is ignored everywhere - not streamed to the page, not in the saved message, not on disk, not in the ledger.
 it('ignores a thinking delta with extra fields: never displayed, never stored',async()=>{
