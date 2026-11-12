@@ -1,0 +1,189 @@
+// Static skill diagrams (build plan 2.6): whatever a skill returns (a full page or a bare svg), only a REBUILT copy of its single top-level
+// <svg> is kept. The reply is read with a small tokenizer of our own (no DOM, so it runs on the server), and the copy is written out again from
+// known-safe elements and attributes only, so anything the original carried can only survive if it was on the list. Page styling that the drawing
+// relied on (custom properties, rules, the page background and font) is resolved into a style block of allowlisted properties. Pure and deterministic:
+// the same input always gives the same bytes. The result is shown only as an <img>, which also cannot run scripts or load anything.
+export type SvgIssue='svg_none'|'svg_too_large'|'svg_too_complex';
+/** Plain words for the person; never the skill's own text. */
+export const SVG_ISSUE_TEXT:Record<SvgIssue,string>={
+ svg_none:'the skill did not draw a picture the app can show',
+ svg_too_large:'the drawing is too large to show as an image',
+ svg_too_complex:'the drawing has too many parts or is nested too deeply',
+};
+export const SVG_LIMITS=Object.freeze({parsedElements:20000,parseDepth:200,elements:2000,depth:32,bytes:300*1024,styleBytes:40*1024,attributes:48,valueLength:2000,pathLength:60000,textLength:4000});
+export type SvgResult={ok:true;svg:string}|{ok:false;reason:SvgIssue;text:string};
+
+interface El{name:string;attrs:[string,string][];kids:(El|string)[]}
+class Complex extends Error{}
+const NS='http://www.w3.org/2000/svg',XLINK='http://www.w3.org/1999/xlink';
+
+// ---- reading -----------------------------------------------------------------------------------------------------------------------------
+const ENTITY:Record<string,string>={amp:'&',lt:'<',gt:'>',quot:'"',apos:"'",nbsp:'\u00a0'};
+const clean=(s:string)=>s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\ufffe\uffff]/g,'');
+const decode=(s:string)=>clean(s.replace(/&(#x[0-9a-f]{1,6}|#[0-9]{1,7}|[a-z]{2,6});/gi,(m,e:string)=>{
+ if(e[0]==='#'){const n=e[1].toLowerCase()==='x'?parseInt(e.slice(2),16):parseInt(e.slice(1),10);return n>0&&n<0x110000&&!(n>=0xd800&&n<=0xdfff)?String.fromCodePoint(n):'';}
+ return ENTITY[e.toLowerCase()]??m;}));
+const VOID=new Set(['meta','link','img','br','hr','input','source','area','base','col','embed','param','track','wbr']);
+const RAW=new Set(['script','style','textarea']);
+const START=/<([A-Za-z][A-Za-z0-9:_-]*)/y,ATTR=/[\s\/]*([^\s"'<>\/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/y,TAIL=/\s*(\/?)>/y,END=/<\/([A-Za-z][A-Za-z0-9:_-]*)[^>]*>/y;
+function parse(src:string):El{
+ const root:El={name:'#root',attrs:[],kids:[]},stack=[root];let i=0,count=0;const n=src.length;
+ const text=(s:string,raw=false)=>{if(s)stack[stack.length-1].kids.push(raw?clean(s):decode(s));};
+ while(i<n){
+  const lt=src.indexOf('<',i);
+  if(lt<0){text(src.slice(i));break;}
+  if(lt>i)text(src.slice(i,lt));
+  i=lt;
+  if(src.startsWith('<!--',i)){const e=src.indexOf('-->',i+4);i=e<0?n:e+3;continue;}
+  if(src.startsWith('<![CDATA[',i)){const e=src.indexOf(']]>',i);text(src.slice(i+9,e<0?n:e),true);i=e<0?n:e+3;continue;}
+  if(src[i+1]==='!'||src[i+1]==='?'){const e=src.indexOf('>',i);i=e<0?n:e+1;continue;}
+  if(src[i+1]==='/'){END.lastIndex=i;const m=END.exec(src);if(!m){text('<');i++;continue;}
+   const name=m[1].toLowerCase();for(let k=stack.length-1;k>0;k--)if(stack[k].name.toLowerCase()===name){stack.length=k;break;}i=END.lastIndex;continue;}
+  START.lastIndex=i;const s=START.exec(src);if(!s){text('<');i++;continue;}
+  const el:El={name:s[1],attrs:[],kids:[]};let at=START.lastIndex,closed=false;
+  for(;;){TAIL.lastIndex=at;const t=TAIL.exec(src);if(t){closed=t[1]==='/';at=TAIL.lastIndex;break;}
+   ATTR.lastIndex=at;const a=ATTR.exec(src);if(!a||ATTR.lastIndex===at){closed=false;at=-1;break;}
+   if(el.attrs.length<400)el.attrs.push([a[1],decode(a[2]??a[3]??a[4]??'')]);at=ATTR.lastIndex;}
+  if(at<0){text('<');i++;continue;}
+  if(++count>SVG_LIMITS.parsedElements)throw new Complex();
+  stack[stack.length-1].kids.push(el);i=at;
+  const lower=el.name.toLowerCase();
+  if(closed||VOID.has(lower))continue;
+  if(RAW.has(lower)){const e=new RegExp('</'+lower+'\\b','i').exec(src.slice(i));const end=e?i+e.index:n;el.kids.push(clean(src.slice(i,end)));const close=src.indexOf('>',end);i=e&&close>=0?close+1:n;continue;}
+  stack.push(el);if(stack.length>SVG_LIMITS.parseDepth)throw new Complex();
+ }
+ return root;
+}
+const size=(e:El):number=>1+e.kids.reduce((a:number,k)=>a+(typeof k==='string'?0:size(k)),0);
+function topSvgs(e:El,out:El[]=[]){for(const k of e.kids)if(typeof k!=='string'){if(k.name.toLowerCase()==='svg')out.push(k);else topSvgs(k,out);}return out;}
+function allStyles(e:El,out:string[]=[]){for(const k of e.kids)if(typeof k!=='string'){if(k.name.toLowerCase()==='style')out.push(k.kids.filter((x):x is string=>typeof x==='string').join('').replace(/<!\[CDATA\[|\]\]>/g,''));else allStyles(k,out);}return out;}
+
+// ---- CSS ---------------------------------------------------------------------------------------------------------------------------------
+const CSS_PROPS=new Set(['fill','stroke','stroke-width','stroke-dasharray','stroke-dashoffset','stroke-linecap','stroke-linejoin','stroke-miterlimit','stroke-opacity','fill-opacity','fill-rule','clip-rule','opacity','color','stop-color','stop-opacity','font','font-family','font-size','font-weight','font-style','font-stretch','letter-spacing','word-spacing','text-anchor','text-decoration','dominant-baseline','alignment-baseline','paint-order','visibility','display','marker-start','marker-mid','marker-end','clip-path','mask','transform','transform-origin','transform-box','vector-effect','shape-rendering','text-rendering']);
+function safeValue(v:string,max:number=SVG_LIMITS.valueLength):boolean{
+ if(!v||v.length>max||/[<>\\\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v))return false;
+ if(/expression\s*\(|javascript:|vbscript:|data:|@import|behavior|binding|image-set|src\s*\(|attr\s*\(|env\s*\(/i.test(v))return false;
+ for(const m of v.matchAll(/url\(([^)]*)\)/gi))if(!/^\s*["']?#[A-Za-z0-9_.:-]+["']?\s*$/.test(m[1]))return false;
+ return true;
+}
+function declarations(body:string):[string,string][]{
+ const out:[string,string][]=[];let cur='',depth=0,quote='';
+ const push=()=>{const i=cur.indexOf(':');if(i>0){const name=cur.slice(0,i).trim(),value=cur.slice(i+1).replace(/!important\s*$/i,'').replace(/\s+/g,' ').trim();if(name&&value)out.push([name.startsWith('--')?name:name.toLowerCase(),value]);}cur='';};
+ for(const ch of body){
+  if(quote){cur+=ch;if(ch===quote)quote='';continue;}
+  if(ch==='"'||ch==="'"){quote=ch;cur+=ch;continue;}
+  if(ch==='(')depth++;else if(ch===')')depth=Math.max(0,depth-1);
+  if(ch===';'&&depth===0){push();continue;}
+  cur+=ch;
+ }
+ push();return out;
+}
+function cssRules(css:string):{selector:string;body:string}[]{
+ css=css.replace(/\/\*[\s\S]*?\*\//g,'');const out:{selector:string;body:string}[]=[];let i=0;
+ const block=(from:number)=>{let d=0;for(let k=from;k<css.length;k++){if(css[k]==='{')d++;else if(css[k]==='}'&&--d===0)return k;}return css.length;};
+ while(i<css.length){
+  while(i<css.length&&/\s/.test(css[i]))i++;if(i>=css.length)break;
+  const open=css.indexOf('{',i);
+  if(css[i]==='@'){const semi=css.indexOf(';',i);if(semi>=0&&(open<0||semi<open)){i=semi+1;continue;}if(open<0)break;i=block(open)+1;continue;} // every at-rule is dropped
+  if(open<0)break;const close=block(open);
+  out.push({selector:css.slice(i,open).trim().replace(/\s+/g,' '),body:css.slice(open+1,close)});i=close+1;
+ }
+ return out;
+}
+const PAGE_SELECTOR=/^(html|body|:root|\*|html body)$/i,PSEUDO=new Set(['hover','focus','first-child','last-child','root']);
+function safeSelector(s:string):boolean{
+ if(!s||s.length>200||!/^[A-Za-z0-9_.#*\- >+~:]+$/.test(s))return false;
+ for(const m of s.matchAll(/:{1,2}([a-z-]*)/g))if(m[0].startsWith('::')||!PSEUDO.has(m[1]))return false;
+ return true;
+}
+const resolveVars=(value:string,vars:Map<string,string>,depth=0):string|null=>{
+ let v=value;
+ for(let round=0;round<6&&/var\(/i.test(v);round++){
+  if(depth>5)return null;let bad=false;
+  v=v.replace(/var\(\s*(--[A-Za-z0-9_-]+)\s*(?:,\s*((?:[^()]|\([^()]*\))*))?\)/gi,(_m,name:string,fb?:string)=>{
+   const own=vars.get(name);if(own!==undefined){const r=resolveVars(own,vars,depth+1);if(r!==null)return r;}
+   if(fb!==undefined){const r=resolveVars(fb.trim(),vars,depth+1);if(r!==null)return r;}
+   bad=true;return '';});
+  if(bad)return null;
+ }
+ return /var\(/i.test(v)?null:v;
+};
+const COLOR=/^(#[0-9a-f]{3,8}|(?:rgb|hsl)a?\([0-9.,%\s\/-]+\)|[a-z]{3,20})$/i;
+const keepDecls=(decls:[string,string][],vars:Map<string,string>):[string,string][]=>{
+ const out:[string,string][]=[];
+ for(const [name,value] of decls){if(name.startsWith('--')||!CSS_PROPS.has(name))continue;const r=resolveVars(value,vars);if(r!==null&&safeValue(r))out.push([name,r]);}
+ return out;
+};
+const declText=(d:[string,string][])=>d.map(([n,v])=>`${n}:${v}`).join(';');
+
+// ---- writing -----------------------------------------------------------------------------------------------------------------------------
+const ELEMENTS=new Map(['svg','g','path','rect','circle','ellipse','line','polyline','polygon','text','tspan','defs','linearGradient','radialGradient','stop','marker','clipPath','mask','title','desc'].map(n=>[n.toLowerCase(),n]));
+const TEXTUAL=new Set(['text','tspan','title','desc']);
+const ATTRS=new Map(['id','class','transform','fill','stroke','stroke-width','stroke-dasharray','stroke-dashoffset','stroke-linecap','stroke-linejoin','stroke-miterlimit','stroke-opacity','fill-opacity','fill-rule','clip-rule','opacity','display','visibility','font-family','font-size','font-weight','font-style','letter-spacing','word-spacing','text-anchor','dominant-baseline','alignment-baseline','text-decoration','color','stop-color','stop-opacity','marker-start','marker-mid','marker-end','clip-path','mask','vector-effect','paint-order','shape-rendering','role','aria-label','aria-hidden','xml:space','x','y','width','height','rx','ry','cx','cy','r','x1','y1','x2','y2','points','d','dx','dy','rotate','viewBox','preserveAspectRatio','offset','gradientUnits','gradientTransform','spreadMethod','fx','fy','markerWidth','markerHeight','markerUnits','refX','refY','orient','clipPathUnits','maskUnits','maskContentUnits'].map(n=>[n.toLowerCase(),n]));
+const GRADIENTS=new Set(['lineargradient','radialgradient']);
+const escText=(s:string)=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const escAttr=(s:string)=>escText(s).replace(/"/g,'&quot;');
+const FORMAT:Record<string,RegExp>={id:/^[A-Za-z][A-Za-z0-9_.:-]{0,99}$/,class:/^[A-Za-z0-9_\- ]{1,300}$/,d:/^[MmLlHhVvCcSsQqTtAaZz0-9eE+\-.,\s]+$/,points:/^[0-9eE+\-.,\s]+$/,transform:/^[A-Za-z0-9()+\-.,\s]+$/,'xml:space':/^(default|preserve)$/};
+
+function rebuild(svg:El,vars:Map<string,string>){
+ let elements=0,usesXlink=false;
+ const attrOut=(name:string,value:string,el:El):string|null=>{
+  const lname=name.toLowerCase();
+  if(lname==='href'||lname==='xlink:href'){if(GRADIENTS.has(el.name.toLowerCase())&&/^#[A-Za-z][\w.:-]*$/.test(value)){if(lname==='xlink:href')usesXlink=true;return `${lname}="${escAttr(value)}"`;}return null;}
+  const canon=ATTRS.get(lname);if(!canon)return null;
+  const v=resolveVars(value,vars);if(v===null)return null;
+  const limit=canon==='d'||canon==='points'?SVG_LIMITS.pathLength:SVG_LIMITS.valueLength;
+  if(!safeValue(v,limit))return null;
+  const f=FORMAT[canon];if(f&&!f.test(v))return null;
+  return `${canon}="${escAttr(v)}"`;
+ };
+ const emit=(el:El,depth:number):string=>{
+  const lower=el.name.toLowerCase(),canon=ELEMENTS.get(lower);
+  if(!canon){return lower==='a'?el.kids.map(k=>typeof k==='string'?'':emit(k,depth)).join(''):'';} // a link goes, its drawing stays; everything else goes with its contents
+  if(depth>SVG_LIMITS.depth||++elements>SVG_LIMITS.elements)throw new Complex();
+  const seen=new Set<string>(),attrs:string[]=[];
+  for(const [n,v] of el.attrs){
+   const lname=n.toLowerCase();if(seen.has(lname)||attrs.length>=SVG_LIMITS.attributes)continue;
+   if(lname==='style'){const d=keepDecls(declarations(v),vars);if(d.length){seen.add(lname);attrs.push(`style="${escAttr(declText(d))}"`);}continue;}
+   const a=attrOut(n,v,el);if(a){seen.add(lname);attrs.push(a);}
+  }
+  const inner=el.kids.map(k=>typeof k==='string'?(TEXTUAL.has(canon)?escText(k.replace(/\r\n?/g,'\n').slice(0,SVG_LIMITS.textLength)):''):emit(k,depth+1)).join('');
+  return `<${canon}${attrs.length?' '+attrs.join(' '):''}${inner?`>${inner}</${canon}>`:'/>'}`;
+ };
+ return {emit,xlink:()=>usesXlink};
+}
+
+/** The single top-level <svg> of a skill's reply, rebuilt from allowlisted parts. Refuses, in plain words, anything missing, too large or too complex. */
+export function sanitizeSvgDocument(document:string):SvgResult{
+ const no=(reason:SvgIssue):SvgResult=>({ok:false,reason,text:SVG_ISSUE_TEXT[reason]});
+ try{
+  const tree=parse(document),found=topSvgs(tree);if(!found.length)return no('svg_none');
+  const svg=found.reduce((best,c)=>size(c)>size(best)?c:best);
+  // Page styling the drawing relied on. Custom properties come from page-level rules (:root, html, body, *, svg) and the root's own style.
+  const css=allStyles(tree).join('\n');if(css.length>SVG_LIMITS.styleBytes*4)throw new Complex();
+  const rules=cssRules(css),vars=new Map<string,string>(),page:[string,string][]=[];
+  const collect=(decls:[string,string][])=>{for(const [n,v] of decls)if(n.startsWith('--'))vars.set(n,v);};
+  for(const r of rules)if(r.selector.split(',').every(s=>PAGE_SELECTOR.test(s.trim())||s.trim()==='svg'))collect(declarations(r.body));
+  collect(declarations(svg.attrs.find(([n])=>n.toLowerCase()==='style')?.[1]??''));
+  for(const r of rules){
+   const sels=r.selector.split(',').map(s=>s.trim());
+   if(sels.every(s=>PAGE_SELECTOR.test(s)))page.push(...declarations(r.body));
+  }
+  const inherit=keepDecls(page.filter(([n])=>n==='color'||n==='font-family'),vars).sort((a,b)=>a[0]<b[0]?-1:1);
+  let paper:string|null=null;
+  for(const [n,v] of page)if(n==='background'||n==='background-color'){const r=resolveVars(v,vars);if(r!==null&&safeValue(r)&&COLOR.test(r.trim()))paper=r.trim();}
+  const styleRules:string[]=inherit.length?[`svg{${declText(inherit)}}`]:[];
+  for(const r of rules){
+   const sels=r.selector.split(',').map(s=>s.trim()).filter(s=>!PAGE_SELECTOR.test(s)&&safeSelector(s));if(!sels.length)continue;
+   const d=keepDecls(declarations(r.body),vars);if(d.length)styleRules.push(`${sels.join(',')}{${declText(d)}}`);
+  }
+  const styleText=styleRules.join('\n');if(styleText.length>SVG_LIMITS.styleBytes)throw new Complex();
+  const b=rebuild(svg,vars);
+  const body=b.emit(svg,1); // <svg ...>...</svg> with the attributes of the page's own root
+  const open=/^<svg((?: [^>]*?)?)(\/?)>/.exec(body);if(!open)return no('svg_none');
+  const rootAttrs=open[1],rest=open[2]==='/'?'':body.slice(open[0].length,body.length-'</svg>'.length);
+  const out=`<svg xmlns="${NS}"${b.xlink()?` xmlns:xlink="${XLINK}"`:''}${rootAttrs}>${styleText?`<style>${escText(styleText)}</style>`:''}${paper?`<rect width="100%" height="100%" fill="${escAttr(paper)}"/>`:''}${rest}</svg>`;
+  if(Buffer.byteLength(out)>SVG_LIMITS.bytes)return no('svg_too_large');
+  return {ok:true,svg:out};
+ }catch(e){if(e instanceof Complex)return no('svg_too_complex');throw e;}
+}

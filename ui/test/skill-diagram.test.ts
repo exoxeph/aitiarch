@@ -2,7 +2,7 @@ import {afterEach,describe,expect,it} from 'vitest';
 import {mkdtemp,readdir,readFile,rm,mkdir,symlink,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import path from 'node:path';import os from 'node:os';
-import {SKILL_DIAGRAM_CSP,SKILL_DIAGRAM_CSP_HEADER,SKILL_DIAGRAM_CSP_META,SKILL_DIAGRAM_MAX_BYTES,SKILL_DIAGRAM_SANDBOX,extractDocument,extractSingleSvg,injectCsp,skillDiagramInstruction,validSkillDiagramRef} from '../shared/skill-diagram.ts';
+import {SKILL_DIAGRAM_CSP,SKILL_DIAGRAM_CSP_HEADER,SKILL_DIAGRAM_CSP_META,SKILL_DIAGRAM_MAX_BYTES,SKILL_DIAGRAM_SANDBOX,extractDocument,injectCsp,skillDiagramInstruction,validSkillDiagramRef} from '../shared/skill-diagram.ts';
 import {SkillDiagramStore} from '../server/skill-diagram-store.ts';
 
 // Skill diagrams (plan 2.6): one self-contained HTML document, a CSP that blocks all network, saved by the hash of its bytes.
@@ -39,23 +39,7 @@ describe('injectCsp',()=>{
   const out=injectCsp('<!-- <head> --><script>fetch("http://x")</script>');expect(out.indexOf('Content-Security-Policy')).toBeLessThan(out.indexOf('<script>'));expect(out.indexOf('Content-Security-Policy')).toBeLessThan(out.indexOf('<!--'));
  });
 });
-describe('extractSingleSvg',()=>{
- it('returns the exact svg text, byte for byte, from a bare svg or an html shell around it',()=>{
-  expect(extractSingleSvg(SVG)).toBe(SVG);expect(extractSingleSvg(`<?xml version="1.0"?>\r\n<!-- c -->\r\n${SVG}\r\n`)).toBe(SVG);
-  expect(extractSingleSvg(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>T</title></head><body>\n${SVG}\n</body></html>`)).toBe(SVG);
-  const crlf=SVG.replace('<rect','\r\n<rect');expect(extractSingleSvg(`<html><body>${crlf}</body></html>`)).toBe(crlf);
- });
- it('allows a nested svg and inline style',()=>{
-  const nested='<svg xmlns="http://www.w3.org/2000/svg"><style>.a{fill:red}</style><svg x="1"><rect class="a" width="1" height="1"/></svg></svg>';expect(extractSingleSvg(nested)).toBe(nested);
- });
- it.each([
-  ['two top-level svgs',SVG+SVG],['text beside the svg',`<p>Title</p>${SVG}`],['a style block outside the svg',`<html><head><style>svg{fill:red}</style></head><body>${SVG}</body></html>`],
-  ['a script',SVG.replace('<rect','<script>alert(1)</script><rect')],['foreignObject',SVG.replace('<rect','<foreignObject><div/></foreignObject><rect')],
-  ['an event handler',SVG.replace('<rect','<rect onload="x()"')],['an external href',SVG.replace('<rect','<image href="https://example.test/a.png"/><rect')],
-  ['an external url()',SVG.replace('fill="#eee"','style="fill:url(https://example.test/p)"')],['a link',SVG.replace('<rect','<a href="#x"><rect')],
-  ['no xmlns',SVG.replace(' xmlns="http://www.w3.org/2000/svg"','')],['a body with attributes',`<html><body class="x">${SVG}</body></html>`],['an html page with scripts',`<html><body>${SVG}<script>1</script></body></html>`],
- ])('is not a single svg: %s',(_n,doc)=>{expect(extractSingleSvg(doc)).toBeNull();});
-});
+
 describe('validSkillDiagramRef',()=>{
  it('accepts only a hash-named html asset with a sensible size',()=>{
   const asset='diagram-'+'a'.repeat(64)+'.html';

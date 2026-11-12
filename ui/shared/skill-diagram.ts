@@ -41,23 +41,6 @@ export function injectCsp(document:string):string{
  return `<!doctype html><meta http-equiv="Content-Security-Policy" content="${SKILL_DIAGRAM_CSP_META}">${body}`;
 }
 
-/** The exact `<svg ...>...</svg>` text when the document is nothing but one top-level svg that can stand alone as an image; otherwise null.
- *  The result is a substring of the input, byte for byte. It needs an xmlns (a standalone .svg without it does not render), and it must
- *  not hold anything that runs, loads or links (script, foreignObject, event handlers, external references). */
-export function extractSingleSvg(document:string):string|null{
- let t=document.replace(/^\uFEFF/,'').replace(/<\?xml[\s\S]*?\?>/gi,'').replace(/<!doctype[^>]*>/gi,'').replace(/<!--[\s\S]*?-->/g,'').trim();
- const shell=/^<html\b[^>]*>\s*(?:<head\b[^>]*>(?:\s*<meta\b[^>]*>|\s*<title\b[^>]*>[^<]*<\/title>)*\s*<\/head>)?\s*(?:<body>\s*)?([\s\S]*?)\s*(?:<\/body>\s*)?<\/html>$/i.exec(t);
- if(shell)t=shell[1].trim();
- if(!/^<svg[\s>]/i.test(t)||!/<\/svg\s*>$/i.test(t))return null;
- let depth=0;const tags=/<(\/?)svg\b[^>]*?(\/?)>/gi;let m:RegExpExecArray|null;
- while((m=tags.exec(t))){if(m[1]){if(--depth<0)return null;if(depth===0&&tags.lastIndex!==t.length)return null;}else if(!m[2]){depth++;}else if(depth===0)return null;}
- if(depth!==0)return null;
- const open=/^<svg\b[^>]*>/i.exec(t)![0];
- if(!/\sxmlns\s*=\s*["']http:\/\/www\.w3\.org\/2000\/svg["']/i.test(open))return null;
- if(/<script\b|<foreignObject\b|<iframe\b|<object\b|<embed\b|<audio\b|<video\b|<animate\b|<set\b|\son[a-z]+\s*=|javascript:|@import|<a\b/i.test(t))return null;
- if(/(?:xlink:)?href\s*=\s*["'](?!#)/i.test(t)||/url\(\s*["']?(?!#|data:)/i.test(t))return null;
- return t;
-}
 
 export const SKILL_DIAGRAM_INSTRUCTION=
 `Draw the selected text as a diagram, following the skill instructions below for the look and the method.
