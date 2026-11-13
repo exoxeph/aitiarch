@@ -1,5 +1,7 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {api,ApiError,streamChat} from '../api.ts';
+import type {InvestigateUsage} from '../../shared/usage.ts';
+import {investigateLine} from './investigate-usage.ts';
 import {CHAT_MESSAGES,type BudgetDetail,type ChatErrorCode,type ChatReview,type ChatUsage} from '../../shared/chat.ts';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
 import {SessionPicker} from './SessionPicker.tsx';
@@ -75,6 +77,9 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  useEffect(()=>{setPickedSessions([]);setConversation('');},[path]);
  useEffect(()=>{let off=false;if(kind!=='investigate'||!conversation||!path){setInvestigation(null);return;}
   api.harnessSessions(path,'investigate').then(r=>{if(!off)setInvestigation(r.sessions.find(s=>s.id===conversation)??null);}).catch(()=>{if(!off)setInvestigation(null);});return()=>{off=true;};},[kind,conversation,path]);
+ // What Investigate has used in this notebook, from the ledger: its own line, never part of the chat budget above it. Read again after each turn in either mode.
+ const [inv,setInv]=useState<InvestigateUsage|null>(null);
+ useEffect(()=>{let off=false;api.usage().then(u=>{if(!off)setInv(u.investigate??null);}).catch(()=>{});return()=>{off=true;};},[path,kind,invRefresh,turns.filter(t=>t.status==='complete').length]);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;abort.current?.abort();};},[]);
  useEffect(()=>{input.current?.focus();},[]);
  useEffect(()=>{
@@ -142,6 +147,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
    <ChatSessions path={path} value={conversation} onChange={setConversation} disabled={false} refresh={invRefresh} kind={kind} onKind={setKind}/>
    {investigation?<InvestigateView key={investigation.id} session={investigation} onDiscuss={()=>{setConversation('');setKind('chat');}} onTurnDone={()=>setInvRefresh(n=>n+1)}/>
     :<p className="chat-empty inv-empty">Choose an investigation or start a new one. Claude reads a copy of your repo folder, read-only, and shows each file it opens.</p>}
+   {inv&&<footer className="chat-foot"><p className="chat-inv-usage" data-usage="investigate">{investigateLine(inv)}</p></footer>}
   </>:<>
   {path&&<ChatSessions path={path} value={conversation} onChange={setConversation} disabled={composing} refresh={turns.filter(t=>t.status==='complete').length} kind={kind} onKind={setKind}/>}
   <div className="chat-context" role="group" aria-label="What the chat can see">
@@ -197,6 +203,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
   </form>
   <footer className="chat-foot">
    <p className="chat-usage">{usage?usageLine(usage):'No calls yet'}</p>
+   {inv&&<p className="chat-inv-usage" data-usage="investigate">{investigateLine(inv)}</p>}
    {persistence==='memory'&&turns.some(t=>t.status==='complete'&&!t.message?.ephemeral)&&<p className="chat-persist">Kept in memory only. <button type="button" className="ghost" title="Adds an ignore rule so this chat can be saved privately beside the note" onClick={()=>void keep()}>Keep on disk privately</button></p>}
   </footer>
   </>}

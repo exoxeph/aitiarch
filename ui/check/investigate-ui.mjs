@@ -65,8 +65,13 @@ try {
   assert.equal(await focused(), 'Ask about the repo', 'then on the question box');
 
   // The trail: thinking (collapsed), Glob, Grep, a denied Read, a Read; the answer with file claim chips; an unknown event is tolerated.
+  assert.equal(await panel.locator('[data-usage="investigate"]').count(), 0, 'no Investigate usage line before the first turn');
   await composer.fill('How does login work?'); await page.keyboard.press('Enter');
   await panel.locator('.inv-status-done').waitFor();
+  // The turn is in the ledger and shown on its own line, labelled Investigate: 450 new input, 3,000 cached, 90 out, $0.012. Not a chat budget.
+  await panel.locator('[data-usage="investigate"]').waitFor();
+  assert.equal(await panel.locator('[data-usage="investigate"]').innerText(), 'Investigate: 1 turn · 450 in · 3k cached · 90 out · $0.012', 'the Investigate footer line');
+  assert.equal(await panel.locator('.chat-usage').count(), 0, 'it is not a chat usage line');
   const rows = await panel.locator('.inv-trail .inv-row:not(.inv-thinking)').evaluateAll((els) => els.map((e) => ({ state: e.dataset.state, text: e.innerText.replace(/\s+/g, ' ').trim() })));
   report.rows = rows;
   assert.deepEqual(rows.map((r) => [r.text.split(' ')[0], r.state]), [['Glob', 'ok'], ['Grep', 'ok'], ['Read', 'denied'], ['Read', 'error'], ['Read', 'ok']]);
@@ -210,6 +215,16 @@ try {
   await panel.getByRole('group', { name: 'Delete this conversation' }).getByRole('button', { name: 'Delete', exact: true }).click();
   await panel.locator('.chat-pick-trigger').click(); await page.waitForFunction((s) => ![...document.querySelectorAll('#chat-panel .chat-pick-opt')].some((o) => o.dataset.value === s), session);
   assert.equal((await readdir(path.join(harness, 'investigations'))).includes(session + '.json'), false, 'its stored turns are gone');
+
+  // The ledger keeps what every turn used, also after the investigation is deleted. In Chat mode the same totals sit under the chat's own usage line, labelled Investigate and not added to it.
+  const totals = await page.evaluate(async () => (await (await fetch('/api/usage', { credentials: 'same-origin' })).json()).investigate);
+  assert(totals && totals.turns >= 8, 'the server has the Investigate totals: ' + JSON.stringify(totals));
+  await panel.getByRole('radio', { name: 'Chat' }).click(); await panel.locator('.chat-usage').waitFor();
+  assert.match(await panel.locator('.chat-usage').innerText(), /^No calls yet/, 'the chat usage line has no calls: Investigate is not in it');
+  const line = await panel.locator('[data-usage="investigate"]').innerText();
+  assert(line.startsWith('Investigate: ' + totals.turns + ' turns · '), 'the Investigate line under the chat footer says ' + totals.turns + ' turns: ' + line);
+  assert.equal(await panel.locator('[data-usage="investigate"]').count(), 1);
+  report.footer = line;
   assert.deepEqual(external, [], 'no request left the machine');
   console.log(JSON.stringify({ passed: true, ...report }, null, 1));
   await context.close();

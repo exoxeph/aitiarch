@@ -2,7 +2,7 @@
 // Before the first turn the user confirms a scope and cost plan (server-enforced by its hash). Every turn re-syncs the copy, runs the CLI with the
 // copy as its working folder, watches every event (only the three read tools, no path outside the copy, at most N model turns: past that the
 // process is killed), and checks each file claim against the real repo file. A tripwire hashes the notebook before and after; restore is explicit.
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {mkdir,mkdtemp,readFile,realpath,rename,rm,stat,writeFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -20,6 +20,8 @@ import {classifyFailure,cleanToolText} from '../../shared/tool-errors.ts';
 import type {SessionIndex} from './session-index.ts';
 import {snapshotDrift,syncSnapshot,SNAPSHOT_LIMITS,type Drift} from './snapshot.ts';
 import {captureFolder,folderChanges,restoreFolder} from './tripwire.ts';
+import {LedgerStore,type InvestigateTurnAudit} from '../ledger-store.ts';
+import type {InvestigateUsage} from '../../shared/usage.ts';
 const exec=promisify(execFile);
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
 
@@ -67,6 +69,8 @@ interface StreamHooks {cwd:string;turnLimit:number;onText:(t:string)=>void;onBlo
 /** The CLI's stream for one investigation turn, read event by event. Anything outside the allowed shape stops the run. */
 export class InvestigateStream {
  private decoder=new StringDecoder('utf8');private pending='';private inited=false;private ids=new Set<string>();private byId=new Map<string,number>();private o:StreamHooks;
+ /** What the CLI reported at the end of the run (tokens and cost), also when the run stopped on the cost cap. Null when it never got that far. */
+ reported:{usage:Record<string,unknown>|null;cost:number|null}|null=null;
  readonly steps:ToolStep[]=[];unknown=0;result:{text:string;usage:Record<string,unknown>|null;cost:number|null;turns:number;denials:string[]}|null=null;
  constructor(o:StreamHooks){this.o=o;}
  /** Model turns so far: one per distinct assistant message. */
@@ -126,8 +130,9 @@ export class InvestigateStream {
    return;
   }
   if(t==='result'){
-   if(e.subtype!=='success'||e.is_error===true||typeof e.result!=='string')throw new InvestigateError(/budget/i.test(st)?'budget':'provider_failed');
    const cost=typeof e.total_cost_usd==='number'&&Number.isFinite(e.total_cost_usd)?e.total_cost_usd:null;
+   this.reported={usage:e.usage&&typeof e.usage==='object'?e.usage:null,cost};
+   if(e.subtype!=='success'||e.is_error===true||typeof e.result!=='string')throw new InvestigateError(/budget/i.test(st)?'budget':'provider_failed');
    this.result={text:e.result,usage:e.usage&&typeof e.usage==='object'?e.usage:null,cost,turns:Number.isSafeInteger(e.num_turns)?e.num_turns:this.turns,
     denials:(Array.isArray(e.permission_denials)?e.permission_denials:[]).map((d:any)=>String(d?.tool_name??'?').slice(0,40))};
    return;
@@ -138,13 +143,33 @@ export class InvestigateStream {
 
 const env=():NodeJS.ProcessEnv=>{const out:NodeJS.ProcessEnv={};for(const [k,v] of Object.entries(process.env))if(/^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|TEMP|TMP|HOME|USERPROFILE|APPDATA|LOCALAPPDATA)$/i.test(k))out[k]=v;out.CLAUDE_CODE_DISABLE_AUTO_MEMORY='1';return out;};
 const gitEnv=()=>({...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'});
+/** Adds one recorded turn to the totals. A turn that gave no token counts or no cost is counted as such, not as zero. */
+function addTurn(sum:InvestigateUsage,t:InvestigateTurnAudit){
+ sum.turns++;sum.input+=t.inputTokens??0;sum.cached+=t.cachedTokens??0;sum.output+=t.outputTokens??0;sum.costUsd=Math.round((sum.costUsd+(t.costUsd??0))*1e6)/1e6;
+ if(t.inputTokens===null||t.outputTokens===null||t.costUsd===null)sum.unreportedTurns++;
+}
 const randomId=()=>'inv-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
 
 export interface InvestigateConfig {index:SessionIndex;dir:string;notebook:string;command:string;prefixArgs?:string[];model?:string;limits?:Partial<typeof INVESTIGATE_LIMITS>}
 export class InvestigateService {
  private o:InvestigateConfig;private limits:typeof INVESTIGATE_LIMITS;private plans=new Map<string,Plan>();private running=new Map<string,AbortController>();
  private last=new Map<string,{changes:Drift;backup:string}>();
- constructor(o:InvestigateConfig){this.o=o;this.limits={...INVESTIGATE_LIMITS,...o.limits};}
+ private ledger:LedgerStore;private totals?:Promise<InvestigateUsage>;
+ constructor(o:InvestigateConfig){this.o=o;this.limits={...INVESTIGATE_LIMITS,...o.limits};this.ledger=new LedgerStore(o.notebook);}
+ /** What Investigate turns have used, from the notebook's ledger (so it survives a restart). Never part of a chat's token budget. */
+ usage():Promise<InvestigateUsage>{return this.totals??=this.loadUsage();}
+ private async loadUsage():Promise<InvestigateUsage>{
+  const sum:InvestigateUsage={turns:0,input:0,cached:0,output:0,costUsd:0,unreportedTurns:0};
+  try{for(const e of (await this.ledger.read()).events)if(e.event==='investigate_turn'&&e.turn)addTurn(sum,e.turn);}catch{/* an unreadable ledger shows nothing rather than failing the panel */}
+  return sum;
+ }
+ /** One turn that reached the CLI, in the ledger and in the totals: ids, counts and cost only, never the question or the answer. */
+ private async recordTurn(session:string,requestId:string,outcome:string,reported:{usage:Record<string,unknown>|null;cost:number|null}|null){
+  const u=sessionUsage(reported?.usage??null);
+  const turn:InvestigateTurnAudit={session,mode:'investigate',inputTokens:u?.inputTokens??null,cachedTokens:u?.cachedTokens??null,outputTokens:u?.outputTokens??null,costUsd:reported?.cost??null,outcome};
+  addTurn(await this.usage(),turn);
+  await this.ledger.append({id:randomUUID(),inkId:'investigate-'+session,requestId,note:'',event:'investigate_turn',at:new Date().toISOString(),turn}).catch(()=>{}); // a ledger that cannot be written never fails the turn
+ }
  /** The copy's folder for a repo: stable, so the CLI can find the session again. */
  snapshotFolder(repo:string){const base=path.join(this.o.dir,'snapshots',sha(repo.toLowerCase()).slice(0,16));return {base,files:path.join(base,'files'),manifest:path.join(base,'manifest.json')};}
  async snapshotCwd(repo:string){const d=this.snapshotFolder(repo);await mkdir(d.files,{recursive:true});return realpath(d.files);}
@@ -239,13 +264,16 @@ export class InvestigateService {
    const finalTrail:TrailItem[]=trail.at(-1)&&'text' in trail.at(-1)!?[...trail.slice(0,-1),...(reply.body?[{text:reply.body}]:[])]:[...trail,...(reply.body?[{text:reply.body}]:[])];
    const message:InvestigateMessage={id:randomId(),body:reply.body,trail:finalTrail,claims:reply.claims,...(reply.citation?{citation:reply.citation}:{}),usage:sessionUsage(r.usage),costUsd:r.cost,turns:stream.turns,steps:stream.steps,permissionDenials:r.denials,tripwire:(await tripwire())!,unknownEvents:stream.unknown};
    await this.saveTurn(id,{id:message.id,question:asked,at,message}).catch(()=>{});
+   await this.recordTurn(id,message.id,'completed',stream.reported);
    emit({type:'complete',message});
   }catch(e){
    const code:InvestigateCode=e instanceof InvestigateError?e.code:'provider_failed';
    const t=await tripwire().catch(()=>undefined),partial:PartialTurn={text:answerTail(trail),steps:stream?.steps??[],turns:stream?.turns??0,trail};
    // A stop on the cost cap or the safety backstop needs a fresh confirmed plan (a new cap) before the same session continues.
    if(code==='budget'||code==='turn_limit')await this.o.index.unconfirm(id).catch(()=>{});
-   await this.saveTurn(id,{id:randomId(),question:asked,at,stopped:{code,partial}}).catch(()=>{});
+   const stoppedId=randomId();
+   await this.saveTurn(id,{id:stoppedId,question:asked,at,stopped:{code,partial}}).catch(()=>{});
+   if(started)await this.recordTurn(id,stoppedId,code,stream?.reported??null); // nothing is recorded for a turn that was stopped before the CLI started: it cost nothing
    emit({type:'error',code,partial,...(t?{tripwire:t}:{})});
   }finally{
    if(started)await this.o.index.touch(id).catch(()=>{}); // the CLI knows this id now: the next turn resumes

@@ -269,7 +269,7 @@ export function createApp(opts: AppOptions) {
       return json(res,200,skillLibrary(await discoveredSkills(url.searchParams.get('refresh')==='1'),{q:url.searchParams.get('q')??'',ids,limit:Number(url.searchParams.get('limit'))||undefined}));
     }
     if(url.pathname==='/api/usage'&&req.method==='GET'){
-      const chats=(await chatReady).usage();return json(res,200,{...(opts.usage?await opts.usage.summary():{since:new Date().toISOString(),hourlyCap:2,providers:[]}),...(chats.length?{chats}:{})});
+      const chats=(await chatReady).usage(),h=await harnessReady,investigate=h?await h.investigate.usage():null;return json(res,200,{...(opts.usage?await opts.usage.summary():{since:new Date().toISOString(),hourlyCap:2,providers:[]}),...(chats.length?{chats}:{}),...(investigate&&investigate.turns>0?{investigate}:{})});
     }
     // Harness chat sessions: the app's own list for this project, a new one for a note, and a new label. Nothing here talks to the CLI.
     if(url.pathname==='/api/harness/sessions'&&req.method==='GET'){

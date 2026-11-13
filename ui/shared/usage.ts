@@ -2,4 +2,6 @@ export interface UsageTotals {
  provider:'claude'|'chatgpt-plan'; calls:number; callsThisSession:number;
  input:number; cached:number; output:number; reasoning:number; wallMs:number; unreportedCalls:number;
 }
-export interface UsageSummary {since:string;hourlyCap:number;providers:UsageTotals[];chats?:import('./chat.ts').ChatUsage[]}
+/** What Investigate turns have used in this notebook, from its ledger. Separate from the chat token budgets: nothing here counts against a chat. */
+export interface InvestigateUsage {turns:number;input:number;cached:number;output:number;costUsd:number;/** Turns that gave no token counts or no cost (stopped before the CLI reported them). */unreportedTurns:number}
+export interface UsageSummary {since:string;hourlyCap:number;providers:UsageTotals[];chats?:import('./chat.ts').ChatUsage[];investigate?:InvestigateUsage}
