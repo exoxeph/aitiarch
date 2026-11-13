@@ -84,8 +84,10 @@ describe('context and estimates',()=>{
 
 describe('usage and errors',()=>{
  it('writes one calm usage line from the chat usage counters',()=>{
-  expect(usageLine(usage())).toBe('1 call · 25 in · 10 out · 35 of 50k tokens');
-  expect(usageLine(usage({calls:3,input:1200,cached:300,output:800,spent:2300}))).toBe('3 calls · 1.5k in · 800 out · 2.3k of 50k tokens');
+  expect(usageLine(usage())).toBe('1 call · 20 in · 5 cached · 10 out · 35 of 50k tokens');
+  expect(usageLine(usage({calls:3,input:1200,cached:300,output:800,spent:2300}))).toBe('3 calls · 1.2k in · 300 cached · 800 out · 2.3k of 50k tokens');
+  expect(usageLine(usage({calls:2,input:17000,cached:3000,output:900,spent:18000}))).toBe('2 calls · 17k in · 3k cached · 900 out · 18k of 50k tokens'); // cached is shown apart from input
+  expect(usageLine(usage({calls:1,input:900,cached:0,output:100,spent:1000}))).toBe('1 call · 900 in · 100 out · 1k of 50k tokens'); // no cache reads: nothing to show
   expect(usageLine(usage({calls:0,input:0,cached:0,output:0,spent:0}))).toBe('No calls yet · 0 of 50k tokens');
  });
  it('says when some calls did not report every counter',()=>{expect(usageLine(usage({unreportedCalls:1}))).toMatch(/some counts unreported/);});

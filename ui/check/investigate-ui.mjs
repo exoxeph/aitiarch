@@ -97,6 +97,7 @@ try {
   await scenario('inv-slow'); await composer.fill('Something slow'); await page.keyboard.press('Enter');
   const status = panel.getByRole('status', { name: 'Investigation progress' }); await status.waitFor();
   assert.match(await status.innerText(), /\d+s.*tool calls?.*cap \$0\.50/s); assert(!/of 12|turns/i.test(await status.innerText()), 'the status bar shows no turn limit');
+  await page.waitForTimeout(650); // Cancel ignores clicks for 600 ms after a send, so a double tap on Send cannot cancel the run it started
   await status.getByRole('button', { name: 'Cancel' }).click();
   await panel.locator('.inv-banner[data-kind="stopped"]').last().waitFor();
   assert.match(await panel.locator('.inv-banner[data-kind="stopped"]').last().innerText(), /You cancelled it/);

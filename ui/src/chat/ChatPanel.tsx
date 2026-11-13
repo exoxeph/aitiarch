@@ -22,6 +22,8 @@ import type {HarnessMode,HarnessSession} from '../../shared/harness.ts';
  *  A named conversation (harness session) is different: its questions are kept in the app's own folder outside the repo and loaded back below. */
 const questions=new Map<string,string>();
 const knownCode=(code:string):code is ChatErrorCode=>code in CHAT_MESSAGES;
+/** How long Stop ignores clicks after a send starts (ms). */
+export const STOP_GUARD_MS=600;
 
 export interface ChatPanelProps {
  path:string|null;noteText:string;threadsText:string;getSelection:()=>string;
@@ -46,6 +48,7 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
    <dd>{review.sources.length===0?<span className="chat-review-none">None. Only your question is sent.</span>:review.sources.map(s=>
     <details key={s.id} className="chat-review-source"><summary>{s.label} <span className="chat-review-est">about {formatCount(s.estimatedTokens)} tokens</span></summary><pre>{review.ephemeral?s.text:previewText(s.text,2000)}</pre></details>)}</dd>
    {review.excluded&&review.excluded.length>0&&<><dt>Left out</dt><dd>{review.excluded.join(', ')}: a conversation never gets the notebook file, hidden files, Aitiarch's own files or secrets.</dd></>}
+   {review.manifest&&<><dt>Starts with</dt><dd>{review.manifest}</dd></>}
    <dt>Earlier messages</dt>
    <dd>{review.session?`Kept in the conversation “${review.session.label}” (${review.session.turns} so far), not pasted again.`:review.historyPairs===0?'None yet.':`${review.historyPairs} earlier ${review.historyPairs===1?'exchange':'exchanges'} included${review.omittedPairs>0?`, ${review.omittedPairs} older left out`:''}.`}{review.otherModePairs?` ${review.otherModePairs} earlier ${review.otherModePairs===1?'exchange':'exchanges'} left out: different mode.`:''}</dd>
   </dl>
@@ -64,7 +67,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  const [pending,setPending]=useState<ChatReview|null>(null),[stopAsking,setStopAsking]=useState(false),[busy,setBusy]=useState(false),[peek,setPeek]=useState<ContextChip['id']|null>(null);
  const persona=useNodeSettings('chat');
  const [usage,setUsage]=useState<ChatUsage|null>(null),[persistence,setPersistence]=useState<'private'|'memory'>('memory'),[notice,setNotice]=useState(''),[adding,setAdding]=useState<string|null>(null);
- const input=useRef<HTMLTextAreaElement>(null),log=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),alive=useRef(true);
+ const sentAt=useRef(0),input=useRef<HTMLTextAreaElement>(null),log=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),alive=useRef(true);
  const [pickedSessions,setPickedSessions]=useState<PickedSession[]>([]),[ctxOpen,setCtxOpen]=useState(false);
  const [conversation,setConversation]=useState(''); // a harness session id; '' is the one-off chat (or no investigation chosen)
  const [kind,setKind]=useState<HarnessMode>('chat'),[investigation,setInvestigation]=useState<HarnessSession|null>(null),[invRefresh,setInvRefresh]=useState(0);
@@ -91,7 +94,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
 
  const fail=(id:string,code:ChatErrorCode)=>setTurns(t=>applyEvent(t,{type:'error',id,code}));
  const send=async(review:ChatReview,dontAskAgain:boolean)=>{
-  setPending(null);setBusy(true);const id=review.requestId,controller=new AbortController();abort.current=controller;
+  setPending(null);setBusy(true);sentAt.current=Date.now();const id=review.requestId,controller=new AbortController();abort.current=controller;
   setTurns(t=>t.map(x=>x.id===id?{...x,status:'streaming' as const}:x));
   let finished=false;
   try{
@@ -124,7 +127,8 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
   if(!pending)return;const id=pending.requestId,q=questions.get(id)??'';
   setTurns(t=>t.filter(x=>x.id!==id));questions.delete(id);setDraft(q);setPending(null);input.current?.focus();
  };
- const stop=()=>{if(path)void api.chatCall('cancel',{path}).catch(()=>{});};
+ // A double tap on Send (or Enter then a click) must not land on the Stop that takes its place: Stop ignores clicks for a moment after a send starts.
+ const stop=()=>{if(!path||Date.now()-sentAt.current<STOP_GUARD_MS)return;void api.chatCall('cancel',{path}).catch(()=>{});};
  const add=async(id:string)=>{setAdding(id);try{await onAdd(id);}finally{if(alive.current)setAdding(null);}};
  const keep=async()=>{try{await api.chatCall('enable',{action:'add-ignore-line'});setPersistence('private');}catch(e){setNotice(e instanceof ApiError?e.message:'Could not keep this chat on disk.');}};
  const composing=busy||!!pending;

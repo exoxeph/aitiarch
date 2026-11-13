@@ -53,7 +53,8 @@ export function previewText(text:string,limit:number):string{
 export const newTurnId=()=>'m-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
 
 export function usageLine(u:ChatUsage):string{
- const calls=u.calls===0?'No calls yet':`${u.calls} ${u.calls===1?'call':'calls'} · ${formatCount(u.input+u.cached)} in · ${formatCount(u.output)} out`;
+ // Cached tokens (cache reads) are shown apart from new input: they are cheap and count for little against the budget.
+ const calls=u.calls===0?'No calls yet':`${u.calls} ${u.calls===1?'call':'calls'} · ${formatCount(u.input)} in${u.cached>0?` · ${formatCount(u.cached)} cached`:''} · ${formatCount(u.output)} out`;
  return `${calls} · ${formatCount(u.spent)} of ${formatCount(u.tokenBudget)} tokens`+(u.unreportedCalls>0?' (some counts unreported)':'');
 }
 /** Shown quietly under a reply the model gave as plain prose: it has no claims, so there is nothing to check against the note. */

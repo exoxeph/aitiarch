@@ -66,7 +66,7 @@ export function InvestigateView({session,onDiscuss,onTurnDone}:{session:HarnessS
  const [budgetDraft,setBudgetDraft]=useState('0.50'),[resume,setResume]=useState(false);
  const [notice,setNotice]=useState(''),[now,setNow]=useState(Date.now()),[excerpt,setExcerpt]=useState<{path:string;line:number;from:number;lines:string[]}|null>(null),[restoring,setRestoring]=useState(false);
  const input=useRef<HTMLTextAreaElement>(null),confirmButton=useRef<HTMLButtonElement>(null),excerptClose=useRef<HTMLButtonElement>(null),abort=useRef<AbortController|null>(null),opener=useRef<HTMLElement|null>(null);
- const running=turns.some(t=>t.running),logEl=useRef<HTMLDivElement>(null),stickLog=useStickToBottom(logEl,turns); // follows the trail smoothly unless the reader scrolled up
+ const sentAt=useRef(0),running=turns.some(t=>t.running),logEl=useRef<HTMLDivElement>(null),stickLog=useStickToBottom(logEl,turns); // follows the trail smoothly unless the reader scrolled up
  useEffect(()=>{let off=false;setTurns([]);setPlan(null);setNeedsPlan(null);setExcerpt(null);
   api.investigateStatus(session.id).then(async s=>{if(off)return;setNeedsPlan(s.needsPlan);
    if(s.needsPlan){const p=await api.investigateCall<Plan>('plan',{session:session.id});if(!off){setPlan(p);setBudgetDraft(p.budgetUsd.toFixed(2));}}
@@ -84,13 +84,13 @@ export function InvestigateView({session,onDiscuss,onTurnDone}:{session:HarnessS
  const continueRun=async()=>{setResume(true);if(await replan())setNeedsPlan(true);};
  const send=async(text?:string,confirmedNow=false)=>{
   const question=(text??draft).trim();if(!question||running||needsPlan!==false&&!confirmedNow)return;setNotice('');if(text===undefined)setDraft('');
-  const id='inv-'+Date.now().toString(36);stickLog.follow();setTurns(t=>[...t,startTurn(id,question)]);setNow(Date.now());
+  const id='inv-'+Date.now().toString(36);stickLog.follow();sentAt.current=Date.now();setTurns(t=>[...t,startTurn(id,question)]);setNow(Date.now());
   const controller=new AbortController();abort.current=controller;
   try{await streamInvestigate({session:session.id,question},e=>setTurns(list=>list.map(t=>t.id===id?applyInvestigate(t,e):t)),controller.signal);}
   catch(e){setTurns(list=>list.map(t=>t.id===id&&t.running?applyInvestigate(t,{type:'error',code:e instanceof ApiError&&e.code==='plan_required'?'plan_required':'provider_failed'}):t));if(e instanceof ApiError)setNotice(e.message);}
   finally{setTurns(list=>list.map(t=>t.id===id&&t.running?applyInvestigate(t,{type:'error',code:'cancelled'}):t));abort.current=null;onTurnDone();}
  };
- const cancel=()=>void api.investigateCall('cancel',{session:session.id}).catch(()=>{});
+ const cancel=()=>{if(Date.now()-sentAt.current<600)return;void api.investigateCall('cancel',{session:session.id}).catch(()=>{});}; // a double tap on Send must not cancel the run it just started
  const restore=async()=>{setRestoring(true);setNotice('');try{await api.investigateCall('restore',{session:session.id});setTurns(list=>list.map(t=>t.tripwire?{...t,tripwire:{...t.tripwire,notebook:{changed:[],added:[],removed:[]}}}:t));setNotice('The notebook is back as it was before the run.');}
   catch(e){setNotice(e instanceof ApiError?e.message:'Restore did not work. Nothing was changed.');}finally{setRestoring(false);}};
  const open=async(p:string,line=1)=>{opener.current=document.activeElement as HTMLElement|null;try{setExcerpt(await api.investigateExcerpt(session.id,p,line));}catch(e){setNotice(e instanceof ApiError?e.message:'That file cannot be shown.');}};
