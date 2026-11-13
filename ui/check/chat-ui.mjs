@@ -105,7 +105,8 @@ try{
  release();
  await panel.locator('.chat-ai:not(.chat-streaming) strong').first().waitFor();
  assert.equal(await panel.locator('.chat-caret').count(),0);
- assert.match(await panel.locator('.chat-usage').innerText(),/^1 call · 140 in · 60 out · 200 of 50k tokens/);
+ // The footer shows cached tokens apart, and the budget counts cache reads at 0.1: 120 new + 20 cached x 0.1 + 60 out = 182.
+ assert.match(await panel.locator('.chat-usage').innerText(),/^1 call · 120 in · 20 cached · 60 out · 182 of 50k tokens/);
  assert.match(await panel.locator('.chat-persist').innerText(),/Kept in memory only/);
 
  // ---- Add to note: quiet at rest, visible on hover and keyboard focus
@@ -153,13 +154,16 @@ try{
  await err.getByRole('button',{name:'Dismiss'}).click();assert.equal(await panel.locator('.chat-error').count(),0);
 
  // ---- cancel: Stop discards the partial reply
- script={kind:'hang',answer:'unused'};
+ // The stream stops after real words with a space, as a model's does: the output gate holds back an unfinished last word, so a lone word would never show.
+ script={kind:'hang',answer:'Thinking about the first part of the reply here, then more words follow.'};const beforeCancel=calls.length;
  await ask('This one will be cancelled.');
  await page.waitForFunction(()=>(document.querySelector('.chat-stream')?.textContent??'').length>2);
+ await page.waitForTimeout(700); // Stop ignores clicks for the first 600 ms after a send (STOP_GUARD_MS), so a double tap on Send cannot cancel the turn
  await panel.getByRole('button',{name:'Stop',exact:true}).click();
  await panel.locator('.chat-error').waitFor();
  assert.match(await panel.locator('.chat-error').innerText(),/cancelled/i);
  assert.equal(await panel.locator('.chat-stream').count(),0,'the partial reply is discarded');
+ assert.equal(calls.length,beforeCancel+1,'the cancelled turn was sent once and is never retried');
 
  // ---- reload: accepted replies come back, questions do not
  await page.reload();await page.waitForSelector('.cm-editor');await page.getByRole('button',{name:/^Chat/}).click();await panel.waitFor();
