@@ -15,6 +15,7 @@ import {ReplyNotes} from './ReplyNotes.tsx';
 import {LiveMarkdown} from '../ink/LiveMarkdown.tsx';
 import {ChatSessions} from './ChatSessions.tsx';
 import {InvestigateView} from './InvestigateView.tsx';
+import {useStickToBottom} from './useStickToBottom.ts';
 import type {HarnessMode,HarnessSession} from '../../shared/harness.ts';
 
 /** One-off chat: questions are not stored by the server; this page remembers them so a closed and reopened panel still reads as a conversation.
@@ -81,7 +82,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
    .catch(()=>{if(!off)setNotice('This note’s chat could not be loaded.');});
   return()=>{off=true;};
  },[path]);
- useEffect(()=>{log.current?.scrollTo({top:log.current.scrollHeight});},[turns,pending]);
+ const stickLog=useStickToBottom(log,turns); // follows the reply smoothly unless the reader scrolled up
 
  const selectionText=getSelection(),noteEstimate=useMemo(()=>chipEstimate(noteText),[noteText]),threadsEstimate=useMemo(()=>chipEstimate(threadsText),[threadsText]);
  const estimate:Record<ContextChip['id'],number>={note:noteEstimate,threads:threadsEstimate,selection:chipEstimate(selectionText)};
@@ -109,7 +110,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  /** `again` re-asks an earlier question through the same review, without touching the draft. */
  const submit=async(again?:string)=>{
   const question=(again??draft).trim();if(!question||!path||busy||pending)return;
-  const id=newTurnId(),{context,selection}=buildContext(chips,getSelection());setNotice('');setBusy(true);
+  const id=newTurnId(),{context,selection}=buildContext(chips,getSelection());setNotice('');setBusy(true);stickLog.follow();
   try{
    const sessionContext=sessionChoices(pickedSessions);
    const fromMap=otherNotes.length?[{moduleId:'other-notes' as const,ids:otherNotes}]:[];
@@ -161,7 +162,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
    {peek&&<div className="chat-peek" role="region" aria-label={`Preview of ${chips.find(c=>c.id===peek)?.label}`}><pre>{previewText(peekText[peek],1200)}</pre></div>}
    </div>}
   </div>
-  <div className="chat-log" role="log" aria-label="Conversation" ref={log}>
+  <div className="chat-log" role="log" aria-label="Conversation" ref={log} onScroll={stickLog.onScroll}>
    {turns.length===0&&!pending
     ?<div className="chat-empty"><p>Ask about this note. Nothing is sent until you have seen exactly what goes.</p>
       <ul>{SUGGESTED_PROMPTS.map(p=><li key={p}><button type="button" className="chat-suggestion" onClick={()=>{setDraft(p);input.current?.focus();}}>{p}</button></li>)}</ul></div>

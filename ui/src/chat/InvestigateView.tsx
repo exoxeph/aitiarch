@@ -4,6 +4,7 @@ import type {HarnessSession} from '../../shared/harness.ts';
 import type {Plan} from '../../server/harness/investigate.ts';
 import {InlineCode,LiveMarkdown} from '../ink/LiveMarkdown.tsx';
 import {ClaimChips} from './ClaimChips.tsx';
+import {useStickToBottom} from './useStickToBottom.ts';
 import {stepFailure} from '../../shared/tool-errors.ts';
 import {applyInvestigate,canContinue,deniedSteps,formatElapsed,fromStoredTurn,startTurn,stepSummary,stopSummary,toolCalls,tripwireChanged,type LiveTurn,type ToolStep} from './investigate-model.ts';
 
@@ -65,7 +66,7 @@ export function InvestigateView({session,onDiscuss,onTurnDone}:{session:HarnessS
  const [budgetDraft,setBudgetDraft]=useState('0.50'),[resume,setResume]=useState(false);
  const [notice,setNotice]=useState(''),[now,setNow]=useState(Date.now()),[excerpt,setExcerpt]=useState<{path:string;line:number;from:number;lines:string[]}|null>(null),[restoring,setRestoring]=useState(false);
  const input=useRef<HTMLTextAreaElement>(null),confirmButton=useRef<HTMLButtonElement>(null),excerptClose=useRef<HTMLButtonElement>(null),abort=useRef<AbortController|null>(null),opener=useRef<HTMLElement|null>(null);
- const running=turns.some(t=>t.running);
+ const running=turns.some(t=>t.running),logEl=useRef<HTMLDivElement>(null),stickLog=useStickToBottom(logEl,turns); // follows the trail smoothly unless the reader scrolled up
  useEffect(()=>{let off=false;setTurns([]);setPlan(null);setNeedsPlan(null);setExcerpt(null);
   api.investigateStatus(session.id).then(async s=>{if(off)return;setNeedsPlan(s.needsPlan);
    if(s.needsPlan){const p=await api.investigateCall<Plan>('plan',{session:session.id});if(!off){setPlan(p);setBudgetDraft(p.budgetUsd.toFixed(2));}}
@@ -83,7 +84,7 @@ export function InvestigateView({session,onDiscuss,onTurnDone}:{session:HarnessS
  const continueRun=async()=>{setResume(true);if(await replan())setNeedsPlan(true);};
  const send=async(text?:string,confirmedNow=false)=>{
   const question=(text??draft).trim();if(!question||running||needsPlan!==false&&!confirmedNow)return;setNotice('');if(text===undefined)setDraft('');
-  const id='inv-'+Date.now().toString(36);setTurns(t=>[...t,startTurn(id,question)]);setNow(Date.now());
+  const id='inv-'+Date.now().toString(36);stickLog.follow();setTurns(t=>[...t,startTurn(id,question)]);setNow(Date.now());
   const controller=new AbortController();abort.current=controller;
   try{await streamInvestigate({session:session.id,question},e=>setTurns(list=>list.map(t=>t.id===id?applyInvestigate(t,e):t)),controller.signal);}
   catch(e){setTurns(list=>list.map(t=>t.id===id&&t.running?applyInvestigate(t,{type:'error',code:e instanceof ApiError&&e.code==='plan_required'?'plan_required':'provider_failed'}):t));if(e instanceof ApiError)setNotice(e.message);}
@@ -111,7 +112,7 @@ export function InvestigateView({session,onDiscuss,onTurnDone}:{session:HarnessS
    <p className="inv-plan-note">Claude can only Read, Grep and Glob inside the copy. Nothing is written, run or sent anywhere else.{resume?' It continues the same conversation: what it already did stays.':''}</p>
    <div className="inv-plan-actions"><button ref={confirmButton} type="button" className="chat-ctl inv-confirm" disabled={capChanged} onClick={()=>void confirm()}>{resume?'Confirm and continue':'Confirm'}</button><button type="button" className="chat-ctl chat-ctl-quiet" onClick={onDiscuss}>Discuss in chat instead</button></div>
   </div>}
-  <div className="inv-log" role="log" aria-label="Investigation">
+  <div className="inv-log" role="log" aria-label="Investigation" ref={logEl} onScroll={stickLog.onScroll}>
    {turns.length===0&&needsPlan===false&&<p className="chat-empty">Ask how something in the repo works. Claude reads the code and points to the lines it used.</p>}
    {turns.map(t=><TurnView key={t.id} turn={t} snapshotFiles={plan?.files} onOpen={(p,l)=>void open(p,l)} onRestore={()=>void restore()} restoring={restoring} onContinue={()=>void continueRun()}/>)}
   </div>
