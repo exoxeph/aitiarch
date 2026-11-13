@@ -176,7 +176,8 @@ try {
         if (ai !== observed) { observer?.disconnect(); observer = new MutationObserver(() => { batches++; }); observer.observe(ai, { childList: true, subtree: true, characterData: true, attributes: true }); observed = ai; }
         rec.snaps.push({ running, html: ai.innerHTML, text: ai.innerText, caret: !!turn.querySelector('.chat-ai > .chat-caret') });
         rec.batches.push(batches); batches = 0;
-        rec.tops.push([turn.querySelector('.chat-you').getBoundingClientRect().top, turn.querySelector('.inv-trail').getBoundingClientRect().top]);
+        const sc = turn.closest('.inv-log')?.scrollTop ?? 0; // position inside the log, so following the answer down does not count as movement
+        rec.tops.push([turn.querySelector('.chat-you').getBoundingClientRect().top + sc, turn.querySelector('.inv-trail').getBoundingClientRect().top + sc]);
         if (seenRunning && !running) { rec.done = true; return; }
       }
       requestAnimationFrame(tick);
