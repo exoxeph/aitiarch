@@ -77,9 +77,14 @@ export class ChatRuntime {
    const module=modules.find(m=>m.id===c?.moduleId);
    if(!module||seen.has(c.moduleId)||!Array.isArray(c.ids)||c.ids.length>CHAT_LIMITS.sources||c.ids.some(id=>typeof id!=='string')||new Set(c.ids).size!==c.ids.length)throw new ChatError('invalid_chat');seen.add(c.moduleId);
    const ids=module.id==='other-notes'?c.ids.filter(id=>{if(!harnessDenied(id))return true;excluded.push(id);return false;}):c.ids;
-   // Metadata audit precedes EVERY read, including failed attempts. No paths/text from a module enter the ledger.
-   for(const id of ids)await this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(input.path),requestId:input.id,note:input.path,event:'context_read',moduleId:module.id,sourceHash:hash(id),at:new Date().toISOString()});
-   try{sources.push(...await module.read(ids,{maxSources:CHAT_LIMITS.sources-sources.length,maxCharacters:module.id==='this-note'?60000:CHAT_LIMITS.otherCharacters}));}catch(e){if(module.id==='claude-sessions'||module.id==='codex-sessions')throw new ChatError(e instanceof Error&&e.message===SESSION_NOTICES.limit?'session_limit':e instanceof Error&&e.message===SESSION_NOTICES.selection?'session_selection':'session_format');throw e;}
+   // Metadata audit precedes EVERY read, including failed attempts: which note is about to be read (its path), never any text. After a read, one more line per source says how many characters were sent.
+   const noteOf=(id:string)=>{const p=module.id==='this-note'?open:module.id==='other-notes'?id:'';return p&&p.length<=400&&!/[\u0000-\u001f\u007f]/.test(p)?p:undefined;},at=()=>new Date().toISOString(),base={inkId:'chat-'+hash(input.path),requestId:input.id,note:input.path,event:'context_read' as const,moduleId:module.id};
+   for(const id of ids)await this.ledger.append({...base,id:randomUUID(),sourceHash:hash(id),...(noteOf(id)?{path:noteOf(id)}:{}),at:at()});
+   let got:ContextSource[]=[];
+   try{got=await module.read(ids,{maxSources:CHAT_LIMITS.sources-sources.length,maxCharacters:module.id==='this-note'?60000:CHAT_LIMITS.otherCharacters});}catch(e){if(module.id==='claude-sessions'||module.id==='codex-sessions')throw new ChatError(e instanceof Error&&e.message===SESSION_NOTICES.limit?'session_limit':e instanceof Error&&e.message===SESSION_NOTICES.selection?'session_selection':'session_format');throw e;}
+   sources.push(...got);
+   const asked=module.id==='this-note'?got.map(x=>x.id==='N1'?'note':'threads'):ids; // a module returns its sources in the order of the ids it was given
+   for(const [i,x] of got.entries())await this.ledger.append({...base,id:randomUUID(),sourceHash:hash(asked[i]??x.id),...(noteOf(asked[i]??'')?{path:noteOf(asked[i]??'')}:{}),chars:x.text.length,at:at()});
   }
   if(sources.length>CHAT_LIMITS.sources||sources.reduce((n,x)=>n+Buffer.byteLength(x.text),0)>85000)throw new ProviderError('context_limit');
   // A harness session: it must be a chat session for this note.
@@ -96,6 +101,9 @@ export class ChatRuntime {
   let history=session?[]:sameMode.map(({id,user,assistant})=>({id,user,assistant}));while(history.length>CHAT_LIMITS.historyPairs||history.reduce((n,p)=>n+p.user.length+p.assistant.length,0)>CHAT_LIMITS.historyCharacters)history.shift();
   const request:Request={id:input.id,action:'ask',chat:true,note:sources.find(x=>x.id==='N1')?.text??'',selection:redact(input.selection??''),decisions:sources.filter(x=>x.id!=='N1').map(x=>({id:x.id,text:x.text})),turns:history,question:redact(input.question)};
   if(extra){request.persona=extra.persona;if(extra.skills.loaded.length)request.skills=extra.skills;}
+  // A selection that goes with the request is recorded by size and line range, with the note it was taken from; its text never enters the ledger.
+  if(request.selection)await this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(input.path),requestId:input.id,note:input.path,event:'context_read',moduleId:'this-note',sourceHash:hash('selection'),path:open,
+   selection:{chars:request.selection.length,...(editor?.lines?{fromLine:editor.lines.from,toLine:editor.lines.to}:{})},at:new Date().toISOString()});
   // In a session the CLI gets the instruction with the sources pasted before the rules (rules last); the earlier conversation is in the session.
   const sessionSources=[...sources.map(x=>({id:x.id,label:x.label,text:redact(x.text)})),...(request.selection?[{id:'S1',label:'Selection',text:request.selection}]:[])];
   // One line, with no note text in it, says where the person is: the open note and its size, the selection, the cursor's section, any other sources. Every conversation message starts

@@ -78,7 +78,8 @@ it('other notes are opt-in; module reads are limited, redacted, and individually
  expect(r.sources).toHaveLength(1);await f.runtime.send({reviewId:r.reviewId,confirmed:true},()=>{});
  expect(f.provider.requests[0].note).toBe('');expect(f.provider.requests[0].decisions).toHaveLength(1);
  await f.runtime.review({...f.input,context:[{moduleId:'other-notes',ids:['other.md']}]});
- const reads=(await new LedgerStore(f.root).read()).events.filter(e=>e.event==='context_read');expect(reads).toHaveLength(2);expect(reads.every(e=>e.requestId===f.input.id)).toBe(true);
+ const all=(await new LedgerStore(f.root).read()).events.filter(e=>e.event==='context_read'),reads=all.filter(e=>e.chars===undefined);expect(reads).toHaveLength(2);expect(reads.every(e=>e.requestId===f.input.id)).toBe(true); // the lines written before each read
+ expect(all.filter(e=>e.chars!==undefined).map(e=>e.path)).toEqual(['other.md','other.md']); // and one per read after it, with the note and its size
 });
 it('a claim whose quote is not in the source is marked not found; the reply is kept and saved',async()=>{
  const f=await fixture();f.provider.answer={answer:'Synthetic bad quote.',claims:[{sourceId:'N1',quote:'Not in the source'}]};

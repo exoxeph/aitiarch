@@ -67,8 +67,9 @@ describe('the one-off chat and the notes it can send',()=>{
  });
  it('does not read a denied note at all: no context_read is written for it',async()=>{
   const p=await project();await p.runtime.review(p.ask('audit-1',['notebook.md','fine.md']));
-  const reads=(await new LedgerStore(p.root).read()).events.filter(e=>e.event==='context_read');
+  const all=(await new LedgerStore(p.root).read()).events.filter(e=>e.event==='context_read'),reads=all.filter(e=>e.chars===undefined); // the lines written before each read
   expect(reads).toHaveLength(2); // this note, and fine.md: nothing for notebook.md
+  const sized=all.filter(e=>e.chars!==undefined);expect(sized).toHaveLength(2);expect(sized.map(e=>e.path)).toContain('fine.md');expect(all.map(e=>e.path)).not.toContain('notebook.md'); // sizes after the reads, and still nothing for the denied note
   const {createHash}=await import('node:crypto'),hash=(t:string)=>createHash('sha256').update(t).digest('hex');
   expect(reads.map(r=>r.sourceHash)).toContain(hash('fine.md'));expect(reads.map(r=>r.sourceHash)).not.toContain(hash('notebook.md'));
  });

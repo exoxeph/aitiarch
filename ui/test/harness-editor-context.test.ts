@@ -112,6 +112,40 @@ describe('the editor line on a conversation turn',()=>{
  });
 });
 
+describe('the ledger says which note was read and how much was sent',()=>{
+ const reads=async(root:string,requestId:string)=>(await new LedgerStore(root).read()).events.filter(e=>e.event==='context_read'&&e.requestId===requestId);
+ it('records the note read, its size and the selection by lines and size, never any text; open on another note, it names that note and keeps the chat\'s note apart',async()=>{
+  const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'Ledger',note:'plan.md'});
+  await turn(runtime,ask(s.id,'m-led1','What is here?',{selection:'Another note',editor:{path:'other.md',title:'other',section:[],lines:{from:1,to:1}},
+   context:[{moduleId:'this-note',ids:['note','threads']},{moduleId:'other-notes',ids:['plan.md']}]}));
+  const all=await reads(p.root,'m-led1'),attempts=all.filter(e=>e.chars===undefined&&!e.selection),sized=all.filter(e=>e.chars!==undefined),selection=all.filter(e=>e.selection);
+  expect(all.every(e=>e.note==='plan.md')).toBe(true); // the chat is kept under plan.md
+  expect(attempts.map(e=>[e.moduleId,e.path])).toEqual([['this-note','other.md'],['this-note','other.md'],['other-notes','plan.md']]); // before the reads: the note that is about to be read
+  expect(sized.map(e=>[e.moduleId,e.path,e.chars])).toEqual([['this-note','other.md',OTHER.length],['this-note','other.md',0],['other-notes','plan.md',NOTE.length]]); // after: the note and what was sent
+  expect(selection).toHaveLength(1);expect(selection[0]).toMatchObject({moduleId:'this-note',path:'other.md',selection:{chars:12,fromLine:1,toLine:1}});
+  expect(sized.slice(0,1)[0].sourceHash).toBe(attempts[0].sourceHash); // each size line pairs with the line written before its read
+  const text=JSON.stringify(all);for(const secret of ['Another note','unique sentence','second paragraph','Plan'])expect(text).not.toContain(secret);
+ });
+ it('names no selection when none was sent, and counts the selection as it was sent (after redaction)',async()=>{
+  const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'Ledger',note:'plan.md'});
+  await turn(runtime,ask(s.id,'m-led2','No selection here'));
+  expect((await reads(p.root,'m-led2')).some(e=>e.selection!==undefined)).toBe(false);
+  const r=await turn(runtime,ask(s.id,'m-led3','With one',{selection:'keep this token=synthetic-led-secret now',editor:{path:'plan.md',title:'Plan',lines:{from:3,to:3}}}));
+  const [sel]=(await reads(p.root,'m-led3')).filter(e=>e.selection);expect(sel.selection).toEqual({chars:r.review.selection.length,fromLine:3,toLine:3});expect(r.review.selection.length).toBeLessThan('keep this token=synthetic-led-secret now'.length);
+  expect(JSON.stringify(await reads(p.root,'m-led3'))).not.toContain('synthetic-led-secret');
+  await turn(runtime,ask(s.id,'m-led4','A selection with no lines',{selection:'plain words'}));
+  expect((await reads(p.root,'m-led4')).find(e=>e.selection)!.selection).toEqual({chars:11}); // the lines are only recorded when the editor said them
+ });
+ it('a one-off chat records the note it is about, and a read that fails leaves only the line written before it',async()=>{
+  const p=await project(),provider=new FakeChatProvider(),runtime=new ChatRuntime(p.store,p.ink,new ChatStore(p.root),provider,[]);
+  const review=await runtime.review({id:'m-led5',path:'plan.md',question:'Hi',context:[{moduleId:'this-note',ids:['note']}]});expect(review.sources).toHaveLength(1);
+  expect((await reads(p.root,'m-led5')).map(e=>[e.path,e.chars])).toEqual([['plan.md',undefined],['plan.md',NOTE.length]]);
+  await expect(runtime.review({id:'m-led6',path:'plan.md',question:'Hi',context:[{moduleId:'other-notes',ids:['missing.md']}]})).rejects.toThrow();
+  expect((await reads(p.root,'m-led6')).map(e=>[e.path,e.chars])).toEqual([['missing.md',undefined]]);
+  await runtime.close();
+ });
+});
+
 describe('a conversation that follows the person to another note',()=>{
  it('keeps the conversation under its own note, sends the note that is open now, and the line changes with it',async()=>{
   const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'Follow',note:'plan.md'});
