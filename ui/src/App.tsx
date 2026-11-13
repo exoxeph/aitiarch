@@ -30,8 +30,6 @@ import {DismissedThoughts} from './ink/DismissedThoughts.tsx';
 import {calloutHeader} from './editor/reveal.ts';
 import {ThoughtInsertionPreview} from './ink/ThoughtInsertionPreview.tsx';
 import {ThoughtChat} from './ink/ThoughtChat.tsx';
-import {previewAiCallout,previewThoughtInsertion} from '../shared/thoughts.ts';
-import {secretKinds} from '../server/chat/secrets.ts';
 import {SettingsDialog} from './settings/SettingsDialog.tsx';
 import {isolateHistory,undo} from '@codemirror/commands';
 /** A brief highlight on the lines that were just added, so you can see where they went. */
@@ -50,7 +48,7 @@ export default function App() {
   const [boot, setBoot] = useState<Boot>({ state: "loading" });
   const [tree, setTree] = useState<TreeNode | null>(null);
   const menu=useEdgeMenu(),burgerRef=useRef<HTMLButtonElement>(null),noteMenuRef=useRef<HTMLButtonElement>(null),chatPillRef=useRef<HTMLButtonElement>(null);
-  const [noteMenuOpen,setNoteMenuOpen]=useState(false),[chatOpen,setChatOpen]=useState(false),[settingsOpen,setSettingsOpen]=useState(false),[settingsVersion,setSettingsVersion]=useState(0);
+  const [noteMenuOpen,setNoteMenuOpen]=useState(false),[chatOpen,setChatOpen]=useState(false),[settingsOpen,setSettingsOpen]=useState(false);
   const [treePersistence,setTreePersistence]=useState(false);
   const [treeNotice,setTreeNotice]=useState(false);
   const [theme,setTheme]=useState<'ember'|'moss'>('ember');
@@ -493,23 +491,6 @@ export default function App() {
   // What the chat chips offer: the same validated AI replies the server's "Threads" module reads (never questions, drafts or summaries).
   const chatThreadsText = activeItems.flatMap(i => [...(i.generation?.status === "complete" ? [i.body] : []), ...(i.thread?.followups ?? []).filter(r => r.generation.status === "complete").map(r => r.body)]).join("\n\n");
   const chatSelection = () => { const h = active ? panes.current.get(active) : undefined; if (!h) return ""; const s = h.view.state.selection.main; return s.empty ? "" : h.view.state.sliceDoc(s.from, s.to).slice(0, 8000); };
-  // Add to note for an investigation answer. The server's insertion journal only knows stored chat messages, so this goes through the editor like
-  // the other AI callouts (shared previewAiCallout, one undoable edit, the same toast) without a journal entry; "Make it mine" still works on it.
-  const addTextToNote = async (body: string) => {
-    if (!active) return;
-    try {
-      if (secretKinds(body).length) throw new Error("Add to note blocked: this answer may contain a secret or private key. Nothing was inserted.");
-      const h = panes.current.get(active); if (!h) throw new Error("Open the note first.");
-      await h.session.flush(); if (h.session.status !== "saved") throw new Error("Save or resolve the note before insertion.");
-      const disk = await api.file(active);
-      if (h.session.base.version !== disk.version || h.view.state.doc.toString() !== disk.text) throw new Error("The note changed. Try again.");
-      const head = h.view.state.selection.main.head, preview = previewAiCallout({ text: disk.text, version: disk.version }, body, head > 0 ? Math.min(head, disk.text.length) : disk.text.length);
-      h.view.dispatch({ changes: preview.changes, annotations: isolateHistory.of("full") });
-      flashInserted(h.view, preview.changes.from, preview.changes.insert.length);
-      setAdded({ text: "Added from investigation", detail: preview.changes.insert.trim() });
-      await h.session.flush();
-    } catch (e) { setNotice(e instanceof Error ? e.message : "Adding to the note failed."); }
-  };
   // Add to note for a chat reply: the same journaled steps as an AI thought (preview, prepare, one editor dispatch, complete), then the same toast with Undo.
   const addChatMessage = async (id: string) => {
     if (!active) return;
@@ -616,8 +597,8 @@ export default function App() {
           onOpen={p => { setMapOpen(false); void openNote(p); }}
           onUseAsContext={ps => { setMapNotes(ps); setMapOpen(false); setChatOpen(true); }} />
       </Suspense>}
-      {chatOpen && <ChatPanel key={active ?? "none"} extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} getSelection={chatSelection} onAdd={addChatMessage} onAddText={addTextToNote} onOpenSettings={() => setSettingsOpen(true)} settingsVersion={settingsVersion} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onCiteClaim={(heading) => { const h = active ? panes.current.get(active) : undefined; return !!h && !!active && citeAtCursor(h.view, active, { path: active, title: titleOf(h.view.state.doc.toString(), active), ...(heading ? { heading } : {}) }); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
-      {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); setSettingsVersion(v => v + 1); burgerRef.current?.focus(); }} />}
+      {chatOpen && <ChatPanel key={active ?? "none"} extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} getSelection={chatSelection} onAdd={addChatMessage} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onCiteClaim={(heading) => { const h = active ? panes.current.get(active) : undefined; return !!h && !!active && citeAtCursor(h.view, active, { path: active, title: titleOf(h.view.state.doc.toString(), active), ...(heading ? { heading } : {}) }); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
+      {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); burgerRef.current?.focus(); }} />}
       {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,toast.undo)}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
       {added&&<div className="thought-toast" role="status"><span>{added.text} · Undo (Ctrl+Z)</span><details className="added-detail"><summary>What was added</summary><pre>{added.detail}</pre></details><button onClick={()=>{const h=active?panes.current.get(active):undefined;if(h){undo(h.view);h.view.focus();}setAdded(null);}}>Undo</button><button aria-label="Close notice" onClick={()=>setAdded(null)}>Close</button></div>}
       {showDismissed&&<DismissedThoughts items={activeItems} restore={id=>void thoughtAction(id,'restore')} close={()=>setShowDismissed(false)}/>}

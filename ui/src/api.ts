@@ -40,8 +40,6 @@ import type { InkDocument, InkItem } from "../shared/ink.ts";
 import type { Invocation } from "../shared/invocation.ts";
 import type { ChatEvent, ChatMessage, ChatUsage } from "../shared/chat.ts";
 import { sseFrames } from "./chat/chat-model.ts";
-import type { InvestigatorEvent } from "../shared/investigator.ts";
-import { investigatorFrames } from "./chat/trail-model.ts";
 import { investigateFrames } from "./chat/investigate-model.ts";
 export interface InkSnapshot { document: InkDocument; version: string | null }
 
@@ -105,7 +103,6 @@ export async function streamChat(body: { reviewId: string; confirmed?: boolean; 
   for (const e of sseFrames(buffer + decoder.decode() + "\n\n").events) onEvent(e);
 }
 
-/** PUT /api/investigator/answer as a server-sent-event stream of M4 investigator events. Rejects with ApiError when refused before streaming. */
 /** One investigation turn as server-sent events. Unknown event types are passed on (the trail counts them); broken frames are dropped. */
 export async function streamInvestigate(body: { session: string; question: string }, onEvent: (e: { type: string }) => void, signal?: AbortSignal): Promise<void> {
   const res = await fetch(scoped("/api/harness/investigate/send"), { method: "PUT", credentials: "same-origin", signal, headers: { "Content-Type": "application/json", "X-Aitiarch": "1" }, body: JSON.stringify(body) });
@@ -124,25 +121,6 @@ export async function streamInvestigate(body: { session: string; question: strin
     const parsed = investigateFrames(buffer); buffer = parsed.rest;
     for (const e of parsed.events) onEvent(e);
   }
-}
-export async function streamInvestigator(body: { chat: string; id: string; note: string; question: string }, onEvent: (e: InvestigatorEvent) => void, signal?: AbortSignal): Promise<void> {
-  const res = await fetch(scoped("/api/investigator/answer"), { method: "PUT", credentials: "same-origin", signal, headers: { "Content-Type": "application/json", "X-Aitiarch": "1" }, body: JSON.stringify(body) });
-  if (!res.ok || !res.body) {
-    let data: any = null;
-    try { data = await res.json(); } catch { /* empty body */ }
-    throw new ApiError(res.status, data?.error ?? "error", data?.message ?? `Request failed (${res.status})`);
-  }
-  const reader = res.body.getReader(), decoder = new TextDecoder();
-  let buffer = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    if (buffer.length > 1_000_000) throw new ApiError(0, "budget", "The investigation sent too much at once and was stopped.");
-    const parsed = investigatorFrames(buffer); buffer = parsed.rest;
-    for (const e of parsed.events) onEvent(e);
-  }
-  for (const e of investigatorFrames(buffer + decoder.decode() + "\n\n").events) onEvent(e);
 }
 
 export const api = {
@@ -163,8 +141,6 @@ export const api = {
   /** Deletes a conversation: the app's entry and Claude Code's own transcript of it. */
   harnessSessionDelete:(id:string)=>ok<{removed:string[]}>('PUT','/api/harness/sessions/delete',{id}),
   chatSessions:(path:string,otherProjects=false)=>ok<{id:import('../shared/chat.ts').ContextChoice['moduleId'];label:string;entries:import('../shared/chat.ts').ContextEntry[];notice?:string}[]>('GET',`/api/chat/modules?path=${encodeURIComponent(path)}&sessions=1&otherProjects=${otherProjects?'1':'0'}`),
-  investigator:()=>ok<any>('GET','/api/investigator'),
-  investigatorCall:<T,>(action:string,body:unknown)=>ok<T>('PUT','/api/investigator/'+action,body),
   usage:()=>ok<import('../shared/usage.ts').UsageSummary>('GET','/api/usage'),
   /** The Skill library never sends a flat list: skills come only from a search (q) or from ids you already hold. */
   skills:(q:string,ids:string[]=[])=>ok<import('../server/skill-library.ts').SkillLibraryReply>('GET','/api/skills'+(q||ids.length?'?'+new URLSearchParams({...(q?{q}:{}),...(ids.length?{ids:ids.join(',')}:{})}).toString():'')),
