@@ -71,7 +71,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  const persona=useNodeSettings('chat');
  const [usage,setUsage]=useState<ChatUsage|null>(null),[persistence,setPersistence]=useState<'private'|'memory'>('memory'),[notice,setNotice]=useState(''),[adding,setAdding]=useState<string|null>(null);
  const sentAt=useRef(0),input=useRef<HTMLTextAreaElement>(null),log=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),alive=useRef(true);
- const [pickedSessions,setPickedSessions]=useState<PickedSession[]>([]),[ctxOpen,setCtxOpen]=useState(false);
+ const [pickedSessions,setPickedSessions]=useState<PickedSession[]>([]),[ctxOpen,setCtxOpen]=useState(false),[hoverThreads,setHoverThreads]=useState(false);
  const [conversation,setConversation]=useState(''); // a harness session id; '' is the one-off chat (or no investigation chosen)
  const [kind,setKind]=useState<HarnessMode>('chat'),[investigation,setInvestigation]=useState<HarnessSession|null>(null),[invRefresh,setInvRefresh]=useState(0);
  useEffect(()=>{setPickedSessions([]);setConversation('');},[path]);
@@ -96,8 +96,11 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  const selectionText=getSelection(),noteEstimate=useMemo(()=>chipEstimate(noteText),[noteText]),threadsEstimate=useMemo(()=>chipEstimate(threadsText),[threadsText]);
  const estimate:Record<ContextChip['id'],number>={note:noteEstimate,threads:threadsEstimate,selection:chipEstimate(selectionText)};
  const total=chips.filter(c=>c.on).reduce((n,c)=>n+estimate[c.id],0);
- const peekText:Record<ContextChip['id'],string>={note:noteText||'This note is empty.',threads:threadsText||'No AI replies in this note yet.',selection:selectionText||'Select text in the note, then turn this on.'};
+ const peekText:Record<ContextChip['id'],string>={note:noteText||'This note is empty.',threads:threadsText||'No AI thoughts (threads) in this note yet.',selection:selectionText||'Select text in the note, then turn this on.'};
 
+ // While Threads is hovered, focused or previewed (and on), the AI thought cards in the margin say "Sent to chat": that is what this option means.
+ const showThreads=ctxOpen&&(hoverThreads||peek==='threads')&&!!chips.find(c=>c.id==='threads')?.on;
+ useEffect(()=>{if(!showThreads)return;const cards=Array.from(document.querySelectorAll<HTMLElement>('.thought-blob'));cards.forEach(el=>el.setAttribute('data-in-chat','true'));return()=>cards.forEach(el=>el.removeAttribute('data-in-chat'));},[showThreads]);
  const fail=(id:string,code:ChatErrorCode,budget?:BudgetDetail)=>setTurns(t=>applyEvent(t,{type:'error',id,code,...(budget?{budget}:{})}));
  const send=async(review:ChatReview,dontAskAgain:boolean)=>{
   setPending(null);setBusy(true);sentAt.current=Date.now();const id=review.requestId,controller=new AbortController();abort.current=controller;
@@ -158,7 +161,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
     <svg className="chat-sum-caret" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6l4 4 4-4"/></svg>
    </button>
    {ctxOpen&&<div id="chat-context-body" className="chat-context-body">
-   {chips.map(c=><span key={c.id} className="chat-chip-wrap">
+   {chips.map(c=><span key={c.id} className="chat-chip-wrap" {...(c.id==='threads'?{onMouseEnter:()=>setHoverThreads(true),onMouseLeave:()=>setHoverThreads(false),onFocus:()=>setHoverThreads(true),onBlur:()=>setHoverThreads(false)}:{})}>
     <button type="button" className="chat-chip" aria-pressed={c.on} onClick={()=>setChips(list=>toggleChip(list,c.id))}>{c.label}<span className="chat-chip-est"> · {formatCount(estimate[c.id])}</span></button>
     <button type="button" className="chat-chip-peek" aria-label={`Preview ${c.label}`} aria-expanded={peek===c.id} onClick={()=>setPeek(p=>p===c.id?null:c.id)}>
      <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 10S5 4.5 10 4.5 18.5 10 18.5 10 15 15.5 10 15.5 1.5 10 1.5 10Z"/><circle cx="10" cy="10" r="2.4"/></svg>
@@ -168,6 +171,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
     <button type="button" className="chat-chip" aria-pressed="true" title={otherNotes.join('\n')}>From the constellation · {otherNotes.length} {otherNotes.length===1?'note':'notes'}</button>
     <button type="button" className="chat-chip-peek" aria-label="Stop sending the notes chosen in the constellation" onClick={onClearExtraNotes}>×</button>
    </span>}
+   <span className="chat-context-help">Threads are the AI thoughts in this note’s margin, with their replies. Point at Threads to see which cards go.</span>
    <span className="chat-context-total">About {formatCount(total)} tokens of context</span>
    {path&&<SessionPicker key={path} path={path} selected={pickedSessions} onChange={setPickedSessions} disabled={composing} budget={usage?.tokenBudget??50000}/>}
    {peek&&<div className="chat-peek" role="region" aria-label={`Preview of ${chips.find(c=>c.id===peek)?.label}`}><pre>{previewText(peekText[peek],1200)}</pre></div>}

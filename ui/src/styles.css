@@ -838,6 +838,12 @@ input.chat-ctl { background: var(--paper); cursor: text; }
 .chat-chip[aria-pressed="true"] .chat-chip-est { color: var(--ink-text); opacity: .8; }
 .chat-chip-peek { display: grid; place-items: center; padding: 0 8px; border-left: 0; border-radius: 0 var(--ctl-r) var(--ctl-r) 0; color: var(--muted); }
 .chat-chip-peek:hover, .chat-chip-peek[aria-expanded="true"] { color: var(--ink-text); background: var(--accent-soft); }
+.chat-context-help { flex-basis: 100%; color: var(--muted); font-size: var(--text-meta); line-height: 1.45; }
+.thought-kind { color: var(--ink-text); font-weight: 600; }
+/* While the chat's Threads option is pointed at, each AI thought card says so in words (never colour alone). */
+.thought-rails .margin-card.thought-blob[data-in-chat]::after { content: "Sent to chat"; position: absolute; top: -11px; right: 12px; padding: 0 8px; border: 1px solid var(--control-border); border-radius: var(--radius-small); background: var(--paper-2); color: var(--ink-text); font: 400 var(--text-meta)/20px var(--font-ui); pointer-events: none; }
+.cm-ink-block.thought-blob[data-in-chat] { position: relative; }
+.cm-ink-block.thought-blob[data-in-chat]::after { content: "Sent to chat"; position: absolute; top: -11px; right: 12px; padding: 0 8px; border: 1px solid var(--control-border); border-radius: var(--radius-small); background: var(--paper-2); color: var(--ink-text); font: 400 var(--text-meta)/20px var(--font-ui); pointer-events: none; }
 .chat-context-total { flex-basis: 100%; margin-top: 2px; color: var(--muted); font-size: var(--text-meta); }
 .chat-peek { flex-basis: 100%; margin: 0; max-height: 150px; overflow: auto; border: 1px solid var(--rule); border-radius: var(--radius-small); background: var(--paper); }
 .chat-peek pre { margin: 0; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; color: var(--muted); font: 12px/1.5 var(--font-mono); }

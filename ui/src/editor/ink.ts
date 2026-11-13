@@ -40,7 +40,7 @@ class InkWidget extends WidgetType {
     const root=createRoot(content);root.render(this.pending?createElement(Thinking):createElement(Streamed,{text:this.body,fresh,children:createElement(ReplyMarkdown,{text:this.body})}));
     widgetCleanup.set(el,()=>{queueMicrotask(()=>root.unmount());});
     el.append(label, content);
-    const replies=document.createElement('div');replies.className='thought-replies';replies.textContent=this.replies+' '+(this.replies===1?'reply':'replies');el.append(replies);
+    const replies=document.createElement('div');replies.className='thought-replies';const kind=document.createElement('span');kind.className='thought-kind';kind.textContent='Thread';replies.append(kind,' · '+this.replies+' '+(this.replies===1?'reply':'replies'));el.append(replies);
     const highlight=(on:boolean)=>el.closest('.ink-surface')?.querySelectorAll<HTMLElement>('[data-thought-anchor]').forEach(mark=>mark.classList.toggle('thought-active',on&&mark.dataset.thoughtAnchor===this.id));
     el.addEventListener('pointerenter',()=>highlight(true));el.addEventListener('pointerleave',()=>highlight(false));el.addEventListener('focusin',()=>highlight(true));el.addEventListener('focusout',e=>{if(!el.contains(e.relatedTarget as Node))highlight(false);});
     const open=document.createElement('button');open.textContent='Open thread';open.setAttribute('aria-label','Open AI thought thread: '+this.body.slice(0,80));open.type='button';
