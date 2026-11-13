@@ -14,6 +14,19 @@ if (args[args.indexOf('--tools') + 1] === 'Read,Grep,Glob') { // an investigatio
   const [kind, extra] = scenario.split('|');
   out({ type: 'system', subtype: 'init', session_id: id, tools: kind === 'inv-tools-extra' ? ['Read', 'Grep', 'Glob', 'Bash'] : ['Read', 'Grep', 'Glob'], mcp_servers: [], plugins: [], permissionMode: 'dontAsk' });
   const tool = (msg, toolId, name, input) => { out({ type: 'assistant', message: { id: msg, content: [{ type: 'tool_use', id: toolId, name, input }] } }); };
+  const textBlock = (t) => { out({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } }); out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: t } } }); out({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } }); };
+  const done = (id, content) => out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content }] } });
+  if (kind === 'inv-narrate') { // text, tool, text, tool, then the final answer in two paragraphs (two text blocks)
+    textBlock('I will look at the files first. '); tool('n1', 'tn1', 'Glob', { pattern: '**/*.js' }); done('tn1', 'src/login.js');
+    textBlock('Now reading the login file. '); tool('n2', 'tn2', 'Read', { file_path: path.join(process.cwd(), 'src', 'login.js') }); done('tn2', '3 const sessions = new Map();');
+    textBlock('Login keeps sessions in a Map.'); textBlock('That is the whole story.');
+    const final = 'Login keeps sessions in a Map.\n\nThat is the whole story.\n<claims>[]</claims>';
+    out({ type: 'assistant', message: { id: 'n3', content: [{ type: 'text', text: final }] } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: final, num_turns: 3, total_cost_usd: 0.02, usage: { input_tokens: 10, output_tokens: 20 }, permission_denials: [] }); process.exit(0);
+  }
+  if (kind === 'inv-notail') { textBlock('Let me check the router first. '); tool('z1', 'tz1', 'Glob', { pattern: '**/*.js' }); done('tz1', 'src/login.js'); await new Promise((r) => setTimeout(r, 20000)); }
+  if (kind === 'inv-budget') { textBlock('Reading the code. '); tool('b1', 'tb1', 'Read', { file_path: path.join(process.cwd(), 'src', 'login.js') }); done('tb1', '3 const sessions = new Map();');
+    out({ type: 'result', subtype: 'error_max_budget_usd', is_error: true, result: '', num_turns: 2, total_cost_usd: 0.5, permission_denials: [] }); process.exit(0); }
   if (kind === 'inv-slow') await new Promise((r) => setTimeout(r, 20000)); // long enough to cancel
   if (kind === 'inv-trail') {
     out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'I should find where login is defined, then read it.' } } });

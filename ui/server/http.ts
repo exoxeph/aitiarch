@@ -336,7 +336,7 @@ export function createApp(opts: AppOptions) {
           return json(res,200,{removed});
         }
         if(url.pathname==='/api/harness/investigate/repo')return json(res,200,{repo:await h.investigate.chooseRepo(b?.repo)});
-        if(url.pathname==='/api/harness/investigate/plan')return json(res,200,await h.investigate.plan(b?.session));
+        if(url.pathname==='/api/harness/investigate/plan')return json(res,200,await h.investigate.plan(b?.session,b?.budgetUsd));
         if(url.pathname==='/api/harness/investigate/confirm')return json(res,200,await h.investigate.confirm(b?.session,b?.planHash));
         if(url.pathname==='/api/harness/investigate/cancel'){h.investigate.cancel(b?.session);return json(res,200,{});}
         if(url.pathname==='/api/harness/investigate/restore')return json(res,200,{restored:await h.investigate.restore(b?.session)});

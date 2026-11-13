@@ -9,6 +9,7 @@ import path from 'node:path';
 import {StringDecoder} from 'node:string_decoder';
 import {promisify} from 'node:util';
 import type {ChatClaim,CitationIssue} from '../../shared/chat.ts';
+import {addStep,addText,answerTail,type TrailItem} from '../../shared/harness-trail.ts';
 import type {HarnessSession} from '../../shared/harness.ts';
 import {StreamGate} from '../chat/gate.ts';
 import {redact} from '../providers/index.ts';
@@ -21,7 +22,9 @@ import {captureFolder,folderChanges,restoreFolder} from './tripwire.ts';
 const exec=promisify(execFile);
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
 
-export const INVESTIGATE_LIMITS=Object.freeze({turns:12,budgetUsd:0.5,timeoutMs:300000});
+/** `turns` is a hidden safety backstop against a looping run, not a limit the user is shown; the user's limit is the cost cap (`budgetUsd`, editable). */
+export const INVESTIGATE_LIMITS=Object.freeze({turns:40,budgetUsd:0.5,timeoutMs:300000});
+export const BUDGET_MIN=0.05,BUDGET_MAX=5;
 /** What the copy never contains, in the words the plan card shows. */
 export const EXCLUDED=['ignored files (by the repo\'s .gitignore)','hidden files and folders, including .env and .git','notebook.md','Aitiarch state: ui-state.json*, ink sidecars, ledgers',
  'keys and secrets: *.pem, id_*, *credentials*, *secrets*, *.private.*','node_modules, backups, chat, runs, measurements','links and junctions',`files over ${SNAPSHOT_LIMITS.fileBytes/1024} KB`];
@@ -38,11 +41,12 @@ export type InvestigateCode='not_investigation'|'invalid'|'repo'|'plan_required'
 export class InvestigateError extends Error {code:InvestigateCode;constructor(code:InvestigateCode){super(code);this.code=code;}}
 export interface Plan {session:string;repo:string;files:number;bytes:number;skipped:Record<string,number>;excluded:string[];budgetUsd:number;turnLimit:number;snapshotHash:string;planHash:string}
 export interface ToolStep {tool:string;target:string;ok:boolean|null;denial?:string;/** Lines in the tool's result (the result itself never leaves the server). */lines?:number}
-/** What a turn had done when it was stopped: the text shown so far, the steps and the model turns used. */
-export interface PartialTurn {text:string;steps:ToolStep[];turns:number}
+/** What a turn had done when it was stopped. `text` is only what was written after the last tool call (the answer so far, often empty); the
+ *  narration before the calls is in `trail`, in order. */
+export interface PartialTurn {text:string;steps:ToolStep[];turns:number;trail:TrailItem[]}
 export interface InvestigateTurn {id:string;question:string;at:string;message?:InvestigateMessage;stopped?:{code:InvestigateCode;partial:PartialTurn}}
 export interface Tripwire {notebook:Drift;snapshot:Drift}
-export interface InvestigateMessage {id:string;body:string;claims:ChatClaim[];citation?:CitationIssue;usage:ReturnType<typeof sessionUsage>;costUsd:number|null;turns:number;steps:ToolStep[];permissionDenials:string[];tripwire:Tripwire;unknownEvents:number}
+export interface InvestigateMessage {id:string;body:string;/** Narration and tool calls in order; the answer is `body`. */trail:TrailItem[];claims:ChatClaim[];citation?:CitationIssue;usage:ReturnType<typeof sessionUsage>;costUsd:number|null;turns:number;steps:ToolStep[];permissionDenials:string[];tripwire:Tripwire;unknownEvents:number}
 export type InvestigateEvent=
  |{type:'start';id:string}
  |{type:'step';index:number;step:ToolStep}
@@ -56,7 +60,7 @@ export type InvestigateEvent=
  |{type:'error';code:InvestigateCode;tripwire?:Tripwire;partial?:PartialTurn};
 
 const TOOLS=new Set(['Read','Grep','Glob']);
-interface StreamHooks {cwd:string;turnLimit:number;onText:(t:string)=>void;onStep:(i:number,s:ToolStep)=>void;onStepResult:(i:number,ok:boolean,denial?:string)=>void;onStarted:()=>void;
+interface StreamHooks {cwd:string;turnLimit:number;onText:(t:string)=>void;onBlock?:()=>void;onStep:(i:number,s:ToolStep)=>void;onStepResult:(i:number,ok:boolean,denial?:string)=>void;onStarted:()=>void;
  onThinking?:(t:string)=>void;onTurn?:(turns:number)=>void}
 /** The CLI's stream for one investigation turn, read event by event. Anything outside the allowed shape stops the run. */
 export class InvestigateStream {
@@ -110,6 +114,7 @@ export class InvestigateStream {
   if(t==='stream_event'){
    const x=e.event;
    if(x?.type==='content_block_start'&&x.content_block?.type==='tool_use'&&!TOOLS.has(x.content_block.name))throw new InvestigateError('tool_refused');
+   if(x?.type==='content_block_start'&&x.content_block?.type==='text')this.o.onBlock?.();
    if(x?.type==='content_block_delta'&&x.delta?.type==='text_delta'&&typeof x.delta.text==='string')this.o.onText(x.delta.text);
    if(x?.type==='content_block_delta'&&x.delta?.type==='thinking_delta'&&typeof x.delta.thinking==='string')this.o.onThinking?.(x.delta.thinking);
    return;
@@ -171,12 +176,16 @@ export class InvestigateService {
   return {path:rel,line,from,lines:lines.slice(from-1,to).map(l=>redact(l).slice(0,400))};
  }
  /** Syncs the copy and returns what the card shows. Its hash is what the user confirms. */
- async plan(id:string):Promise<Plan>{
-  const s=await this.session(id),d=this.snapshotFolder(s.repo),r=await syncSnapshot(s.repo,d.files,d.manifest);
-  const core={repo:s.repo,files:r.files,excluded:EXCLUDED,budgetUsd:this.limits.budgetUsd,turnLimit:this.limits.turns,snapshotHash:r.hash};
+ async plan(id:string,budgetUsd?:unknown):Promise<Plan>{
+  const s=await this.session(id),d=this.snapshotFolder(s.repo);
+  const budget=budgetUsd===undefined||budgetUsd===null?s.budgetUsd??this.limits.budgetUsd:Number(budgetUsd);
+  if(!Number.isFinite(budget)||budget<BUDGET_MIN||budget>BUDGET_MAX)throw new InvestigateError('invalid');
+  const r=await syncSnapshot(s.repo,d.files,d.manifest),capped=Math.round(budget*100)/100;
+  // The cost cap is part of the plan the user confirms, so changing it changes the hash. The backstop is kept in the plan but never shown.
+  const core={repo:s.repo,files:r.files,excluded:EXCLUDED,budgetUsd:capped,turnLimit:this.limits.turns,snapshotHash:r.hash};
   const plan:Plan={session:id,...core,bytes:r.bytes,skipped:r.skipped,planHash:sha(JSON.stringify(core))};this.plans.set(id,plan);return plan;
  }
- async confirm(id:string,planHash:unknown){const p=this.plans.get(id);if(!p||p.planHash!==planHash)throw new InvestigateError('plan_changed');await this.o.index.confirm(id,p.planHash);return p;}
+ async confirm(id:string,planHash:unknown){const p=this.plans.get(id);if(!p||p.planHash!==planHash)throw new InvestigateError('plan_changed');await this.o.index.confirm(id,p.planHash,p.budgetUsd);return p;}
  /** Cancel can reach the server before the turn it is for (both are requests in flight): an early cancel is kept for a few seconds and honoured
   *  as soon as that session's turn starts. */
  private early=new Map<string,number>();
@@ -188,20 +197,24 @@ export class InvestigateService {
   const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});this.running.set(id,controller);
   const asked0=this.early.get(id);this.early.delete(id);if(asked0!==undefined&&Date.now()-asked0<5000)controller.abort();
   const d=this.snapshotFolder(s.repo),backup=path.join(this.o.dir,'tripwire',id,'before');let before:Record<string,string>|null=null,started=false,turnDir:string|undefined;
-  let stream:InvestigateStream|undefined,shown='';const asked=redact(question.trim()),at=new Date().toISOString();
+  let stream:InvestigateStream|undefined,trail:TrailItem[]=[];const asked=redact(question.trim()),at=new Date().toISOString(),budgetUsd=s.budgetUsd??this.limits.budgetUsd;
   const tripwire=async():Promise<Tripwire|undefined>=>{if(!before)return undefined;const notebook=await folderChanges(this.o.notebook,before),snapshot=await snapshotDrift(d.files,d.manifest);this.last.set(id,{changes:notebook,backup});await this.savePending(id,notebook);return {notebook,snapshot};};
   try{
    await syncSnapshot(s.repo,d.files,d.manifest); // re-sync by hash before every turn
    before=await captureFolder(this.o.notebook,backup);
    const cwd=await realpath(d.files);turnDir=await mkdtemp(path.join(this.o.dir,'turn-'));const file=path.join(turnDir,'system.md');await writeFile(file,INVESTIGATE_INSTRUCTION,{mode:0o600});
    const gate=new StreamGate({instruction:INVESTIGATE_INSTRUCTION}),thinking=new StreamGate({instruction:INVESTIGATE_INSTRUCTION});
+   // Text goes through the gate (redaction, the echo guard) into the trail. Whatever the gate holds back is released when a tool call or a new
+   // text block starts (a space or a blank line is pushed), so narration lands before the call it belongs to and paragraphs stay separate.
+   const say=(raw:string)=>{const delta=gate.push(raw);if(delta){trail=addText(trail,delta);emit({type:'delta',text:delta});}};
    stream=new InvestigateStream({cwd,turnLimit:this.limits.turns,onStarted:()=>{started=true;},
-    onText:t=>{const delta=gate.push(t);if(delta){shown+=delta;emit({type:'delta',text:delta});}},onStep:(index,step)=>emit({type:'step',index,step}),onStepResult:(index,ok,denial)=>emit({type:'step_result',index,ok,...(denial?{denial}:{})}),
+    onText:say,onBlock:()=>{if(answerTail(trail))say('\n\n');},
+    onStep:(index,step)=>{say('\n');trail=addStep(trail,index);emit({type:'step',index,step});},onStepResult:(index,ok,denial)=>emit({type:'step_result',index,ok,...(denial?{denial}:{})}),
     onThinking:t=>{const delta=thinking.push(t);if(delta)emit({type:'thinking',text:delta});},onTurn:turns=>emit({type:'progress',turns})});
    emit({type:'start',id});
    if(controller.signal.aborted)throw new InvestigateError('cancelled'); // cancelled before the CLI started: never start it
    await new Promise<void>((resolve,reject)=>{
-    const child=spawnInvestigateSession({provider:'claude',command:this.o.command,prefixArgs:this.o.prefixArgs},{id:s.id,resume:s.turns>0,addendumFile:file,budgetUsd:this.limits.budgetUsd,...(this.o.model?{model:this.o.model}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
+    const child=spawnInvestigateSession({provider:'claude',command:this.o.command,prefixArgs:this.o.prefixArgs},{id:s.id,resume:s.turns>0,addendumFile:file,budgetUsd,...(this.o.model?{model:this.o.model}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
     let failure:InvestigateError|undefined,killing:Promise<void>=Promise.resolve(),bytes=0;
     const stop=(code:InvestigateCode)=>{if(failure)return;failure=new InvestigateError(code);if(child.pid)killing=killTree(child.pid);};
     const timer=setTimeout(()=>stop('timeout'),this.limits.timeoutMs),onAbort=()=>stop('cancelled');controller.signal.addEventListener('abort',onAbort,{once:true});
@@ -216,12 +229,16 @@ export class InvestigateService {
     child.stdin.end(asked);
    });
    const r=stream.result!,reply=await finishFileReply(r.text,s.repo);
-   const message:InvestigateMessage={id:randomId(),body:reply.body,claims:reply.claims,...(reply.citation?{citation:reply.citation}:{}),usage:sessionUsage(r.usage),costUsd:r.cost,turns:stream.turns,steps:stream.steps,permissionDenials:r.denials,tripwire:(await tripwire())!,unknownEvents:stream.unknown};
+   // The result field is the answer: the trail's last text (what streamed, minus the word the gate was still holding) is replaced by it.
+   const finalTrail:TrailItem[]=trail.at(-1)&&'text' in trail.at(-1)!?[...trail.slice(0,-1),...(reply.body?[{text:reply.body}]:[])]:[...trail,...(reply.body?[{text:reply.body}]:[])];
+   const message:InvestigateMessage={id:randomId(),body:reply.body,trail:finalTrail,claims:reply.claims,...(reply.citation?{citation:reply.citation}:{}),usage:sessionUsage(r.usage),costUsd:r.cost,turns:stream.turns,steps:stream.steps,permissionDenials:r.denials,tripwire:(await tripwire())!,unknownEvents:stream.unknown};
    await this.saveTurn(id,{id:message.id,question:asked,at,message}).catch(()=>{});
    emit({type:'complete',message});
   }catch(e){
    const code:InvestigateCode=e instanceof InvestigateError?e.code:'provider_failed';
-   const t=await tripwire().catch(()=>undefined),partial:PartialTurn={text:shown,steps:stream?.steps??[],turns:stream?.turns??0};
+   const t=await tripwire().catch(()=>undefined),partial:PartialTurn={text:answerTail(trail),steps:stream?.steps??[],turns:stream?.turns??0,trail};
+   // A stop on the cost cap or the safety backstop needs a fresh confirmed plan (a new cap) before the same session continues.
+   if(code==='budget'||code==='turn_limit')await this.o.index.unconfirm(id).catch(()=>{});
    await this.saveTurn(id,{id:randomId(),question:asked,at,stopped:{code,partial}}).catch(()=>{});
    emit({type:'error',code,partial,...(t?{tripwire:t}:{})});
   }finally{

@@ -38,7 +38,7 @@ describe('investigation sessions',()=>{
   const t=await setup(),svc=t.service(),s=await svc.create('x',t.repo);
   await expect(svc.send(s.id,'q',()=>{})).rejects.toThrow('plan_required');
   const p=await svc.plan(s.id);
-  expect(p).toMatchObject({files:2,budgetUsd:0.5,turnLimit:12});expect(p.excluded).toContain('notebook.md');
+  expect(p).toMatchObject({files:2,budgetUsd:0.5,turnLimit:40}); // 40 is the hidden safety backstop, not a limit shown to the userexpect(p.excluded).toContain('notebook.md');
   await expect(svc.confirm(s.id,'0'.repeat(64))).rejects.toThrow('plan_changed');
   await svc.confirm(s.id,p.planHash);expect((await t.index.get(s.id))!.confirmed).toBe(p.planHash);
  });
@@ -71,6 +71,31 @@ describe('investigation sessions',()=>{
    expect((await t.run(svc,s.id)).error?.code,p).toBe('outside_path');
   }
   const t=await setup(),svc=t.service('inv-path|src/login.js'),{s}=await confirmed(svc,t.repo);expect((await t.run(svc,s.id)).error).toBeUndefined();
+ });
+ it('narration before a tool call stays in the trail in order; the answer is only the final text, paragraphs separated',async()=>{
+  const t=await setup(),svc=t.service('inv-narrate'),{s}=await confirmed(svc,t.repo),r=await t.run(svc,s.id);
+  expect(r.error).toBeUndefined();const m=r.complete!.message;
+  expect(m.body).toBe('Login keeps sessions in a Map.\n\nThat is the whole story.');
+  expect(m.trail).toEqual([{text:'I will look at the files first.'},{step:0},{text:'Now reading the login file.'},{step:1},{text:'Login keeps sessions in a Map.\n\nThat is the whole story.'}]);
+  const text=r.events.filter(e=>e.type==='delta').map((e:any)=>e.text).join('');expect(text).toContain('Login keeps sessions in a Map.\n\nThat is the whole'); // two text blocks arrive with one blank line between (the complete event carries the last held word)
+ });
+ it('a run stopped with no text after the last tool call has no answer: the partial is empty and its trail ends with the call',async()=>{
+  const t=await setup(),svc=t.service('inv-notail'),{s}=await confirmed(svc,t.repo);
+  const events:InvestigateEvent[]=[];await svc.send(s.id,'q',e=>{events.push(e);if(e.type==='step')setTimeout(()=>svc.cancel(s.id),300);});
+  const err=events.find(e=>e.type==='error') as Extract<InvestigateEvent,{type:'error'}>;
+  expect(err.code).toBe('cancelled');expect(err.partial).toMatchObject({text:'',trail:[{text:'Let me check the router first.'},{step:0}]});
+ });
+ it('the cost cap is in the plan hash, is the one the run is launched with, and a stop on the cap needs a fresh confirmed plan before it continues the same session',async()=>{
+  const t=await setup(),svc=t.service('inv-budget'),s=await svc.create('x',t.repo);
+  const p1=await svc.plan(s.id),p2=await svc.plan(s.id,0.25);expect(p2.budgetUsd).toBe(0.25);expect(p2.planHash).not.toBe(p1.planHash);
+  await expect(svc.plan(s.id,0)).rejects.toThrow('invalid');await expect(svc.plan(s.id,50)).rejects.toThrow('invalid');
+  await svc.confirm(s.id,p2.planHash);
+  const stop=await t.run(svc,s.id);expect(stop.error?.code).toBe('budget');expect(stop.error?.partial?.text).toBe('');
+  const [first]=await t.calls();expect(first.args[first.args.indexOf('--max-budget-usd')+1]).toBe('0.25');expect(first.args).toContain('--session-id');
+  await expect(svc.send(s.id,'continue',()=>{})).rejects.toThrow('plan_required'); // the stop cleared the confirmation
+  const svc2=t.service('inv-ok'),p3=await svc2.plan(s.id,0.4);await svc2.confirm(s.id,p3.planHash);
+  const go=await t.run(svc2,s.id,'Please continue where you stopped.');expect(go.error).toBeUndefined();
+  const calls=await t.calls(),second=calls[1];expect(second.args).toContain('--resume');expect(second.args).not.toContain('--session-id');expect(second.args[second.args.indexOf('--max-budget-usd')+1]).toBe('0.40');
  });
  it('Cancel works before the CLI has started (while the copy syncs) and while it runs',async()=>{
   const t=await setup(),svc=t.service('inv-slow'),{s}=await confirmed(svc,t.repo);

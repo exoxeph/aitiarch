@@ -46,8 +46,10 @@ export class SessionIndex {
  rename(id:string,label:string){const clean=cleanLabel(label);if(!clean)return Promise.reject(new SessionIndexError('Invalid label.'));
   return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');s.label=clean;return {...s};});}
  /** The user confirmed this investigation's scope and cost plan (by its hash). */
- confirm(id:string,planHash:string){if(!/^[0-9a-f]{64}$/.test(planHash))return Promise.reject(new SessionIndexError('Invalid plan.'));
-  return this.change(all=>{const s=all.find(x=>x.id===id);if(!s||s.mode!=='investigate')throw new SessionIndexError('No such investigation.');s.confirmed=planHash;return {...s};});}
+ confirm(id:string,planHash:string,budgetUsd?:number){if(!/^[0-9a-f]{64}$/.test(planHash)||budgetUsd!==undefined&&!(budgetUsd>0&&budgetUsd<=5))return Promise.reject(new SessionIndexError('Invalid plan.'));
+  return this.change(all=>{const s=all.find(x=>x.id===id);if(!s||s.mode!=='investigate')throw new SessionIndexError('No such investigation.');s.confirmed=planHash;if(budgetUsd!==undefined)s.budgetUsd=budgetUsd;return {...s};});}
+ /** A run stopped on its cost cap or its safety backstop: the next turn needs a fresh confirmed plan. Persisted, so it also holds after a restart. */
+ unconfirm(id:string){return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');delete s.confirmed;return {...s};});}
  /** Forgets a session. Its CLI transcript is removed separately (transcripts.ts). */
  remove(id:string){return this.change(all=>{const i=all.findIndex(x=>x.id===id);if(i<0)throw new SessionIndexError('No such session.');const [s]=all.splice(i,1);return s;});}
  /** A turn finished: the next one resumes. */

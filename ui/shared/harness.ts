@@ -15,6 +15,8 @@ export interface HarnessSession {
  repo?:string;
  /** An investigation: the hash of the scope and cost plan the user confirmed. No turn runs without it. */
  confirmed?:string;
+ /** An investigation: the cost cap (dollars per question) the user confirmed. */
+ budgetUsd?:number;
 }
 export const MAX_SESSIONS=200;
 export const validSessionId=(v:unknown):v is string=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v);
@@ -24,7 +26,9 @@ export function validSession(v:unknown):v is HarnessSession{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;const s=v as HarnessSession;
  return validSessionId(s.id)&&cleanLabel(s.label)===s.label&&(s.mode==='chat'||s.mode==='investigate')&&(s.note===undefined||typeof s.note==='string'&&s.note.length<=400)
   &&[s.created,s.lastUsed].every(t=>typeof t==='string'&&Number.isFinite(Date.parse(t)))&&Number.isSafeInteger(s.turns)&&s.turns>=0
-  &&(s.repo===undefined||typeof s.repo==='string'&&s.repo.length<=1000)&&(s.confirmed===undefined||typeof s.confirmed==='string'&&/^[0-9a-f]{64}$/.test(s.confirmed));
+  &&(s.repo===undefined||typeof s.repo==='string'&&s.repo.length<=1000)&&(s.confirmed===undefined||typeof s.confirmed==='string'&&/^[0-9a-f]{64}$/.test(s.confirmed))
+  &&(s.budgetUsd===undefined||typeof s.budgetUsd==='number'&&Number.isFinite(s.budgetUsd)&&s.budgetUsd>0&&s.budgetUsd<=5)
+  &&(s.budgetUsd===undefined||typeof s.budgetUsd==='number'&&Number.isFinite(s.budgetUsd)&&s.budgetUsd>0&&s.budgetUsd<=5);
 }
 
 /**
