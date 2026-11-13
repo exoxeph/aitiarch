@@ -2,6 +2,8 @@
 
 Status: proposal waiting for the owner's approval. Nothing here is implemented. Based on `ui-remodel` at `b1d5809`. All paths are under `ui/`.
 
+Later note: the old app-side investigator mentioned below (`server/investigator/*`, its cards and `investigator/stream.ts`) has since been removed. The harness Investigate is the only Investigate. Where this proposal says "the investigator", read it as that removed code.
+
 ## a. Current data flow
 
 1. `src/chat/ChatPanel.tsx` `submit()` builds the context with `buildContext()` (`src/chat/chat-model.ts`) and calls `PUT /api/chat/review` (`server/http.ts`).
@@ -20,14 +22,14 @@ Status: proposal waiting for the owner's approval. Nothing here is implemented. 
 
 | Bug | Symptom | Design flaw |
 |---|---|---|
-| 1. Strict parser | The CLI was killed on extra fields in `thinking_delta`, on `status`, on `signature_delta`. | One parser does two jobs: it enforces isolation and it parses for display. It fails on any event it does not recognise, not only on dangerous ones. The CLI protocol is listed by hand in five places (`chat-stream.ts`, `claude-canary.ts`, `failure-metrics.ts`, `thinking-status.ts`, `investigator/stream.ts`), and each CLI release can break each list separately. |
+| 1. Strict parser | The CLI was killed on extra fields in `thinking_delta`, on `status`, on `signature_delta`. | One parser does two jobs: it enforces isolation and it parses for display. It fails on any event it does not recognise, not only on dangerous ones. The CLI protocol is listed by hand in five places (`chat-stream.ts`, `claude-canary.ts`, `failure-metrics.ts`, `thinking-status.ts`, `investigator/stream.ts`, removed since), and each CLI release can break each list separately. |
 | 2. Raw text on screen | A JSON reply wrapped in prose streamed as written. | The display text and the machine data travel in one JSON object, so live display needs a partial-JSON parser, and when that guess fails the runtime streams raw text. Underneath, there is no stage between the CLI and the screen: redaction, the secret scan and shape checks run only on the final reply. |
 | 3. Persona outvoted | Grill me still returns a full analysis. | The persona is appended after a 20-line base style written for Ask ("the first sentence is the answer", about 120 words, "2-3 options") and after a contract that requires claims, which pulls the model toward analysis. Nothing on the server checks the result, so a violation is invisible. |
 
 Findings the brief does not mention:
 
 - **A fourth live bug.** `validateProviderResponse()` runs `redact()` over `JSON.stringify(response)`. The `authorization:` rule removes everything to the end of the line, and in serialized JSON that is the rest of the object. A throwaway probe confirmed it: the answer "Send it in the Authorization: Bearer header." throws `SyntaxError`, and the reply fails as "could not be read". Think and Ask share this code. The path rule also misses Windows paths in serialized JSON, because the backslashes are doubled there.
-- **Claims are invisible.** Chat stores `evidence`, but no chat UI renders it (grep: `.evidence` is only read by the investigator cards). The claims contract costs prompt weight and can fail a good reply over one wrong character, and the person gets nothing from it.
+- **Claims are invisible.** Chat stores `evidence`, but no chat UI renders it (grep: `.evidence` was only read by the old investigator cards, removed since). The claims contract costs prompt weight and can fail a good reply over one wrong character, and the person gets nothing from it.
 - **History teaches the old style.** Up to 4 earlier replies are sent back. After a switch to Grill me they are worked examples of full analysis, and they compete with the instruction.
 - **The rules vary.** `HARD_RULES` is added only when skills are attached, so the order and wording of the rules change from one request to the next.
 - **A workaround became a feature.** The `unstructured` fallback in `parseChatReply()` is now a stored field, a UI label and a shared type.
@@ -57,12 +59,12 @@ Where the brief is off: bug 2 is less of a leak than it looks. The model only se
 - Couplings that should not exist:
   - `providers/index.ts` owns prompt text, redaction, spawning, parsing and chat-only branches.
   - The runtime knows the JSON wire format (`answerPrefix()`).
-  - The chat stream depends on the canary inspector, and the investigator's parser shares the canary's rule that unknown events are fatal.
+  - The chat stream depends on the canary inspector, and the old investigator's parser (removed since) shared the canary's rule that unknown events are fatal.
   - The exact-key checks are repeated in the runtime and the store.
 
 ## d. Proposed architecture
 
-Five stages. Each has one job, a typed input and output, and its own test file. Think, Ask and the investigator do not change, except where they share a fixed bug or the event table.
+Five stages. Each has one job, a typed input and output, and its own test file. Think and Ask do not change (the old investigator was removed later), except where they share a fixed bug or the event table.
 
 1. **Request builder** (`server/chat/request.ts`).
    - In: the question, sources, history, persona and skills. Out: `ChatPacket {instruction, data, contract}`.
@@ -73,7 +75,7 @@ Five stages. Each has one job, a typed input and output, and its own test file. 
    - It spawns and enforces limits, and knows nothing about the protocol.
 3. **Event normalizer** (`server/providers/claude-events.ts`).
    - In: one line. Out: one of `text`, `thinking` (dropped), `status`, `init{registries}`, `result{text, model, usage}`, `danger{kind}`, `unknown{typeWords}`.
-   - It is one table, also used by the canary, the failure metrics and, later, the investigator.
+   - It is one table, also used by the canary, the failure metrics and, later, the harness Investigate.
    - An isolation monitor turns these events into a verdict: exactly one `init` with empty registries, no `danger` events, no files in the temp folder. Only a `danger` event, a bad `init` or a file is fatal.
    - An `unknown` event is counted in the failure metadata and does not stop the reply. If `result.text` differs from the joined deltas, the result wins and the mismatch is counted.
 4. **Output gate** (`server/chat/gate.ts`).
