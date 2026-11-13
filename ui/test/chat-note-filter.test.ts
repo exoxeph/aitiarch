@@ -48,7 +48,7 @@ describe('the one-off chat and the notes it can send',()=>{
  it('never sends a hidden .md note, a note in a hidden folder or in the chat folder, however it is asked for',async()=>{
   const p=await project(),hidden=['.hidden.md','.vault/inside.md','chat/old.md','../plan.md','.hidden.md/../.hidden.md'];
   for(const [i,id] of hidden.entries()){
-   const asked=await p.runtime.review(p.ask('hid-'+i,[id])).catch(e=>e); // either refused outright or left out and named; never read
+   const asked=await p.runtime.review(p.ask('hid-'+i,[id])).catch((e:unknown)=>e as Error); // either refused outright or left out and named; never read
    if(asked instanceof Error){expect(leaked(String(asked.message))).toEqual([]);continue;}
    expect(asked.sources.map(s=>s.label)).toEqual(['This note']);expect(JSON.stringify(asked)).not.toMatch(/CANARY/);
   }
@@ -59,7 +59,7 @@ describe('the one-off chat and the notes it can send',()=>{
  it('cannot send an internal file at all: ui-state.json, the ledger and the sidecars are not notes, so they are refused',async()=>{
   const p=await project();
   for(const id of ['ui-state.json','ledger.json','chat/fixture.md.chat.json','ink/plan.ink.json']){
-   const asked=await p.runtime.review(p.ask('int-'+id.length,[id])).catch(e=>e);
+   const asked=await p.runtime.review(p.ask('int-'+id.length,[id])).catch((e:unknown)=>e as Error);
    if(asked instanceof Error)continue; // refused: the module list does not have it
    expect(asked.sources.map(s=>s.label)).toEqual(['This note']);expect(asked.excluded).toContain(id); // or left out and named
   }
