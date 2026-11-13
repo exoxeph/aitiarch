@@ -7,6 +7,7 @@
 //  - a one-off chat sends the same line as its "editor" field;
 //  - a conversation counts against its own budget and counters (the footer, the usage list), whichever note is open; a one-off chat keeps its note's;
 //  - Delete conversation, asked while another note is open, names the note the conversation was started on and how many saved replies go with it;
+//  - the "Added from chat" toast sits below the panel, not over the composer, in a narrow window;
 //  - a selection that crosses sections says where it starts and ends;
 //  - a reply's source chip names the note its question was asked on, with the same Found / Not found state, whichever note is open now;
 //  - a conversation started on a note with a very long name: the picker still says "started on", the name is cut with an ellipsis (full name in a tooltip), and nothing overflows in a 374 px panel.
@@ -166,7 +167,25 @@ try {
 
   // 7. A reply written while Ideas was open is added to Ideas, from the chat it is kept in (the conversation started on Plan).
   await openNote('ideas.md'); await chip('switched').waitFor();
+  // The window is narrow here: the panel is 374 px wide and covers the editor. The toast that says "Added from chat" must not land on the composer, or on anything else in the panel.
+  await page.setViewportSize({ width: 390, height: 860 });
+  await page.waitForFunction(() => Math.round(document.querySelector('#chat-panel').getBoundingClientRect().width) === 374);
   await panel.locator('.chat-turn').nth(2).locator('.chat-add').click();
+  const toast = page.locator('.thought-toast'); await toast.waitFor();
+  const at = await page.evaluate(() => {
+   const box = (el) => { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y, r: b.right, b: b.bottom }; }, t = document.querySelector('.thought-toast');
+   return { toast: box(t), composer: box(document.querySelector('#chat-panel .chat-composer')), panel: box(document.querySelector('#chat-panel')), vw: innerWidth, vh: innerHeight, pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, toastOverflow: t.scrollWidth - t.clientWidth, text: t.innerText.replace(/\s+/g, ' ').trim() };
+  });
+  const hit = (a, b) => a.x < b.r && a.r > b.x && a.y < b.b && a.b > b.y;
+  assert(!hit(at.toast, at.composer), 'the toast does not cover the composer: ' + JSON.stringify(at)); assert(!hit(at.toast, at.panel), 'nor anything else in the chat panel: ' + JSON.stringify(at));
+  assert(at.toast.x >= 0 && at.toast.r <= at.vw && at.toast.y >= 0 && at.toast.b <= at.vh, 'the toast is inside the window: ' + JSON.stringify(at)); assert(at.pageOverflow <= 1 && at.toastOverflow <= 1, 'and nothing overflows sideways');
+  assert.match(at.text, /^Added from chat/); assert(!/Ctrl\+Z/.test(at.text), 'the keyboard hint is dropped at this width'); for (const name of ['Undo', 'Close notice']) assert.equal(await toast.getByRole('button', { name }).isVisible(), true, name + ' can be reached');
+  // "What was added" opens upward, over the panel only because it was asked for; the toast itself keeps its place and size.
+  const sizeBefore = await toast.boundingBox(); await toast.locator('summary').click(); await toast.locator('.added-detail pre').waitFor(); const sizeOpen = await toast.boundingBox();
+  assert(Math.abs(sizeOpen.height - sizeBefore.height) <= 1 && Math.abs(sizeOpen.y - sizeBefore.y) <= 1, 'opening the details does not grow the toast: ' + JSON.stringify([sizeBefore, sizeOpen]));
+  assert.match(await toast.locator('.added-detail pre').innerText(), /Started|Resumed/, 'and shows what was added'); await toast.locator('summary').click();
+  await toast.getByRole('button', { name: 'Close notice' }).click(); await toast.waitFor({ state: 'detached' });
+  await page.setViewportSize({ width: 1440, height: 900 });
   let ideasOnDisk = '';
   for (let i = 0; i < 60 && !ideasOnDisk.includes('[!ai]'); i++) { await page.waitForTimeout(250); ideasOnDisk = await readFile(path.join(notebook, 'ideas.md'), 'utf8'); }
   assert(ideasOnDisk.includes('> [!ai]') && ideasOnDisk.includes('Resumed.'), 'the reply was added to the note that is open: ' + ideasOnDisk.slice(0, 200));
