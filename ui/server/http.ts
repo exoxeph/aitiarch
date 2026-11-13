@@ -4,6 +4,7 @@ import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES,budgetText} from '../shared/chat.ts';
 import {validSessionId} from '../shared/harness.ts';
 import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
+import {DiagramImageError,DiagramImageStore} from './diagram-image-store.ts';import {DIAGRAM_PNG_MAX_BYTES,DIAGRAM_PNG_NAME} from '../shared/diagram-refs.ts';
 import {InsertionStore} from './insertion-store.ts';
 import {SKILL_DIAGRAM_CSP_HEADER,SKILL_DIAGRAM_SVG_CSP_HEADER} from '../shared/skill-diagram.ts';
 import { UiStateStore } from './ui-state-store.ts';
@@ -175,11 +176,11 @@ export function createApp(opts: AppOptions) {
   };
   const nodeSettings = new NodeSettingsService(uiStateStore, () => discoveredSkills(false));
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
-  const chatStore=new ChatStore(store.rootReal);
+  const chatStore=new ChatStore(store.rootReal),diagramImages=new DiagramImageStore(store.rootReal);
   const harnessReady=opts.harness?SessionIndex.open(opts.harness.dir??harnessDirectory(store.rootReal)).then(async index=>{const h=opts.harness!;await sweepStaleTurnFolders(index.dir).catch(()=>{}); /* a turn that was cut off leaves its notes in a turn-* folder: clear the old ones when the project opens */return {index,
     runner:new ClaudeSessionRunner({command:h.command,prefixArgs:h.prefixArgs,model:h.model,dir:index.dir}),questions:new QuestionStore(index.dir),
     investigate:new InvestigateService({index,dir:index.dir,notebook:store.rootReal,command:h.command,prefixArgs:h.prefixArgs,model:h.model})};}):Promise.resolve(null);
-  const chatReady=Promise.all([inkReady,harnessReady]).then(([ink,harness])=>new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined));
+  const chatReady=Promise.all([inkReady,harnessReady]).then(([ink,harness])=>new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages));
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
@@ -400,6 +401,24 @@ export function createApp(opts: AppOptions) {
     // A skill's diagram: served only to be framed by this app, under a CSP that blocks all network (also injected in the document itself).
     if(url.pathname==='/api/skill-diagram'&&req.method==='GET'){
       try{const name=url.searchParams.get('name')??'',bytes=await (await assistance).skillDiagrams.read(name),svg=name.endsWith('.svg');res.writeHead(200,{'Content-Type':svg?'image/svg+xml':'text/html; charset=utf-8','Content-Security-Policy':svg?SKILL_DIAGRAM_SVG_CSP_HEADER:SKILL_DIAGRAM_CSP_HEADER,'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Cache-Control':'private, max-age=31536000, immutable'});return res.end(bytes);}catch{return json(res,404,{error:'not_found'});}
+    }
+    // The picture of a diagram (a PNG the page made from the diagram's sanitised svg), for the chat to attach: served, listed and saved only under a strict name, and checked as untrusted bytes.
+    if(url.pathname==='/api/diagram-image'&&req.method==='GET'){
+      try{const bytes=await diagramImages.read(url.searchParams.get('name')??'');res.writeHead(200,{'Content-Type':'image/png','Content-Security-Policy':"default-src 'none'; sandbox",'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Cache-Control':'private, max-age=31536000, immutable'});return res.end(bytes);}catch{return json(res,404,{error:'not_found'});}
+    }
+    if(url.pathname==='/api/diagram-images'&&req.method==='GET'){
+      const names=(url.searchParams.get('names')??'').split(',').filter(Boolean);
+      if(names.length>40||names.some(n=>!DIAGRAM_PNG_NAME.test(n)))return json(res,400,{error:'invalid_image',message:'Those are not diagram picture names.'});
+      const images=[];for(const n of names){try{const i=await diagramImages.info(n);if(i)images.push(i);}catch{/* a name that cannot be served is simply not listed */}}
+      return json(res,200,{images});
+    }
+    if(url.pathname==='/api/diagram-image'&&req.method==='PUT'){
+      const b=await readBody(req) as {name?:unknown;data?:unknown};
+      try{
+        if(typeof b?.name!=='string'||!DIAGRAM_PNG_NAME.test(b.name))throw new DiagramImageError('bad_name');
+        if(typeof b.data!=='string'||b.data.length>Math.ceil(DIAGRAM_PNG_MAX_BYTES*4/3)+8||!/^[A-Za-z0-9+/]+={0,2}$/.test(b.data))throw new DiagramImageError('not_png');
+        return json(res,200,await diagramImages.save(b.name,Buffer.from(b.data,'base64')));
+      }catch(e){if(e instanceof DiagramImageError)return json(res,400,{error:'invalid_image',message:'The diagram picture was refused ('+e.problem.replace(/_/g,' ')+'). Nothing was saved.'});throw e;}
     }
     if(url.pathname==='/api/diagram-asset'&&req.method==='GET'){
       try{const bytes=await (await insertionsReady).asset(url.searchParams.get('name')??'');res.writeHead(200,{'Content-Type':'image/svg+xml','Content-Security-Policy':"default-src 'none'; sandbox",'X-Content-Type-Options':'nosniff','Cache-Control':'private, max-age=31536000, immutable'});return res.end(bytes);}catch{return json(res,404,{error:'not_found'});}

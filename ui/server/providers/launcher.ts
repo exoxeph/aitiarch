@@ -42,7 +42,7 @@ export function spawnIsolated(config: Target, args: string[], options: SpawnOpti
 }
 /** A chat harness session turn. The arguments are built here from the profile (never passed in), the working folder must be the project's
  *  registered, empty session folder, and the instruction file must live outside it. */
-export function spawnChatSession(config:Target,profile:{id:string;resume:boolean;addendumFile:string;model?:string},options:SpawnOptionsWithoutStdio&{cwd:string},registeredCwd:string){
+export function spawnChatSession(config:Target,profile:{id:string;resume:boolean;addendumFile:string;model?:string;images?:boolean},options:SpawnOptionsWithoutStdio&{cwd:string},registeredCwd:string){
  assertTarget(config);
  const reject=()=>{throw new Error('Session launch rejected.');};
  if(config.provider!=='claude')reject();

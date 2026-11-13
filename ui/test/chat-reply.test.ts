@@ -77,7 +77,7 @@ describe('finishReply',()=>{
   const redact=(t:string)=>t.replace(/password=\S+/g,'password=[SECRET]');
   const r=finishReply({text:`X.\n<claims>[{"source":"id\\u0000\\n${'z'.repeat(80)}","quote":"password=hunter22 ${'q'.repeat(300)}"}]</claims>`,legacy:false},sources,hash,redact);
   expect(r.claims).toHaveLength(1);const c=r.claims[0];expect(c.status).toBe('no_valid_source');expect(c.sourceId.length).toBeLessThanOrEqual(40);expect(c.sourceId).not.toMatch(/[\u0000-\u001f]/);
-  expect(c.quote.length).toBeLessThanOrEqual(240);expect(c.quote).toContain('password=[SECRET]');expect(c.quote).not.toContain('hunter22');
+  expect(c.quote!.length).toBeLessThanOrEqual(240);expect(c.quote).toContain('password=[SECRET]');expect(c.quote).not.toContain('hunter22');
  });
  it('an adapted provider\'s claim with an invalid source is kept the same way',()=>{
   const r=finishReply({text:'Yes.',legacy:true,claims:[{sourceId:'nope',quote:'The venue is the library'}]},sources,hash);

@@ -14,14 +14,16 @@ export interface ContextModule {
  estimateTokens(text:string):number;
 }
 /** Where a claim's quote comes from: the note (N1), the selection (S1), threads (T1), another note (O1...) or a session (C1.../X1...). */
-export type ClaimSourceKind='note'|'selection'|'thread'|'other_note'|'session';
+export type ClaimSourceKind='note'|'selection'|'thread'|'other_note'|'session'|'diagram';
 /** One claim from the reply's claims block, checked against its source after whitespace and Markdown normalisation. */
 export interface CheckedClaim {sourceId:string;source:ClaimSourceKind;quote:string;status:'found'|'not_found';/** Only when found. */sourceHash?:string}
+/** A claim about what a diagram's picture shows (D1 ...): there is no text to quote, so nothing was checked. Shown as "from the diagram image, not quote-checked"; never counted as evidence. */
+export interface VisualClaim {sourceId:string;source:'diagram';status:'visual';visual:true;quote?:undefined}
 /** A claim whose source id was not a valid one (a word, an unknown letter, a number, or none). Kept and shown with its quote; nothing was checked, so it is never evidence. */
 export interface UnsourcedClaim {sourceId:string;quote:string;status:'no_valid_source'}
 /** A claim about code in an investigation: a file in the repo the user picked, the line it names and a verbatim quote, checked against the real file. */
 export interface FileClaim {sourceId:'F';source:'file';path:string;line:number;/** Set when the quote was found on a different line than the AI named: `line` is the real one. */namedLine?:number;quote:string;status:'found'|'not_found'}
-export type ChatClaim=CheckedClaim|UnsourcedClaim|FileClaim;
+export type ChatClaim=CheckedClaim|UnsourcedClaim|FileClaim|VisualClaim;
 /** Why a reply cites nothing, from a fixed list the model must choose from. */
 export const NO_CITATION_REASONS=['opinion','question_back','no_context_used'] as const;
 export type NoCitationReason=typeof NO_CITATION_REASONS[number];
@@ -29,10 +31,12 @@ export type NoCitationReason=typeof NO_CITATION_REASONS[number];
 export const CITATION_ISSUES=['uncited_overlap','missing_block','malformed_block'] as const;
 export type CitationIssue=typeof CITATION_ISSUES[number];
 const CLAIM_KINDS:readonly string[]=['note','selection','thread','other_note','session'];
+const DIAGRAM_ID=/^D[1-9]$/;
 export function validClaims(v:unknown):v is ChatClaim[]{
  return Array.isArray(v)&&v.length<=32&&v.every(c=>{
   if(!c||typeof c!=='object'||Array.isArray(c))return false;const k=Object.keys(c).sort().join();
   if((c as FileClaim).source==='file'){const f=c as FileClaim;return (k==='line,path,quote,source,sourceId,status'||k==='line,namedLine,path,quote,source,sourceId,status'&&Number.isSafeInteger(f.namedLine)&&f.namedLine!>=1)&&f.sourceId==='F'&&(f.status==='found'||f.status==='not_found')&&typeof f.path==='string'&&f.path.length<=400&&!/[\u0000-\u001f]/.test(f.path)&&Number.isSafeInteger(f.line)&&f.line>=1&&typeof f.quote==='string'&&f.quote.length<=240;}
+  if((c as ChatClaim).status==='visual'){const v=c as VisualClaim;return k==='source,sourceId,status,visual'&&v.source==='diagram'&&v.visual===true&&typeof v.sourceId==='string'&&DIAGRAM_ID.test(v.sourceId);}
   if((c as ChatClaim).status==='no_valid_source'){const u=c as UnsourcedClaim;return k==='quote,sourceId,status'&&typeof u.sourceId==='string'&&u.sourceId.length<=40&&!/[\u0000-\u001f\u007f]/.test(u.sourceId)&&typeof u.quote==='string'&&u.quote.length<=240;}
   const x=c as CheckedClaim;
   return (k==='quote,source,sourceId,status'&&x.status==='not_found'||k==='quote,source,sourceHash,sourceId,status'&&x.status==='found'&&typeof x.sourceHash==='string'&&/^[a-f0-9]{64}$/.test(x.sourceHash))
@@ -100,9 +104,13 @@ export type ChatEvent=
 export interface ChatInput {id:string;path:string;question:string;selection?:string;context:ContextChoice[];
  /** A harness chat session (the app's id) to send this message in. Absent: the classic one-shot chat. */
  session?:string;
+ /** Diagrams of the open note whose pictures go with this message (`diagram-<hash>` names, at most two). Only a conversation can carry pictures; the server checks each one and says which it attached. */
+ diagrams?:string[];
  /** Where the person is in the editor: the open note, the section the cursor is in and the line range of the selection that is sent. `path` is the note the chat is kept under;
   *  in a conversation, `editor.path` is the note open now, which may be another note of the same project (the conversation followed the person there). */
  editor?:EditorInfo}
+/** One diagram picture in a review: D<n>, what the note calls it, the file's name (shown through GET /api/diagram-image), its size and its estimated token cost. */
+export interface ReviewImage {n:number;asset:string;title:string;width:number;height:number;tokens:number}
 export interface ChatReview {
  reviewId:string;requestId:string;path:string;question:string;selection:string;
  sources:(ContextPreview&{text:string})[];historyPairs:number;omittedPairs:number;
@@ -125,6 +133,8 @@ export interface ChatReview {
  manifest?:string;
  /** The editor information this message was sent with, as the server accepted it. */
  editor?:EditorInfo;
+ /** The diagram pictures that go with this message (a conversation only), with what each is expected to cost, and the diagrams that were asked for but are not attached, with the reason in words. */
+ images?:ReviewImage[];notAttached?:{n:number;title:string;why:string}[];
 }
 /** How much a cache read counts against a chat's token budget, next to new input and output (1). Cache reads are cheap and fast, and counting them
  *  in full made a long conversation look about three quarters spent on tokens it barely paid for. */

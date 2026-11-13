@@ -9,6 +9,8 @@ import {ChatStore} from './store.ts';import {contextModules,hash,estimateTokens}
 import {prepareRequest,ProviderError,redact,type Provider,type Request,type Result} from '../providers/index.ts';
 import {chatSessionInstruction,editorManifest,turnMessage} from './request.ts';
 import {cleanLabel,parseEditorInfo} from '../../shared/editor-context.ts';
+import {DIAGRAM_BASE,MAX_DIAGRAM_IMAGES,diagramsIn,imageTokens} from '../../shared/diagram-refs.ts';
+import type {DiagramImageInfo,DiagramImageStore} from '../diagram-image-store.ts';
 import {titleOf} from '../../shared/headings.ts';
 import {harnessDenied} from '../../shared/harness.ts';
 import type {SessionIndex} from '../harness/session-index.ts';
@@ -26,7 +28,9 @@ interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:
  /** A harness session turn: the session id and the exact file text the CLI gets (instruction, sources, rules last). */
  session?:{id:string};addendum?:string;
  /** The one line that starts the session message: what this turn was given. */
- manifest?:string}
+ manifest?:string;
+ /** The diagram pictures that go with this turn (base64 PNG), and the ids (D1 ...) a picture-only claim may name: the pictures sent now and those sent earlier in this conversation. */
+ images?:{mediaType:'image/png';data:string}[];diagramIds?:string[];diagramAssets?:string[]}
 /** Harness chat sessions: the app's index of sessions and the runner that talks to the Claude Code CLI. */
 export interface ChatHarness {index:SessionIndex;runner:Pick<ClaudeSessionRunner,'chatTurn'>;
  /** Where the questions of session turns are kept (outside the repo). Absent: they are not kept. */
@@ -40,7 +44,12 @@ export class ChatRuntime {
  private extras?:ExtrasFor;private sessions:ContextModule[];private ephemeral=new Map<string,ChatMessage[]>();private harness?:ChatHarness;
  /** What each conversation already holds (its last prompt plus reply, in tokens): the next turn re-reads it from the CLI's cache, so it counts at the cache weight. */
  private replay=new Map<string,number>();
- constructor(store:Store,ink:InkStore,chats:ChatStore,provider?:Provider,sessions?:ContextModule[],extras?:ExtrasFor,harness?:ChatHarness){this.harness=harness;this.extras=extras;this.store=store;this.ink=ink;this.chats=chats;this.provider=provider;this.ledger=new LedgerStore(store.rootReal);this.sessions=sessions??sessionModules({project:path.dirname(store.rootReal)});}
+ /** The saved pictures of the note's diagrams. Absent: no picture is ever attached. */
+ private images?:DiagramImageStore;
+ /** The diagrams whose picture went with an earlier message of each conversation (by diagram, so a renumbered note does not confuse them). The CLI's session still holds those pictures, so a picture-only claim about
+  *  one is believed; after the app restarts this is empty and such a claim is "no valid source" (the safe side). */
+ private shown=new Map<string,Set<string>>();
+ constructor(store:Store,ink:InkStore,chats:ChatStore,provider?:Provider,sessions?:ContextModule[],extras?:ExtrasFor,harness?:ChatHarness,images?:DiagramImageStore){this.images=images;this.harness=harness;this.extras=extras;this.store=store;this.ink=ink;this.chats=chats;this.provider=provider;this.ledger=new LedgerStore(store.rootReal);this.sessions=sessions??sessionModules({project:path.dirname(store.rootReal)});}
  memoryMessages(note:string){return structuredClone(this.ephemeral.get(note)??[]);}
  /** The counters of one chat: a note's one-off chat (keyed by the note) or a named conversation (keyed by its id), which owns its budget, hourly cap and calls whichever note is open.
   *  A conversation starts with the budget and cap its note's chat has at that moment. Each kind has its own limit on how many are kept. */
@@ -70,6 +79,7 @@ export class ChatRuntime {
  }
  async review(input:ChatInput):Promise<ChatReview>{
   if(this.closed||!input||!/^[\w-]{1,100}$/.test(input.id)||typeof input.question!=='string'||!input.question.trim()||input.question.length>CHAT_LIMITS.questionCharacters||typeof input.path!=='string'||input.selection!==undefined&&(typeof input.selection!=='string'||input.selection.length>8000)||!Array.isArray(input.context)||input.context.length>4)throw new ChatError('invalid_chat');
+  if(input.diagrams!==undefined&&(!Array.isArray(input.diagrams)||input.diagrams.length>MAX_DIAGRAM_IMAGES||input.diagrams.some(d=>typeof d!=='string'||!DIAGRAM_BASE.test(d))||new Set(input.diagrams).size!==input.diagrams.length))throw new ChatError('invalid_chat');
   // Validate target even when no context module is selected. Never implicitly send it.
   if(input.path.split('/').some(part=>part.startsWith('.')))throw new ChatError('invalid_chat');
   // Where the person is: the open note, the cursor's section and the selection's lines. `input.path` is the note this chat is kept under; only a conversation may be open on
@@ -78,7 +88,7 @@ export class ChatRuntime {
   if(input.editor!==undefined&&!editor)throw new ChatError('invalid_chat');
   const open=editor?.path??input.path;
   if(open!==input.path&&(input.session===undefined||open.split('/').some(part=>part.startsWith('.'))))throw new ChatError('invalid_chat');
-  await this.store.read(input.path);if(open!==input.path)await this.store.read(open);
+  await this.store.read(input.path);const openNote=await this.store.read(open);
   const sources:ContextSource[]=[],modules=[...contextModules(this.store,this.ink,open),...this.sessions],seen=new Set<string>();
   // Other notes the app adds (the Constellation, a picker) pass one filter in every chat, one-off or a conversation: never the notebook file, hidden files, Aitiarch's own
   // state and sidecars, secrets or keys. They are dropped BEFORE anything is read, so they are not read and not audited as read; what was left out is named in the review.
@@ -105,6 +115,21 @@ export class ChatRuntime {
    session=await this.harness.index.get(input.session);
    if(!session||session.mode!=='chat'||session.note!==undefined&&session.note!==input.path)throw new ChatError('invalid_chat');
   }
+  // Diagram pictures go with a conversation's message only (a one-off message is one JSON document and carries none). The note's own text numbers its diagrams D1, D2 ...; the page names which to attach.
+  // Each is checked here: the picture must exist and be a valid PNG, and the diagram's text must not look like a secret (a picture cannot be redacted, so it is not sent at all in that case).
+  const diagramRefs=session&&this.images?diagramsIn(openNote.text):[],attached:{ref:(typeof diagramRefs)[number];info:DiagramImageInfo;data:string}[]=[],notAttached:NonNullable<ChatReview['notAttached']>=[];
+  if(this.images)for(const ref of diagramRefs){
+   if(!(input.diagrams??[]).includes(ref.asset))continue;
+   const name=ref.asset+'.png',skip=(why:string)=>void notAttached.push({n:ref.n,title:redact(ref.title),why});
+   if(attached.length>=MAX_DIAGRAM_IMAGES){skip('only two pictures go with a message');continue;}
+   try{
+    const info=await this.images.info(name);if(!info){skip('its picture has not been made yet');continue;}
+    const text=await this.images.svgText(name);if(redact(text)!==text||secretKinds(text).length){skip('it holds text that looks like a secret');continue;}
+    attached.push({ref,info,data:(await this.images.read(name)).toString('base64')});
+   }catch{skip('its picture could not be read');}
+  }
+  const earlier=session?this.shown.get(session.id):undefined,claimable=diagramRefs.filter(d=>attached.some(a=>a.ref.asset===d.asset)||earlier?.has(d.asset)).map(d=>'D'+d.n);
+  const pictureTokens=attached.reduce((n,a)=>n+imageTokens(a.info.width,a.info.height),0);
   // A one-off chat counts against its note; a conversation counts against itself (budget, hourly cap, calls), whichever note is open.
   const s=this.state(input.path,session?.id);if(session)s.usage.label=session.label;
   // The chat node's persona always rides along; its skills only when something loaded. Fixed here, so the review shows what is sent.
@@ -125,11 +150,11 @@ export class ChatRuntime {
   const manifest=editorManifest({title:redact(editor?.title??cleanLabel(titleOf(noteSource?.text??'',open))),noteChars:noteSource?noteSource.text.length:null,
    selection:request.selection?{chars:request.selection.length,...(editor?.lines?{lines:editor.lines}:{})}:null,...(editor?.section?{section:editor.section.map(x=>redact(x))}:{}),
    ...(request.selection&&editor?.spans?{span:{from:editor.spans.from.map(x=>redact(x)),to:editor.spans.to.map(x=>redact(x))}}:{}),
-   others:sessionSources.filter(x=>x.id!=='N1'&&x.id!=='S1'&&x.text.length>0).map(x=>({id:x.id,label:cleanLabel(x.label),chars:x.text.length}))});
+   diagrams:diagramRefs.map(d=>({n:d.n,title:redact(d.title),attached:attached.some(a=>a.ref.asset===d.asset)})),others:sessionSources.filter(x=>x.id!=='N1'&&x.id!=='S1'&&x.text.length>0).map(x=>({id:x.id,label:cleanLabel(x.label),chars:x.text.length}))});
   if(!session)request.editor=manifest;
   const packet=prepareRequest(request);
-  const sessionText=session?chatSessionInstruction(request,sessionSources):null;
-  const sent=sessionText?estimateTokens(sessionText.addendum+turnMessage(manifest,request.question)):estimateTokens(JSON.stringify(packet));
+  const sessionText=session?chatSessionInstruction(request,sessionSources,{diagrams:diagramRefs.length>0}):null;
+  const sent=sessionText?estimateTokens(sessionText.addendum+turnMessage(manifest,request.question))+pictureTokens:estimateTokens(JSON.stringify(packet));
   // The next message's cost, the same number the review shows and the gate uses: what is sent now in full, the conversation already in a session at the cache weight, room for the reply.
   const estimate=nextTurnEstimate(sent,session?this.replay.get(session.id)??0:0).total;
   const privateContext=!!s.privateContext||sources.some(x=>x.ephemeral);
@@ -139,9 +164,11 @@ export class ChatRuntime {
   if(session)review.session={id:session.id,label:session.label,turns:session.turns};
   if(excluded.length)review.excluded=excluded;
   review.manifest=manifest;if(editor)review.editor=editor;
+  if(attached.length)review.images=attached.map(a=>({n:a.ref.n,asset:a.ref.asset,title:redact(a.ref.title),width:a.info.width,height:a.info.height,tokens:imageTokens(a.info.width,a.info.height)}));
+  if(notAttached.length)review.notAttached=notAttached;
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');
-  this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(privateContext?{privateContext:true as const}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{})});
+  this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(privateContext?{privateContext:true as const}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(attached.length?{images:attached.map(a=>({mediaType:'image/png' as const,data:a.data})),diagramAssets:attached.map(a=>a.ref.asset)}:{}),...(claimable.length?{diagramIds:claimable}:{})});
   return review;
  }
  async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
@@ -191,7 +218,7 @@ export class ChatRuntime {
    if(!Array.isArray(result.claims)||result.claims.some(c=>!c||typeof c!=='object'||Object.keys(c).sort().join()!=='quote,sourceId')||Object.keys(result).some(k=>!['id','provider','model','answer','claims','usage','rawReply'].includes(k)))throw new ChatError('validation');
    // The output gate's final part: the body, each claim checked on its own, and whether the citations need attention.
    let finished;
-   try{finished=finishReply({text:result.answer,legacy:result.rawReply!==true,claims:result.claims},{note:request.note,selection:request.selection,decisions:request.decisions},hash,redact);}
+   try{finished=finishReply({text:result.answer,legacy:result.rawReply!==true,claims:result.claims},{note:request.note,selection:request.selection,decisions:request.decisions,...(frozen.diagramIds?{diagrams:frozen.diagramIds}:{})},hash,redact);}
    catch(error){const shape:Record<string,string>={'Invalid answer shape.':'the reply was JSON with the wrong fields','Invalid answer formatting.':'the reply looked like JSON but was incomplete or malformed'};
     const failure=new ProviderError('invalid_response');failure.reason={kind:'unparseable',detail:error instanceof Error&&shape[error.message]?shape[error.message]:'the reply could not be read'};throw failure;}
    const validated=validateProductResult({...result,answer:finished.body,claims:[]},request.id,request,redact,hash,'claude');
@@ -204,6 +231,7 @@ export class ChatRuntime {
    await this.audit(review.path,request.id,'chat_completed');
    if(!frozen.session)s.history.push({id:request.id,user:request.question,assistant:message.body,...(request.persona?{persona:request.persona}:{})}); // a session keeps its own
    while(s.history.length>4||s.history.reduce((n,p)=>n+p.user.length+p.assistant.length,0)>4000){s.history.shift();s.omittedPairs++;}
+   if(frozen.session&&frozen.diagramAssets?.length){const seen=this.shown.get(frozen.session.id)??new Set<string>();for(const a of frozen.diagramAssets)seen.add(a);this.shown.delete(frozen.session.id);this.shown.set(frozen.session.id,seen);while(this.shown.size>200)this.shown.delete(this.shown.keys().next().value as string);}
    emit({type:'complete',id:request.id,message,persistence,usage:{...s.usage,reserved:0}});
   }catch(e){
    const budgetNow:BudgetDetail={spent:s.usage.spent,next:frozen.reservation,budget:s.usage.tokenBudget};
@@ -220,7 +248,7 @@ export class ChatRuntime {
   const session=await h.index.get(frozen.session.id);if(!session||session.mode!=='chat')throw new ChatError('invalid_chat');
   let started=false;
   try{
-   const r=await h.runner.chatTurn({id:session.id,resume:session.turns>0,addendum:frozen.addendum,question:turnMessage(frozen.manifest,request.question),signal,onTextDelta,onStarted:()=>{started=true;}});
+   const r=await h.runner.chatTurn({id:session.id,resume:session.turns>0,addendum:frozen.addendum,question:turnMessage(frozen.manifest,request.question),...(frozen.images?.length?{images:frozen.images}:{}),signal,onTextDelta,onStarted:()=>{started=true;}});
    await h.questions?.add(session.id,request.id,request.question).catch(()=>{}); // a failed save must not lose the answer
    return {id:request.id,provider:'claude',model:null,answer:dropManifestEcho(r.answer),claims:[],usage:r.usage,rawReply:true};
   }finally{if(started)await h.index.touch(session.id).catch(()=>{});} // the CLI now knows this id: the next turn must resume it
@@ -244,7 +272,7 @@ export class ChatRuntime {
   let removed=await this.chats.removeConversation(note,session,messageIds);
   const held=this.ephemeral.get(note);
   if(held){const keep=held.filter(m=>m.session!==session&&!messageIds.has(m.id));removed+=held.length-keep.length;if(keep.length)this.ephemeral.set(note,keep);else this.ephemeral.delete(note);}
-  this.replay.delete(session);this.states.delete('session:'+session);return removed;
+  this.replay.delete(session);this.shown.delete(session);this.states.delete('session:'+session);return removed;
  }
  /** Stop: whatever is running for this note, its one-off chat or a conversation that was started on it. */
  cancel(note:string){for(const s of this.states.values())if(s.usage.note===note&&s.controller){s.abortCause??='user_stop';s.controller.abort();}}

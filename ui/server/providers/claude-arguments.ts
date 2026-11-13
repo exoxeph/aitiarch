@@ -7,8 +7,8 @@ export function claudeArguments(options: { stream?: boolean; hardening?: readonl
 }
 /** A chat harness session: no tools, no settings, MCP, hooks or slash commands; the conversation is kept by the CLI under the app-chosen id
  *  (--session-id on the first turn, --resume after). The app's instruction and the pasted notes come from a file, never argv. */
-export const chatSessionArguments=(p:{id:string;resume:boolean;addendumFile:string;model?:string})=>['-p','--safe-mode','--tools','','--strict-mcp-config','--mcp-config','{"mcpServers":{}}',
-  '--setting-sources','','--settings','{"disableAllHooks":true}','--disable-slash-commands','--output-format','stream-json','--verbose','--include-hook-events','--include-partial-messages',
+export const chatSessionArguments=(p:{id:string;resume:boolean;addendumFile:string;model?:string;images?:boolean})=>['-p','--safe-mode','--tools','','--strict-mcp-config','--mcp-config','{"mcpServers":{}}',
+  '--setting-sources','','--settings','{"disableAllHooks":true}','--disable-slash-commands',...(p.images?['--input-format','stream-json']:[]),'--output-format','stream-json','--verbose','--include-hook-events','--include-partial-messages',
   ...(p.model?['--model',p.model]:[]),p.resume?'--resume':'--session-id',p.id,'--append-system-prompt-file',p.addendumFile];
 /** An investigation harness session: Read, Grep and Glob only (reads scoped to the working folder, which is the app's snapshot), everything else
  *  denied without asking, no settings, MCP, hooks or slash commands, and a dollar cap. Same session flags and instruction file as chat. */

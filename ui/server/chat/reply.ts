@@ -8,12 +8,18 @@ import {normalizeQuote} from '../../shared/quote-match.ts';
 import {NO_CITATION_REASONS,type ChatClaim,type CitationIssue,type ClaimSourceKind,type NoCitationReason} from '../../shared/chat.ts';
 
 export type ClaimsBlock=
- |{body:string;block:'claims';claims:{source:string;quote:string}[]}
+ |{body:string;block:'claims';claims:{source:string;quote:string;visual?:true}[]}
  |{body:string;block:'none';reason:NoCitationReason}
  |{body:string;block:'missing'}
  |{body:string;block:'malformed'};
 const OPEN='<claims>',CLOSE='</claims>';
 const sourceOf=(c:unknown)=>{const s=(c as any).source??(c as any).sourceId;return typeof s==='string'?s:'';};
+/** A claim of the block: a quote with its source, or a picture-only claim ({"source":"D1","visual":true}) which has no quote. Anything else is left out. */
+const claimOf=(c:unknown):{source:string;quote:string;visual?:true}[]=>{
+ if(!c||typeof c!=='object')return [];
+ if((c as any).visual===true&&typeof (c as any).quote!=='string')return [{source:sourceOf(c),quote:'',visual:true}];
+ return typeof (c as any).quote==='string'?[{source:sourceOf(c),quote:(c as any).quote as string}]:[];
+};
 const pureBlock=(s:string)=>{const t=s.trim(),l=t.toLowerCase();return l.startsWith(OPEN)&&l.endsWith(CLOSE)&&l.indexOf(OPEN)===l.lastIndexOf(OPEN);};
 /** The final claims block and the body before it. Only a block that ends the reply counts (optionally inside one code fence of its own). */
 function finalBlock(text:string):{before:string;inner:string}|null{
@@ -32,7 +38,7 @@ export function parseClaimsBlock(text:string):ClaimsBlock{
  let value:unknown;try{value=JSON.parse(json);}catch{return {body,block:'malformed'};}
  if(Array.isArray(value)){
   // A claim needs a quote to be shown. A missing or non-string source is kept as an empty one, so it is shown as "no valid source" rather than dropped.
-  const claims=value.flatMap(c=>c&&typeof c==='object'&&typeof (c as any).quote==='string'?[{source:sourceOf(c),quote:(c as any).quote as string}]:[]);
+  const claims=value.flatMap(claimOf);
   return claims.length?{body,block:'claims',claims}:{body,block:'malformed'};
  }
  if(value&&typeof value==='object'&&Object.keys(value).length===1&&(NO_CITATION_REASONS as readonly unknown[]).includes((value as any).none))return {body,block:'none',reason:(value as any).none};
@@ -62,14 +68,15 @@ export function usesContext(body:string,sources:readonly string[]):boolean{
 /** Grill me's reply: one question, at most two sentences and 60 words. It may echo a few words of the note without citing it. */
 const singleQuestion=(body:string)=>{const t=body.trim();return t.endsWith('?')&&(t.match(/[.!?](?=\s|$)/g)?.length??0)<=2&&words(t).length<=60;};
 
-export interface ReplySources {note:string;selection:string;decisions:readonly {id:string;text:string}[]}
+/** `diagrams`: the ids (D1 ...) of the diagram pictures that went with the message. A picture-only claim is accepted only for one of those. */
+export interface ReplySources {note:string;selection:string;decisions:readonly {id:string;text:string}[];diagrams?:readonly string[]}
 const KIND:Record<string,ClaimSourceKind>={N:'note',S:'selection',T:'thread',O:'other_note',C:'session',X:'session'};
 const ALIAS:Record<string,string>={note:'N1',selection:'S1',thread:'T1',threads:'T1'};
 export interface FinishedReply {body:string;claims:ChatClaim[];noCitation?:NoCitationReason;citation?:CitationIssue}
 /** `legacy` is a structured result from an adapted provider (its answer and claims are already separate); otherwise `text` is the raw reply. */
 export function finishReply(input:{text:string;legacy:boolean;claims?:unknown[]},sources:ReplySources,hash:(text:string)=>string,redact:(text:string)=>string=t=>t):FinishedReply{
  let parsed:ClaimsBlock;
- const fromClaims=(body:string,claims:unknown[]):ClaimsBlock=>{const list=claims.flatMap(c=>c&&typeof c==='object'&&typeof (c as any).quote==='string'?[{source:sourceOf(c),quote:(c as any).quote as string}]:[]);return list.length?{body,block:'claims',claims:list}:{body,block:'missing'};};
+ const fromClaims=(body:string,claims:unknown[]):ClaimsBlock=>{const list=claims.flatMap(claimOf);return list.length?{body,block:'claims',claims:list}:{body,block:'missing'};};
  if(input.legacy)parsed=fromClaims(input.text,input.claims??[]);
  else{
   parsed=parseClaimsBlock(input.text);
@@ -80,6 +87,11 @@ export function finishReply(input:{text:string;legacy:boolean;claims?:unknown[]}
  if(parsed.block==='claims')for(const c of parsed.claims){
   if(claims.length>=32)break;
   const id=ALIAS[c.source.trim().toLowerCase()]??c.source.trim();
+  if(c.visual){
+   // A claim about what a diagram's picture shows: nothing to check, so it is kept as such, and only for a diagram whose picture went with this message. Any other is "no valid source".
+   if(/^D[1-9]$/.test(id)&&sources.diagrams?.includes(id)){claims.push({sourceId:id,source:'diagram',status:'visual',visual:true});continue;}
+   claims.push({sourceId:redact(c.source).replace(/[\u0000-\u001f\u007f]+/g,' ').trim().slice(0,40),quote:'(a diagram that was not attached)',status:'no_valid_source'});continue;
+  }
   if(!/^[A-Z][0-9]{1,3}$/.test(id)||!KIND[id[0]]){
    // Not a source the request could have carried. Kept, with its quote, and shown as "no valid source": never dropped, never counted as evidence.
    const tidy=(s:string,n:number)=>redact(s).replace(/[\u0000-\u001f\u007f]+/g,' ').trim().slice(0,n);

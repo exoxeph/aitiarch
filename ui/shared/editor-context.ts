@@ -11,6 +11,8 @@ export interface EditorContext {
  note:{path:string;title:string};
  /** The headings above the cursor, outermost first. Empty when the cursor is above the first heading (or the note has no headings). */
  section:string[];
+ /** The line the cursor (the selection's head) is on, 1-based. */
+ cursorLine:number;
  /** Lines are 1-based and describe `text`, which is cut at SELECTION_CAP (`cut` says so). `sections` are the heading paths at the first and the last character of `text`. */
  selection?:{fromLine:number;toLine:number;text:string;cut:boolean;sections:{from:string[];to:string[]}};
 }
@@ -24,7 +26,7 @@ const newlines=(s:string)=>{let n=0;for(let i=s.indexOf('\n');i>=0;i=s.indexOf('
 export function buildEditorContext(input:{path:string;text:string;anchor:number;head:number}):EditorContext{
  const {path,text}=input,clamp=(n:number)=>Math.max(0,Math.min(text.length,Math.floor(Number.isFinite(n)?n:0)));
  const anchor=clamp(input.anchor),head=clamp(input.head),from=Math.min(anchor,head),to=Math.max(anchor,head);
- const context:EditorContext={note:{path,title:titleOf(text,path)},section:headingPathAt(text,head)};
+ const context:EditorContext={note:{path,title:titleOf(text,path)},section:headingPathAt(text,head),cursorLine:newlines(text.slice(0,head))+1};
  const whole=text.slice(from,to);
  if(whole.trim()){
   const cut=whole.length>SELECTION_CAP;let sent=cut?whole.slice(0,SELECTION_CAP):whole;

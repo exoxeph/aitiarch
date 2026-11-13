@@ -67,11 +67,14 @@ export const CITATION_LABELS:Record<CitationIssue,string>={
 export function contractNotice(m:Pick<ChatMessage,'contract'>):{text:string;askAgain:true}|null{
  const text=m.contract?contractText(m.contract):null;return text?{text,askAgain:true}:null;
 }
-const SOURCE_WORDS:Record<ClaimSourceKind,string>={note:'your note',selection:'your selection',thread:'a thread',other_note:'another note',session:'a session'};
+const SOURCE_WORDS:Record<ClaimSourceKind,string>={note:'your note',selection:'your selection',thread:'a thread',other_note:'another note',session:'a session',diagram:'a diagram'};
+/** What a claim about a diagram's picture says about itself: nothing to quote, so nothing was checked. */
+export const VISUAL_WORDS='From the diagram image, not quote-checked';
 export interface ClaimLine {state:ChatClaim['status'];text:string;quote:string}
 /** Every claim in the reply, in words. Nothing is left out; a claim with no valid source says so and is never worded as found. */
 export function claimLines(claims:readonly ChatClaim[]|undefined):ClaimLine[]{
- return (claims??[]).map(c=>c.status==='no_valid_source'?{state:c.status,text:'Claim had no valid source',quote:c.quote}
+ return (claims??[]).map(c=>c.status==='visual'?{state:c.status,text:VISUAL_WORDS,quote:''}
+  :c.status==='no_valid_source'?{state:c.status,text:'Claim had no valid source',quote:c.quote}
   :c.source==='file'?{state:c.status,text:c.status==='found'?`Found in ${c.path}`:`Quote not found in ${c.path}`,quote:c.quote}
   :{state:c.status,text:c.status==='found'?`Found in ${SOURCE_WORDS[c.source]}`:`Quote not found in ${SOURCE_WORDS[c.source]}`,quote:c.quote});
 }

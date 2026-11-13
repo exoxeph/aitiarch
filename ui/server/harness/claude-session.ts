@@ -12,7 +12,9 @@ import {activeTurnDirs} from './sweep.ts';
 export interface SessionRunnerConfig {command:string;prefixArgs?:string[];
  /** The project's harness folder (outside the repo). The session working folder and per-turn files live under it. */
  dir:string;model?:string;timeoutMs?:number}
-export interface ChatTurn {id:string;resume:boolean;addendum:string;question:string;signal?:AbortSignal;onTextDelta:(text:string)=>void;
+/** A picture that goes with a turn: PNG bytes as base64. A turn with pictures is sent as stream-json (the text and the image blocks in one user message); a turn without keeps plain text. */
+export interface TurnImage {mediaType:'image/png';data:string}
+export interface ChatTurn {id:string;resume:boolean;addendum:string;question:string;images?:TurnImage[];signal?:AbortSignal;onTextDelta:(text:string)=>void;
  /** Called once the CLI has started (or resumed) the session, so a failed first turn still marks the id as taken. */
  onStarted?:()=>void}
 export interface TurnResult {answer:string;usage:{inputTokens:number;outputTokens:number;cachedTokens?:number}|null;unknownEvents:string[]}
@@ -24,6 +26,8 @@ export function sessionUsage(u:Record<string,unknown>|null):TurnResult['usage']{
  return input===null||output===null?null:{inputTokens:input+write,outputTokens:output,...(read===null?{}:{cachedTokens:read})};
 }
 
+/** The one stream-json line a turn with pictures sends: a user message whose content is the pictures, then the text (the editor line and the question). */
+export const imageMessage=(question:string,images:readonly TurnImage[])=>JSON.stringify({type:'user',message:{role:'user',content:[...images.map(i=>({type:'image',source:{type:'base64',media_type:i.mediaType,data:i.data}})),{type:'text',text:question}]}})+'\n';
 export class ClaudeSessionRunner {
  private cfg:SessionRunnerConfig;
  constructor(cfg:SessionRunnerConfig){this.cfg=cfg;}
@@ -38,7 +42,7 @@ export class ClaudeSessionRunner {
    await writeFile(file,t.addendum,{mode:0o600});
    const stream=new ClaudeChatStream(t.onTextDelta,t.onStarted);
    await new Promise<void>((resolve,reject)=>{
-    const child=spawnChatSession({provider:'claude',command:this.cfg.command,prefixArgs:this.cfg.prefixArgs},{id:t.id,resume:t.resume,addendumFile:file,...(this.cfg.model?{model:this.cfg.model}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
+    const child=spawnChatSession({provider:'claude',command:this.cfg.command,prefixArgs:this.cfg.prefixArgs},{id:t.id,resume:t.resume,addendumFile:file,...(t.images?.length?{images:true}:{}),...(this.cfg.model?{model:this.cfg.model}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
     let failure:ProviderError|undefined,killing:Promise<void>=Promise.resolve(),bytes=0;const stderr:Buffer[]=[];
     const stop=(code:'timeout'|'cancelled'|'output_limit'|'invalid_response',detail?:string)=>{if(failure)return;failure=new ProviderError(code);if(detail)failure.reason={kind:'unparseable',detail};if(child.pid)killing=killTree(child.pid);};
     const timer=setTimeout(()=>stop('timeout'),this.cfg.timeoutMs??180000),abort=()=>stop('cancelled');
@@ -54,7 +58,7 @@ export class ClaudeSessionRunner {
      if(code!==0){const text=Buffer.concat(stderr).toString('utf8'),login=/not logged in|login required|please (?:log|sign) in/i.test(text);const x=new ProviderError(login?'not_logged_in':'provider_error');x.reason=login?{kind:'login'}:{kind:'exited',exitCode:code??undefined};return reject(x);}
      try{stream.finish();resolve();}catch{const x=new ProviderError('invalid_response');x.reason={kind:'unparseable',detail:'the reply ended before it was complete'};reject(x);}
     });
-    child.stdin.end(t.question);
+    child.stdin.end(t.images?.length?imageMessage(t.question,t.images):t.question);
    });
    if((await readdir(cwd)).length)throw new ProviderError('invalid_response','The session wrote into its working folder.');
    return {answer:stream.finalText,usage:sessionUsage(stream.usage),unknownEvents:stream.unknown};

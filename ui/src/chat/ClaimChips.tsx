@@ -13,7 +13,7 @@ export interface ClaimChipsProps {
  /** File claims (investigations): opens a read-only excerpt of the real repo file at that line. */
  onFile?:(path:string,line:number)=>void;
 }
-const KIND_WORDS={N:'Note',T:'Thread',S:'Selection',O:'Another note',C:'Session',F:'File in the repo'} as const;
+const KIND_WORDS={N:'Note',T:'Thread',S:'Selection',O:'Another note',C:'Session',F:'File in the repo',D:'Diagram image'} as const;
 export const QUOTE_MOVED='Quote not found in the current note.';
 
 /**
@@ -25,11 +25,11 @@ export const ELSEWHERE_NOTE='This quote is from a note that is not open now, so 
 export function ClaimChips({claims,path,noteText,elsewhere=false,onShow,onCite,onFile}:ClaimChipsProps){
  const chips=claimChips(claims,{path,text:noteText},elsewhere),[open,setOpen]=useState<number|null>(null),[said,setSaid]=useState(''),refs=useRef(new Map<number,HTMLButtonElement>()),id=useId();
  if(!chips.length)return null;
- const needsLook=chips.some(c=>c.state!=='found'),current=chips.find(c=>c.key===open)??null;
+ const needsLook=chips.some(c=>c.state!=='found'&&c.state!=='visual'),current=chips.find(c=>c.key===open)??null;
  const close=()=>{const k=open;setOpen(null);setSaid('');if(k!==null)refs.current.get(k)?.focus();};
  const onKey=(e:KeyboardEvent)=>{if(e.key==='Escape'&&current){e.stopPropagation();e.preventDefault();close();}};
  return <details className="chat-claims" open={needsLook}>
-  <summary>{chips.length===1?'1 claim':`${chips.length} claims`}{needsLook?' · some need a look':' · all found'}</summary>
+  <summary>{chips.length===1?'1 claim':`${chips.length} claims`}{needsLook?' · some need a look':chips.some(c=>c.state==='visual')?' · from a diagram image, not quote-checked':' · all found'}</summary>
   <section className="claim-sources" aria-label="Sources" onKeyDown={onKey}>
    <h4 className="claim-sources-title">Sources</h4>
    <ul className="claim-chips">{chips.map(c=><li key={c.key} data-state={c.state}>
@@ -41,8 +41,8 @@ export function ClaimChips({claims,path,noteText,elsewhere=false,onShow,onCite,o
      <span className="claim-state"> · {c.stateWords}</span>
     </button>
     {current?.key===c.key&&<div className="claim-quote" id={`${id}-quote`} role="group" aria-label={`Quote claimed by the AI: ${current.label}`}>
-     <p className="claim-quote-label">The AI quoted</p>
-     <q className="claim-quote-text">{current.quote}</q>
+     {current.kind==='D'?<p className="claim-quote-label">The AI described what it saw in the diagram's picture. There is no text to quote, so nothing was checked against the note.</p>
+      :<><p className="claim-quote-label">The AI quoted</p><q className="claim-quote-text">{current.quote}</q></>}
      {current.elsewhere&&<p className="claim-elsewhere">{ELSEWHERE_NOTE}</p>}
      <div className="claim-quote-actions">
       {current.canShow&&<button type="button" className="claim-action" onClick={()=>setSaid(onShow(current.quote)?'Shown in the note.':QUOTE_MOVED)}>Show in note</button>}
