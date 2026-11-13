@@ -67,6 +67,28 @@ describe('harness chat sessions',()=>{
   expect((await readdir(p.harness)).filter(n=>n.startsWith('turn-'))).toEqual([]); // the instruction file is gone after each turn
   expect((await index.get(s.id))!.turns).toBe(2);
  });
+ it('sends the note as it is now on every turn: an edit between turns reaches the resumed turn, once, with the rules still last',async()=>{
+  const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'Fresh',note:'plan.md'});
+  const OLD='A unique sentence for the session.',NEW='A different sentence written after the first turn.';
+  await turn(runtime,ask(s.id,'m-fresh-1','What does the note say?'));
+  await writeFile(path.join(p.root,'plan.md'),'# Plan\n\n'+NEW+'\n');
+  const two=await turn(runtime,ask(s.id,'m-fresh-2','And now?'));
+  await turn(runtime,ask(s.id,'m-fresh-3','why?'));
+  const [a,b,c]=await p.calls(),count=(text:string,part:string)=>text.split(part).length-1;
+  expect(a.args).toContain('--session-id');expect(b.args).toContain('--resume');expect(c.args).toContain('--resume');
+  expect(a.addendum).toContain(OLD);expect(a.addendum).not.toContain(NEW);
+  for(const x of [b,c]){expect(x.addendum).toContain(NEW);expect(x.addendum).not.toContain(OLD);}
+  expect(c.addendum).toBe(b.addendum); // nothing changed between the last two turns, so the same text goes again
+  for(const x of [a,b,c]){
+   expect(count(x.addendum,'[[source N1:')).toBe(1);expect(count(x.addendum,'[[end of source N1]]')).toBe(1);
+   expect(x.addendum.startsWith(SESSION_INVARIANTS)).toBe(true);expect(x.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);
+   expect(x.addendum.indexOf('[[end of source N1]]')).toBeLessThan(x.addendum.lastIndexOf(CHAT_HARD_RULES)); // the note comes before the rules
+  }
+  expect(b.stdin).toBe('And now?');expect(b.stdin).not.toContain(NEW); // the note is never in the message itself, so the CLI's record does not hold it twice
+  // The review card and the echo guard use the instruction without any note text: quoting the note is never an echo.
+  expect(two.review.instruction).not.toContain(NEW);expect(two.review.sources.find(x=>x.id==='N1')!.text).toContain(NEW);
+  expect(two.complete!.message.echo).toBeUndefined();
+ });
  it('never pastes the notebook file or other denied notes, and the review names what was left out',async()=>{
   const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'x',note:'plan.md'});
   const r=await turn(runtime,ask(s.id,'m-deny','What do my notes say?',[{moduleId:'this-note',ids:['note']},{moduleId:'other-notes',ids:['notebook.md','other.md']}]));
