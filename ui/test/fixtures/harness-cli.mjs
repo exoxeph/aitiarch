@@ -34,13 +34,17 @@ if (args[args.indexOf('--tools') + 1] === 'Read,Grep,Glob') { // an investigatio
     tool('g1', 'tg1', 'Glob', { pattern: '**/*.js' }); out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tg1', content: 'src/login.js\nsrc/server.js' }] } });
     tool('g2', 'tg2', 'Grep', { pattern: 'function login', path: process.cwd() }); out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tg2', content: 'src/login.js:4:function login(name) {' }] } });
     tool('g3', 'tg3', 'Read', { file_path: path.join(process.cwd(), 'notes.private.md') }); out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tg3', is_error: true, content: 'Permission to read notes.private.md has been denied.' }] } });
+    // A path that is not there: a tool error ("Error: path not found: src/missing.ts"), not a policy denial. The message carries the copy's absolute folder, as the real CLI does.
+    tool('g4', 'tg4', 'Read', { file_path: path.join(process.cwd(), 'src', 'missing.ts') }); out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tg4', is_error: true, content: 'Path does not exist: ' + path.join(process.cwd(), 'src', 'missing.ts') }] } });
   }
   if (kind === 'inv-turns') { out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Partial so far: login lives in src. ' } } }); for (let i = 0; i < 45; i++) tool('m' + i, 't' + i, 'Grep', { pattern: 'login' }); }
   if (kind === 'inv-outside') tool('m1', 't1', 'Read', { file_path: path.resolve(process.cwd(), '..', '..', 'outside.txt') });
   if (kind === 'inv-path') tool('m1', 't1', extra.startsWith('glob:') ? 'Glob' : 'Read', extra.startsWith('glob:') ? { pattern: extra.slice(5) } : { file_path: extra });
   if (kind === 'inv-bash') out({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', name: 'Bash', input: {} } } });
-  tool('m1', 't1', 'Read', { file_path: path.join(process.cwd(), 'src', 'login.js') });
-  out({ type: 'user', message: { content: [kind === 'inv-denied' ? { type: 'tool_result', tool_use_id: 't1', is_error: true, content: 'Permission to use Read has been denied.' } : { type: 'tool_result', tool_use_id: 't1', content: '3 const sessions = new Map();' }] } });
+  tool('m1', 't1', 'Read', { file_path: path.join(process.cwd(), 'src', kind === 'inv-missing' ? 'missing.ts' : 'login.js') });
+  out({ type: 'user', message: { content: [kind === 'inv-denied' ? { type: 'tool_result', tool_use_id: 't1', is_error: true, content: 'Permission to use Read has been denied.' }
+    : kind === 'inv-missing' ? { type: 'tool_result', tool_use_id: 't1', is_error: true, content: 'Path does not exist: ' + path.join(process.cwd(), 'src', 'missing.ts') } // a tool error, not a policy denial
+    : { type: 'tool_result', tool_use_id: 't1', content: '3 const sessions = new Map();' }] } });
   if (kind === 'inv-write-snapshot') writeFileSync(path.join(process.cwd(), 'stray-from-agent.txt'), 'x');
   if (kind === 'inv-write-notebook') writeFileSync(extra, 'tampered by the agent');
   const text = 'Sessions live in a Map.\n<claims>[{"path":"src/login.js","line":3,"quote":"const sessions = new Map();"},{"path":"src/login.js","line":3,"quote":"Sessions are stored in a database"}]</claims>';

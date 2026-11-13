@@ -1018,6 +1018,7 @@ button.claim-chip:focus-visible, .claim-action:focus-visible { outline: 2px soli
 .inv-dot { position: absolute; left: -18px; top: 10px; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
 .inv-row[data-state="ok"] .inv-dot { background: var(--ok); }
 .inv-row[data-state="denied"] .inv-dot { background: var(--danger); }
+.inv-row[data-state="error"] .inv-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--danger); } /* a tool error: an outlined ring, and the word "Error" */
 .inv-row[data-state="running"] .inv-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--muted); }
 .inv-row-main { min-width: 0; overflow-wrap: anywhere; }
 .inv-tool { font-weight: 700; color: var(--ink-text); }

@@ -16,6 +16,7 @@ import {redact} from '../providers/index.ts';
 import {killTree,spawnInvestigateSession} from '../providers/launcher.ts';
 import {sessionUsage} from './claude-session.ts';
 import {finishFileReply,readRepoFile} from './file-claims.ts';
+import {classifyFailure,cleanToolText} from '../../shared/tool-errors.ts';
 import type {SessionIndex} from './session-index.ts';
 import {snapshotDrift,syncSnapshot,SNAPSHOT_LIMITS,type Drift} from './snapshot.ts';
 import {captureFolder,folderChanges,restoreFolder} from './tripwire.ts';
@@ -40,7 +41,7 @@ export const INVESTIGATE_INSTRUCTION=[
 export type InvestigateCode='not_investigation'|'invalid'|'repo'|'plan_required'|'plan_changed'|'busy'|'turn_limit'|'outside_path'|'tool_refused'|'isolation'|'budget'|'cancelled'|'timeout'|'provider_failed'|'nothing_to_restore';
 export class InvestigateError extends Error {code:InvestigateCode;constructor(code:InvestigateCode){super(code);this.code=code;}}
 export interface Plan {session:string;repo:string;files:number;bytes:number;skipped:Record<string,number>;excluded:string[];budgetUsd:number;turnLimit:number;snapshotHash:string;planHash:string}
-export interface ToolStep {tool:string;target:string;ok:boolean|null;denial?:string;/** Lines in the tool's result (the result itself never leaves the server). */lines?:number}
+export interface ToolStep {tool:string;target:string;ok:boolean|null;/** Only a real permission denial by the CLI's rules. */denial?:string;/** Any other tool error (a path that does not exist, a directory read as a file...), cleaned of the copy's folder and redacted. */error?:string;/** The repo-relative path the call named, when it named one. */path?:string;/** Lines in the tool's result (the result itself never leaves the server). */lines?:number}
 /** What a turn had done when it was stopped. `text` is only what was written after the last tool call (the answer so far, often empty); the
  *  narration before the calls is in `trail`, in order. */
 export interface PartialTurn {text:string;steps:ToolStep[];turns:number;trail:TrailItem[]}
@@ -50,7 +51,7 @@ export interface InvestigateMessage {id:string;body:string;/** Narration and too
 export type InvestigateEvent=
  |{type:'start';id:string}
  |{type:'step';index:number;step:ToolStep}
- |{type:'step_result';index:number;ok:boolean;denial?:string}
+ |{type:'step_result';index:number;ok:boolean;denial?:string;error?:string}
  |{type:'delta';text:string}
  /** The model's thinking as the CLI streams it, through the same gate as the answer (redacted, stops at a recital of the instruction). */
  |{type:'thinking';text:string}
@@ -60,7 +61,7 @@ export type InvestigateEvent=
  |{type:'error';code:InvestigateCode;tripwire?:Tripwire;partial?:PartialTurn};
 
 const TOOLS=new Set(['Read','Grep','Glob']);
-interface StreamHooks {cwd:string;turnLimit:number;onText:(t:string)=>void;onBlock?:()=>void;onStep:(i:number,s:ToolStep)=>void;onStepResult:(i:number,ok:boolean,denial?:string)=>void;onStarted:()=>void;
+interface StreamHooks {cwd:string;turnLimit:number;onText:(t:string)=>void;onBlock?:()=>void;onStep:(i:number,s:ToolStep)=>void;onStepResult:(i:number,ok:boolean,denial?:string,error?:string)=>void;onStarted:()=>void;
  onThinking?:(t:string)=>void;onTurn?:(turns:number)=>void}
 /** The CLI's stream for one investigation turn, read event by event. Anything outside the allowed shape stops the run. */
 export class InvestigateStream {
@@ -86,7 +87,7 @@ export class InvestigateStream {
   const where=String(input.file_path??input.path??'');
   const rel=where&&path.isAbsolute(where)?path.relative(this.o.cwd,where).split(path.sep).join('/'):where;
   const target=redact(c.name==='Grep'?`${String(input.pattern??'')}${rel?' in '+rel:''}`:c.name==='Glob'?String(input.pattern??''):rel).slice(0,200);
-  const step:ToolStep={tool:c.name,target,ok:null};const i=this.steps.push(step)-1;if(typeof c.id==='string')this.byId.set(c.id,i);this.o.onStep(i,step);
+  const step:ToolStep={tool:c.name,target,ok:null,...(rel&&!path.isAbsolute(rel)?{path:redact(rel).slice(0,200)}:{})};const i=this.steps.push(step)-1;if(typeof c.id==='string')this.byId.set(c.id,i);this.o.onStep(i,step);
  }
  private event(line:string){
   let e:any;try{e=JSON.parse(line);}catch{throw new InvestigateError('isolation');}
@@ -107,7 +108,11 @@ export class InvestigateStream {
   if(t==='user'){
    for(const c of Array.isArray(e.message?.content)?e.message.content:[])if(c?.type==='tool_result'){
     const i=this.byId.get(c.tool_use_id);if(i===undefined)continue;const ok=c.is_error!==true,text=typeof c.content==='string'?c.content:JSON.stringify(c.content??'');
-    this.steps[i].ok=ok;this.steps[i].lines=text?text.split('\n').length:0;if(!ok)this.steps[i].denial=redact(text).slice(0,200);this.o.onStepResult(i,ok,this.steps[i].denial);
+    this.steps[i].ok=ok;this.steps[i].lines=text?text.split('\n').length:0;
+    if(!ok){ // a tool error is not a policy denial: only the CLI's own permission wording is called one. The copy's folder comes off the message before redaction, so a path inside the repo stays a repo path.
+     const clean=redact(cleanToolText(text,this.o.cwd)).slice(0,200);if(classifyFailure(clean)==='denied')this.steps[i].denial=clean;else this.steps[i].error=clean;
+    }
+    this.o.onStepResult(i,ok,this.steps[i].denial,this.steps[i].error);
    }
    return;
   }
@@ -209,7 +214,7 @@ export class InvestigateService {
    const say=(raw:string)=>{const delta=gate.push(raw);if(delta){trail=addText(trail,delta);emit({type:'delta',text:delta});}};
    stream=new InvestigateStream({cwd,turnLimit:this.limits.turns,onStarted:()=>{started=true;},
     onText:say,onBlock:()=>{if(answerTail(trail))say('\n\n');},
-    onStep:(index,step)=>{say('\n');trail=addStep(trail,index);emit({type:'step',index,step});},onStepResult:(index,ok,denial)=>emit({type:'step_result',index,ok,...(denial?{denial}:{})}),
+    onStep:(index,step)=>{say('\n');trail=addStep(trail,index);emit({type:'step',index,step});},onStepResult:(index,ok,denial,error)=>emit({type:'step_result',index,ok,...(denial?{denial}:{}),...(error?{error}:{})}),
     onThinking:t=>{const delta=thinking.push(t);if(delta)emit({type:'thinking',text:delta});},onTurn:turns=>emit({type:'progress',turns})});
    emit({type:'start',id});
    if(controller.signal.aborted)throw new InvestigateError('cancelled'); // cancelled before the CLI started: never start it

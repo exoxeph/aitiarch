@@ -110,6 +110,13 @@ describe('investigation sessions',()=>{
   const t=await setup(),svc=t.service('inv-denied'),{s}=await confirmed(svc,t.repo),r=await t.run(svc,s.id);
   expect(r.complete!.message.steps[0]).toMatchObject({tool:'Read',ok:false,denial:expect.stringContaining('denied')});expect(r.complete!.message.permissionDenials).toEqual(['Read']);
  });
+ it('a tool error such as a missing path is an error with the repo-relative path, not a policy denial, and never a redacted user path',async()=>{
+  const t=await setup(),svc=t.service('inv-missing'),{s}=await confirmed(svc,t.repo),r=await t.run(svc,s.id),step=r.complete!.message.steps[0] as any;
+  expect(step).toMatchObject({tool:'Read',ok:false,error:'Path does not exist: src/missing.ts',path:'src/missing.ts'});
+  expect(step.denial).toBeUndefined();expect(JSON.stringify(step)).not.toMatch(/USER_PATH|aitiarch-inv|AppData|Temp/i);
+  expect(r.events.find(e=>e.type==='step_result')).toMatchObject({ok:false,error:'Path does not exist: src/missing.ts'});
+  expect(r.complete!.message.permissionDenials).toEqual([]);
+ });
  it('tripwire: shows a change to the copy (and the next sync removes it) and a change to the notebook, which one restore puts back',async()=>{
   let t=await setup(),svc=t.service('inv-write-snapshot'),{s}=await confirmed(svc,t.repo),r=await t.run(svc,s.id);
   expect(r.complete!.message.tripwire.snapshot.added).toEqual(['stray-from-agent.txt']);

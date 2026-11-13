@@ -4,19 +4,20 @@ import type {HarnessSession} from '../../shared/harness.ts';
 import type {Plan} from '../../server/harness/investigate.ts';
 import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
 import {ClaimChips} from './ClaimChips.tsx';
+import {stepFailure} from '../../shared/tool-errors.ts';
 import {applyInvestigate,canContinue,deniedSteps,formatElapsed,fromStoredTurn,startTurn,stepSummary,stopSummary,toolCalls,tripwireChanged,type LiveTurn,type ToolStep} from './investigate-model.ts';
 
 const BUDGET=0.5,CONTINUE_QUESTION='Please continue where you stopped.';
 const money=(n:number)=>'$'+n.toFixed(n<0.1?3:2);
 
-/** One tool call as a compact row on the trail: a dot (green done, red denied, grey running), the tool, its target, and a one-line result. */
+/** One tool call as a compact row on the trail: a dot (green done, red denied by policy, outlined error, grey running), the tool, its target, and a one-line result. */
 function StepRow({step,onOpen,ended}:{step:ToolStep;onOpen:(path:string)=>void;ended:boolean}){
- const state=step.ok===false?'denied':step.ok?'ok':ended?'unfinished':'running',openable=step.tool==='Read'&&step.ok===true;
+ const failure=stepFailure(step),state=failure?failure.kind==='denied'?'denied':'error':step.ok?'ok':ended?'unfinished':'running',openable=step.tool==='Read'&&step.ok===true;
  return <li className="inv-row" data-state={state}>
   <span className="inv-dot" aria-hidden="true"/>
   <span className="inv-row-main"><strong className="inv-tool">{step.tool}</strong>{' '}
    {openable?<button type="button" className="inv-target inv-target-link" onClick={()=>onOpen(step.target)} title="Show a read-only excerpt">{step.target}</button>:<code className="inv-target">{step.target}</code>}</span>
-  <span className="inv-result">{state==='denied'?<><span className="inv-denied-word">Denied by policy</span>{step.denial?': '+step.denial:''}</>:state==='unfinished'?'stopped before it finished':stepSummary(step)}</span>
+  <span className="inv-result">{failure?<><span className="inv-denied-word">{failure.word}</span>{failure.detail?': '+failure.detail:''}</>:state==='unfinished'?'stopped before it finished':stepSummary(step)}</span>
  </li>;
 }
 

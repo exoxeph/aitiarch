@@ -2,6 +2,7 @@
 // Unknown event types are counted and otherwise ignored; a malformed frame is dropped, never guessed.
 import type {InvestigateCode,InvestigateEvent,InvestigateMessage,InvestigateTurn,PartialTurn,ToolStep,Tripwire} from '../../server/harness/investigate.ts';
 import {addStep,addText,answerTail,type TrailItem} from '../../shared/harness-trail.ts';
+import {stepFailure} from '../../shared/tool-errors.ts';
 export type {InvestigateTurn,ToolStep};
 
 export interface LiveTurn {
@@ -18,7 +19,7 @@ export function applyInvestigate(t:LiveTurn,e:InvestigateEvent|{type:string},now
  switch(x.type){
   case 'start':return t;
   case 'step':{const trail=addStep(t.trail,x.index);return {...t,trail,text:answerTail(trail),steps:[...t.steps.slice(0,x.index),{...x.step},...t.steps.slice(x.index+1)]};}
-  case 'step_result':return {...t,steps:t.steps.map((s,i)=>i===x.index?{...s,ok:x.ok,...(x.denial?{denial:x.denial}:{})}:s)};
+  case 'step_result':return {...t,steps:t.steps.map((s,i)=>i===x.index?{...s,ok:x.ok,...(x.denial?{denial:x.denial}:{}),...(x.error?{error:x.error}:{})}:s)};
   case 'delta':{const trail=addText(t.trail,x.text);return {...t,trail,text:answerTail(trail)};}
   case 'thinking':return {...t,thinking:t.thinking+x.text};
   case 'progress':return {...t,turns:Math.max(t.turns,x.turns)};
@@ -42,9 +43,9 @@ export function investigateFrames(buffer:string):{events:{type:string}[];rest:st
  }
  return {events,rest};
 }
-/** The small grey line under a tool row. Denied rows say so in words, with the reason. */
+/** The small grey line under a tool row. A real denial says so in words, with the reason; any other tool error says "error" and what it was. */
 export function stepSummary(s:ToolStep):string{
- if(s.ok===false)return 'denied by policy'+(s.denial?': '+s.denial:'');
+ if(s.ok===false){const f=stepFailure(s)!;return (f.kind==='denied'?'denied by policy':'error')+(f.detail?': '+f.detail:'');}
  if(s.ok===null||s.ok===undefined)return 'running…';
  return s.lines===undefined?'done':`${s.lines} ${s.lines===1?'line':'lines'} of output`;
 }
@@ -63,6 +64,7 @@ export function stopSummary(t:LiveTurn,snapshotFiles?:number):{title:string;open
 /** After a stop on the cost cap or the safety backstop the same session can continue, after a fresh confirmed plan (a new cap). */
 export const canContinue=(t:LiveTurn)=>!t.running&&(t.stopped?.code==='budget'||t.stopped?.code==='turn_limit');
 export const toolCalls=(t:LiveTurn)=>t.steps.length;
-export const deniedSteps=(t:LiveTurn)=>t.steps.filter(s=>s.ok===false);
+/** Only real permission denials, not tool errors. */
+export const deniedSteps=(t:LiveTurn)=>t.steps.filter(s=>stepFailure(s)?.kind==='denied');
 export const tripwireChanged=(w?:Tripwire)=>!!w&&w.notebook.changed.length+w.notebook.added.length+w.notebook.removed.length>0;
 export const formatElapsed=(ms:number)=>{const s=Math.max(0,Math.round(ms/1000));return s<60?`${s}s`:`${Math.floor(s/60)}m ${String(s%60).padStart(2,'0')}s`;};
