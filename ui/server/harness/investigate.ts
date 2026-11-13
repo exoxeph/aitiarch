@@ -20,6 +20,7 @@ import {classifyFailure,cleanToolText} from '../../shared/tool-errors.ts';
 import type {SessionIndex} from './session-index.ts';
 import {snapshotDrift,syncSnapshot,SNAPSHOT_LIMITS,type Drift} from './snapshot.ts';
 import {captureFolder,folderChanges,restoreFolder} from './tripwire.ts';
+import {activeTurnDirs} from './sweep.ts';
 import {LedgerStore,type InvestigateTurnAudit} from '../ledger-store.ts';
 import type {InvestigateUsage} from '../../shared/usage.ts';
 const exec=promisify(execFile);
@@ -233,7 +234,7 @@ export class InvestigateService {
   try{
    await syncSnapshot(s.repo,d.files,d.manifest,undefined,this.o.notebook); // re-sync by hash before every turn
    before=await captureFolder(this.o.notebook,backup);
-   const cwd=await realpath(d.files);turnDir=await mkdtemp(path.join(this.o.dir,'turn-'));const file=path.join(turnDir,'system.md');await writeFile(file,INVESTIGATE_INSTRUCTION,{mode:0o600});
+   const cwd=await realpath(d.files);turnDir=await mkdtemp(path.join(this.o.dir,'turn-'));activeTurnDirs.add(path.resolve(turnDir));const file=path.join(turnDir,'system.md');await writeFile(file,INVESTIGATE_INSTRUCTION,{mode:0o600});
    const gate=new StreamGate({instruction:INVESTIGATE_INSTRUCTION}),thinking=new StreamGate({instruction:INVESTIGATE_INSTRUCTION});
    // Text goes through the gate (redaction, the echo guard) into the trail. Whatever the gate holds back is released when a tool call or a new
    // text block starts (a space or a blank line is pushed), so narration lands before the call it belongs to and paragraphs stay separate.
@@ -277,7 +278,7 @@ export class InvestigateService {
    emit({type:'error',code,partial,...(t?{tripwire:t}:{})});
   }finally{
    if(started)await this.o.index.touch(id).catch(()=>{}); // the CLI knows this id now: the next turn resumes
-   if(turnDir)await rm(turnDir,{recursive:true,force:true});
+   if(turnDir){await rm(turnDir,{recursive:true,force:true});activeTurnDirs.delete(path.resolve(turnDir));}
    this.running.delete(id);signal?.removeEventListener('abort',abort);
   }
  }

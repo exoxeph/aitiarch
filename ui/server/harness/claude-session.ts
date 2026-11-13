@@ -7,6 +7,7 @@ import {validSessionId} from '../../shared/harness.ts';
 import {ClaudeChatStream} from '../providers/chat-stream.ts';
 import {ProviderError} from '../providers/index.ts';
 import {killTree,spawnChatSession} from '../providers/launcher.ts';
+import {activeTurnDirs} from './sweep.ts';
 
 export interface SessionRunnerConfig {command:string;prefixArgs?:string[];
  /** The project's harness folder (outside the repo). The session working folder and per-turn files live under it. */
@@ -32,7 +33,7 @@ export class ClaudeSessionRunner {
   if(!validSessionId(t.id)||typeof t.question!=='string'||!t.question.trim()||typeof t.addendum!=='string'||!t.addendum)throw new ProviderError('provider_error');
   if(t.signal?.aborted)throw new ProviderError('cancelled');
   const cwd=await this.chatCwd();if((await readdir(cwd)).length)throw new ProviderError('invalid_response','The session folder is not empty.');
-  const turnDir=await mkdtemp(path.join(this.cfg.dir,'turn-')),file=path.join(turnDir,'system.md');
+  const turnDir=await mkdtemp(path.join(this.cfg.dir,'turn-')),file=path.join(turnDir,'system.md');activeTurnDirs.add(path.resolve(turnDir));
   try{
    await writeFile(file,t.addendum,{mode:0o600});
    const stream=new ClaudeChatStream(t.onTextDelta,t.onStarted);
@@ -57,6 +58,6 @@ export class ClaudeSessionRunner {
    });
    if((await readdir(cwd)).length)throw new ProviderError('invalid_response','The session wrote into its working folder.');
    return {answer:stream.finalText,usage:sessionUsage(stream.usage),unknownEvents:stream.unknown};
-  }finally{await rm(turnDir,{recursive:true,force:true});}
+  }finally{await rm(turnDir,{recursive:true,force:true});activeTurnDirs.delete(path.resolve(turnDir));}
  }
 }

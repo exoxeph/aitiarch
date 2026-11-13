@@ -89,7 +89,7 @@ export function ChatSessions({path,value,onChange,disabled,refresh,kind,onKind}:
    <button type="submit" className="chat-ctl">Save</button><button type="button" className="chat-ctl chat-ctl-quiet" onClick={()=>setNaming(null)}>Cancel</button>
   </form>}
   {current&&deleting&&<span className="chat-sessions-delete" role="group" aria-label="Delete this conversation" onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();setDeleting(false);}}}>
-   Delete “{current.label}”? Claude's own record of it, its questions{kind==='investigate'?' and its answers':''} are removed too.
+   Delete “{current.label}”? Claude's own record of it, its questions{kind==='investigate'?' and its answers':', and the replies it saved in this note\u2019s chat'} are removed too.
    <button type="button" className="chat-ctl" onClick={async()=>{setNotice('');try{await api.harnessSessionDelete(current.id);setList(l=>l.filter(x=>x.id!==current.id));setDeleting(false);onChange('');}catch(e){fail(e);}}}>Delete</button>
    <button type="button" className="chat-ctl chat-ctl-quiet" ref={keepButton} onClick={()=>setDeleting(false)}>Keep</button>
   </span>}

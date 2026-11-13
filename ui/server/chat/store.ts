@@ -5,6 +5,7 @@ import {normalizeRel,isNotePath} from '../paths.ts';
 import {validId,validAt,exactKeys,validSkillRefs} from '../../shared/threads.ts';
 import {CITATION_ISSUES,NO_CITATION_REASONS,validClaims,type ChatMessage} from '../../shared/chat.ts';
 import {isPersona} from '../../shared/persona.ts';
+import {validSessionId} from '../../shared/harness.ts';
 import {validContract} from '../../shared/persona-contract.ts';
 const exec=promisify(execFile),missing=(e:unknown)=>(e as NodeJS.ErrnoException).code==='ENOENT';
 export interface ChatDocument {v:1;note:string;messages:ChatMessage[]}
@@ -47,8 +48,8 @@ export class ChatStore {
   if(!exactKeys(d,['v','note','messages'])||d.v!==1||d.note!==note||!Array.isArray(d.messages)||d.messages.length>200)throw new Error('Invalid chat sidecar.');
   const ids=new Set<string>();
   for(const m of d.messages){
-   if(!exactKeys(m,['id','role','body','at','provider','model','evidence','usage','insertionBlocked',...(m.skills===undefined?[]:['skills']),...(m.unstructured===undefined?[]:['unstructured']),...(m.echo===undefined?[]:['echo']),...(m.claims===undefined?[]:['claims']),...(m.noCitation===undefined?[]:['noCitation']),...(m.citation===undefined?[]:['citation']),...(m.persona===undefined?[]:['persona']),...(m.contract===undefined?[]:['contract'])])
-    ||(m.claims!==undefined&&!validClaims(m.claims))||(m.noCitation!==undefined&&!(NO_CITATION_REASONS as readonly unknown[]).includes(m.noCitation))
+   if(!exactKeys(m,['id','role','body','at','provider','model','evidence','usage','insertionBlocked',...(m.skills===undefined?[]:['skills']),...(m.unstructured===undefined?[]:['unstructured']),...(m.echo===undefined?[]:['echo']),...(m.claims===undefined?[]:['claims']),...(m.noCitation===undefined?[]:['noCitation']),...(m.citation===undefined?[]:['citation']),...(m.persona===undefined?[]:['persona']),...(m.contract===undefined?[]:['contract']),...(m.session===undefined?[]:['session'])])
+    ||(m.session!==undefined&&!validSessionId(m.session))||(m.claims!==undefined&&!validClaims(m.claims))||(m.noCitation!==undefined&&!(NO_CITATION_REASONS as readonly unknown[]).includes(m.noCitation))
     ||(m.citation!==undefined&&!(CITATION_ISSUES as readonly unknown[]).includes(m.citation))||(m.persona!==undefined&&!isPersona(m.persona))||(m.contract!==undefined&&(!validContract(m.contract)||m.contract.mode!==m.persona))||(m.skills!==undefined&&!validSkillRefs(m.skills))||(m.unstructured!==undefined&&m.unstructured!==true)||(m.echo!==undefined&&m.echo!==true)||!validId(m.id)||ids.has(m.id)||m.role!=='assistant'||m.provider!=='claude'||!validAt(m.at)||typeof m.body!=='string'||!m.body.trim()||m.body.length>100000||typeof m.insertionBlocked!=='boolean'||!(m.model===null||typeof m.model==='string'&&/^[\w.:-]{1,100}$/.test(m.model))||!Array.isArray(m.evidence)||m.evidence.length>32)throw new Error('Invalid chat message.');
    ids.add(m.id);
    for(const e of m.evidence)if(!exactKeys(e,['sourceId','sourceHash','quote'])||typeof e.sourceId!=='string'||!/^[A-Z][0-9]{1,3}$/.test(e.sourceId)||typeof e.sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(e.sourceHash)||typeof e.quote!=='string'||e.quote.length>240)throw new Error('Invalid chat evidence.');
@@ -63,6 +64,22 @@ export class ChatStore {
   for(const m of this.memory.get(note)?.messages??[])if(!d.messages.some(x=>x.id===m.id))d.messages.push(structuredClone(m));
   this.validate(d,note);return d;
  }
+ /** Delete conversation: the replies it saved leave this note's chat record, on disk and in memory. They are found by the session id they carry and, for older replies
+  *  that carry none, by the ids of the questions the conversation kept. Replies of other conversations and of the one-off chat stay. Returns how many were removed. */
+ async removeConversation(note:string,session:string,messageIds:ReadonlySet<string>):Promise<number>{return this.serial(async()=>{
+  this.note(note);const d=await this.read(note),keep=d.messages.filter(m=>m.session!==session&&!messageIds.has(m.id)),removed=d.messages.length-keep.length;
+  if(!removed)return 0;
+  if(keep.length)this.memory.set(note,{...structuredClone(d),messages:structuredClone(keep)});else this.memory.delete(note);
+  if(!(await this.status()).enabled)return removed;
+  const file=await this.confined('chat/'+note+'.chat.json',true),lock=await open(await this.confined('chat/'+note+'.chat.json.lock'),'wx',0o600),temp=file+'.'+randomUUID()+'.tmp';
+  try{
+   for(const target of [file,temp])await exec('git',['check-ignore','-q','--',target],{cwd:this.root,windowsHide:true,timeout:3000});
+   if(!keep.length){await unlink(file).catch(e=>{if(!missing(e))throw e;});return removed;} // nothing left: the record goes, it is not kept empty
+   const doc:ChatDocument={v:1,note,messages:keep};this.validate(doc,note);
+   const f=await open(temp,'wx',0o600);try{await f.writeFile(JSON.stringify(doc,null,2)+'\n');await f.sync();}finally{await f.close();}
+   await this.confined('chat/'+note+'.chat.json');await rename(temp,file);return removed;
+  }finally{await unlink(temp).catch(()=>{});await lock.close();await unlink(file+'.lock');}
+ });}
  async append(note:string,message:ChatMessage){return this.serial(async()=>{
   const persistent=(await this.status()).enabled;
   const file=persistent?await this.confined('chat/'+this.note(note)+'.chat.json',true):undefined;

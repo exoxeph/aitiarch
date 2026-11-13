@@ -1,5 +1,5 @@
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
-import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {removeTranscript} from './harness/transcripts.ts';import {QuestionStore} from './harness/questions.ts';
+import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {removeTranscript} from './harness/transcripts.ts';import {sweepStaleTurnFolders} from './harness/sweep.ts';import {QuestionStore} from './harness/questions.ts';
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES,budgetText} from '../shared/chat.ts';
 import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
@@ -50,7 +50,7 @@ export interface AppOptions {
   /** Where the Skill library looks. Tests pass temp folders; the real app uses the usual places under your home folder and this project. */
   skillRoots?: SkillRoot[];
   /** Harness chat sessions through the Claude Code CLI. `dir` (tests) overrides the per-project folder under local app data. */
-  harness?: {command:string;prefixArgs?:string[];model?:string;dir?:string};
+  harness?: {command:string;prefixArgs?:string[];model?:string;dir?:string;/** The folder whose .claude holds the CLI's transcripts (default: the user's home). Tests pass a fake one. */home?:string};
 }
 
 export const CSP = [
@@ -175,7 +175,7 @@ export function createApp(opts: AppOptions) {
   const nodeSettings = new NodeSettingsService(uiStateStore, () => discoveredSkills(false));
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
   const chatStore=new ChatStore(store.rootReal);
-  const harnessReady=opts.harness?SessionIndex.open(opts.harness.dir??harnessDirectory(store.rootReal)).then(index=>{const h=opts.harness!;return {index,
+  const harnessReady=opts.harness?SessionIndex.open(opts.harness.dir??harnessDirectory(store.rootReal)).then(async index=>{const h=opts.harness!;await sweepStaleTurnFolders(index.dir).catch(()=>{}); /* a turn that was cut off leaves its notes in a turn-* folder: clear the old ones when the project opens */return {index,
     runner:new ClaudeSessionRunner({command:h.command,prefixArgs:h.prefixArgs,model:h.model,dir:index.dir}),questions:new QuestionStore(index.dir),
     investigate:new InvestigateService({index,dir:index.dir,notebook:store.rootReal,command:h.command,prefixArgs:h.prefixArgs,model:h.model})};}):Promise.resolve(null);
   const chatReady=Promise.all([inkReady,harnessReady]).then(([ink,harness])=>new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined));
@@ -307,8 +307,11 @@ export function createApp(opts: AppOptions) {
         if(url.pathname==='/api/harness/sessions/delete'){
           const s=await h.index.get(b?.id);if(!s)throw new SessionIndexError('No such session.');
           const cwd=s.mode==='chat'?await h.runner.chatCwd():await h.investigate.snapshotCwd(s.repo!);
-          const removed=await removeTranscript(cwd,s.id);await h.questions.remove(s.id);await h.index.remove(s.id);if(s.mode==='investigate')await h.investigate.forget(s.id);
-          return json(res,200,{removed});
+          const removed=await removeTranscript(cwd,s.id,opts.harness?.home);
+          // The replies this conversation saved in its note's chat record go with it (found by the id they carry, and by the ids of its kept questions for older ones).
+          const replies=s.mode==='chat'&&s.note?await (await chatReady).forgetConversation(s.note,s.id,new Set(Object.keys(await h.questions.read(s.id)))):0;
+          await h.questions.remove(s.id);await h.index.remove(s.id);if(s.mode==='investigate')await h.investigate.forget(s.id);
+          return json(res,200,{removed,replies});
         }
         if(url.pathname==='/api/harness/investigate/repo')return json(res,200,{repo:await h.investigate.chooseRepo(b?.repo)});
         if(url.pathname==='/api/harness/investigate/plan')return json(res,200,await h.investigate.plan(b?.session,b?.budgetUsd));

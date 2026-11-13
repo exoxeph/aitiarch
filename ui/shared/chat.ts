@@ -61,6 +61,8 @@ export interface ChatMessage {
  skills?:string[];
  /** Session-derived replies never enter the repository or Add to note. */
  ephemeral?:true;
+ /** The named conversation (harness session) this reply was written in. Delete conversation removes the replies that carry its id. Absent in a one-off chat and in older files. */
+ session?:string;
 }
 export interface ChatUsage {
  note:string;calls:number;input:number;cached:number;output:number;unreportedCalls:number;

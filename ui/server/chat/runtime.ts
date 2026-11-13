@@ -159,7 +159,7 @@ export class ChatRuntime {
     const failure=new ProviderError('invalid_response');failure.reason={kind:'unparseable',detail:error instanceof Error&&shape[error.message]?shape[error.message]:'the reply could not be read'};throw failure;}
    const validated=validateProductResult({...result,answer:finished.body,claims:[]},request.id,request,redact,hash,'claude');
    const message:ChatMessage={id:request.id,role:'assistant',body:validated.body,at:new Date().toISOString(),provider:'claude',model:validated.model,evidence:finished.claims.flatMap(c=>c.status==='found'&&c.source!=='file'&&c.sourceHash?[{sourceId:c.sourceId,sourceHash:c.sourceHash,quote:c.quote}]:[]),usage:result.usage,insertionBlocked:!!s.privateContext||secretKinds(result.answer).length>0||secretKinds(validated.body).length>0,
-   claims:finished.claims,...(finished.noCitation?{noCitation:finished.noCitation}:{}),...(finished.citation?{citation:finished.citation}:{}),...(request.persona?{persona:request.persona,contract:checkContract(request.persona,validated.body)}:{}),...(gate.echo||echoes(validated.body,review.instruction)?{echo:true as const}:{}),...(frozen.skillNames.length?{skills:frozen.skillNames}:{}),...(s.privateContext?{ephemeral:true as const}:{})};
+   claims:finished.claims,...(finished.noCitation?{noCitation:finished.noCitation}:{}),...(finished.citation?{citation:finished.citation}:{}),...(request.persona?{persona:request.persona,contract:checkContract(request.persona,validated.body)}:{}),...(gate.echo||echoes(validated.body,review.instruction)?{echo:true as const}:{}),...(frozen.skillNames.length?{skills:frozen.skillNames}:{}),...(frozen.session?{session:frozen.session.id}:{}),...(s.privateContext?{ephemeral:true as const}:{})};
    stage='save'; // from here on, a failure is about saving the reply
    let persistence:'memory'|'private';
    if(s.privateContext){const messages=this.ephemeral.get(review.path)??[];if(messages.length>=200)throw new ChatError('budget_reached');messages.push(message);this.ephemeral.set(review.path,messages);persistence='memory';}
@@ -190,6 +190,13 @@ export class ChatRuntime {
  }
  private audit(note:string,id:string,event:'chat_started'|'chat_completed'|'chat_failed',cause?:AbortCause){return this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(note),requestId:id,note,event,at:new Date().toISOString(),...(cause?{cause}:{})});}
  private rememberReplay(id:string,tokens:number){this.replay.delete(id);this.replay.set(id,tokens);while(this.replay.size>200)this.replay.delete(this.replay.keys().next().value as string);}
+ /** Delete conversation: the replies it saved go too, from the note's chat record (on disk or in memory) and from the private in-memory list. Returns how many. */
+ async forgetConversation(note:string,session:string,messageIds:ReadonlySet<string>):Promise<number>{
+  let removed=await this.chats.removeConversation(note,session,messageIds);
+  const held=this.ephemeral.get(note);
+  if(held){const keep=held.filter(m=>m.session!==session&&!messageIds.has(m.id));removed+=held.length-keep.length;if(keep.length)this.ephemeral.set(note,keep);else this.ephemeral.delete(note);}
+  this.replay.delete(session);return removed;
+ }
  cancel(note:string){const s=this.states.get(note);if(s?.controller){s.abortCause??='user_stop';s.controller.abort();}}
  async close(){this.closed=true;for(const s of this.states.values())if(s.controller){s.abortCause??='server_shutdown';s.controller.abort();}await Promise.allSettled(this.jobs);this.reviews.clear();this.states.clear();this.ephemeral.clear();}
 }
