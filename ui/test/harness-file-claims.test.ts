@@ -42,6 +42,12 @@ describe('finishFileReply',()=>{
   expect((await finishFileReply(reply(claims),r)).claims.map((c:{status:string})=>c.status)).toEqual(['found','found']); // no notebook given: both are plain repo files
   expect((await finishFileReply(reply(claims),r,path.join(r,'journal'))).claims.map((c:{status:string})=>c.status)).toEqual(['found','no_valid_source']);
  });
+ it('a source file called secrets.ts is code and can be cited; a secrets.json store, a key and a tool credential file are never read',async()=>{
+  const r=await repo();await writeFile(path.join(r,'src','secrets.ts'),SRC);await mkdir(path.join(r,'config'));
+  for(const f of ['config/secrets.json','.npmrc','deploy.key','terraform.tfstate'])await writeFile(path.join(r,f),SRC);
+  const out=await finishFileReply(reply([{path:'src/secrets.ts',line:3,quote:'const sessions = new Map();'},...['config/secrets.json','.npmrc','deploy.key','terraform.tfstate'].map(p=>({path:p,line:3,quote:'const sessions = new Map();'}))]),r);
+  expect(out.claims.map((c:{status:string})=>c.status)).toEqual(['found','no_valid_source','no_valid_source','no_valid_source','no_valid_source']);
+ });
  it('a reply without a claims block keeps its text and says so',async()=>{
   const out=await finishFileReply('Just prose.',await repo());expect(out).toMatchObject({body:'Just prose.',claims:[],citation:'missing_block'});
  });
