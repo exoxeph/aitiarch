@@ -77,6 +77,9 @@ try {
     await page.keyboard.press('Tab'); assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Show in note');
     await page.keyboard.press('Enter');
     await page.waitForSelector('.cm-quote-flash');
+    // The editor scrolls to the passage in its next measure cycle, so the mark can exist a frame before it is on screen: give the scroll a moment to land
+    // (it never gets here by waiting if it was not scrolled to), then check exactly what was checked before.
+    await page.waitForFunction(() => { const r = document.querySelector('.cm-quote-flash')?.getBoundingClientRect(); return !!r && r.top >= 0 && r.bottom <= innerHeight; }, undefined, { timeout: 3000 }).catch(() => {});
     const flash = await page.evaluate(() => { const els = [...document.querySelectorAll('.cm-quote-flash')], r = els[0].getBoundingClientRect(); return { text: els.map((e) => e.textContent).join(''), top: r.top, bottom: r.bottom, vh: innerHeight }; });
     assert.match(flash.text.replace(/\s+/g, ' '), /We chose SQLite for the local store/, 'the right passage is marked'); assert(flash.top >= 0 && flash.bottom <= flash.vh, 'and it is on screen');
     assert((await page.evaluate(() => document.querySelector('.pane').scrollTop)) > scrollBefore, 'the editor scrolled to it');
