@@ -177,12 +177,16 @@ export class InvestigateService {
   const plan:Plan={session:id,...core,bytes:r.bytes,skipped:r.skipped,planHash:sha(JSON.stringify(core))};this.plans.set(id,plan);return plan;
  }
  async confirm(id:string,planHash:unknown){const p=this.plans.get(id);if(!p||p.planHash!==planHash)throw new InvestigateError('plan_changed');await this.o.index.confirm(id,p.planHash);return p;}
- cancel(id:string){this.running.get(id)?.abort();}
+ /** Cancel can reach the server before the turn it is for (both are requests in flight): an early cancel is kept for a few seconds and honoured
+  *  as soon as that session's turn starts. */
+ private early=new Map<string,number>();
+ cancel(id:string){const c=this.running.get(id);if(c)c.abort();else this.early.set(id,Date.now());}
  async send(id:string,question:unknown,emit:(e:InvestigateEvent)=>void,signal?:AbortSignal):Promise<void>{
   if(typeof question!=='string'||!question.trim()||question.length>4000)throw new InvestigateError('invalid');
   const s=await this.session(id);if(!s.confirmed)throw new InvestigateError('plan_required');
   if(this.running.has(id))throw new InvestigateError('busy');
   const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});this.running.set(id,controller);
+  const asked0=this.early.get(id);this.early.delete(id);if(asked0!==undefined&&Date.now()-asked0<5000)controller.abort();
   const d=this.snapshotFolder(s.repo),backup=path.join(this.o.dir,'tripwire',id,'before');let before:Record<string,string>|null=null,started=false,turnDir:string|undefined;
   let stream:InvestigateStream|undefined,shown='';const asked=redact(question.trim()),at=new Date().toISOString();
   const tripwire=async():Promise<Tripwire|undefined>=>{if(!before)return undefined;const notebook=await folderChanges(this.o.notebook,before),snapshot=await snapshotDrift(d.files,d.manifest);this.last.set(id,{changes:notebook,backup});await this.savePending(id,notebook);return {notebook,snapshot};};
@@ -195,11 +199,13 @@ export class InvestigateService {
     onText:t=>{const delta=gate.push(t);if(delta){shown+=delta;emit({type:'delta',text:delta});}},onStep:(index,step)=>emit({type:'step',index,step}),onStepResult:(index,ok,denial)=>emit({type:'step_result',index,ok,...(denial?{denial}:{})}),
     onThinking:t=>{const delta=thinking.push(t);if(delta)emit({type:'thinking',text:delta});},onTurn:turns=>emit({type:'progress',turns})});
    emit({type:'start',id});
+   if(controller.signal.aborted)throw new InvestigateError('cancelled'); // cancelled before the CLI started: never start it
    await new Promise<void>((resolve,reject)=>{
     const child=spawnInvestigateSession({provider:'claude',command:this.o.command,prefixArgs:this.o.prefixArgs},{id:s.id,resume:s.turns>0,addendumFile:file,budgetUsd:this.limits.budgetUsd,...(this.o.model?{model:this.o.model}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
     let failure:InvestigateError|undefined,killing:Promise<void>=Promise.resolve(),bytes=0;
     const stop=(code:InvestigateCode)=>{if(failure)return;failure=new InvestigateError(code);if(child.pid)killing=killTree(child.pid);};
     const timer=setTimeout(()=>stop('timeout'),this.limits.timeoutMs),onAbort=()=>stop('cancelled');controller.signal.addEventListener('abort',onAbort,{once:true});
+    if(controller.signal.aborted)onAbort(); // cancelled while the copy was syncing: an abort that already happened fires no event
     child.stdout.on('data',(b:Buffer)=>{if(failure)return;bytes+=b.length;if(bytes>4*1024*1024)return stop('budget');try{stream!.push(b);}catch(e){stop(e instanceof InvestigateError?e.code:'isolation');}});
     child.stderr.on('data',()=>{});child.stdin.on('error',()=>{});
     child.on('error',()=>{failure??=new InvestigateError('provider_failed');});

@@ -72,6 +72,13 @@ describe('investigation sessions',()=>{
   }
   const t=await setup(),svc=t.service('inv-path|src/login.js'),{s}=await confirmed(svc,t.repo);expect((await t.run(svc,s.id)).error).toBeUndefined();
  });
+ it('Cancel works before the CLI has started (while the copy syncs) and while it runs',async()=>{
+  const t=await setup(),svc=t.service('inv-slow'),{s}=await confirmed(svc,t.repo);
+  const early:InvestigateEvent[]=[];const p1=svc.send(s.id,'q',e=>{early.push(e);});svc.cancel(s.id);await p1;
+  expect(early.find(e=>e.type==='error')).toMatchObject({code:'cancelled'});
+  const late:InvestigateEvent[]=[];const p2=svc.send(s.id,'q',e=>{late.push(e);if(e.type==='start')setTimeout(()=>svc.cancel(s.id),300);});const t0=Date.now();await p2;
+  expect(late.find(e=>e.type==='error')).toMatchObject({code:'cancelled'});expect(Date.now()-t0).toBeLessThan(10000);
+ });
  it('reports a denied read as a step with its denial and in the permission denials',async()=>{
   const t=await setup(),svc=t.service('inv-denied'),{s}=await confirmed(svc,t.repo),r=await t.run(svc,s.id);
   expect(r.complete!.message.steps[0]).toMatchObject({tool:'Read',ok:false,denial:expect.stringContaining('denied')});expect(r.complete!.message.permissionDenials).toEqual(['Read']);

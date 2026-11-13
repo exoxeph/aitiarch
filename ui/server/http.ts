@@ -319,7 +319,7 @@ export function createApp(opts: AppOptions) {
       const out:Record<string,string>={};if(h)for(const s of await h.index.list({mode:'chat',note}))Object.assign(out,await h.questions.read(s.id));
       return json(res,200,{questions:out});
     }
-    if(url.pathname.startsWith('/api/harness/sessions/')&&req.method==='PUT'){
+    if((url.pathname.startsWith('/api/harness/sessions/')||url.pathname.startsWith('/api/harness/investigate/'))&&req.method==='PUT'){
       const h=await harnessReady,b=await readBody(req) as any;
       if(!h)return json(res,409,{error:'disabled',message:'Sessions need the Claude Code CLI. Start Aitiarch with --claude.'});
       try{
