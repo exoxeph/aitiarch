@@ -301,6 +301,18 @@ export function createApp(opts: AppOptions) {
       const h=await harnessReady,mode=url.searchParams.get('mode')==='investigate'?'investigate' as const:'chat' as const,note=mode==='chat'?url.searchParams.get('path')||undefined:undefined;if(note)await store.read(note);
       return json(res,200,{enabled:!!h,sessions:h?await h.index.list({mode,...(note?{note}:{})}):[]});
     }
+    // Investigations, read-only: the project's repo folder, a session's turns (question and answer, for a reload), whether it still needs its
+    // plan confirmed, and a redacted excerpt of a real repo file around a line (for a file claim).
+    if(url.pathname.startsWith('/api/harness/investigate/')&&req.method==='GET'){
+      const h=await harnessReady;if(!h)return json(res,409,{error:'disabled',message:'Investigations need the Claude Code CLI. Start Aitiarch with --claude.'});
+      const q=url.searchParams,session=q.get('session')??'';
+      try{
+        if(url.pathname==='/api/harness/investigate/repo')return json(res,200,{repo:await h.investigate.repo()});
+        if(url.pathname==='/api/harness/investigate/turns')return json(res,200,{turns:await h.investigate.turns(session)});
+        if(url.pathname==='/api/harness/investigate/status')return json(res,200,{needsPlan:await h.investigate.needsPlan(session)});
+        if(url.pathname==='/api/harness/investigate/excerpt')return json(res,200,await h.investigate.excerpt(session,q.get('path'),Number(q.get('line'))));
+      }catch(e){if(e instanceof InvestigateError)return json(res,409,{error:e.code,message:'Investigation: '+e.code.replace(/_/g,' ')+'.'});throw e;}
+    }
     // The questions asked in this note's named conversations, by message id, so a reloaded panel can show them.
     if(url.pathname==='/api/harness/questions'&&req.method==='GET'){
       const h=await harnessReady,note=url.searchParams.get('path')??'';await store.read(note);
