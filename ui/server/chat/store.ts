@@ -20,6 +20,8 @@ export class ChatStore {
    if(s&&(s.isSymbolicLink()||s.nlink!==1&&!s.isDirectory()||n<segments.length-1&&!s.isDirectory()||n===segments.length-1&&!s.isFile()))throw new Error('Unsafe private chat path.');
   }return file;
  }
+ // This record never holds questions (the notice below says so, and it applies to the one-off chat). A named conversation (harness session) keeps
+ // its questions separately, in the app's own folder outside the repo (server/harness/questions.ts), and Delete conversation removes them.
  async status(){let enabled=false;try{
   await this.confined('chat/ignore-probe.chat.json');
   for(const rel of ['chat/ignore-probe.chat.json','chat/ignore-probe.chat.json.atomic.tmp'])await exec('git',['check-ignore','-q','--',rel],{cwd:this.root,windowsHide:true,timeout:3000});

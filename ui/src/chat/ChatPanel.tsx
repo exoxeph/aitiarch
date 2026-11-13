@@ -18,7 +18,8 @@ import {applyEvent,buildContext,chipEstimate,errorText,formatCount,fromStored,ne
 import {ReplyNotes} from './ReplyNotes.tsx';
 import {ChatSessions} from './ChatSessions.tsx';
 
-/** Questions are not stored by the server; this session remembers them so a closed and reopened panel still reads as a conversation. */
+/** One-off chat: questions are not stored by the server; this page remembers them so a closed and reopened panel still reads as a conversation.
+ *  A named conversation (harness session) is different: its questions are kept in the app's own folder outside the repo and loaded back below. */
 const questions=new Map<string,string>();
 const knownCode=(code:string):code is ChatErrorCode=>code in CHAT_MESSAGES;
 
@@ -78,7 +79,10 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  useEffect(()=>{input.current?.focus();},[]);
  useEffect(()=>{
   if(!path)return;let off=false;
-  api.chat(path).then(s=>{if(off)return;setTurns(prev=>prev.length?prev:fromStored(s.messages,questions));setUsage(s.usage);setPersistence(s.persistence.enabled?'private':'memory');})
+  // Questions of named conversations come back from the app's own folder; the one-off chat's are only what this page remembers.
+  Promise.all([api.chat(path),api.harnessQuestions(path).catch(()=>({questions:{} as Record<string,string>}))]).then(([s,h])=>{if(off)return;
+   const merged=new Map(questions);for(const [id,q] of Object.entries(h.questions))if(!merged.has(id))merged.set(id,q);
+   setTurns(prev=>prev.length?prev:fromStored(s.messages,merged));setUsage(s.usage);setPersistence(s.persistence.enabled?'private':'memory');})
    .catch(()=>{if(!off)setNotice('This note’s chat could not be loaded.');});
   return()=>{off=true;};
  },[path]);

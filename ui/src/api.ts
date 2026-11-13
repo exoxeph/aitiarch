@@ -131,6 +131,8 @@ export const api = {
   /** Harness chat sessions for a note: whether they are on (the Claude Code CLI is configured) and the list, most recent first. */
   harnessSessions:(path:string)=>ok<{enabled:boolean;sessions:import('../shared/harness.ts').HarnessSession[]}>('GET',`/api/harness/sessions?path=${encodeURIComponent(path)}`),
   harnessSessionCall:(action:'new'|'rename',body:unknown)=>ok<import('../shared/harness.ts').HarnessSession>('PUT','/api/harness/sessions/'+action,body),
+  /** Questions asked in this note's named conversations, by message id. */
+  harnessQuestions:(path:string)=>ok<{questions:Record<string,string>}>('GET',`/api/harness/questions?path=${encodeURIComponent(path)}`),
   /** Deletes a conversation: the app's entry and Claude Code's own transcript of it. */
   harnessSessionDelete:(id:string)=>ok<{removed:string[]}>('PUT','/api/harness/sessions/delete',{id}),
   chatSessions:(path:string,otherProjects=false)=>ok<{id:import('../shared/chat.ts').ContextChoice['moduleId'];label:string;entries:import('../shared/chat.ts').ContextEntry[];notice?:string}[]>('GET',`/api/chat/modules?path=${encodeURIComponent(path)}&sessions=1&otherProjects=${otherProjects?'1':'0'}`),

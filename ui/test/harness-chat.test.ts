@@ -10,6 +10,7 @@ import {FakeChatProvider} from '../server/chat/fake.ts';
 import {CHAT_HARD_RULES,SESSION_INVARIANTS} from '../server/chat/request.ts';
 import {SessionIndex} from '../server/harness/session-index.ts';
 import {ClaudeSessionRunner} from '../server/harness/claude-session.ts';
+import {QuestionStore} from '../server/harness/questions.ts';
 import type {ChatEvent,ChatInput} from '../shared/chat.ts';
 
 // Chat in a Claude Code harness session, against a synthetic CLI (no model). The app starts the session with its own id, resumes it on every
@@ -27,8 +28,8 @@ async function project(){
  await writeFile(path.join(root,'notebook.md'),'# Notebook\n\nCANARY-NOTEBOOK-SESSION\n');await writeFile(path.join(root,'other.md'),'Another note.\n');
  const store=await Store.open(root),ink=await InkStore.open(root);
  const open=async(scenario='ok',extras?:ConstructorParameters<typeof ChatRuntime>[5])=>{
-  const index=await SessionIndex.open(harness),runner=new ClaudeSessionRunner({command:process.execPath,prefixArgs:[cli,scenario,record],dir:harness});
-  return {index,runtime:new ChatRuntime(store,ink,new ChatStore(root),new FakeChatProvider(),[],extras,{index,runner})};
+  const index=await SessionIndex.open(harness),runner=new ClaudeSessionRunner({command:process.execPath,prefixArgs:[cli,scenario,record],dir:harness}),questions=new QuestionStore(harness);
+  return {index,questions,runtime:new ChatRuntime(store,ink,new ChatStore(root),new FakeChatProvider(),[],extras,{index,runner,questions})};
  };
  const calls=async()=>(await readFile(record,'utf8')).trim().split('\n').map(l=>JSON.parse(l));
  return {root,harness,open,calls};
@@ -71,6 +72,22 @@ describe('harness chat sessions',()=>{
   const r=await turn(runtime,ask(s.id,'m-deny','What do my notes say?',[{moduleId:'this-note',ids:['note']},{moduleId:'other-notes',ids:['notebook.md','other.md']}]));
   expect(r.review.excluded).toEqual(['notebook.md']);expect(r.review.sources.map(x=>x.label)).toEqual(['This note','other.md']);
   const [c]=await p.calls();expect(c.addendum).not.toContain('CANARY-NOTEBOOK-SESSION');expect(c.addendum).toContain('Another note.');
+ });
+ it('keeps a session turn\'s question outside the repo, shows it after a reload, never in the chat record, and Delete removes it',async()=>{
+  const p=await project();let {index,runtime,questions}=await p.open();const s=await index.create({mode:'chat',label:'x',note:'plan.md'});
+  const one=await turn(runtime,ask(s.id,'m-q1','Where does password=hunter2-q-secret live?'));await turn(runtime,ask(s.id,'m-q2','And who decided?'));
+  await runtime.close();
+  ({index,runtime,questions}=await p.open()); // reload: new instances over the same files
+  const kept=await questions.read(s.id);expect(Object.keys(kept)).toEqual(['m-q1','m-q2']);expect(kept['m-q2']).toBe('And who decided?');
+  expect(kept['m-q1']).toContain('[SECRET]');expect(kept['m-q1']).not.toContain('hunter2-q-secret'); // redacted like the sent question
+  expect(path.relative(p.root,p.harness).startsWith('..')).toBe(true); // the record is not in the repo
+  const chat=JSON.stringify(await new ChatStore(p.root).read('plan.md'));expect(chat).not.toContain('And who decided?');expect(chat).not.toContain('Where does');
+  await questions.remove(s.id);expect(await questions.read(s.id)).toEqual({});expect(one.error).toBeUndefined();
+ });
+ it('a one-off chat message saves no question anywhere',async()=>{
+  const p=await project(),{runtime,questions,index}=await p.open();
+  const review=await runtime.review({id:'m-oneoff',path:'plan.md',question:'A one-off question',context:[{moduleId:'this-note',ids:['note']}]});expect(review.session).toBeUndefined();
+  expect((await readdir(p.harness)).includes('questions')).toBe(false);void questions;void index;
  });
  it('a chat open on notebook.md itself gets that note: the user chose it; only notes the app adds are filtered',async()=>{
   const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'x',note:'notebook.md'});

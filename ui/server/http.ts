@@ -1,6 +1,6 @@
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
 import {InvestigatorError,type InvestigatorRunner,type AgentName} from '../shared/investigator.ts';
-import {InvestigatorRuntime} from './investigator/runtime.ts';import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {removeTranscript} from './harness/transcripts.ts';import {PolicyGate} from './investigator/policy.ts';import {Lookups} from './investigator/lookups.ts';import {LedgerStore} from './ledger-store.ts';
+import {InvestigatorRuntime} from './investigator/runtime.ts';import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {removeTranscript} from './harness/transcripts.ts';import {QuestionStore} from './harness/questions.ts';import {PolicyGate} from './investigator/policy.ts';import {Lookups} from './investigator/lookups.ts';import {LedgerStore} from './ledger-store.ts';
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES} from '../shared/chat.ts';
 import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
@@ -180,7 +180,7 @@ export function createApp(opts: AppOptions) {
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
   const chatStore=new ChatStore(store.rootReal);
   const harnessReady=opts.harness?SessionIndex.open(opts.harness.dir??harnessDirectory(store.rootReal)).then(index=>{const h=opts.harness!;return {index,
-    runner:new ClaudeSessionRunner({command:h.command,prefixArgs:h.prefixArgs,model:h.model,dir:index.dir}),
+    runner:new ClaudeSessionRunner({command:h.command,prefixArgs:h.prefixArgs,model:h.model,dir:index.dir}),questions:new QuestionStore(index.dir),
     investigate:new InvestigateService({index,dir:index.dir,notebook:store.rootReal,command:h.command,prefixArgs:h.prefixArgs,model:h.model})};}):Promise.resolve(null);
   const chatReady=Promise.all([inkReady,harnessReady]).then(([ink,harness])=>new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined));
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
@@ -301,6 +301,12 @@ export function createApp(opts: AppOptions) {
       const h=await harnessReady,mode=url.searchParams.get('mode')==='investigate'?'investigate' as const:'chat' as const,note=mode==='chat'?url.searchParams.get('path')||undefined:undefined;if(note)await store.read(note);
       return json(res,200,{enabled:!!h,sessions:h?await h.index.list({mode,...(note?{note}:{})}):[]});
     }
+    // The questions asked in this note's named conversations, by message id, so a reloaded panel can show them.
+    if(url.pathname==='/api/harness/questions'&&req.method==='GET'){
+      const h=await harnessReady,note=url.searchParams.get('path')??'';await store.read(note);
+      const out:Record<string,string>={};if(h)for(const s of await h.index.list({mode:'chat',note}))Object.assign(out,await h.questions.read(s.id));
+      return json(res,200,{questions:out});
+    }
     if(url.pathname.startsWith('/api/harness/sessions/')&&req.method==='PUT'){
       const h=await harnessReady,b=await readBody(req) as any;
       if(!h)return json(res,409,{error:'disabled',message:'Sessions need the Claude Code CLI. Start Aitiarch with --claude.'});
@@ -314,7 +320,7 @@ export function createApp(opts: AppOptions) {
         if(url.pathname==='/api/harness/sessions/delete'){
           const s=await h.index.get(b?.id);if(!s)throw new SessionIndexError('No such session.');
           const cwd=s.mode==='chat'?await h.runner.chatCwd():await h.investigate.snapshotCwd(s.repo!);
-          const removed=await removeTranscript(cwd,s.id);await h.index.remove(s.id);if(s.mode==='investigate')await h.investigate.forget(s.id);
+          const removed=await removeTranscript(cwd,s.id);await h.questions.remove(s.id);await h.index.remove(s.id);if(s.mode==='investigate')await h.investigate.forget(s.id);
           return json(res,200,{removed});
         }
         if(url.pathname==='/api/harness/investigate/plan')return json(res,200,await h.investigate.plan(b?.session));

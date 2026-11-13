@@ -10,6 +10,7 @@ import {prepareRequest,ProviderError,redact,type Provider,type Request,type Resu
 import {chatSessionInstruction} from './request.ts';
 import {harnessDenied} from '../../shared/harness.ts';
 import type {SessionIndex} from '../harness/session-index.ts';
+import type {QuestionStore} from '../harness/questions.ts';
 import type {ClaudeSessionRunner} from '../harness/claude-session.ts';
 import {validateProductResult,ProductValidationError} from '../product-validation.ts';
 import type {ExtrasFor} from '../node-settings.ts';
@@ -23,7 +24,9 @@ interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:
  /** A harness session turn: the session id and the exact file text the CLI gets (instruction, sources, rules last). */
  session?:{id:string};addendum?:string}
 /** Harness chat sessions: the app's index of sessions and the runner that talks to the Claude Code CLI. */
-export interface ChatHarness {index:SessionIndex;runner:Pick<ClaudeSessionRunner,'chatTurn'>}
+export interface ChatHarness {index:SessionIndex;runner:Pick<ClaudeSessionRunner,'chatTurn'>;
+ /** Where the questions of session turns are kept (outside the repo). Absent: they are not kept. */
+ questions?:QuestionStore}
 type Pair={id:string;user:string;assistant:string;persona?:PersonaMode};
 interface State {history:Pair[];omittedPairs:number;serial:number;usage:ChatUsage;calls:number[];running:boolean;privateContext?:true;controller?:AbortController}
 
@@ -165,6 +168,7 @@ export class ChatRuntime {
   let started=false;
   try{
    const r=await h.runner.chatTurn({id:session.id,resume:session.turns>0,addendum:frozen.addendum,question:request.question,signal,onTextDelta,onStarted:()=>{started=true;}});
+   await h.questions?.add(session.id,request.id,request.question).catch(()=>{}); // a failed save must not lose the answer
    return {id:request.id,provider:'claude',model:null,answer:r.answer,claims:[],usage:r.usage,rawReply:true};
   }finally{if(started)await h.index.touch(session.id).catch(()=>{});} // the CLI now knows this id: the next turn must resume it
  }
