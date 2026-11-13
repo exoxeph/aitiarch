@@ -22,6 +22,18 @@ function scan(text:string):(Heading&{from:number})[]{
 /** ATX headings outside fenced code, in order; a repeated heading gets -1, -2 ... like GitHub. */
 export const headingsOf=(text:string):Heading[]=>scan(text).map(({text:t,slug,level})=>({text:t,slug,level}));
 
+/** The headings a position sits under, outermost first (the heading's own line counts as inside it). A position above the first heading has none: []. A skipped level is skipped
+ *  ("# A" then "### C" gives A, C). Headings in fenced code are not headings. */
+export function headingPathAt(text:string,pos:number):string[]{
+ const stack:{text:string;level:number}[]=[];
+ for(const h of scan(text)){
+  if(h.from>pos)break;
+  while(stack.length&&stack[stack.length-1].level>=h.level)stack.pop();
+  stack.push({text:h.text,level:h.level});
+ }
+ return stack.map(h=>h.text);
+}
+
 /** Where the heading a link's #fragment names starts in `text`, or null. The fragment may be percent-encoded or differ in case. */
 export function headingOffset(text:string,fragment:string):number|null{
  let want=fragment.replace(/^#/,'');try{want=decodeURIComponent(want);}catch{/* keep it as written */}

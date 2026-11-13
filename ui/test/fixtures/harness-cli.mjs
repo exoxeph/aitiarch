@@ -71,7 +71,11 @@ out({ type: 'system', subtype: 'init', session_id: id, tools: scenario === 'tool
 if (scenario === 'fail-after-init') process.exit(1);
 out({ type: 'system', subtype: 'brand_new_kind', session_id: id }); // an event this version does not know: counted, not fatal
 if (scenario === 'write-cwd') writeFileSync(path.join(process.cwd(), 'stray.txt'), 'x');
-const reply = scenario === 'slow-stream' ? Array.from({ length: 150 }, (_, i) => 'word' + i).join(' ') + '.\n<claims>{"none":"opinion"}</claims>' : scenario === 'quote-missing' ? 'It says something else.\n<claims>[{"source":"N1","quote":"Words that are not in the note."}]</claims>'
+// quote-selection cites the first line of the selection source (S1) the app pasted; echo-manifest repeats the line the message started with (the model must never do that, the app drops it).
+const selectionSource = addendum && /\[\[source S1: Selection\]\]\n([\s\S]*?)\n\[\[end of source S1\]\]/.exec(addendum)?.[1];
+const reply = scenario === 'quote-selection' ? `That passage says something.\n<claims>[{"source":"S1","quote":${JSON.stringify((selectionSource ?? '').split('\n')[0].slice(0, 60))}}]</claims>`
+  : scenario === 'echo-manifest' ? `${stdin.split('\n')[0]}\n\nThe note is about the plan.\n<claims>{"none":"opinion"}</claims>`
+  : scenario === 'slow-stream' ? Array.from({ length: 150 }, (_, i) => 'word' + i).join(' ') + '.\n<claims>{"none":"opinion"}</claims>' : scenario === 'quote-missing' ? 'It says something else.\n<claims>[{"source":"N1","quote":"Words that are not in the note."}]</claims>'
   : `${args.includes('--resume') ? 'Resumed.' : 'Started.'} The note says the store is local.\n<claims>[{"source":"N1","quote":"A unique sentence for the session."}]</claims>`;
 out({ type: 'stream_event', event: { type: 'message_start', message: {} } });
 out({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } });

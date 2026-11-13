@@ -5,7 +5,7 @@ import react from "@vitejs/plugin-react";
 // Dev: Vite on 5173 proxies /api to the Aitiarch server (see scripts/dev.mjs).
 const apiTarget = process.env.AITIARCH_API ?? "http://127.0.0.1:43117";
 /** Test files that spawn processes, servers or git, or churn temp folders. Run in their own group (see `test` below). */
-const HEAVY_TESTS = ["chatgpt-plan", "thread-store", "thread-runtime", "chat-backend", "harness-chat", "harness-investigate", "providers", "chat-claims-http", "harness-snapshot", "thread-resolve", "watch-start", "thread-http", "usage"].map((name) => `test/${name}.test.{ts,tsx}`);
+const HEAVY_TESTS = ["chatgpt-plan", "thread-store", "thread-runtime", "chat-backend", "harness-chat", "harness-editor-context", "harness-investigate", "providers", "chat-claims-http", "harness-snapshot", "thread-resolve", "watch-start", "thread-http", "usage"].map((name) => `test/${name}.test.{ts,tsx}`);
 
 export default defineConfig({
   plugins: [react(),{name:'diagram-build-graph',generateBundle(_options,bundle){

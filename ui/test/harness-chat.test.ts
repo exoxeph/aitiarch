@@ -64,7 +64,7 @@ describe('harness chat sessions',()=>{
    expect(c.addendumOutsideCwd).toBe(true);expect(path.relative(p.root,c.cwd).startsWith('..')).toBe(true);
    expect(c.addendum.startsWith(SESSION_INVARIANTS)).toBe(true);expect(c.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);expect(c.addendum).toContain('A unique sentence for the session.');
   }
-  const line=`Sources this turn: N1 This note, ${NOTE.length} characters`;
+  const line=`Open note: Plan (${NOTE.length} chars).`;
   expect(a.stdin).toBe(line+'\n\nWhere does the data live?');expect(b.stdin).toBe(line+'\n\nAnd who decided?');expect(one.review.manifest).toBe(line);expect(a.cwd).toBe(b.cwd); // same folder, so the CLI can find the session
   expect((await readdir(p.harness)).filter(n=>n.startsWith('turn-'))).toEqual([]); // the instruction file is gone after each turn
   expect((await index.get(s.id))!.turns).toBe(2);
@@ -86,17 +86,17 @@ describe('harness chat sessions',()=>{
    expect(x.addendum.startsWith(SESSION_INVARIANTS)).toBe(true);expect(x.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);
    expect(x.addendum.indexOf('[[end of source N1]]')).toBeLessThan(x.addendum.lastIndexOf(CHAT_HARD_RULES)); // the note comes before the rules
   }
-  expect(b.stdin).toBe(`Sources this turn: N1 This note, ${('# Plan\n\n'+NEW+'\n').length} characters\n\nAnd now?`);expect(b.stdin).not.toContain(NEW); // only the manifest line, never the note's text, so the CLI's record does not hold it twice
+  expect(b.stdin).toBe(`Open note: Plan (${('# Plan\n\n'+NEW+'\n').length} chars).\n\nAnd now?`);expect(b.stdin).not.toContain(NEW); // only the manifest line, never the note's text, so the CLI's record does not hold it twice
   // The review card and the echo guard use the instruction without any note text: quoting the note is never an echo.
   expect(two.review.instruction).not.toContain(NEW);expect(two.review.sources.find(x=>x.id==='N1')!.text).toContain(NEW);
   expect(two.complete!.message.echo).toBeUndefined();
  });
- it('says "none" in the message line when this turn has no sources, and the instruction makes this turn\'s sources the truth over earlier replies',async()=>{
+ it('says the note was not sent in the message line when this turn has no sources, and the instruction makes this turn\'s line the truth over earlier replies',async()=>{
   const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'Off',note:'plan.md'});
   const r=await turn(runtime,ask(s.id,'m-none','Is the note here?',[]));
-  const [c]=await p.calls();expect(c.stdin).toBe('Sources this turn: none\n\nIs the note here?');expect(r.review.manifest).toBe('Sources this turn: none');
+  const [c]=await p.calls();expect(c.stdin).toBe('Open note: plan (not sent this turn).\n\nIs the note here?');expect(r.review.manifest).toBe('Open note: plan (not sent this turn).');
   expect(c.addendum).toContain('Sources: none were included in this message.');
-  expect(SESSION_INVARIANTS).toMatch(/Sources this turn: \.\.\./);expect(SESSION_INVARIANTS).toMatch(/Earlier replies in this conversation may say that the note was missing/);expect(SESSION_INVARIANTS).toMatch(/may be outdated/);
+  expect(SESSION_INVARIANTS).toMatch(/Every message starts with one line from the app/);expect(SESSION_INVARIANTS).toMatch(/Earlier replies in this conversation may say that the note was missing/);expect(SESSION_INVARIANTS).toMatch(/may be outdated/);
  });
  it('streams a ~150-word reply to the page piece by piece while the CLI is still running, not all at once at the end',async()=>{
   const p=await project(),{index,runtime}=await p.open('slow-stream'),s=await index.create({mode:'chat',label:'Slow',note:'plan.md'});

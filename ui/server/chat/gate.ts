@@ -28,13 +28,14 @@ export function answerPrefix(json:string):string {
   }else {if(c.charCodeAt(0)<32)break;out+=c;}
  }return out;
 }
-const MANIFEST_LEAD='Sources this turn:';
+/** How the one-line manifest starts: "Open note: ..." now, and the older "Sources this turn: ..." that earlier conversations may still echo. */
+const MANIFEST_LEADS=['Open note:','Sources this turn:'];
 /** A model sometimes repeats the one-line manifest that starts the message. That line is the app's, not part of the reply: drop it, and show
  *  nothing while the start of the reply could still turn out to be that line. */
 export function dropManifestEcho(raw:string):string{
  const t=raw.trimStart();
- if(t&&t.length<MANIFEST_LEAD.length&&MANIFEST_LEAD.startsWith(t))return '';
- if(!t.startsWith(MANIFEST_LEAD))return raw;
+ if(t&&MANIFEST_LEADS.some(lead=>t.length<lead.length&&lead.startsWith(t)))return '';
+ if(!MANIFEST_LEADS.some(lead=>t.startsWith(lead)))return raw;
  const end=t.indexOf('\n');return end<0?'':t.slice(end+1).replace(/^\s+/,'');
 }
 /** The displayable text of the raw reply so far: the answer field of an exact {answer, claims} reply (the older format), or the Markdown reply up to its claims block. */

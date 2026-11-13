@@ -7,7 +7,9 @@ import {CHAT_LIMITS,REPLY_ALLOWANCE,budgetTokens,isAbortCause,nextTurnEstimate,t
 import {Store} from '../store.ts';import {InkStore} from '../ink-store.ts';import {LedgerStore} from '../ledger-store.ts';
 import {ChatStore} from './store.ts';import {contextModules,hash,estimateTokens} from './context.ts';import {secretKinds} from './secrets.ts';
 import {prepareRequest,ProviderError,redact,type Provider,type Request,type Result} from '../providers/index.ts';
-import {chatSessionInstruction,sourcesManifest,turnMessage} from './request.ts';
+import {chatSessionInstruction,editorManifest,turnMessage} from './request.ts';
+import {cleanLabel,parseEditorInfo} from '../../shared/editor-context.ts';
+import {titleOf} from '../../shared/headings.ts';
 import {harnessDenied} from '../../shared/harness.ts';
 import type {SessionIndex} from '../harness/session-index.ts';
 import type {QuestionStore} from '../harness/questions.ts';
@@ -59,7 +61,14 @@ export class ChatRuntime {
   if(this.closed||!input||!/^[\w-]{1,100}$/.test(input.id)||typeof input.question!=='string'||!input.question.trim()||input.question.length>CHAT_LIMITS.questionCharacters||typeof input.path!=='string'||input.selection!==undefined&&(typeof input.selection!=='string'||input.selection.length>8000)||!Array.isArray(input.context)||input.context.length>4)throw new ChatError('invalid_chat');
   // Validate target even when no context module is selected. Never implicitly send it.
   if(input.path.split('/').some(part=>part.startsWith('.')))throw new ChatError('invalid_chat');
-  await this.store.read(input.path);const s=this.state(input.path),sources:ContextSource[]=[],modules=[...contextModules(this.store,this.ink,input.path),...this.sessions],seen=new Set<string>();
+  // Where the person is: the open note, the cursor's section and the selection's lines. `input.path` is the note this chat is kept under; only a conversation may be open on
+  // another note of the project (it followed the person there), and then "this note" is the open one. A one-off chat is always about its own note.
+  const editor=input.editor===undefined?undefined:parseEditorInfo(input.editor);
+  if(input.editor!==undefined&&!editor)throw new ChatError('invalid_chat');
+  const open=editor?.path??input.path;
+  if(open!==input.path&&(input.session===undefined||open.split('/').some(part=>part.startsWith('.'))))throw new ChatError('invalid_chat');
+  await this.store.read(input.path);if(open!==input.path)await this.store.read(open);
+  const s=this.state(input.path),sources:ContextSource[]=[],modules=[...contextModules(this.store,this.ink,open),...this.sessions],seen=new Set<string>();
   // Other notes the app adds (the Constellation, a picker) pass one filter in every chat, one-off or a conversation: never the notebook file, hidden files, Aitiarch's own
   // state and sidecars, secrets or keys. They are dropped BEFORE anything is read, so they are not read and not audited as read; what was left out is named in the review.
   // The note the chat is open on is the person's own choice and is never filtered (it is the "this-note" module, not an added note).
@@ -87,13 +96,18 @@ export class ChatRuntime {
   let history=session?[]:sameMode.map(({id,user,assistant})=>({id,user,assistant}));while(history.length>CHAT_LIMITS.historyPairs||history.reduce((n,p)=>n+p.user.length+p.assistant.length,0)>CHAT_LIMITS.historyCharacters)history.shift();
   const request:Request={id:input.id,action:'ask',chat:true,note:sources.find(x=>x.id==='N1')?.text??'',selection:redact(input.selection??''),decisions:sources.filter(x=>x.id!=='N1').map(x=>({id:x.id,text:x.text})),turns:history,question:redact(input.question)};
   if(extra){request.persona=extra.persona;if(extra.skills.loaded.length)request.skills=extra.skills;}
-  const packet=prepareRequest(request);
   // In a session the CLI gets the instruction with the sources pasted before the rules (rules last); the earlier conversation is in the session.
   const sessionSources=[...sources.map(x=>({id:x.id,label:x.label,text:redact(x.text)})),...(request.selection?[{id:'S1',label:'Selection',text:request.selection}]:[])];
+  // One line, with no note text in it, says where the person is: the open note and its size, the selection, the cursor's section, any other sources. Every conversation message starts
+  // with it and a one-off message carries it as its "editor" field, so earlier replies about a missing or another note cannot outvote what this turn was given.
+  const noteSource=sessionSources.find(x=>x.id==='N1');
+  const manifest=editorManifest({title:redact(editor?.title??cleanLabel(titleOf(noteSource?.text??'',open))),noteChars:noteSource?noteSource.text.length:null,
+   selection:request.selection?{chars:request.selection.length,...(editor?.lines?{lines:editor.lines}:{})}:null,...(editor?.section?{section:editor.section.map(x=>redact(x))}:{}),
+   others:sessionSources.filter(x=>x.id!=='N1'&&x.id!=='S1'&&x.text.length>0).map(x=>({id:x.id,label:cleanLabel(x.label),chars:x.text.length}))});
+  if(!session)request.editor=manifest;
+  const packet=prepareRequest(request);
   const sessionText=session?chatSessionInstruction(request,sessionSources):null;
-  // Every session message starts with one line naming this turn's sources (no source text), so earlier replies about a missing note cannot outvote it.
-  const manifest=session?sourcesManifest(sessionSources):undefined;
-  const sent=sessionText?estimateTokens(sessionText.addendum+turnMessage(manifest!,request.question)):estimateTokens(JSON.stringify(packet));
+  const sent=sessionText?estimateTokens(sessionText.addendum+turnMessage(manifest,request.question)):estimateTokens(JSON.stringify(packet));
   // The next message's cost, the same number the review shows and the gate uses: what is sent now in full, the conversation already in a session at the cache weight, room for the reply.
   const estimate=nextTurnEstimate(sent,session?this.replay.get(session.id)??0:0).total;
   const privateContext=!!s.privateContext||sources.some(x=>x.ephemeral);
@@ -102,7 +116,7 @@ export class ChatRuntime {
   if(privateContext)review.ephemeral=true;
   if(session)review.session={id:session.id,label:session.label,turns:session.turns};
   if(excluded.length)review.excluded=excluded;
-  if(manifest)review.manifest=manifest;
+  review.manifest=manifest;if(editor)review.editor=editor;
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');
   this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(privateContext?{privateContext:true as const}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{})});
@@ -143,7 +157,8 @@ export class ChatRuntime {
     // Only what the output gate lets through reaches the page. The final, validated message replaces it.
     const delta=gate.push(text);if(delta)emit({type:'delta',id:request.id,text:delta,provisional:true});
    };
-   const result=frozen.session?await this.sessionTurn(frozen,request,controller.signal,onTextDelta):await this.provider.invoke(request,{signal:controller.signal,onTextDelta});
+   const reply=frozen.session?await this.sessionTurn(frozen,request,controller.signal,onTextDelta):await this.provider.invoke(request,{signal:controller.signal,onTextDelta});
+   const result:Result={...reply,answer:dropManifestEcho(reply.answer)}; // the editor line is the app's, never part of a reply, in a conversation or a one-off chat
    if(controller.signal.aborted)throw new ChatError('cancelled');
    if(result.usage){for(const n of Object.values(result.usage))if(typeof n!=='number'||!Number.isFinite(n)||n<0)throw new ChatError('validation');
     s.usage.input+=result.usage.inputTokens;s.usage.cached+=result.usage.cachedTokens??0;s.usage.output+=result.usage.outputTokens;
@@ -179,11 +194,11 @@ export class ChatRuntime {
  }
  /** One turn in a harness session. The first turn starts it with the app's id; every later one resumes it, also after the project is reopened. */
  private async sessionTurn(frozen:Frozen,request:Request,signal:AbortSignal,onTextDelta:(text:string)=>void):Promise<Result>{
-  const h=this.harness;if(!h||!frozen.session||!frozen.addendum)throw new ChatError('disabled');
+  const h=this.harness;if(!h||!frozen.session||!frozen.addendum||!frozen.manifest)throw new ChatError('disabled');
   const session=await h.index.get(frozen.session.id);if(!session||session.mode!=='chat')throw new ChatError('invalid_chat');
   let started=false;
   try{
-   const r=await h.runner.chatTurn({id:session.id,resume:session.turns>0,addendum:frozen.addendum,question:turnMessage(frozen.manifest??sourcesManifest([]),request.question),signal,onTextDelta,onStarted:()=>{started=true;}});
+   const r=await h.runner.chatTurn({id:session.id,resume:session.turns>0,addendum:frozen.addendum,question:turnMessage(frozen.manifest,request.question),signal,onTextDelta,onStarted:()=>{started=true;}});
    await h.questions?.add(session.id,request.id,request.question).catch(()=>{}); // a failed save must not lose the answer
    return {id:request.id,provider:'claude',model:null,answer:dropManifestEcho(r.answer),claims:[],usage:r.usage,rawReply:true};
   }finally{if(started)await h.index.touch(session.id).catch(()=>{});} // the CLI now knows this id: the next turn must resume it

@@ -1,4 +1,5 @@
 /** Per-note chat protocol. Deltas are provisional; only complete messages are accepted. */
+import type {EditorInfo} from './editor-context.ts';
 export interface ContextChoice {moduleId:'this-note'|'other-notes'|'claude-sessions'|'codex-sessions'; ids:string[]}
 export interface ContextEntry {id:string;label:string;session?:import('./ide-sessions.ts').SessionDetails}
 export interface ContextSource {id:string;label:string;text:string;version:string;ephemeral?:true}
@@ -93,7 +94,10 @@ export type ChatEvent=
   /** For a stopped request (cancelled, or budget_reached part-way): what stopped it. Absent when it is not known. */cause?:AbortCause;/** For budget_reached: the numbers. */budget?:BudgetDetail};
 export interface ChatInput {id:string;path:string;question:string;selection?:string;context:ContextChoice[];
  /** A harness chat session (the app's id) to send this message in. Absent: the classic one-shot chat. */
- session?:string}
+ session?:string;
+ /** Where the person is in the editor: the open note, the section the cursor is in and the line range of the selection that is sent. `path` is the note the chat is kept under;
+  *  in a conversation, `editor.path` is the note open now, which may be another note of the same project (the conversation followed the person there). */
+ editor?:EditorInfo}
 export interface ChatReview {
  reviewId:string;requestId:string;path:string;question:string;selection:string;
  sources:(ContextPreview&{text:string})[];historyPairs:number;omittedPairs:number;
@@ -111,8 +115,11 @@ export interface ChatReview {
  session?:{id:string;label:string;turns:number};
  /** Notes no chat gets unless it is the note the chat is open on (the notebook file, hidden files, sidecars, state, secrets): named here so the review says so. */
  excluded?:string[];
- /** A conversation turn only: the one line that starts the message, naming this turn's sources (IDs, labels and sizes, never their text). */
+ /** The one line that tells the model where the person is: the open note and its size, the selection's line range and size, the cursor's section and any other sources
+  *  (titles, headings, IDs and sizes, never any note text). A conversation message starts with it; a one-off message carries it in its "editor" field. */
  manifest?:string;
+ /** The editor information this message was sent with, as the server accepted it. */
+ editor?:EditorInfo;
 }
 /** How much a cache read counts against a chat's token budget, next to new input and output (1). Cache reads are cheap and fast, and counting them
  *  in full made a long conversation look about three quarters spent on tokens it barely paid for. */

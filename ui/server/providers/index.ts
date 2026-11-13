@@ -34,6 +34,8 @@ export interface Request {
   /** The node's thinking-partner mode and any skills you attached to it (instruction mode). Both optional: absent means the prompt is unchanged. */
   persona?: PersonaMode;
   skills?: SkillBlock;
+  /** Chat only: the one line saying where the person is (open note, selection, cursor section). It carries no note text; the page's own sources are the other fields. */
+  editor?: string;
   /** 'skill': the Visualize skill renderer. The reply is one HTML document, passed through as raw text (server/assistance.ts checks and saves it). */
   render?: 'skill';
 }
@@ -117,7 +119,7 @@ export function prepareRequest(request: Request): { instruction: string; data: R
     if(request.turns.length>4||request.turns.reduce((n,t)=>n+t.user.length+t.assistant.length,0)>4000||request.question.length>2000)throw new ProviderError('context_limit');
     // The chat's prompt lives in server/chat/request.ts: Markdown plus a claims block, with the mode as the whole answer style.
     return {instruction:chatInstruction(request),omittedTurns:0,clippedMessages:0,
-      data:{chat:true,note:redact(request.note),decisions:request.decisions.map(d=>({id:d.id,text:redact(d.text)})),turns:request.turns.map(t=>({id:t.id,user:redact(t.user),assistant:redact(t.assistant)})),selection:redact(request.selection),action:'ask',id:request.id,question:redact(request.question)}};
+      data:{chat:true,note:redact(request.note),decisions:request.decisions.map(d=>({id:d.id,text:redact(d.text)})),turns:request.turns.map(t=>({id:t.id,user:redact(t.user),assistant:redact(t.assistant)})),selection:redact(request.selection),...(request.editor?{editor:redact(request.editor)}:{}),action:'ask',id:request.id,question:redact(request.question)}};
   }
   let remaining = 8000, clippedMessages = 0;
   const turns = request.turns.slice(-4).map(turn => {

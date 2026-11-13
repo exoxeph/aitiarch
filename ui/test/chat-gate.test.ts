@@ -72,6 +72,16 @@ describe('an echoed manifest line',()=>{
   expect(run(split('Sources this turn: none\n\nNo note text was included here, so I cannot say. ',4)).shown).toBe('No note text was included here, so I cannot say. ');
   expect(run(['Sour','ces ',"are lists of things. Here we go "]).shown).toBe('Sources are lists of things. Here we go '); // an ordinary reply that merely starts alike is released
  });
+ it('drops the editor line that now starts a message ("Open note: ..."), whole or part-way, and keeps a reply that merely starts alike',()=>{
+  const line='Open note: Plan (4,204 chars). Selection: lines 3-5 (210 chars). Cursor section: Plan > Risks.';
+  expect(dropManifestEcho(line+'\n\nThe paragraph says two things.')).toBe('The paragraph says two things.');
+  expect(dropManifestEcho('  '+line+'\r\n\nIndented echo.')).toBe('Indented echo.');
+  expect(dropManifestEcho('Open no')).toBe('');expect(dropManifestEcho('Open note: Plan (4,20')).toBe('');
+  expect(dropManifestEcho('Open questions remain in the plan.')).toBe('Open questions remain in the plan.');
+  expect(run(split(line+'\n\nThe paragraph says two things. ',4)).shown).toBe('The paragraph says two things. ');
+  expect(run(['Open ','questions remain in the plan. Here we go ']).shown).toBe('Open questions remain in the plan. Here we go ');
+  expect(dropManifestEcho('Sources this turn: none\n\nOlder conversations may still echo the old line.')).toBe('Older conversations may still echo the old line.');
+ });
 });
 describe('echoes',()=>{
  it('finds a 100-character run of the instruction, ignoring spacing',()=>{
