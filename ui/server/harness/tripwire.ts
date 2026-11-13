@@ -2,7 +2,7 @@
 // (changed, added, removed). Restoring is a separate, explicit action. The app's own state (chat sidecars, ink, ledger, ui-state, caches) and
 // .git are not watched: the app itself may write them during a run. Files over the cap are hashed but not copied, so they cannot be restored.
 import {createHash} from 'node:crypto';
-import {copyFile,lstat,mkdir,readdir,readFile,realpath,rm} from 'node:fs/promises';
+import {copyFile,lstat,mkdir,readdir,readFile,realpath,rename,rm,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import type {Drift} from './snapshot.ts';
 export const TRIPWIRE_FILE_CAP=8*1024*1024;
@@ -11,10 +11,23 @@ const sha=(b:Buffer)=>createHash('sha256').update(b).digest('hex');
  *  target is a plain file, and the parent's real path is inside `root`. Missing parents are fine (they will be created as real folders). */
 export async function safeTarget(root:string,rel:string):Promise<boolean>{
  const parts=rel.split('/');if(parts.some(p=>!p||p==='.'||p==='..'))return false;let cur=root;
- for(let i=0;i<parts.length;i++){cur=path.join(cur,parts[i]);const s=await lstat(cur).catch(()=>null);if(!s)break;if(s.isSymbolicLink())return false;if(i<parts.length-1?!s.isDirectory():!s.isFile())return false;}
+ for(let i=0;i<parts.length;i++){cur=path.join(cur,parts[i]);const s=await lstat(cur).catch(()=>null);if(!s)break;if(s.isSymbolicLink())return false;if(i<parts.length-1?!s.isDirectory():!s.isFile()||s.nlink!==1)return false;}
  return true;
 }
 async function parentInside(root:string,file:string){const real=await realpath(path.dirname(file)),r=path.relative(await realpath(root),real);return !r.startsWith('..')&&!path.isAbsolute(r);}
+/**
+ * Writes `rel` under `root` without ever reusing an existing file or following a link: a new file is created exclusively next to the target, the
+ * real parent is checked to be inside `root` again, and the new file is renamed over the target. Returns false (and writes nothing) when unsafe.
+ */
+export async function safeWrite(root:string,rel:string,data:Buffer):Promise<boolean>{
+ if(!await safeTarget(root,rel))return false;
+ const to=path.join(root,...rel.split('/'));await mkdir(path.dirname(to),{recursive:true});
+ if(!await safeTarget(root,rel)||!await parentInside(root,to))return false;
+ const temp=to+'.'+process.pid+'.'+Math.random().toString(36).slice(2)+'.tmp';
+ await writeFile(temp,data,{flag:'wx'});
+ try{if(!await parentInside(root,to))throw new Error('moved');await rename(temp,to);}catch{await rm(temp,{force:true});return false;}
+ return true;
+}
 /** Paths the app writes for itself. */
 export const appOwned=(rel:string)=>{const top=rel.split('/')[0];return ['.git','chat','ink','.cache','node_modules'].includes(top)||/^(?:ui-state\.json|ledger\.json)/i.test(top)||/\.(?:tmp|lock)$/i.test(rel);};
 async function walk(root:string,rel=''):Promise<string[]>{
@@ -44,10 +57,9 @@ export async function folderChanges(root:string,before:Record<string,string>):Pr
 /** Puts back changed and removed files from the copy taken before the run and removes added ones. Only what the change list names. */
 export async function restoreFolder(root:string,backup:string,changes:Drift){
  for(const rel of [...changes.changed,...changes.removed]){
-  if(rel.split('/').some(p=>p==='..'||!p))continue;const from=path.join(backup,...rel.split('/')),to=path.join(root,...rel.split('/'));
+  if(rel.split('/').some(p=>p==='..'||!p))continue;const from=path.join(backup,...rel.split('/'));
   try{await lstat(from);}catch{continue;} // too large to keep a copy of: cannot restore, the change list still names it
-  if(!await safeTarget(root,rel))continue; // never write through a link or junction
-  await mkdir(path.dirname(to),{recursive:true});if(!await parentInside(root,to))continue;await copyFile(from,to);
+  await safeWrite(root,rel,await readFile(from)); // never through a link, a junction or a hard-linked file
  }
  for(const rel of changes.added){if(!await safeTarget(root,rel))continue;const to=path.join(root,...rel.split('/'));const s=await lstat(to).catch(()=>null);if(s&&s.isFile())await rm(to);}
 }

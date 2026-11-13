@@ -7,7 +7,7 @@ import {lstat,mkdir,readdir,readFile,realpath,rm,rmdir,writeFile} from 'node:fs/
 import path from 'node:path';
 import {promisify} from 'node:util';
 import {harnessDenied} from '../../shared/harness.ts';
-import {safeTarget} from './tripwire.ts';
+import {safeTarget,safeWrite} from './tripwire.ts';
 const exec=promisify(execFile);
 export const SNAPSHOT_LIMITS=Object.freeze({fileBytes:262144,files:5000,totalBytes:50*1024*1024});
 export interface SnapshotResult {files:number;bytes:number;changed:number;hash:string;skipped:{denied:number;links:number;tooLarge:number;overCap:number;notFile:number}}
@@ -59,7 +59,7 @@ export async function syncSnapshot(repo:string,dest:string,manifestFile:string,l
   if(!await safeTarget(dest,rel)){await rm(target,{force:true});if(!await safeTarget(dest,rel))throw new Error('The snapshot folder contains a link.');}
   let same=old[rel]===h;
   if(same){try{same=sha(await readFile(target))===h;}catch{same=false;}}
-  if(!same){await mkdir(path.dirname(target),{recursive:true});await writeFile(target,data.get(rel)!);changed++;}
+  if(!same){if(!await safeWrite(dest,rel,data.get(rel)!))throw new Error('The snapshot folder contains a link.');changed++;}
  }
  await writeFile(manifestFile,JSON.stringify({v:1,files}));
  return {files:Object.keys(files).length,bytes,changed,hash:sha(JSON.stringify(Object.entries(files).sort())),skipped};
