@@ -10,6 +10,8 @@ import {redact} from '../providers/index.ts';
 /** How many lines either side of the named line a quote may start, and how many lines it may span. */
 export const LINE_SLACK=3,QUOTE_LINES=8,FILE_CAP=1024*1024;
 
+/** A repo file's text, by the same rules as claim checking: inside the repo, no link, nothing a session must not see. Null otherwise. */
+export const readRepoFile=(root:string,rel:string)=>realFile(root,rel);
 async function realFile(root:string,rel:string):Promise<string|null>{
  // Windows aliases are refused outright: 8.3 short names (~), trailing dots or spaces, and alternate data streams (:).
  if(!rel||rel.length>400||path.isAbsolute(rel)||/^[A-Za-z]:/.test(rel)||rel.split('/').some(p=>!p||p==='.'||p==='..'||/[. ]$/.test(p)||p.includes('~'))||harnessDenied(rel)||/[\u0000-\u001f<>:"|?*]/.test(rel))return null;

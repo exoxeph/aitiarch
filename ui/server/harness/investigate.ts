@@ -14,7 +14,7 @@ import {StreamGate} from '../chat/gate.ts';
 import {redact} from '../providers/index.ts';
 import {killTree,spawnInvestigateSession} from '../providers/launcher.ts';
 import {sessionUsage} from './claude-session.ts';
-import {finishFileReply} from './file-claims.ts';
+import {finishFileReply,readRepoFile} from './file-claims.ts';
 import type {SessionIndex} from './session-index.ts';
 import {snapshotDrift,syncSnapshot,SNAPSHOT_LIMITS,type Drift} from './snapshot.ts';
 import {captureFolder,folderChanges,restoreFolder} from './tripwire.ts';
@@ -37,7 +37,10 @@ export const INVESTIGATE_INSTRUCTION=[
 export type InvestigateCode='not_investigation'|'invalid'|'repo'|'plan_required'|'plan_changed'|'busy'|'turn_limit'|'outside_path'|'tool_refused'|'isolation'|'budget'|'cancelled'|'timeout'|'provider_failed'|'nothing_to_restore';
 export class InvestigateError extends Error {code:InvestigateCode;constructor(code:InvestigateCode){super(code);this.code=code;}}
 export interface Plan {session:string;repo:string;files:number;bytes:number;skipped:Record<string,number>;excluded:string[];budgetUsd:number;turnLimit:number;snapshotHash:string;planHash:string}
-export interface ToolStep {tool:string;target:string;ok:boolean|null;denial?:string}
+export interface ToolStep {tool:string;target:string;ok:boolean|null;denial?:string;/** Lines in the tool's result (the result itself never leaves the server). */lines?:number}
+/** What a turn had done when it was stopped: the text shown so far, the steps and the model turns used. */
+export interface PartialTurn {text:string;steps:ToolStep[];turns:number}
+export interface InvestigateTurn {id:string;question:string;at:string;message?:InvestigateMessage;stopped?:{code:InvestigateCode;partial:PartialTurn}}
 export interface Tripwire {notebook:Drift;snapshot:Drift}
 export interface InvestigateMessage {id:string;body:string;claims:ChatClaim[];citation?:CitationIssue;usage:ReturnType<typeof sessionUsage>;costUsd:number|null;turns:number;steps:ToolStep[];permissionDenials:string[];tripwire:Tripwire;unknownEvents:number}
 export type InvestigateEvent=
@@ -45,11 +48,16 @@ export type InvestigateEvent=
  |{type:'step';index:number;step:ToolStep}
  |{type:'step_result';index:number;ok:boolean;denial?:string}
  |{type:'delta';text:string}
+ /** The model's thinking as the CLI streams it, through the same gate as the answer (redacted, stops at a recital of the instruction). */
+ |{type:'thinking';text:string}
+ /** Model turns used so far. */
+ |{type:'progress';turns:number}
  |{type:'complete';message:InvestigateMessage}
- |{type:'error';code:InvestigateCode;tripwire?:Tripwire};
+ |{type:'error';code:InvestigateCode;tripwire?:Tripwire;partial?:PartialTurn};
 
 const TOOLS=new Set(['Read','Grep','Glob']);
-interface StreamHooks {cwd:string;turnLimit:number;onText:(t:string)=>void;onStep:(i:number,s:ToolStep)=>void;onStepResult:(i:number,ok:boolean,denial?:string)=>void;onStarted:()=>void}
+interface StreamHooks {cwd:string;turnLimit:number;onText:(t:string)=>void;onStep:(i:number,s:ToolStep)=>void;onStepResult:(i:number,ok:boolean,denial?:string)=>void;onStarted:()=>void;
+ onThinking?:(t:string)=>void;onTurn?:(turns:number)=>void}
 /** The CLI's stream for one investigation turn, read event by event. Anything outside the allowed shape stops the run. */
 export class InvestigateStream {
  private decoder=new StringDecoder('utf8');private pending='';private inited=false;private ids=new Set<string>();private byId=new Map<string,number>();private o:StreamHooks;
@@ -88,14 +96,14 @@ export class InvestigateStream {
   }
   if(!this.inited){if(t==='assistant'||t==='user'||t==='result'||t==='stream_event')throw new InvestigateError('isolation');this.unknown++;return;}
   if(t==='assistant'){
-   const m=e.message;if(m&&typeof m.id==='string'&&!this.ids.has(m.id)){this.ids.add(m.id);if(this.ids.size>this.o.turnLimit)throw new InvestigateError('turn_limit');}
+   const m=e.message;if(m&&typeof m.id==='string'&&!this.ids.has(m.id)){this.ids.add(m.id);if(this.ids.size>this.o.turnLimit)throw new InvestigateError('turn_limit');this.o.onTurn?.(this.ids.size);}
    for(const c of Array.isArray(m?.content)?m.content:[])if(c?.type==='tool_use'&&!(typeof c.id==='string'&&this.byId.has(c.id)))this.tool(c);
    return;
   }
   if(t==='user'){
    for(const c of Array.isArray(e.message?.content)?e.message.content:[])if(c?.type==='tool_result'){
     const i=this.byId.get(c.tool_use_id);if(i===undefined)continue;const ok=c.is_error!==true,text=typeof c.content==='string'?c.content:JSON.stringify(c.content??'');
-    this.steps[i].ok=ok;if(!ok)this.steps[i].denial=redact(text).slice(0,200);this.o.onStepResult(i,ok,this.steps[i].denial);
+    this.steps[i].ok=ok;this.steps[i].lines=text?text.split('\n').length:0;if(!ok)this.steps[i].denial=redact(text).slice(0,200);this.o.onStepResult(i,ok,this.steps[i].denial);
    }
    return;
   }
@@ -103,6 +111,7 @@ export class InvestigateStream {
    const x=e.event;
    if(x?.type==='content_block_start'&&x.content_block?.type==='tool_use'&&!TOOLS.has(x.content_block.name))throw new InvestigateError('tool_refused');
    if(x?.type==='content_block_delta'&&x.delta?.type==='text_delta'&&typeof x.delta.text==='string')this.o.onText(x.delta.text);
+   if(x?.type==='content_block_delta'&&x.delta?.type==='thinking_delta'&&typeof x.delta.thinking==='string')this.o.onThinking?.(x.delta.thinking);
    return;
   }
   if(t==='result'){
@@ -129,15 +138,37 @@ export class InvestigateService {
  snapshotFolder(repo:string){const base=path.join(this.o.dir,'snapshots',sha(repo.toLowerCase()).slice(0,16));return {base,files:path.join(base,'files'),manifest:path.join(base,'manifest.json')};}
  async snapshotCwd(repo:string){const d=this.snapshotFolder(repo);await mkdir(d.files,{recursive:true});return realpath(d.files);}
  private async session(id:string):Promise<HarnessSession&{repo:string}>{const s=await this.o.index.get(id);if(!s||s.mode!=='investigate'||!s.repo)throw new InvestigateError('not_investigation');return s as HarnessSession&{repo:string};}
- /** A new investigation of a repo folder: an existing, real (not linked) git work tree outside Aitiarch's own folder. */
- async create(label:string,repo:unknown){
+ /** The repo folder chosen for this project (once; it can be changed). Kept next to the session index, outside the repo. */
+ async repo():Promise<string|null>{try{const d=JSON.parse(await readFile(path.join(this.o.dir,'repo.json'),'utf8'));return d?.v===1&&typeof d.repo==='string'?d.repo:null;}catch{return null;}}
+ async chooseRepo(repo:unknown){const real=await this.validRepo(repo);await mkdir(this.o.dir,{recursive:true});const f=path.join(this.o.dir,'repo.json');await writeFile(f+'.tmp',JSON.stringify({v:1,repo:real}));await rename(f+'.tmp',f);return real;}
+ /** A new investigation of the project's repo folder (or the one given). */
+ async create(label:string,repo?:unknown){
+  const chosen=repo??await this.repo();if(chosen==null)throw new InvestigateError('repo');
+  return this.o.index.create({mode:'investigate',label,repo:await this.validRepo(chosen)});
+ }
+ /** An existing, real (not linked) git work tree outside Aitiarch's own folder. */
+ private async validRepo(repo:unknown):Promise<string>{
   if(typeof repo!=='string'||!path.isAbsolute(repo))throw new InvestigateError('repo');
   let real:string;try{real=await realpath(repo);if(!(await stat(real)).isDirectory())throw 0;}catch{throw new InvestigateError('repo');}
   if(path.resolve(real).toLowerCase()!==path.resolve(repo).toLowerCase())throw new InvestigateError('repo'); // reached through a link: refuse
   const inHarness=path.relative(this.o.dir,real);if(!inHarness||!inHarness.startsWith('..')&&!path.isAbsolute(inHarness))throw new InvestigateError('repo');
   try{const top=(await exec('git',['-c','core.fsmonitor=false','rev-parse','--show-toplevel'],{cwd:real,windowsHide:true,timeout:10000,env:gitEnv()})).stdout.trim();
    if(path.resolve(top).toLowerCase()!==real.toLowerCase())throw 0;}catch{throw new InvestigateError('repo');}
-  return this.o.index.create({mode:'investigate',label,repo:real});
+  return real;
+ }
+ /** The turns of an investigation (question, answer or how it stopped), kept outside the repo so a reloaded panel shows them. */
+ private turnsFile(id:string){if(!/^[0-9a-f-]{36}$/.test(id))throw new InvestigateError('not_investigation');return path.join(this.o.dir,'investigations',id+'.json');}
+ async turns(id:string):Promise<InvestigateTurn[]>{await this.session(id);try{const d=JSON.parse(await readFile(this.turnsFile(id),'utf8'));return d?.v===1&&Array.isArray(d.turns)?d.turns:[];}catch{return [];}}
+ private async saveTurn(id:string,turn:InvestigateTurn){
+  const all=await this.turns(id).catch(()=>[] as InvestigateTurn[]);all.push(turn);while(all.length>100)all.shift();
+  const f=this.turnsFile(id);await mkdir(path.dirname(f),{recursive:true});await writeFile(f+'.tmp',JSON.stringify({v:1,turns:all}));await rename(f+'.tmp',f);
+ }
+ /** A read-only, redacted excerpt of the real repo file around a line (for a file claim). Same rules as claim checking. */
+ async excerpt(id:string,rel:unknown,line:unknown){
+  const s=await this.session(id);if(typeof rel!=='string'||!Number.isSafeInteger(line)||(line as number)<1)throw new InvestigateError('invalid');
+  const text=await readRepoFile(await realpath(s.repo),rel.replace(/\\/g,'/'));if(text===null)throw new InvestigateError('invalid');
+  const lines=text.replace(/^﻿/,'').split(/\r?\n/),from=Math.max(1,(line as number)-6),to=Math.min(lines.length,(line as number)+6);
+  return {path:rel,line,from,lines:lines.slice(from-1,to).map(l=>redact(l).slice(0,400))};
  }
  /** Syncs the copy and returns what the card shows. Its hash is what the user confirms. */
  async plan(id:string):Promise<Plan>{
@@ -153,34 +184,40 @@ export class InvestigateService {
   if(this.running.has(id))throw new InvestigateError('busy');
   const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});this.running.set(id,controller);
   const d=this.snapshotFolder(s.repo),backup=path.join(this.o.dir,'tripwire',id,'before');let before:Record<string,string>|null=null,started=false,turnDir:string|undefined;
+  let stream:InvestigateStream|undefined,shown='';const asked=redact(question.trim()),at=new Date().toISOString();
   const tripwire=async():Promise<Tripwire|undefined>=>{if(!before)return undefined;const notebook=await folderChanges(this.o.notebook,before),snapshot=await snapshotDrift(d.files,d.manifest);this.last.set(id,{changes:notebook,backup});await this.savePending(id,notebook);return {notebook,snapshot};};
   try{
    await syncSnapshot(s.repo,d.files,d.manifest); // re-sync by hash before every turn
    before=await captureFolder(this.o.notebook,backup);
    const cwd=await realpath(d.files);turnDir=await mkdtemp(path.join(this.o.dir,'turn-'));const file=path.join(turnDir,'system.md');await writeFile(file,INVESTIGATE_INSTRUCTION,{mode:0o600});
-   const gate=new StreamGate({instruction:INVESTIGATE_INSTRUCTION});
-   const stream=new InvestigateStream({cwd,turnLimit:this.limits.turns,onStarted:()=>{started=true;},
-    onText:t=>{const delta=gate.push(t);if(delta)emit({type:'delta',text:delta});},onStep:(index,step)=>emit({type:'step',index,step}),onStepResult:(index,ok,denial)=>emit({type:'step_result',index,ok,...(denial?{denial}:{})})});
+   const gate=new StreamGate({instruction:INVESTIGATE_INSTRUCTION}),thinking=new StreamGate({instruction:INVESTIGATE_INSTRUCTION});
+   stream=new InvestigateStream({cwd,turnLimit:this.limits.turns,onStarted:()=>{started=true;},
+    onText:t=>{const delta=gate.push(t);if(delta){shown+=delta;emit({type:'delta',text:delta});}},onStep:(index,step)=>emit({type:'step',index,step}),onStepResult:(index,ok,denial)=>emit({type:'step_result',index,ok,...(denial?{denial}:{})}),
+    onThinking:t=>{const delta=thinking.push(t);if(delta)emit({type:'thinking',text:delta});},onTurn:turns=>emit({type:'progress',turns})});
    emit({type:'start',id});
    await new Promise<void>((resolve,reject)=>{
     const child=spawnInvestigateSession({provider:'claude',command:this.o.command,prefixArgs:this.o.prefixArgs},{id:s.id,resume:s.turns>0,addendumFile:file,budgetUsd:this.limits.budgetUsd,...(this.o.model?{model:this.o.model}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
     let failure:InvestigateError|undefined,killing:Promise<void>=Promise.resolve(),bytes=0;
     const stop=(code:InvestigateCode)=>{if(failure)return;failure=new InvestigateError(code);if(child.pid)killing=killTree(child.pid);};
     const timer=setTimeout(()=>stop('timeout'),this.limits.timeoutMs),onAbort=()=>stop('cancelled');controller.signal.addEventListener('abort',onAbort,{once:true});
-    child.stdout.on('data',(b:Buffer)=>{if(failure)return;bytes+=b.length;if(bytes>4*1024*1024)return stop('budget');try{stream.push(b);}catch(e){stop(e instanceof InvestigateError?e.code:'isolation');}});
+    child.stdout.on('data',(b:Buffer)=>{if(failure)return;bytes+=b.length;if(bytes>4*1024*1024)return stop('budget');try{stream!.push(b);}catch(e){stop(e instanceof InvestigateError?e.code:'isolation');}});
     child.stderr.on('data',()=>{});child.stdin.on('error',()=>{});
     child.on('error',()=>{failure??=new InvestigateError('provider_failed');});
     child.once('close',async code=>{clearTimeout(timer);controller.signal.removeEventListener('abort',onAbort);await killing;
      if(failure)return reject(failure);
-     try{stream.finish();}catch(e){return reject(e);}
+     try{stream!.finish();}catch(e){return reject(e);}
      if(code!==0)return reject(new InvestigateError('provider_failed'));resolve();});
-    child.stdin.end(redact(question.trim()));
+    child.stdin.end(asked);
    });
    const r=stream.result!,reply=await finishFileReply(r.text,s.repo);
-   emit({type:'complete',message:{id:randomId(),body:reply.body,claims:reply.claims,...(reply.citation?{citation:reply.citation}:{}),usage:sessionUsage(r.usage),costUsd:r.cost,turns:stream.turns,steps:stream.steps,permissionDenials:r.denials,tripwire:(await tripwire())!,unknownEvents:stream.unknown}});
+   const message:InvestigateMessage={id:randomId(),body:reply.body,claims:reply.claims,...(reply.citation?{citation:reply.citation}:{}),usage:sessionUsage(r.usage),costUsd:r.cost,turns:stream.turns,steps:stream.steps,permissionDenials:r.denials,tripwire:(await tripwire())!,unknownEvents:stream.unknown};
+   await this.saveTurn(id,{id:message.id,question:asked,at,message}).catch(()=>{});
+   emit({type:'complete',message});
   }catch(e){
    const code:InvestigateCode=e instanceof InvestigateError?e.code:'provider_failed';
-   const t=await tripwire().catch(()=>undefined);emit({type:'error',code,...(t?{tripwire:t}:{})});
+   const t=await tripwire().catch(()=>undefined),partial:PartialTurn={text:shown,steps:stream?.steps??[],turns:stream?.turns??0};
+   await this.saveTurn(id,{id:randomId(),question:asked,at,stopped:{code,partial}}).catch(()=>{});
+   emit({type:'error',code,partial,...(t?{tripwire:t}:{})});
   }finally{
    if(started)await this.o.index.touch(id).catch(()=>{}); // the CLI knows this id now: the next turn resumes
    if(turnDir)await rm(turnDir,{recursive:true,force:true});
@@ -206,5 +243,7 @@ export class InvestigateService {
   }catch{return null;}
  }
  /** Removes the session's tripwire copy (Delete conversation). */
- async forget(id:string){this.plans.delete(id);this.last.delete(id);await rm(path.join(this.o.dir,'tripwire',id),{recursive:true,force:true});}
+ async forget(id:string){this.plans.delete(id);this.last.delete(id);await rm(path.join(this.o.dir,'tripwire',id),{recursive:true,force:true});await rm(this.turnsFile(id),{force:true});}
+ /** The plan this session last confirmed is still the one the card would show (so the UI knows whether to ask again). */
+ async needsPlan(id:string){const s=await this.session(id);return !s.confirmed;}
 }

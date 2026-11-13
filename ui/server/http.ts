@@ -323,6 +323,7 @@ export function createApp(opts: AppOptions) {
           const removed=await removeTranscript(cwd,s.id);await h.questions.remove(s.id);await h.index.remove(s.id);if(s.mode==='investigate')await h.investigate.forget(s.id);
           return json(res,200,{removed});
         }
+        if(url.pathname==='/api/harness/investigate/repo')return json(res,200,{repo:await h.investigate.chooseRepo(b?.repo)});
         if(url.pathname==='/api/harness/investigate/plan')return json(res,200,await h.investigate.plan(b?.session));
         if(url.pathname==='/api/harness/investigate/confirm')return json(res,200,await h.investigate.confirm(b?.session,b?.planHash));
         if(url.pathname==='/api/harness/investigate/cancel'){h.investigate.cancel(b?.session);return json(res,200,{});}
