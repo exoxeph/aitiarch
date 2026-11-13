@@ -45,7 +45,7 @@ describe('finishFileReply',()=>{
 describe('quoteLine',()=>{
  it('prefers the named line, falls back to the whole file, and says nowhere only when it is nowhere',()=>{
   expect(quoteLine(SRC,3,'const sessions = new Map();')).toBe(3);expect(quoteLine(SRC,99,'const sessions = new Map();')).toBe(3);
-  expect(quoteLine(SRC,1,'sessions.get(name)')).toBe(5);expect(quoteLine(SRC,3,'a paraphrase that is nowhere')).toBeNull();
+  expect(quoteLine('filler\n'.repeat(20)+SRC,1,'sessions.get(name)')).toBe(25);expect(quoteLine(SRC,3,'a paraphrase that is nowhere')).toBeNull();
  });
 });
 
