@@ -3,7 +3,7 @@ import { execFile, spawn, type SpawnOptionsWithoutStdio } from 'node:child_proce
 import { realpathSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { chatSessionArguments,claudeArguments,investigatorArguments } from './claude-arguments.ts';
+import { chatSessionArguments,claudeArguments,investigateSessionArguments,investigatorArguments } from './claude-arguments.ts';
 import type { Configuration, ProviderName } from './index.ts';
 
 export function assertLaunch(provider: ProviderName, mode: 'metadata' | 'isolated', args: readonly string[], cwd?: string): void {
@@ -60,6 +60,19 @@ export function spawnChatSession(config:Target,profile:{id:string;resume:boolean
  const cwd=realpathSync(options.cwd);if(cwd!==realpathSync(registeredCwd)||readdirSync(cwd).length)reject();
  const rel=path.relative(cwd,realpathSync(profile.addendumFile));if(!rel.startsWith('..')&&!path.isAbsolute(rel))reject();
  return spawn(config.command,[...(config.prefixArgs??[]),...chatSessionArguments(profile)],{...options,cwd,shell:false,windowsHide:true,stdio:'pipe'});
+}
+/** An investigation turn: arguments built here, cwd must be the registered snapshot folder (not empty: it holds the copy), the instruction file outside it. */
+export function spawnInvestigateSession(config:Target,profile:{id:string;resume:boolean;addendumFile:string;model?:string;budgetUsd:number},options:SpawnOptionsWithoutStdio&{cwd:string},registeredCwd:string){
+ assertTarget(config);
+ const reject=()=>{throw new Error('Investigation launch rejected.');};
+ if(config.provider!=='claude')reject();
+ if(!config.prefixArgs?.length&&(!path.isAbsolute(config.command)||/\.(?:cmd|bat|ps1)$/i.test(config.command)))reject();
+ if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(profile.id)||profile.model!==undefined&&!/^[a-z0-9.-]{1,60}$/i.test(profile.model)||!path.isAbsolute(profile.addendumFile))reject();
+ if(!Number.isFinite(profile.budgetUsd)||profile.budgetUsd<=0||profile.budgetUsd>5)reject();
+ if(!path.isAbsolute(options.cwd))reject();
+ const cwd=realpathSync(options.cwd);if(cwd!==realpathSync(registeredCwd))reject();
+ const rel=path.relative(cwd,realpathSync(profile.addendumFile));if(!rel.startsWith('..')&&!path.isAbsolute(rel))reject();
+ return spawn(config.command,[...(config.prefixArgs??[]),...investigateSessionArguments(profile)],{...options,cwd,shell:false,windowsHide:true,stdio:'pipe'});
 }
 export async function isolatedOutput(config: Target, args: string[], cwd: string, env: NodeJS.ProcessEnv, input: string): Promise<string> {
   assertTarget(config);

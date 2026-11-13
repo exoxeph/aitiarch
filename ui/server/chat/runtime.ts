@@ -68,8 +68,9 @@ export class ChatRuntime {
    if(!this.harness)throw new ChatError('disabled');
    session=await this.harness.index.get(input.session);
    if(!session||session.mode!=='chat'||session.note!==undefined&&session.note!==input.path)throw new ChatError('invalid_chat');
-   const keep=(x:ContextSource)=>x.id==='N1'?!harnessDenied(input.path):x.id.startsWith('O')?!harnessDenied(x.label):true;
-   excluded=sources.filter(x=>!keep(x)).map(x=>x.id==='N1'?input.path:x.label);
+   // The note the chat is open on is the user's own choice (the one-off chat sees it too), so it is never filtered; other notes are.
+   const keep=(x:ContextSource)=>x.id.startsWith('O')?!harnessDenied(x.label):true;
+   excluded=sources.filter(x=>!keep(x)).map(x=>x.label);
    sources.splice(0,sources.length,...sources.filter(keep));
   }
   // The chat node's persona always rides along; its skills only when something loaded. Fixed here, so the review shows what is sent.

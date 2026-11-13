@@ -11,6 +11,10 @@ export interface HarnessSession {
  created:string;lastUsed:string;
  /** Completed turns. 0 means the next turn starts the session (--session-id); later turns resume it (--resume). */
  turns:number;
+ /** An investigation: the absolute folder of the repo the user picked. */
+ repo?:string;
+ /** An investigation: the hash of the scope and cost plan the user confirmed. No turn runs without it. */
+ confirmed?:string;
 }
 export const MAX_SESSIONS=200;
 export const validSessionId=(v:unknown):v is string=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v);
@@ -19,7 +23,8 @@ export const cleanLabel=(v:unknown):string|null=>{if(typeof v!=='string')return 
 export function validSession(v:unknown):v is HarnessSession{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;const s=v as HarnessSession;
  return validSessionId(s.id)&&cleanLabel(s.label)===s.label&&(s.mode==='chat'||s.mode==='investigate')&&(s.note===undefined||typeof s.note==='string'&&s.note.length<=400)
-  &&[s.created,s.lastUsed].every(t=>typeof t==='string'&&Number.isFinite(Date.parse(t)))&&Number.isSafeInteger(s.turns)&&s.turns>=0;
+  &&[s.created,s.lastUsed].every(t=>typeof t==='string'&&Number.isFinite(Date.parse(t)))&&Number.isSafeInteger(s.turns)&&s.turns>=0
+  &&(s.repo===undefined||typeof s.repo==='string'&&s.repo.length<=1000)&&(s.confirmed===undefined||typeof s.confirmed==='string'&&/^[0-9a-f]{64}$/.test(s.confirmed));
 }
 
 /**

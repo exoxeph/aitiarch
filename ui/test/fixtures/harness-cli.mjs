@@ -9,6 +9,24 @@ const at = args.indexOf('--append-system-prompt-file'), addendum = at >= 0 ? rea
 const id = args[args.indexOf(args.includes('--resume') ? '--resume' : '--session-id') + 1];
 appendFileSync(record, JSON.stringify({ args: args.map((a, i) => i === at + 1 ? '<file>' : a), stdin, cwd: process.cwd(), addendum, addendumOutsideCwd: at >= 0 && path.relative(process.cwd(), args[at + 1]).startsWith('..') }) + '\n');
 const out = (e) => process.stdout.write(JSON.stringify(e) + '\n');
+if (args[args.indexOf('--tools') + 1] === 'Read,Grep,Glob') { // an investigation turn
+  const [kind, extra] = scenario.split('|');
+  out({ type: 'system', subtype: 'init', session_id: id, tools: kind === 'inv-tools-extra' ? ['Read', 'Grep', 'Glob', 'Bash'] : ['Read', 'Grep', 'Glob'], mcp_servers: [], plugins: [], permissionMode: 'dontAsk' });
+  const tool = (msg, toolId, name, input) => { out({ type: 'assistant', message: { id: msg, content: [{ type: 'tool_use', id: toolId, name, input }] } }); };
+  if (kind === 'inv-turns') for (let i = 0; i < 20; i++) tool('m' + i, 't' + i, 'Grep', { pattern: 'login' });
+  if (kind === 'inv-outside') tool('m1', 't1', 'Read', { file_path: path.resolve(process.cwd(), '..', '..', 'outside.txt') });
+  if (kind === 'inv-bash') out({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', name: 'Bash', input: {} } } });
+  tool('m1', 't1', 'Read', { file_path: path.join(process.cwd(), 'src', 'login.js') });
+  out({ type: 'user', message: { content: [kind === 'inv-denied' ? { type: 'tool_result', tool_use_id: 't1', is_error: true, content: 'Permission to use Read has been denied.' } : { type: 'tool_result', tool_use_id: 't1', content: '3 const sessions = new Map();' }] } });
+  if (kind === 'inv-write-snapshot') writeFileSync(path.join(process.cwd(), 'stray-from-agent.txt'), 'x');
+  if (kind === 'inv-write-notebook') writeFileSync(extra, 'tampered by the agent');
+  const text = 'Sessions live in a Map.\n<claims>[{"path":"src/login.js","line":3,"quote":"const sessions = new Map();"},{"path":"src/login.js","line":3,"quote":"Sessions are stored in a database"}]</claims>';
+  out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Sessions live in a Map. ' } } });
+  out({ type: 'assistant', message: { id: 'm2', content: [{ type: 'text', text }] } });
+  out({ type: 'rate_limit_event' });
+  out({ type: 'result', subtype: 'success', is_error: false, result: text, num_turns: 2, total_cost_usd: 0.0123, usage: { input_tokens: 50, cache_creation_input_tokens: 400, cache_read_input_tokens: 3000, output_tokens: 90 }, permission_denials: kind === 'inv-denied' ? [{ tool_name: 'Read', tool_input: {} }] : [] });
+  process.exit(0);
+}
 out({ type: 'system', subtype: 'init', session_id: id, tools: scenario === 'tools' ? ['Read'] : [], mcp_servers: [], plugins: [] });
 if (scenario === 'fail-after-init') process.exit(1);
 out({ type: 'system', subtype: 'brand_new_kind', session_id: id }); // an event this version does not know: counted, not fatal

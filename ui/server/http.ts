@@ -1,6 +1,6 @@
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
 import {InvestigatorError,type InvestigatorRunner,type AgentName} from '../shared/investigator.ts';
-import {InvestigatorRuntime} from './investigator/runtime.ts';import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {PolicyGate} from './investigator/policy.ts';import {Lookups} from './investigator/lookups.ts';import {LedgerStore} from './ledger-store.ts';
+import {InvestigatorRuntime} from './investigator/runtime.ts';import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {removeTranscript} from './harness/transcripts.ts';import {PolicyGate} from './investigator/policy.ts';import {Lookups} from './investigator/lookups.ts';import {LedgerStore} from './ledger-store.ts';
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES} from '../shared/chat.ts';
 import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
@@ -179,7 +179,9 @@ export function createApp(opts: AppOptions) {
   const investigator=new InvestigatorRuntime(investigatorPolicy,new Lookups(investigatorPolicy),new LedgerStore(store.rootReal),opts.investigator??{},undefined,store.rootReal);
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
   const chatStore=new ChatStore(store.rootReal);
-  const harnessReady=opts.harness?SessionIndex.open(opts.harness.dir??harnessDirectory(store.rootReal)).then(index=>({index,runner:new ClaudeSessionRunner({command:opts.harness!.command,prefixArgs:opts.harness!.prefixArgs,model:opts.harness!.model,dir:index.dir})})):Promise.resolve(null);
+  const harnessReady=opts.harness?SessionIndex.open(opts.harness.dir??harnessDirectory(store.rootReal)).then(index=>{const h=opts.harness!;return {index,
+    runner:new ClaudeSessionRunner({command:h.command,prefixArgs:h.prefixArgs,model:h.model,dir:index.dir}),
+    investigate:new InvestigateService({index,dir:index.dir,notebook:store.rootReal,command:h.command,prefixArgs:h.prefixArgs,model:h.model})};}):Promise.resolve(null);
   const chatReady=Promise.all([inkReady,harnessReady]).then(([ink,harness])=>new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined));
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
@@ -296,16 +298,42 @@ export function createApp(opts: AppOptions) {
     }
     // Harness chat sessions: the app's own list for this project, a new one for a note, and a new label. Nothing here talks to the CLI.
     if(url.pathname==='/api/harness/sessions'&&req.method==='GET'){
-      const h=await harnessReady,note=url.searchParams.get('path')||undefined;if(note)await store.read(note);
-      return json(res,200,{enabled:!!h,sessions:h?await h.index.list({mode:'chat',...(note?{note}:{})}):[]});
+      const h=await harnessReady,mode=url.searchParams.get('mode')==='investigate'?'investigate' as const:'chat' as const,note=mode==='chat'?url.searchParams.get('path')||undefined:undefined;if(note)await store.read(note);
+      return json(res,200,{enabled:!!h,sessions:h?await h.index.list({mode,...(note?{note}:{})}):[]});
     }
     if(url.pathname.startsWith('/api/harness/sessions/')&&req.method==='PUT'){
       const h=await harnessReady,b=await readBody(req) as any;
       if(!h)return json(res,409,{error:'disabled',message:'Sessions need the Claude Code CLI. Start Aitiarch with --claude.'});
       try{
-        if(url.pathname==='/api/harness/sessions/new'){if(b?.mode!=='chat'||typeof b.path!=='string')throw new SessionIndexError('Invalid session.');await store.read(b.path);return json(res,200,await h.index.create({mode:'chat',label:b.label,note:b.path}));}
+        if(url.pathname==='/api/harness/sessions/new'){
+          if(b?.mode==='investigate')return json(res,200,await h.investigate.create(b.label,b.repo));
+          if(b?.mode!=='chat'||typeof b.path!=='string')throw new SessionIndexError('Invalid session.');await store.read(b.path);return json(res,200,await h.index.create({mode:'chat',label:b.label,note:b.path}));
+        }
         if(url.pathname==='/api/harness/sessions/rename')return json(res,200,await h.index.rename(b?.id,b?.label));
-      }catch(e){if(e instanceof SessionIndexError)return json(res,400,{error:'invalid_session',message:e.message});throw e;}
+        // Delete conversation: the CLI's transcript for this one id (under ~/.claude/projects/<its working folder>), then the app's own entry.
+        if(url.pathname==='/api/harness/sessions/delete'){
+          const s=await h.index.get(b?.id);if(!s)throw new SessionIndexError('No such session.');
+          const cwd=s.mode==='chat'?await h.runner.chatCwd():await h.investigate.snapshotCwd(s.repo!);
+          const removed=await removeTranscript(cwd,s.id);await h.index.remove(s.id);if(s.mode==='investigate')await h.investigate.forget(s.id);
+          return json(res,200,{removed});
+        }
+        if(url.pathname==='/api/harness/investigate/plan')return json(res,200,await h.investigate.plan(b?.session));
+        if(url.pathname==='/api/harness/investigate/confirm')return json(res,200,await h.investigate.confirm(b?.session,b?.planHash));
+        if(url.pathname==='/api/harness/investigate/cancel'){h.investigate.cancel(b?.session);return json(res,200,{});}
+        if(url.pathname==='/api/harness/investigate/restore')return json(res,200,{restored:await h.investigate.restore(b?.session)});
+        if(url.pathname==='/api/harness/investigate/send'){
+          const controller=new AbortController();res.on('close',()=>controller.abort());
+          await h.investigate.send(b?.session,b?.question,event=>{
+            if(!res.headersSent)res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'});
+            if(!res.destroyed)res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+          },controller.signal);
+          return res.end();
+        }
+      }catch(e){
+        if(e instanceof SessionIndexError)return json(res,400,{error:'invalid_session',message:e.message});
+        if(e instanceof InvestigateError){if(res.headersSent)return res.end();return json(res,409,{error:e.code,message:'Investigation: '+e.code.replace(/_/g,' ')+'. Nothing was run.'});}
+        throw e;
+      }
     }
     if(url.pathname==='/api/chat'&&req.method==='GET'){
       const note=url.searchParams.get('path')??'';await store.read(note);

@@ -72,6 +72,11 @@ describe('harness chat sessions',()=>{
   expect(r.review.excluded).toEqual(['notebook.md']);expect(r.review.sources.map(x=>x.label)).toEqual(['This note','other.md']);
   const [c]=await p.calls();expect(c.addendum).not.toContain('CANARY-NOTEBOOK-SESSION');expect(c.addendum).toContain('Another note.');
  });
+ it('a chat open on notebook.md itself gets that note: the user chose it; only notes the app adds are filtered',async()=>{
+  const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'x',note:'notebook.md'});
+  const r=await turn(runtime,{id:'m-nb',path:'notebook.md',question:'What is here?',context:[{moduleId:'this-note',ids:['note']}],session:s.id});
+  expect(r.review.excluded).toBeUndefined();const [c]=await p.calls();expect(c.addendum).toContain('CANARY-NOTEBOOK-SESSION');
+ });
  it('redacts secrets in every pasted source, as the one-off chat does',async()=>{
   const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'x',note:'plan.md'});
   await writeFile(path.join(p.root,'other.md'),'Another note.\npassword=hunter2-session-secret\n');
