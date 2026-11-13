@@ -66,7 +66,7 @@ try{
  const noteBytes=Buffer.byteLength(note);
  // The context is one summary line until it is opened: it names every part and its state in words, and the total.
  const summary=panel.getByRole('button',{name:/^Context/});assert.equal(await summary.getAttribute('aria-expanded'),'false');
- assert.match(await summary.innerText(),/This note \d.*Threads .*Selection off.*\d.* tokens/s,'the summary line says what is sent and what is off');
+ assert.match(await summary.innerText(),/This note \d.*Threads .*Selection none.*\d.* tokens/s,'the summary line says what is sent, and that there is no selection to send');
  assert.equal(await panel.getByRole('button',{name:/^This note/}).count(),0,'the toggles stay hidden until the summary is opened');
  await summary.click();assert.equal(await summary.getAttribute('aria-expanded'),'true');
  const noteChip=panel.getByRole('button',{name:/^This note/});
@@ -77,10 +77,10 @@ try{
  await panel.getByRole('button',{name:'Preview This note',exact:true}).click();
  assert.match(await panel.getByRole('region',{name:'Preview of This note'}).innerText(),/Chat fixture/);
  await panel.getByRole('button',{name:'Preview This note',exact:true}).click();assert.equal(await panel.getByRole('region',{name:/^Preview of/}).count(),0);
- // The selection chip is off until chosen, then counts the selected text.
+ // The selection chip is on by default (a selection is sent when there is one), and counts the selected text; it can be taken off and put back.
  await page.evaluate(()=>{const {view}=window.__aitiarch['fixture.md'],q='A unique selected sentence.',from=view.state.doc.toString().indexOf(q);view.dispatch({selection:{anchor:from,head:from+q.length}});});
- const selChip=panel.getByRole('button',{name:/^Selection/});assert.equal(await selChip.getAttribute('aria-pressed'),'false');
- await selChip.click();assert.equal(await selChip.getAttribute('aria-pressed'),'true');
+ const selChip=panel.getByRole('button',{name:/^Selection/});assert.equal(await selChip.getAttribute('aria-pressed'),'true');
+ await selChip.click();assert.equal(await selChip.getAttribute('aria-pressed'),'false');await selChip.click();assert.equal(await selChip.getAttribute('aria-pressed'),'true');
  assert.match(await selChip.innerText(),/· 9\b/,'27 bytes of selected text is 9 tokens');
 
  // ---- the first-message review card: nothing is sent until Send

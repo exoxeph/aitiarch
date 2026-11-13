@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState,type FormEvent,type KeyboardEvent} from 'react';
 import {api,ApiError} from '../api.ts';
 import type {HarnessMode,HarnessSession} from '../../shared/harness.ts';
+import {noteTitle} from './chat-stub.ts';
 
 const Caret=()=><svg className="chat-sum-caret" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6l4 4 4-4"/></svg>;
 
@@ -9,7 +10,7 @@ const Caret=()=><svg className="chat-sum-caret" viewBox="0 0 16 16" width="12" h
  * Arrow keys, Home and End move through the options and actions; Enter chooses; Escape closes and returns focus to the button (it never reaches the
  * panel, which would close the chat); Tab closes.
  */
-function ConversationMenu({label,empty,value,list,disabled,canCreate,onPick,onNew,onRename,onDelete}:{label:string;empty:string;value:string;list:HarnessSession[];disabled:boolean;canCreate:boolean;
+function ConversationMenu({label,empty,value,list,disabled,canCreate,open:openNote,onPick,onNew,onRename,onDelete}:{label:string;empty:string;value:string;list:HarnessSession[];disabled:boolean;canCreate:boolean;/** The note open now: a conversation that was started on another note says so. */open:string;
  onPick:(id:string)=>void;onNew:()=>void;onRename:()=>void;onDelete:()=>void}){
  const [open,setOpen]=useState(false);
  const root=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null),pop=useRef<HTMLDivElement>(null);
@@ -34,7 +35,7 @@ function ConversationMenu({label,empty,value,list,disabled,canCreate,onPick,onNe
   <button ref={trigger} type="button" className="chat-ctl chat-pick-trigger" aria-haspopup="listbox" aria-expanded={open} data-session={value} disabled={disabled}
    onClick={()=>setOpen(v=>!v)} onKeyDown={e=>{if(e.key==='ArrowDown'&&!open){e.preventDefault();setOpen(true);}}}>
    <span className="chat-pick-label">{label}</span>
-   <span className="chat-pick-value">{current?`${current.label} · ${current.turns} ${current.turns===1?'message':'messages'}`:empty}</span><Caret/>
+   <span className="chat-pick-value">{current?`${current.label} · ${current.turns} ${current.turns===1?'message':'messages'}${current.note&&current.note!==openNote?` · started on ${noteTitle(current.note)}`:''}`:empty}</span><Caret/>
   </button>
   {open&&<div className="chat-pick-pop" ref={pop} onKeyDown={onKey}>
    <div role="listbox" aria-label={label}>
@@ -56,19 +57,27 @@ function ConversationMenu({label,empty,value,list,disabled,canCreate,onPick,onNe
  * Claude Code session the app keeps for this note. An investigation is a Claude Code session that reads a copy of the project's repo folder (chosen
  * once per project). Shown only when the Claude Code CLI is configured.
  */
-export function ChatSessions({path,value,onChange,disabled,refresh,kind,onKind}:{path:string;value:string;onChange:(id:string)=>void;disabled:boolean;refresh:number;kind:HarnessMode;onKind:(k:HarnessMode)=>void}){
+export function ChatSessions({path,value,onChange,disabled,refresh,kind,onKind,carry}:{path:string;value:string;onChange:(id:string,session?:HarnessSession)=>void;disabled:boolean;refresh:number;kind:HarnessMode;onKind:(k:HarnessMode)=>void;
+ /** A conversation that followed the person here from the note it was started on: it is listed with this note's own, so it can be seen, kept or left. */
+ carry?:{id:string;home:string}}){
  const [enabled,setEnabled]=useState(false),[list,setList]=useState<HarnessSession[]>([]),[naming,setNaming]=useState<string|null>(null),[notice,setNotice]=useState(''),[deleting,setDeleting]=useState(false);
  const [repo,setRepo]=useState<string|null>(null),[repoDraft,setRepoDraft]=useState<string|null>(null);
  const field=useRef<HTMLInputElement>(null),keepButton=useRef<HTMLButtonElement>(null),repoField=useRef<HTMLInputElement>(null);
- useEffect(()=>{let off=false;api.harnessSessions(path,kind).then(r=>{if(off)return;setEnabled(r.enabled);setList(r.sessions);}).catch(()=>{if(!off)setEnabled(false);});
-  if(kind==='investigate')api.investigateRepo().then(r=>{if(!off)setRepo(r.repo);}).catch(()=>{});return()=>{off=true;};},[path,refresh,kind]);
+ useEffect(()=>{let off=false;
+  api.harnessSessions(path,kind).then(async r=>{
+   let sessions=r.sessions;
+   if(kind==='chat'&&carry&&carry.home!==path&&!sessions.some(s=>s.id===carry.id)){
+    const home=await api.harnessSessions(carry.home,'chat').catch(()=>null),found=home?.sessions.find(s=>s.id===carry.id);if(found)sessions=[found,...sessions];
+   }
+   if(off)return;setEnabled(r.enabled);setList(sessions);}).catch(()=>{if(!off)setEnabled(false);});
+  if(kind==='investigate')api.investigateRepo().then(r=>{if(!off)setRepo(r.repo);}).catch(()=>{});return()=>{off=true;};},[path,refresh,kind,carry?.id,carry?.home]);
  useEffect(()=>{if(naming!==null)field.current?.focus();},[naming]);
  useEffect(()=>{if(deleting)keepButton.current?.focus();},[deleting]);
  useEffect(()=>{if(repoDraft!==null)repoField.current?.focus();},[repoDraft]);
  if(!enabled)return null;
  const current=list.find(s=>s.id===value);
  const fail=(e:unknown)=>setNotice(e instanceof ApiError?e.message:'That did not work. Nothing was changed.');
- const create=async()=>{setNotice('');try{const s=kind==='chat'?await api.harnessSessionCall('new',{mode:'chat',path,label:`Conversation ${list.length+1}`}):await api.harnessSessionCall('new',{mode:'investigate',label:`Investigation ${list.length+1}`});setList(l=>[s,...l]);onChange(s.id);}catch(e){fail(e);}};
+ const create=async()=>{setNotice('');try{const s=kind==='chat'?await api.harnessSessionCall('new',{mode:'chat',path,label:`Conversation ${list.length+1}`}):await api.harnessSessionCall('new',{mode:'investigate',label:`Investigation ${list.length+1}`});setList(l=>[s,...l]);onChange(s.id,s);}catch(e){fail(e);}};
  const save=async(e:FormEvent)=>{e.preventDefault();if(!current||naming===null)return;setNotice('');
   try{const s=await api.harnessSessionCall('rename',{id:current.id,label:naming});setList(l=>l.map(x=>x.id===s.id?s:x));setNaming(null);}catch(err){fail(err);}};
  const chooseRepo=async(e:FormEvent)=>{e.preventDefault();if(repoDraft===null)return;setNotice('');try{const r=await api.investigateChooseRepo(repoDraft.trim());setRepo(r.repo);setRepoDraft(null);}catch(err){fail(err);}};
@@ -83,13 +92,13 @@ export function ChatSessions({path,value,onChange,disabled,refresh,kind,onKind}:
      <input ref={repoField} className="chat-ctl" aria-label="Repo folder (absolute path)" placeholder="C:\path\to\repo" value={repoDraft} onChange={e=>setRepoDraft(e.target.value)}/>
      <button type="submit" className="chat-ctl">Use this folder</button><button type="button" className="chat-ctl chat-ctl-quiet" onClick={()=>setRepoDraft(null)}>Cancel</button></form>)}
   <ConversationMenu label={kind==='chat'?'Conversation':'Investigation'} empty={kind==='chat'?'One-off (no memory)':'None selected'} value={value} list={list} disabled={disabled}
-   canCreate={!(kind==='investigate'&&!repo)} onPick={id=>{setNaming(null);setDeleting(false);onChange(id);}} onNew={()=>void create()} onRename={()=>current&&setNaming(current.label)} onDelete={()=>setDeleting(true)}/>
+   canCreate={!(kind==='investigate'&&!repo)} open={path} onPick={id=>{setNaming(null);setDeleting(false);onChange(id,list.find(s=>s.id===id));}} onNew={()=>void create()} onRename={()=>current&&setNaming(current.label)} onDelete={()=>setDeleting(true)}/>
   {current&&naming!==null&&<form className="chat-sessions-name" onSubmit={e=>void save(e)} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();setNaming(null);}}}>
    <input ref={field} className="chat-ctl" aria-label={kind==='chat'?'Conversation name':'Investigation name'} maxLength={80} value={naming} onChange={e=>setNaming(e.target.value)}/>
    <button type="submit" className="chat-ctl">Save</button><button type="button" className="chat-ctl chat-ctl-quiet" onClick={()=>setNaming(null)}>Cancel</button>
   </form>}
   {current&&deleting&&<span className="chat-sessions-delete" role="group" aria-label="Delete this conversation" onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();setDeleting(false);}}}>
-   Delete “{current.label}”? Claude's own record of it, its questions{kind==='investigate'?' and its answers':', and the replies it saved in this note\u2019s chat'} are removed too.
+   Delete “{current.label}”? Claude's own record of it, its questions{kind==='investigate'?' and its answers':current.note&&current.note!==path?', and the replies it saved in the chat of the note it was started on':', and the replies it saved in this note\u2019s chat'} are removed too.
    <button type="button" className="chat-ctl" onClick={async()=>{setNotice('');try{await api.harnessSessionDelete(current.id);setList(l=>l.filter(x=>x.id!==current.id));setDeleting(false);onChange('');}catch(e){fail(e);}}}>Delete</button>
    <button type="button" className="chat-ctl chat-ctl-quiet" ref={keepButton} onClick={()=>setDeleting(false)}>Keep</button>
   </span>}

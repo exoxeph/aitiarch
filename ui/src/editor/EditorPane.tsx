@@ -50,6 +50,8 @@ interface Props {
   onJumped?: () => void;
   onStatus: (path: string, s: SyncStatus) => void;
   onDoc: (path: string, text: string) => void;
+  /** The caret or the selection moved, or the text changed under it: the chat panel keeps its "Selection" and "Open note" chips in step with this. */
+  onSelection?: (path: string) => void;
   subscribe: (fn: (e: ServerEvent) => void) => () => void;
   register: (path: string, h: PaneHandle | null) => void;
   inkItems?: InkItem[];
@@ -177,6 +179,7 @@ export function EditorPane(props: Props) {
           EditorView.contentAttributes.of({ "aria-label": `Editing ${path}`, spellcheck: "true" }),
           EditorView.updateListener.of((u) => {
             const inkChanged = u.transactions.some(t => t.effects.some(e => e.is(setInk) || e.is(addInk) || e.is(removeInk)));
+            if (u.selectionSet || u.docChanged) live.current.onSelection?.(path);
             if (u.docChanged || inkChanged) live.current.onInk?.(path, u.state.field(inkField).items);
             if (u.docChanged || u.viewportChanged || inkChanged || u.transactions.some(t=>t.effects.some(e=>e.is(setThoughtNarrow)))) queueMargin();
             if (inkChanged && session) queueDoc();

@@ -1,10 +1,11 @@
 // Static data for the chat panel: context chips and suggested prompts. Nothing here talks to a provider.
 export interface ContextChip {id:'note'|'threads'|'selection';label:string;on:boolean}
 
+/** The open note and its threads go by default, and so does a selection: it is only sent when something is selected, and removing it holds for one message. */
 export const DEFAULT_CONTEXT:readonly ContextChip[]=[
  {id:'note',label:'This note',on:true},
  {id:'threads',label:'Threads',on:true},
- {id:'selection',label:'Selection',on:false},
+ {id:'selection',label:'Selection',on:true},
 ];
 export const SUGGESTED_PROMPTS:readonly string[]=[
  'Where is this note weakest?',

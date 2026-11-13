@@ -11,7 +11,9 @@ import {Thinking} from '../ink/streaming.tsx';
 import {SkillsReviewList} from '../skills/SkillsReviewList.tsx';
 import {PersonaSwitch,UsedSkills} from '../skills/PersonaSwitch.tsx';
 import {useNodeSettings} from '../skills/useNodeSettings.ts';
-import {DEFAULT_CONTEXT,SUGGESTED_PROMPTS,chatHeader,toggleChip,type ContextChip} from './chat-stub.ts';
+import {DEFAULT_CONTEXT,SUGGESTED_PROMPTS,chatHeader,noteTitle,toggleChip,type ContextChip} from './chat-stub.ts';
+import {editorInfo,sameEditorContext,type EditorContext} from '../../shared/editor-context.ts';
+import {linesText,noteChangedText,noteChipText,selectionChipText} from './editor-chips.ts';
 import {applyEvent,buildContext,chipEstimate,errorText,formatCount,fromStored,newTurnId,previewText,usageLine,ECHO_LABEL,UNSTRUCTURED_LABEL,type Turn} from './chat-model.ts';
 import {ReplyNotes} from './ReplyNotes.tsx';
 import {LiveMarkdown} from '../ink/LiveMarkdown.tsx';
@@ -27,10 +29,13 @@ const knownCode=(code:string):code is ChatErrorCode=>code in CHAT_MESSAGES;
 /** How long Stop ignores clicks after a send starts (ms). */
 export const STOP_GUARD_MS=600;
 
+/** The editor, as the panel sees it: the open note, the selection and the cursor's section on demand, and a call when the caret or selection moves. */
+export interface EditorSource {get:()=>EditorContext|null;subscribe:(fn:()=>void)=>()=>void}
 export interface ChatPanelProps {
- path:string|null;noteText:string;threadsText:string;getSelection:()=>string;
- /** Adds one accepted reply to the note through the same journaled insertion as AI thoughts. The caller shows the toast with Undo. */
- onAdd:(messageId:string)=>Promise<void>;onClose:()=>void;
+ /** The note open in the editor. */
+ path:string|null;noteText:string;threadsText:string;editor:EditorSource;
+ /** Adds one accepted reply to the note through the same journaled insertion as AI thoughts. The caller shows the toast with Undo. `chat` is the note whose chat holds the reply, when it is not the open note. */
+ onAdd:(messageId:string,chat?:string)=>Promise<void>;onClose:()=>void;
  /** Notes chosen in the Constellation ("Use as chat context"): sent as the Other notes module, shown in the review first. */
  extraNotes?:string[];onClearExtraNotes?:()=>void;
  /** Source chips: scroll the editor to a claim's quote and mark it for a moment (false when the quote is not in the current note), and cite the note at the cursor. */
@@ -45,12 +50,12 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
   <p className="chat-review-lead">Nothing has gone to Claude yet. It will see exactly this, and nothing else.</p>
   <dl>
    <dt>Your question</dt><dd>{review.question}</dd>
-   {review.selection&&<><dt>Selection</dt><dd className="chat-review-quote">{previewText(review.selection,300)}</dd></>}
+   {review.selection&&<><dt>Selection{review.editor?.lines?` · ${linesText(review.editor.lines.from,review.editor.lines.to)}`:''}</dt><dd className="chat-review-quote">{previewText(review.selection,300)}</dd></>}
    <dt>Context</dt>
    <dd>{review.sources.length===0?<span className="chat-review-none">None. Only your question is sent.</span>:review.sources.map(s=>
     <details key={s.id} className="chat-review-source"><summary>{s.label} <span className="chat-review-est">about {formatCount(s.estimatedTokens)} tokens</span></summary><pre>{review.ephemeral?s.text:previewText(s.text,2000)}</pre></details>)}</dd>
    {review.excluded&&review.excluded.length>0&&<><dt>Left out</dt><dd>{review.excluded.join(', ')}: a chat never gets the notebook file, hidden files, Aitiarch's own files or secrets, apart from the note it is open on.</dd></>}
-   {review.manifest&&<><dt>Starts with</dt><dd>{review.manifest}</dd></>}
+   {review.manifest&&<><dt>{review.session?'Starts with':'Editor line'}</dt><dd className="chat-review-manifest">{review.manifest}</dd></>}
    <dt>Earlier messages</dt>
    <dd>{review.session?`Kept in the conversation “${review.session.label}” (${review.session.turns} so far), not pasted again.`:review.historyPairs===0?'None yet.':`${review.historyPairs} earlier ${review.historyPairs===1?'exchange':'exchanges'} included${review.omittedPairs>0?`, ${review.omittedPairs} older left out`:''}.`}{review.otherModePairs?` ${review.otherModePairs} earlier ${review.otherModePairs===1?'exchange':'exchanges'} left out: different mode.`:''}</dd>
   </dl>
@@ -63,18 +68,43 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
  </section>;
 }
 
-/** The right-hand chat: streamed replies from the per-note chat backend, with what is sent always reviewable first. */
-export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,extraNotes=[],onClearExtraNotes,onShowQuote=()=>false,onCiteClaim=()=>false}:ChatPanelProps){
- const otherNotes=extraNotes.filter(p=>p!==path);
+/**
+ * The right-hand chat. A one-off chat and an investigation belong to the note that is open: another note is another chat. A named conversation follows the person from
+ * note to note: it stays selected, its replies stay under the note it was started on, and each message says which note is open now.
+ */
+export function ChatPanel(props:ChatPanelProps){
+ const open=props.path,[conversation,setConversation]=useState<{id:string;home:string}|null>(null),[kind,setKind]=useState<HarnessMode>('chat');
+ const lastOpen=useRef(open);
+ useEffect(()=>{if(lastOpen.current===open)return;lastOpen.current=open;if(kind==='chat'&&conversation?.home)return;setConversation(null);setKind('chat');},[open,kind,conversation]);
+ const home=kind==='chat'&&conversation?.home?conversation.home:open;
+ return <ChatPanelBody key={home??'none'} {...props} path={home} openPath={open} conversation={conversation?.id??''} kind={kind} onKind={setKind}
+  carry={kind==='chat'&&conversation?.home?conversation:undefined} onConversation={(id,from)=>setConversation(id?{id,home:from}:null)}/>;
+}
+
+interface BodyProps extends Omit<ChatPanelProps,'path'> {
+ /** The note this chat is kept under: the open note, or the note a followed conversation was started on. */
+ path:string|null;openPath:string|null;
+ conversation:string;kind:HarnessMode;onKind:(k:HarnessMode)=>void;carry?:{id:string;home:string};onConversation:(id:string,home:string)=>void;
+}
+function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,extraNotes=[],onClearExtraNotes,onShowQuote=()=>false,onCiteClaim=()=>false,conversation,kind,onKind:setKind,carry,onConversation}:BodyProps){
+ const otherNotes=extraNotes.filter(p=>p!==openPath);
+ const setConversation=(id:string,session?:HarnessSession)=>onConversation(id,session?.note??path??'');
  const [chips,setChips]=useState<ContextChip[]>(()=>DEFAULT_CONTEXT.map(c=>({...c}))),[turns,setTurns]=useState<Turn[]>([]),[draft,setDraft]=useState('');
  const [pending,setPending]=useState<ChatReview|null>(null),[stopAsking,setStopAsking]=useState(false),[busy,setBusy]=useState(false),[peek,setPeek]=useState<ContextChip['id']|null>(null);
  const persona=useNodeSettings('chat');
  const [usage,setUsage]=useState<ChatUsage|null>(null),[persistence,setPersistence]=useState<'private'|'memory'>('memory'),[notice,setNotice]=useState(''),[adding,setAdding]=useState<string|null>(null);
  const sentAt=useRef(0),input=useRef<HTMLTextAreaElement>(null),log=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),alive=useRef(true);
  const [pickedSessions,setPickedSessions]=useState<PickedSession[]>([]),[ctxOpen,setCtxOpen]=useState(false),[hoverThreads,setHoverThreads]=useState(false);
- const [conversation,setConversation]=useState(''); // a harness session id; '' is the one-off chat (or no investigation chosen)
- const [kind,setKind]=useState<HarnessMode>('chat'),[investigation,setInvestigation]=useState<HarnessSession|null>(null),[invRefresh,setInvRefresh]=useState(0);
- useEffect(()=>{setPickedSessions([]);setConversation('');},[path]);
+ const [investigation,setInvestigation]=useState<HarnessSession|null>(null),[invRefresh,setInvRefresh]=useState(0);
+ // What the editor says now: the open note, the selection (line range and text) and the cursor's section. Read again a moment after the caret or selection moves.
+ const [ec,setEc]=useState<EditorContext|null>(()=>editor.get()),[switched,setSwitched]=useState<{from:string}|null>(null);
+ const pullEditor=()=>setEc(prev=>{const next=editor.get();return sameEditorContext(prev,next)?prev:next;});
+ useEffect(()=>{let timer=0;pullEditor();const off=editor.subscribe(()=>{window.clearTimeout(timer);timer=window.setTimeout(pullEditor,100);});return()=>{window.clearTimeout(timer);off();};},[editor]);
+ // The person opened another note while a conversation is on: the chat stays with the conversation and the next message names the note that is open now.
+ const lastOpen=useRef(openPath),lastTitle=useRef(openPath?noteTitle(openPath):'');
+ useEffect(()=>{if(ec&&ec.note.path===openPath)lastTitle.current=ec.note.title;},[ec,openPath]);
+ useEffect(()=>{if(lastOpen.current===openPath)return;const from=lastTitle.current;lastOpen.current=openPath;lastTitle.current=openPath?noteTitle(openPath):'';
+  if(conversation&&kind==='chat'&&openPath)setSwitched({from});},[openPath]);
  useEffect(()=>{let off=false;if(kind!=='investigate'||!conversation||!path){setInvestigation(null);return;}
   api.harnessSessions(path,'investigate').then(r=>{if(!off)setInvestigation(r.sessions.find(s=>s.id===conversation)??null);}).catch(()=>{if(!off)setInvestigation(null);});return()=>{off=true;};},[kind,conversation,path]);
  // What Investigate has used in this notebook, from the ledger: its own line, never part of the chat budget above it. Read again after each turn in either mode.
@@ -93,7 +123,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  },[path]);
  const stickLog=useStickToBottom(log,turns); // follows the reply smoothly unless the reader scrolled up
 
- const selectionText=getSelection(),noteEstimate=useMemo(()=>chipEstimate(noteText),[noteText]),threadsEstimate=useMemo(()=>chipEstimate(threadsText),[threadsText]);
+ const selectionText=ec?.selection?.text??'',openTitle=ec&&ec.note.path===openPath?ec.note.title:openPath?noteTitle(openPath):'',noteEstimate=useMemo(()=>chipEstimate(noteText),[noteText]),threadsEstimate=useMemo(()=>chipEstimate(threadsText),[threadsText]);
  const estimate:Record<ContextChip['id'],number>={note:noteEstimate,threads:threadsEstimate,selection:chipEstimate(selectionText)};
  const total=chips.filter(c=>c.on).reduce((n,c)=>n+estimate[c.id],0);
  const peekText:Record<ContextChip['id'],string>={note:noteText||'This note is empty.',threads:threadsText||'No AI thoughts (threads) in this note yet.',selection:selectionText||'Select text in the note, then turn this on.'};
@@ -104,6 +134,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  const fail=(id:string,code:ChatErrorCode,budget?:BudgetDetail)=>setTurns(t=>applyEvent(t,{type:'error',id,code,...(budget?{budget}:{})}));
  const send=async(review:ChatReview,dontAskAgain:boolean)=>{
   setPending(null);setBusy(true);sentAt.current=Date.now();const id=review.requestId,controller=new AbortController();abort.current=controller;
+  setSwitched(null);setChips(list=>list.map(c=>c.id==='selection'&&!c.on?{...c,on:true}:c)); // removing the selection or the notice holds for one message
   setTurns(t=>t.map(x=>x.id===id?{...x,status:'streaming' as const}:x));
   let finished=false;
   try{
@@ -122,11 +153,12 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  /** `again` re-asks an earlier question through the same review, without touching the draft. */
  const submit=async(again?:string)=>{
   const question=(again??draft).trim();if(!question||!path||busy||pending)return;
-  const id=newTurnId(),{context,selection}=buildContext(chips,getSelection());setNotice('');setBusy(true);stickLog.follow();
+  const id=newTurnId(),live=editor.get(),{context,selection}=buildContext(chips,live?.selection?.text??'');setNotice('');setBusy(true);stickLog.follow();
+  const info=live?editorInfo(live,!!selection):openPath?{path:openPath,title:noteTitle(openPath)}:undefined;
   try{
    const sessionContext=sessionChoices(pickedSessions);
    const fromMap=otherNotes.length?[{moduleId:'other-notes' as const,ids:otherNotes}]:[];
-   const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...fromMap,...sessionContext],...(selection?{selection}:{}),...(conversation?{session:conversation}:{})});
+   const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...fromMap,...sessionContext],...(selection?{selection}:{}),...(conversation?{session:conversation}:{}),...(info?{editor:info}:{})});
    questions.set(id,question);setTurns(t=>[...t,{id,question,status:'review',text:''}]);if(again===undefined)setDraft('');
    if(review.requiresConfirmation){setPending(review);setBusy(false);return;}
    await send(review,false);
@@ -138,25 +170,25 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  };
  // A double tap on Send (or Enter then a click) must not land on the Stop that takes its place: Stop ignores clicks for a moment after a send starts.
  const stop=()=>{if(!path||Date.now()-sentAt.current<STOP_GUARD_MS)return;void api.chatCall('cancel',{path}).catch(()=>{});};
- const add=async(id:string)=>{setAdding(id);try{await onAdd(id);}finally{if(alive.current)setAdding(null);}};
+ const add=async(id:string)=>{setAdding(id);try{await onAdd(id,path??undefined);}finally{if(alive.current)setAdding(null);}};
  const keep=async()=>{try{await api.chatCall('enable',{action:'add-ignore-line'});setPersistence('private');}catch(e){setNotice(e instanceof ApiError?e.message:'Could not keep this chat on disk.');}};
  const composing=busy||!!pending;
  // The composer is disabled while a review is open or a reply streams; when it frees up, focus returns to it so the keyboard never gets stranded.
  useEffect(()=>{if(!composing&&!document.activeElement?.closest('.chat-review'))input.current?.focus();},[composing]); // the review card, while it waits for an answer, keeps focus
 
- return <aside id="chat-panel" className="chat-panel" aria-label="Aitiarch AI chat" onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();onClose();}}}>
-  <header className="chat-head"><h2>{chatHeader(path)}</h2><button type="button" className="ghost chat-close" aria-label="Close chat" onClick={onClose}>×</button></header>
+ return <aside id="chat-panel" className="chat-panel" aria-label="Aitiarch AI chat" onPointerDownCapture={pullEditor} onFocusCapture={pullEditor} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();onClose();}}}>
+  <header className="chat-head"><h2>{chatHeader(openPath)}</h2><button type="button" className="ghost chat-close" aria-label="Close chat" onClick={onClose}>×</button></header>
   {path&&kind==='investigate'?<>
-   <ChatSessions path={path} value={conversation} onChange={setConversation} disabled={false} refresh={invRefresh} kind={kind} onKind={setKind}/>
+   <ChatSessions path={openPath??path} value={conversation} onChange={setConversation} disabled={false} refresh={invRefresh} kind={kind} onKind={setKind}/>
    {investigation?<InvestigateView key={investigation.id} session={investigation} onDiscuss={()=>{setConversation('');setKind('chat');}} onTurnDone={()=>setInvRefresh(n=>n+1)}/>
     :<p className="chat-empty inv-empty">Choose an investigation or start a new one. Claude reads a copy of your repo folder, read-only, and shows each file it opens.</p>}
    {inv&&<footer className="chat-foot"><p className="chat-inv-usage" data-usage="investigate">{investigateLine(inv)}</p></footer>}
   </>:<>
-  {path&&<ChatSessions path={path} value={conversation} onChange={setConversation} disabled={composing} refresh={turns.filter(t=>t.status==='complete').length} kind={kind} onKind={setKind}/>}
+  {openPath&&<ChatSessions path={openPath} value={conversation} onChange={setConversation} disabled={composing} refresh={turns.filter(t=>t.status==='complete').length} kind={kind} onKind={setKind} carry={carry}/>}
   <div className="chat-context" role="group" aria-label="What the chat can see">
    <button type="button" className="chat-ctl chat-context-sum" aria-expanded={ctxOpen} aria-controls="chat-context-body" onClick={()=>setCtxOpen(v=>!v)}>
     <span className="chat-sum-label">Context</span>
-    <span className="chat-sum-items">{chips.map(c=>`${c.label} ${c.on?formatCount(estimate[c.id]):'off'}`).concat(otherNotes.length?[`Constellation ${otherNotes.length}`]:[],pickedSessions.length?[`Sessions ${pickedSessions.length}`]:[]).join(' · ')}</span>
+    <span className="chat-sum-items">{chips.map(c=>`${c.label} ${c.on?(c.id==='selection'&&!selectionText?'none':formatCount(estimate[c.id])):'off'}`).concat(otherNotes.length?[`Constellation ${otherNotes.length}`]:[],pickedSessions.length?[`Sessions ${pickedSessions.length}`]:[]).join(' · ')}</span>
     <span className="chat-sum-total">{formatCount(total)} tokens</span>
     <svg className="chat-sum-caret" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6l4 4 4-4"/></svg>
    </button>
@@ -188,7 +220,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
       {t.text?<div className="chat-stream"><LiveMarkdown text={t.text} live/></div>:<div className="chat-thinking"><Thinking/></div>}
       <div className="chat-message-tools"><button type="button" className="chat-stop" onClick={stop}>Stop</button></div></div>}
      {t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span><ReplyMarkdown text={t.text}/>{t.message?.unstructured&&<p className="chat-unstructured">{UNSTRUCTURED_LABEL}</p>}{t.message?.echo&&<p className="chat-flag chat-echo">{ECHO_LABEL}</p>}
-      {t.message&&<ReplyNotes message={t.message} question={t.question} busy={composing} onAskAgain={q=>void submit(q)} note={{path,noteText,onShow:onShowQuote,onCite:onCiteClaim}}/>}<UsedSkills names={t.message?.skills}/>
+      {t.message&&<ReplyNotes message={t.message} question={t.question} busy={composing} onAskAgain={q=>void submit(q)} note={{path:openPath,noteText,onShow:onShowQuote,onCite:onCiteClaim}}/>}<UsedSkills names={t.message?.skills}/>
       {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
       <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}>Add to note</button></div></div>}
      {t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason,t.error.errorName,t.error)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button></div>}
@@ -198,6 +230,13 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
   {notice&&<p className="chat-notice" role="alert">{notice} <button type="button" className="ghost" onClick={()=>setNotice('')}>Dismiss</button></p>}
   <PersonaSwitch id="chat" label="How this chat works with you" value={persona.persona} kept={persona.kept} disabled={!!pending||busy} hint="Change it before you review a message." onChange={p=>void persona.choose(p)}/>
   {persona.failed&&<p className="chat-notice" role="alert">That choice could not be saved. Nothing was changed.</p>}
+  {openPath&&<div className="chat-sends" role="group" aria-label="Sent with your next message">
+   {(()=>{const note=chips.find(c=>c.id==='note'),sel=chips.find(c=>c.id==='selection');return <>
+    {note&&<button type="button" className="chat-send-chip" data-chip="note" aria-pressed={note.on} aria-label={note.on?`Remove the open note (${openTitle}) from the next message`:`Add the open note (${openTitle}) back to the next message`} onClick={()=>setChips(l=>toggleChip(l,'note'))}><span>{noteChipText(openTitle,note.on)}</span><span aria-hidden="true">{note.on?'×':'+'}</span></button>}
+    {ec?.selection&&sel&&<button type="button" className="chat-send-chip" data-chip="selection" aria-pressed={sel.on} aria-label={sel.on?`Remove the selection (${linesText(ec.selection.fromLine,ec.selection.toLine)}) from the next message`:`Add the selection (${linesText(ec.selection.fromLine,ec.selection.toLine)}) back to the next message`} onClick={()=>setChips(l=>toggleChip(l,'selection'))}><span>{sel.on?selectionChipText(ec.selection):`Selection · ${linesText(ec.selection.fromLine,ec.selection.toLine)} · off`}</span><span aria-hidden="true">{sel.on?'×':'+'}</span></button>}
+   </>;})()}
+   {switched&&<span className="chat-send-chip chat-switched" data-chip="switched" role="status"><span>{noteChangedText(switched.from,openTitle)}</span><button type="button" aria-label="Dismiss this notice" onClick={()=>setSwitched(null)}>×</button></span>}
+  </div>}
   <form className="chat-composer" onSubmit={e=>{e.preventDefault();void submit();}}>
    <textarea ref={input} aria-label="Message Aitiarch AI" rows={1} placeholder={pending?'Review above, then send…':'Ask about this note…'} value={draft} disabled={composing} onChange={e=>setDraft(e.target.value)}
     onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void submit();}}}/>

@@ -116,7 +116,7 @@ try{
  await panel.getByRole('button',{name:/^Context/}).click();
  assert.equal(await panel.getByRole('button',{name:/^This note/}).getAttribute('aria-pressed'),'true');
  assert.equal(await panel.getByRole('button',{name:/^Threads/}).getAttribute('aria-pressed'),'true');
- assert.equal(await panel.getByRole('button',{name:/^Selection/}).getAttribute('aria-pressed'),'false');
+ assert.equal(await panel.getByRole('button',{name:/^Selection/}).getAttribute('aria-pressed'),'true'); // on by default: it is only sent when something is selected
  assert.equal(await panel.locator('.chat-suggestion').count(),3);
  const send=panel.getByRole('button',{name:'Send message'});assert.equal(await send.isDisabled(),true);
  await panel.locator('.chat-suggestion').first().click();

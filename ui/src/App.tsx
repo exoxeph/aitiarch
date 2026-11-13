@@ -24,6 +24,7 @@ import {defaultNote} from './menu/explorer-model.ts';
 import {NoteMenu} from './menu/NoteMenu.tsx';
 import {useEdgeMenu} from './menu/useEdgeMenu.ts';
 import {ChatPanel} from './chat/ChatPanel.tsx';
+import {buildEditorContext} from '../shared/editor-context.ts';
 import {showQuote} from './editor/quote-highlight.ts';
 import {ThreadPanel} from './threads/ThreadPanel.tsx';
 import {DismissedThoughts} from './ink/DismissedThoughts.tsx';
@@ -82,6 +83,7 @@ export default function App() {
   const [cacheBusy, setCacheBusy] = useState(false);
   const panes = useRef(new Map<string, PaneHandle>());
   const listeners = useRef(new Set<(e: ServerEvent) => void>());
+  const selectionListeners = useRef(new Set<() => void>());
   const loaded = useRef(false);
   useEffect(()=>{const open=(event:Event)=>{const detail=(event as CustomEvent<{id:string;thought?:boolean}>).detail;setThreadId(detail.id);setThoughtChat(detail.id);};window.addEventListener('open-thread',open);return()=>window.removeEventListener('open-thread',open);},[]);
   // A Think or Ask review takes the stage: the note menu, if open, closes so it cannot sit over the review's Send button.
@@ -285,7 +287,14 @@ export default function App() {
 
   const onStatus = useCallback((p: string, s: SyncStatus) => setStatus((m) => (m[p] === s ? m : { ...m, [p]: s })), []);
   const onDoc = useCallback((p: string, text: string) => setDocs((m) => (m[p] === text ? m : { ...m, [p]: text })), []);
-  const register = useCallback((p: string, h: PaneHandle | null) => void (h ? panes.current.set(p, h) : panes.current.delete(p)), []);
+  const register = useCallback((p: string, h: PaneHandle | null) => { if (h) { panes.current.set(p, h); selectionListeners.current.forEach(fn => fn()); } else panes.current.delete(p); }, []);
+  const onSelection = useCallback(() => selectionListeners.current.forEach(fn => fn()), []);
+  // What the chat panel reads from the editor: the open note, the selection (line range and text, capped) and the section the cursor is in. Read on demand; the
+  // panel is told when the caret or selection moves. Nothing here changes the note.
+  const chatEditor = useMemo(() => ({
+    get: () => { const h = active ? panes.current.get(active) : undefined; if (!h || !active) return null; const s = h.view.state.selection.main; return buildEditorContext({ path: active, text: h.view.state.doc.toString(), anchor: s.anchor, head: s.head }); },
+    subscribe: (fn: () => void) => { selectionListeners.current.add(fn); return () => void selectionListeners.current.delete(fn); },
+  }), [active]);
   const onOpenWiki = useCallback(
     (target: string) => {
       const p = resolver(target);
@@ -490,9 +499,8 @@ export default function App() {
   const orphanCount = activeItems.filter(i => i.attachment.status === "orphaned").length;
   // What the chat chips offer: the same validated AI replies the server's "Threads" module reads (never questions, drafts or summaries).
   const chatThreadsText = activeItems.flatMap(i => [...(i.generation?.status === "complete" ? [i.body] : []), ...(i.thread?.followups ?? []).filter(r => r.generation.status === "complete").map(r => r.body)]).join("\n\n");
-  const chatSelection = () => { const h = active ? panes.current.get(active) : undefined; if (!h) return ""; const s = h.view.state.selection.main; return s.empty ? "" : h.view.state.sliceDoc(s.from, s.to).slice(0, 8000); };
   // Add to note for a chat reply: the same journaled steps as an AI thought (preview, prepare, one editor dispatch, complete), then the same toast with Undo.
-  const addChatMessage = async (id: string) => {
+  const addChatMessage = async (id: string, chat?: string) => {
     if (!active) return;
     let inserted = false, operationId: string | undefined;
     try {
@@ -500,7 +508,7 @@ export default function App() {
       await h.session.flush(); if (h.session.status !== "saved") throw new Error("Save or resolve the note before insertion.");
       const disk = await api.file(active), unchanged = () => h.session.status === "saved" && h.session.base.version === disk.version && h.view.state.doc.toString() === disk.text;
       if (!unchanged()) throw new Error("The note changed. Review a new preview.");
-      const head = h.view.state.selection.main.head, body = { path: active, id, noteVersion: disk.version, after: head > 0 ? Math.min(head, disk.text.length) : disk.text.length };
+      const head = h.view.state.selection.main.head, body = { path: active, id, noteVersion: disk.version, after: head > 0 ? Math.min(head, disk.text.length) : disk.text.length, ...(chat && chat !== active ? { chat } : {}) };
       const preview = await api.chatCall<BringPreview>("bring-preview", body);
       const prepared = await api.chatCall<{ operationId: string }>("bring-prepare", { ...body, preview }); operationId = prepared.operationId;
       if (!unchanged()) throw new Error("The note changed. Review a new preview.");
@@ -578,7 +586,7 @@ export default function App() {
         )}
         {tabs.map((p) =>
           files[p] ? (
-            <EditorPane key={p} file={files[p]} visible={p === active} resolver={resolver} onOpenWiki={onOpenWiki} cite={cite} jumpTo={jump?.path === p ? jump.heading : null} onJumped={() => setJump(null)} onStatus={onStatus} onDoc={onDoc} subscribe={subscribe} register={register}
+            <EditorPane key={p} file={files[p]} visible={p === active} resolver={resolver} onOpenWiki={onOpenWiki} cite={cite} jumpTo={jump?.path === p ? jump.heading : null} onJumped={() => setJump(null)} onStatus={onStatus} onDoc={onDoc} onSelection={onSelection} subscribe={subscribe} register={register}
               inkItems={inkFiles[p]?.document.items} trustedText={p === active ? trustedText : null}
               typingOptions={{enabled:typingHelpOn,doubleSpace:doubleSpacePeriod,smart:smartCorrections,vocabulary:vocabulary??undefined,neverCorrect,onReject:rejectCorrection}}
               inkVersion={inkFiles[p]?.version} onInk={onInk} onInkSaved={onInkSaved} onInkError={setNotice} />
@@ -597,7 +605,7 @@ export default function App() {
           onOpen={p => { setMapOpen(false); void openNote(p); }}
           onUseAsContext={ps => { setMapNotes(ps); setMapOpen(false); setChatOpen(true); }} />
       </Suspense>}
-      {chatOpen && <ChatPanel key={active ?? "none"} extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} getSelection={chatSelection} onAdd={addChatMessage} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onCiteClaim={(heading) => { const h = active ? panes.current.get(active) : undefined; return !!h && !!active && citeAtCursor(h.view, active, { path: active, title: titleOf(h.view.state.doc.toString(), active), ...(heading ? { heading } : {}) }); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
+      {chatOpen && <ChatPanel extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} editor={chatEditor} onAdd={addChatMessage} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onCiteClaim={(heading) => { const h = active ? panes.current.get(active) : undefined; return !!h && !!active && citeAtCursor(h.view, active, { path: active, title: titleOf(h.view.state.doc.toString(), active), ...(heading ? { heading } : {}) }); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
       {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); burgerRef.current?.focus(); }} />}
       {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,toast.undo)}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
       {added&&<div className="thought-toast" role="status"><span>{added.text} · Undo (Ctrl+Z)</span><details className="added-detail"><summary>What was added</summary><pre>{added.detail}</pre></details><button onClick={()=>{const h=active?panes.current.get(active):undefined;if(h){undo(h.view);h.view.focus();}setAdded(null);}}>Undo</button><button aria-label="Close notice" onClick={()=>setAdded(null)}>Close</button></div>}

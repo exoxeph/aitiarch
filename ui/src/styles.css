@@ -838,6 +838,18 @@ input.chat-ctl { background: var(--paper); cursor: text; }
 .chat-chip[aria-pressed="true"] .chat-chip-est { color: var(--ink-text); opacity: .8; }
 .chat-chip-peek { display: grid; place-items: center; padding: 0 8px; border-left: 0; border-radius: 0 var(--ctl-r) var(--ctl-r) 0; color: var(--muted); }
 .chat-chip-peek:hover, .chat-chip-peek[aria-expanded="true"] { color: var(--ink-text); background: var(--accent-soft); }
+/* What the next message carries from the editor: the open note, the selection, and the one notice when another note was opened mid-conversation. */
+.chat-sends { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 16px 6px; }
+.chat-send-chip { display: inline-flex; align-items: center; gap: 8px; box-sizing: border-box; max-width: 100%; min-height: var(--ctl-h); padding: 0 8px 0 10px; border: 1px solid var(--control-border); border-radius: 999px; background: var(--accent-soft); color: var(--ink-text); font: 400 var(--text-meta)/1.2 var(--font-ui); cursor: pointer; transition: border-color 160ms, background 160ms; }
+.chat-send-chip > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-send-chip[aria-pressed="false"] { background: transparent; color: var(--muted); border-style: dashed; }
+.chat-send-chip:hover { border-color: var(--accent); }
+.chat-send-chip:focus-visible, .chat-switched button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.chat-switched { cursor: default; border-color: var(--accent); background: transparent; }
+.chat-switched button { padding: 0 2px; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.chat-switched button:hover { color: var(--ink-text); }
+.chat-review-manifest { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .chat-send-chip { transition: none; } }
 .chat-context-help { flex-basis: 100%; color: var(--muted); font-size: var(--text-meta); line-height: 1.45; }
 .thought-kind { color: var(--ink-text); font-weight: 600; }
 /* While the chat's Threads option is pointed at, each AI thought card says so in words (never colour alone). */
