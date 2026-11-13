@@ -25,6 +25,8 @@ import {NoteMenu} from './menu/NoteMenu.tsx';
 import {useEdgeMenu} from './menu/useEdgeMenu.ts';
 import {ChatPanel} from './chat/ChatPanel.tsx';
 import {buildEditorContext} from '../shared/editor-context.ts';
+import {diagramsIn} from '../shared/diagram-refs.ts';
+import {ensurePictures} from './diagrams/diagram-images.ts';
 import {showQuote} from './editor/quote-highlight.ts';
 import {ThreadPanel} from './threads/ThreadPanel.tsx';
 import {DismissedThoughts} from './ink/DismissedThoughts.tsx';
@@ -321,6 +323,10 @@ export default function App() {
 
   const activeHandle = () => (active ? panes.current.get(active) : undefined);
   const activeText = active ? (docs[active] ?? files[active]?.text ?? "") : "";
+  // Every diagram of the open note gets its picture (for the chat to attach): one made now when "Add to note" has just put a diagram in, and, for a diagram saved earlier as an svg only, the first
+  // time its note is open. A diagram that cannot be drawn as a picture simply has none.
+  const diagramKey = diagramsIn(activeText).map(d => d.asset).join();
+  useEffect(() => { if (diagramKey) void ensurePictures(diagramKey.split(',')); }, [diagramKey]);
   const currentInk = active ? inkFiles[active] : undefined;
   const openVersion = active ? (panes.current.get(active)?.session.base.version ?? files[active]?.version ?? null) : null;
   const trustedText = active && currentInk?.document.noteVersion === openVersion && status[active] !== "dirty" && status[active] !== "conflict"

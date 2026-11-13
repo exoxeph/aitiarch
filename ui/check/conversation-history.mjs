@@ -39,7 +39,7 @@ try {
   page.on('request', (r) => { if (!r.url().startsWith('http://127.0.0.1') && !r.url().startsWith('data:') && !r.url().startsWith('blob:')) external.push(r.url()); });
   page.on('pageerror', (e) => errors.push(e.message));
   const panel = page.locator('#chat-panel');
-  const openNote = async (file) => { await page.keyboard.press('Control+k'); const palette = page.getByRole('dialog', { name: 'Command palette' }); await palette.waitFor(); const search = palette.getByRole('textbox'); await search.fill('Jump to note: ' + file); await search.press('Enter'); await page.waitForFunction((f) => window.__aitiarch?.[f] && document.querySelector('.tab.on')?.textContent?.toLowerCase().includes(f.replace('.md', '')), file); };
+  const openNote = async (file) => { for (let attempt = 0; ; attempt++) { await page.keyboard.press('Control+k'); const palette = page.getByRole('dialog', { name: 'Command palette' }); await palette.waitFor(); const search = palette.getByRole('textbox'); await search.fill('Jump to note: ' + file); await search.press('Enter'); try { await page.waitForFunction((f) => window.__aitiarch?.[f] && document.querySelector('.tab.on')?.textContent?.toLowerCase().includes(f.replace('.md', '')), file, { timeout: 6000 }); return; } catch (e) { if (attempt >= 2) throw e; await page.keyboard.press('Escape'); } } };
   const text = async (loc) => (await loc.innerText()).replace(/\s+/g, ' ').trim();
   const asked = () => panel.locator('.chat-turn .chat-you').evaluateAll((els) => els.map((e) => e.querySelector('p')?.textContent.trim()));
   const chipLabels = () => panel.locator('.chat-turn').evaluateAll((els) => els.map((e) => e.querySelector('.claim-chip .claim-label')?.textContent.trim() ?? null));

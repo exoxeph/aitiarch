@@ -144,6 +144,9 @@ export const api = {
   harnessSessionCall:(action:'new'|'rename',body:unknown)=>ok<import('../shared/harness.ts').HarnessSession>('PUT','/api/harness/sessions/'+action,body),
   /** Questions asked in this note's named conversations, by message id. */
   harnessQuestions:(path:string)=>ok<{questions:Record<string,string>}>('GET',`/api/harness/questions?path=${encodeURIComponent(path)}`),
+  /** The pictures of diagrams (names like `diagram-<hash>.png`) that exist, with their size; and saving one the page made (base64 PNG), which the server checks again. */
+  diagramImages:(names:string[])=>ok<{images:{name:string;width:number;height:number;bytes:number}[]}>('GET',`/api/diagram-images?names=${names.map(encodeURIComponent).join(',')}`),
+  saveDiagramImage:(name:string,data:string)=>ok<{name:string;width:number;height:number;bytes:number}>('PUT','/api/diagram-image',{name,data}),
   /** What deleting a conversation would remove from the chat of the note it was started on: that note, and how many saved replies. */
   harnessSessionReplies:(id:string)=>ok<{note:string|null;replies:number}>('GET',`/api/harness/sessions/replies?id=${encodeURIComponent(id)}`),
   /** Deletes a conversation: the app's entry and Claude Code's own transcript of it. */

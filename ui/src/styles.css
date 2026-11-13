@@ -848,6 +848,13 @@ input.chat-ctl { background: var(--paper); cursor: text; }
 .chat-switched { cursor: default; border-color: var(--accent); background: transparent; }
 .chat-switched button { padding: 0 2px; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .chat-switched button:hover { color: var(--ink-text); }
+.chat-send-chip[aria-disabled="true"] { cursor: default; color: var(--muted); border-style: dotted; }
+.chat-send-chip[data-over] { border-color: var(--danger); }
+.chat-send-note { flex-basis: 100%; color: var(--muted); font: 400 var(--text-meta)/1.4 var(--font-ui); }
+.chat-review-images { display: flex; flex-wrap: wrap; gap: 10px; }
+.chat-review-images figure { margin: 0; max-width: 150px; }
+.chat-review-images img { display: block; max-width: 150px; max-height: 110px; border: 1px solid var(--rule); border-radius: var(--radius-small); }
+.chat-review-images figcaption, .chat-review-block { display: block; margin-top: 3px; color: var(--muted); font: 400 var(--text-meta)/1.35 var(--font-ui); overflow-wrap: anywhere; }
 .chat-review-manifest { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .chat-send-chip { transition: none; } }
 /* A narrow window: the chat panel covers it, so a toast cannot sit over it. It becomes one compact row in the strip under the panel (where the status bar is): the keyboard hint is dropped

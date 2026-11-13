@@ -14,6 +14,9 @@ import {useNodeSettings} from '../skills/useNodeSettings.ts';
 import {DEFAULT_CONTEXT,SUGGESTED_PROMPTS,chatHeader,noteTitle,toggleChip,type ContextChip} from './chat-stub.ts';
 import {editorInfo,sameEditorContext,type EditorContext} from '../../shared/editor-context.ts';
 import {linesText,noteChangedText,noteChipText,selectionChipText} from './editor-chips.ts';
+import {autoDiagrams,diagramsIn,pickAttached} from '../../shared/diagram-refs.ts';
+import {ensurePictures,onPictures,pictureFailed,pictureOf,pictureUrl} from '../diagrams/diagram-images.ts';
+import {diagramChipText,notAttachedText,overLimitText,reviewImageText} from './diagram-chips.ts';
 import {readConversationChoice,writeConversationChoice,type ConversationChoice} from './conversation-choice.ts';
 import {applyEvent,buildContext,chipEstimate,errorText,formatCount,fromStored,newTurnId,previewText,usageLine,ECHO_LABEL,UNSTRUCTURED_LABEL,type Turn} from './chat-model.ts';
 import {ReplyNotes} from './ReplyNotes.tsx';
@@ -52,6 +55,8 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
   <dl>
    <dt>Your question</dt><dd>{review.question}</dd>
    {review.selection&&<><dt>Selection{review.editor?.lines?` · ${linesText(review.editor.lines.from,review.editor.lines.to)}`:''}</dt><dd className="chat-review-quote">{previewText(review.selection,300)}</dd></>}
+   {review.images&&review.images.length>0&&<><dt>Diagram pictures</dt><dd className="chat-review-images">{review.images.map(i=><figure key={i.asset}><img src={pictureUrl(i.asset)} alt={`Diagram D${i.n}: ${i.title}`}/><figcaption>{reviewImageText(i)}</figcaption></figure>)}</dd></>}
+   {review.notAttached&&review.notAttached.length>0&&<><dt>Not attached</dt><dd>{review.notAttached.map(i=><span key={i.n} className="chat-review-block">{notAttachedText(i)}</span>)}</dd></>}
    <dt>Context</dt>
    <dd>{review.sources.length===0?<span className="chat-review-none">None. Only your question is sent.</span>:review.sources.map(s=>
     <details key={s.id} className="chat-review-source"><summary>{s.label} <span className="chat-review-est">about {formatCount(s.estimatedTokens)} tokens</span></summary><pre>{review.ephemeral?s.text:previewText(s.text,2000)}</pre></details>)}</dd>
@@ -101,6 +106,11 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  const [investigation,setInvestigation]=useState<HarnessSession|null>(null),[invRefresh,setInvRefresh]=useState(0);
  // What the editor says now: the open note, the selection (line range and text) and the cursor's section. Read again a moment after the caret or selection moves.
  const [ec,setEc]=useState<EditorContext|null>(()=>editor.get()),[switched,setSwitched]=useState<{from:string}|null>(null);
+ // The diagrams of the open note, and which of them go with the next message (a conversation only: a one-off message is one JSON document and carries no picture). A diagram is off until the
+ // question or the cursor points at it; a switch the person made holds for one message. At most two pictures go with a message.
+ const named=kind==='chat'&&!!conversation,diagrams=useMemo(()=>diagramsIn(noteText),[noteText]),diagramKey=diagrams.map(d=>d.asset).join();
+ const [manualDiagrams,setManualDiagrams]=useState<Map<string,boolean>>(()=>new Map()),[,setPictureTick]=useState(0);
+ useEffect(()=>{if(!diagramKey)return;let off=false;const stop=onPictures(()=>setPictureTick(n=>n+1));void ensurePictures(diagramKey.split(',')).then(()=>{if(!off)setPictureTick(n=>n+1);});return()=>{off=true;stop();};},[diagramKey]);
  const pullEditor=()=>setEc(prev=>{const next=editor.get();return sameEditorContext(prev,next)?prev:next;});
  useEffect(()=>{let timer=0;pullEditor();const off=editor.subscribe(()=>{window.clearTimeout(timer);timer=window.setTimeout(pullEditor,100);});return()=>{window.clearTimeout(timer);off();};},[editor]);
  // The person opened another note while a conversation is on: the chat stays with the conversation and the next message names the note that is open now.
@@ -138,6 +148,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  },[path,conversation,kind]);
  const stickLog=useStickToBottom(log,turns); // follows the reply smoothly unless the reader scrolled up
 
+ const chooseDiagrams=(question:string)=>pickAttached(diagrams,manualDiagrams,autoDiagrams(diagrams,{question,...(ec?{cursorLine:ec.cursorLine}:{}),...(ec?.selection?{selection:{fromLine:ec.selection.fromLine,toLine:ec.selection.toLine}}:{})}),new Set(diagrams.filter(d=>pictureOf(d.asset)).map(d=>d.asset))),attachment=chooseDiagrams(draft);
  const selectionText=ec?.selection?.text??'',openTitle=ec&&ec.note.path===openPath?ec.note.title:openPath?noteTitle(openPath):'',noteEstimate=useMemo(()=>chipEstimate(noteText),[noteText]),threadsEstimate=useMemo(()=>chipEstimate(threadsText),[threadsText]);
  const estimate:Record<ContextChip['id'],number>={note:noteEstimate,threads:threadsEstimate,selection:chipEstimate(selectionText)};
  const total=chips.filter(c=>c.on).reduce((n,c)=>n+estimate[c.id],0);
@@ -149,7 +160,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  const fail=(id:string,code:ChatErrorCode,budget?:BudgetDetail)=>setTurns(t=>applyEvent(t,{type:'error',id,code,...(budget?{budget}:{})}));
  const send=async(review:ChatReview,dontAskAgain:boolean)=>{
   setPending(null);setBusy(true);sentAt.current=Date.now();const id=review.requestId,controller=new AbortController();abort.current=controller;
-  setSwitched(null);setChips(list=>list.map(c=>c.id==='selection'&&!c.on?{...c,on:true}:c)); // removing the selection or the notice holds for one message
+  setSwitched(null);setChips(list=>list.map(c=>c.id==='selection'&&!c.on?{...c,on:true}:c));setManualDiagrams(new Map()); // removing the selection, the notice or a diagram's picture holds for one message
   setTurns(t=>t.map(x=>x.id===id?{...x,status:'streaming' as const}:x));
   let finished=false;
   try{
@@ -168,12 +179,12 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  /** `again` re-asks an earlier question through the same review, without touching the draft. */
  const submit=async(again?:string)=>{
   const question=(again??draft).trim();if(!question||!path||busy||pending)return;
-  const id=newTurnId(),live=editor.get(),{context,selection}=buildContext(chips,live?.selection?.text??'');setNotice('');setBusy(true);stickLog.follow();
+  const id=newTurnId(),live=editor.get(),{context,selection}=buildContext(chips,live?.selection?.text??''),pictures=named?chooseDiagrams(question).attached:[];setNotice('');setBusy(true);stickLog.follow();
   const info=live?editorInfo(live,!!selection):openPath?{path:openPath,title:noteTitle(openPath)}:undefined;
   try{
    const sessionContext=sessionChoices(pickedSessions);
    const fromMap=otherNotes.length?[{moduleId:'other-notes' as const,ids:otherNotes}]:[];
-   const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...fromMap,...sessionContext],...(selection?{selection}:{}),...(conversation?{session:conversation}:{}),...(info?{editor:info}:{})});
+   const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...fromMap,...sessionContext],...(selection?{selection}:{}),...(conversation?{session:conversation}:{}),...(pictures.length?{diagrams:pictures}:{}),...(info?{editor:info}:{})});
    questions.set(id,question);setTurns(t=>[...t,{id,question,status:'review',text:''}]);if(again===undefined)setDraft('');
    if(review.requiresConfirmation){setPending(review);setBusy(false);return;}
    await send(review,false);
@@ -252,6 +263,14 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
     {note&&<button type="button" className="chat-send-chip" data-chip="note" aria-pressed={note.on} aria-label={note.on?`Remove the open note (${openTitle}) from the next message`:`Add the open note (${openTitle}) back to the next message`} onClick={()=>setChips(l=>toggleChip(l,'note'))}><span>{noteChipText(openTitle,note.on)}</span><span aria-hidden="true">{note.on?'×':'+'}</span></button>}
     {ec?.selection&&sel&&<button type="button" className="chat-send-chip" data-chip="selection" aria-pressed={sel.on} aria-label={sel.on?`Remove the selection (${linesText(ec.selection.fromLine,ec.selection.toLine)}) from the next message`:`Add the selection (${linesText(ec.selection.fromLine,ec.selection.toLine)}) back to the next message`} onClick={()=>setChips(l=>toggleChip(l,'selection'))}><span>{sel.on?selectionChipText(ec.selection):`Selection · ${linesText(ec.selection.fromLine,ec.selection.toLine)} · off`}</span><span aria-hidden="true">{sel.on?'×':'+'}</span></button>}
    </>;})()}
+   {named&&diagrams.map(d=>{
+    const pic=pictureOf(d.asset),on=attachment.attached.includes(d.asset),over=attachment.over.includes(d.asset),want=on||over;
+    const label=`D${d.n} ${d.title}`;
+    return <button key={d.asset} type="button" className="chat-send-chip" data-chip={`diagram-${d.n}`} aria-pressed={want} aria-disabled={!pic} data-over={over||undefined}
+     aria-label={!pic?`Diagram ${label}: no picture to attach`:want?`Remove the picture of diagram ${label} from the next message`:`Add the picture of diagram ${label} to the next message`}
+     onClick={()=>{if(pic)setManualDiagrams(m=>{const n=new Map(m);n.set(d.asset,!want);return n;});}}>
+     <span>{diagramChipText(d,pic,over?'over':on?'on':'off',pictureFailed(d.asset))}</span><span aria-hidden="true">{pic?(want?'×':'+'):''}</span></button>;})}
+   {named&&attachment.over.length>0&&<span className="chat-send-note" role="status">{overLimitText(attachment.over.map(a=>diagrams.find(d=>d.asset===a)!.n))}</span>}
    {switched&&<span className="chat-send-chip chat-switched" data-chip="switched" role="status"><span>{noteChangedText(switched.from,openTitle)}</span><button type="button" aria-label="Dismiss this notice" onClick={()=>setSwitched(null)}>×</button></span>}
   </div>}
   <form className="chat-composer" onSubmit={e=>{e.preventDefault();void submit();}}>
