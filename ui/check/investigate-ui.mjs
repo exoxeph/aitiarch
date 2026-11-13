@@ -43,7 +43,7 @@ try {
   await panel.getByRole('button', { name: 'Choose a folder' }).click();
   await panel.getByRole('textbox', { name: 'Repo folder (absolute path)' }).fill(repo); await panel.getByRole('button', { name: 'Use this folder' }).click();
   await panel.locator('.chat-sessions-repo code').waitFor(); assert.equal(await panel.locator('.chat-sessions-repo code').innerText(), repo);
-  await panel.getByRole('button', { name: 'New', exact: true }).click();
+  await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click();
 
   // The plan card comes first; there is no composer until it is confirmed, and the server refuses a turn without it.
   const card = panel.getByRole('group', { name: 'Plan for this investigation' }); await card.waitFor();
@@ -53,10 +53,10 @@ try {
   // The cost cap is editable (default $0.50); a changed cap must be applied to the plan before it can be confirmed.
   const cap = card.getByLabel('Cost cap per question'); assert.equal(await cap.inputValue(), '0.50');
   await cap.fill('0.25'); assert.equal(await card.getByRole('button', { name: 'Confirm' }).isDisabled(), true, 'Confirm waits for the updated plan');
-  await card.getByRole('button', { name: 'Update the plan' }).click(); await page.waitForFunction(() => document.querySelector('#chat-panel .inv-plan button:not(.ghost)')?.disabled === false);
-  assert.equal(await cap.inputValue(), '0.25'); await cap.fill('0.50'); await card.getByRole('button', { name: 'Update the plan' }).click(); await page.waitForFunction(() => document.querySelector('#chat-panel .inv-plan button:not(.ghost)')?.disabled === false);
+  await card.getByRole('button', { name: 'Update the plan' }).click(); await page.waitForFunction(() => document.querySelector('#chat-panel .inv-plan .inv-confirm')?.disabled === false);
+  assert.equal(await cap.inputValue(), '0.25'); await cap.fill('0.50'); await card.getByRole('button', { name: 'Update the plan' }).click(); await page.waitForFunction(() => document.querySelector('#chat-panel .inv-plan .inv-confirm')?.disabled === false);
   assert.equal(await panel.getByRole('textbox', { name: 'Ask about the repo' }).count(), 0, 'no composer before the plan is confirmed');
-  const session = await page.evaluate(() => document.querySelector('#chat-panel .chat-sessions-pick select').value);
+  const session = await page.evaluate(() => document.querySelector('#chat-panel .chat-pick-trigger').dataset.session);
   const refused = await page.evaluate(async (s) => (await fetch('/api/harness/investigate/send', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Aitiarch': '1' }, body: JSON.stringify({ session: s, question: 'q' }) })).json(), session);
   assert.equal(refused.error, 'plan_required', 'the server refuses a turn before the plan is confirmed');
   await panel.screenshot({ path: path.join(output, 'investigate-plan-card.png') });
@@ -136,7 +136,7 @@ try {
   await scenario('inv-ok'); await capStop.getByRole('button', { name: 'Continue with a new plan' }).click();
   const card2 = panel.getByRole('group', { name: 'Plan for this investigation' }); await card2.waitFor();
   assert.match(await card2.innerText(), /Before it continues/); await card2.getByLabel('Cost cap per question').fill('0.40'); await card2.getByRole('button', { name: 'Update the plan' }).click();
-  await page.waitForFunction(() => document.querySelector('#chat-panel .inv-plan button:not(.ghost)')?.disabled === false);
+  await page.waitForFunction(() => document.querySelector('#chat-panel .inv-plan .inv-confirm')?.disabled === false);
   await card2.getByRole('button', { name: 'Confirm and continue' }).click();
   await page.waitForFunction(() => document.querySelectorAll('#chat-panel .inv-turn').length === 7); await idle();
   assert.equal(await panel.locator('.inv-turn .chat-you p').last().innerText(), 'Please continue where you stopped.');
@@ -151,7 +151,7 @@ try {
   assert.equal(await readFile(path.join(notebook, 'plan.md'), 'utf8'), '# Plan\n\nKeep this.\n');
 
   // A reload shows the questions and answers of this investigation (kept outside the repo).
-  await openPanel(); await panel.locator('.chat-sessions-pick select').selectOption(session);
+  await openPanel(); await panel.locator('.chat-pick-trigger').click(); await panel.locator('.chat-pick-opt[data-value="' + session + '"]').click();
   await panel.locator('.inv-turn').nth(7).waitFor();
   const questions = await panel.locator('.inv-turn .chat-you p').allInnerTexts();
   assert.deepEqual(questions, ['How does login work?', 'Something slow', 'Look everywhere', 'Please continue where you stopped.', 'Explain it', 'Read everything', 'Please continue where you stopped.', 'Anything']);
@@ -204,9 +204,9 @@ try {
   await panel.locator('.inv-turn').last().screenshot({ path: path.join(output, 'investigate-markdown.png') });
 
   // Delete removes it from the list and removes its stored turns.
-  await panel.getByRole('button', { name: 'Delete', exact: true }).click();
+  await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'Delete', exact: true }).click();
   await panel.getByRole('group', { name: 'Delete this conversation' }).getByRole('button', { name: 'Delete', exact: true }).click();
-  await page.waitForFunction((s) => ![...document.querySelectorAll('#chat-panel .chat-sessions-pick option')].some((o) => o.value === s), session);
+  await panel.locator('.chat-pick-trigger').click(); await page.waitForFunction((s) => ![...document.querySelectorAll('#chat-panel .chat-pick-opt')].some((o) => o.dataset.value === s), session);
   assert.equal((await readdir(path.join(harness, 'investigations'))).includes(session + '.json'), false, 'its stored turns are gone');
   assert.deepEqual(external, [], 'no request left the machine');
   console.log(JSON.stringify({ passed: true, ...report }, null, 1));

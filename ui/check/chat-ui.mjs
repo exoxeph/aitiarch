@@ -64,6 +64,11 @@ try{
  assert.equal(await panel.locator('.chat-suggestion').count(),3);
  assert.match(await panel.locator('.chat-usage').innerText(),/^No calls yet/);
  const noteBytes=Buffer.byteLength(note);
+ // The context is one summary line until it is opened: it names every part and its state in words, and the total.
+ const summary=panel.getByRole('button',{name:/^Context/});assert.equal(await summary.getAttribute('aria-expanded'),'false');
+ assert.match(await summary.innerText(),/This note \d.*Threads .*Selection off.*\d.* tokens/s,'the summary line says what is sent and what is off');
+ assert.equal(await panel.getByRole('button',{name:/^This note/}).count(),0,'the toggles stay hidden until the summary is opened');
+ await summary.click();assert.equal(await summary.getAttribute('aria-expanded'),'true');
  const noteChip=panel.getByRole('button',{name:/^This note/});
  const chipText=await noteChip.innerText();assert.match(chipText,/· \d/,'the chip shows an estimate');
  assert.ok(Math.abs(Number(/· (\d+)/.exec(chipText)?.[1]??NaN)-noteBytes)<=12,`This note estimate should be about ${noteBytes} (got ${chipText})`);
@@ -125,6 +130,7 @@ try{
  script={kind:'rich',answer:RICH};
  await ask('Show a table.');
  await panel.locator('.chat-ai table').waitFor();
+ await panel.locator('.chat-streaming').waitFor({state:'detached'}); // the code widget only exists on the finished reply, not on the streaming preview
  assert.equal(await panel.getByRole('region',{name:'What will be sent'}).count(),0,'no review card after “don’t ask again”');
  assert.ok(await panel.locator('.reply-code').count()>=1,'fenced code uses the editor code widget');
  assert.ok(await panel.locator('.cm-callout').count()>=1,'callouts keep their style');

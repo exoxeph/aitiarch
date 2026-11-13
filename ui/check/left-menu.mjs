@@ -113,6 +113,7 @@ try{
  const chat=page.getByRole('button',{name:/^Chat/});assert.equal(await chat.getAttribute('aria-expanded'),'false');
  await chat.click();const panel=page.locator('#chat-panel');await panel.waitFor();
  assert.match(await panel.getByRole('heading').first().innerText(),/^Aitiarch AI - On (notebook|sub)$/);
+ await panel.getByRole('button',{name:/^Context/}).click();
  assert.equal(await panel.getByRole('button',{name:/^This note/}).getAttribute('aria-pressed'),'true');
  assert.equal(await panel.getByRole('button',{name:/^Threads/}).getAttribute('aria-pressed'),'true');
  assert.equal(await panel.getByRole('button',{name:/^Selection/}).getAttribute('aria-pressed'),'false');

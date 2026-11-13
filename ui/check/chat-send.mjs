@@ -62,7 +62,7 @@ try {
     assert(!(await panel.innerText()).includes('private reasoning'), 'the model\'s private reasoning never reaches the page');
     assert(!(await page.content()).includes('SECRET-THINKING-TEXT-42'), 'thinking text is nowhere on the page, not even hidden');
     // "This note" is on by default: the note text must be in the request that went to the provider.
-    await panel.getByRole('button', { name: /^This note/ }).waitFor();
+    await panel.getByRole('button', { name: /^Context/ }).click(); await panel.getByRole('button', { name: /^This note/ }).waitFor();
     assert.equal(captured.length, 1, 'one request reached the provider');
     assert(captured[0].data.note.includes('A unique selected sentence.'), 'the note text reached the provider');
     assert.match(captured[0].instruction, /"note" field of the data/, 'and the request says where the note is');

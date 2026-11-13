@@ -45,7 +45,7 @@ function TurnView({turn,snapshotFiles,onOpen,onRestore,restoring,onContinue}:{tu
   {stop&&<div className="inv-banner" data-kind="stopped" role="note">
    <p><strong>{stop.title}.</strong> {stop.partial?'The text below was written after the last file it opened. It is not a finished answer.':'No answer was written yet.'}</p>
    <p>Opened: {stop.opened.length?stop.opened.join(', '):'no files'}.{stop.notOpened?' '+stop.notOpened:''}</p>
-   {canContinue(turn)&&<button type="button" onClick={onContinue}>Continue with a new plan</button>}
+   {canContinue(turn)&&<button type="button" className="chat-ctl" onClick={onContinue}>Continue with a new plan</button>}
   </div>}
   {(turn.text||turn.message)&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span>
    <LiveMarkdown text={turn.text} live={turn.running}/>
@@ -54,7 +54,7 @@ function TurnView({turn,snapshotFiles,onOpen,onRestore,restoring,onContinue}:{tu
   {denied.length>0&&!turn.running&&<div className="inv-banner" data-kind="denied" role="note"><p><strong>Denied reads:</strong> {denied.map(s=>`${s.tool} ${s.target}`).join('; ')}.</p></div>}
   {tripwireChanged(turn.tripwire)&&<div className="inv-banner" data-kind="tripwire" role="alert">
    <p><strong>Your notebook changed during this run.</strong> Changed: {turn.tripwire!.notebook.changed.join(', ')||'none'}; added: {turn.tripwire!.notebook.added.join(', ')||'none'}; removed: {turn.tripwire!.notebook.removed.join(', ')||'none'}.</p>
-   <button type="button" disabled={restoring} onClick={onRestore}>Restore the notebook as it was before the run</button>
+   <button type="button" className="chat-ctl" disabled={restoring} onClick={onRestore}>Restore the notebook as it was before the run</button>
   </div>}
  </div>;
 }
@@ -105,11 +105,11 @@ export function InvestigateView({session,onDiscuss,onTurnDone}:{session:HarnessS
     <dt><label htmlFor="inv-cap">Cost cap per question</label></dt>
     <dd className="inv-cap"><span aria-hidden="true">$</span><input id="inv-cap" type="number" inputMode="decimal" min="0.05" max="5" step="0.05" value={budgetDraft} onChange={e=>setBudgetDraft(e.target.value)}
       onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();if(capChanged)void replan(capValue);}}}/>
-     <button type="button" className="ghost" disabled={!capChanged||!(capValue>=0.05&&capValue<=5)} onClick={()=>void replan(capValue)}>Update the plan</button>
+     <button type="button" className="chat-ctl" disabled={!capChanged||!(capValue>=0.05&&capValue<=5)} onClick={()=>void replan(capValue)}>Update the plan</button>
      {capChanged&&<span className="inv-cap-note" role="status"> Update the plan to apply this cap, then confirm.</span>}</dd>
    </dl>
    <p className="inv-plan-note">Claude can only Read, Grep and Glob inside the copy. Nothing is written, run or sent anywhere else.{resume?' It continues the same conversation: what it already did stays.':''}</p>
-   <div className="inv-plan-actions"><button ref={confirmButton} type="button" disabled={capChanged} onClick={()=>void confirm()}>{resume?'Confirm and continue':'Confirm'}</button><button type="button" className="ghost" onClick={onDiscuss}>Discuss in chat instead</button></div>
+   <div className="inv-plan-actions"><button ref={confirmButton} type="button" className="chat-ctl inv-confirm" disabled={capChanged} onClick={()=>void confirm()}>{resume?'Confirm and continue':'Confirm'}</button><button type="button" className="chat-ctl chat-ctl-quiet" onClick={onDiscuss}>Discuss in chat instead</button></div>
   </div>}
   <div className="inv-log" role="log" aria-label="Investigation">
    {turns.length===0&&needsPlan===false&&<p className="chat-empty">Ask how something in the repo works. Claude reads the code and points to the lines it used.</p>}
@@ -122,7 +122,7 @@ export function InvestigateView({session,onDiscuss,onTurnDone}:{session:HarnessS
   {notice&&<p className="chat-notice" role="status">{notice}</p>}
   {live&&<div className="inv-status" role="status" aria-label="Investigation progress">
    <span>{formatElapsed(now-live.startedAt)}</span><span>{toolCalls(live)} tool {toolCalls(live)===1?'call':'calls'}</span><span>cost shown at the end · cap {money(plan?.budgetUsd??BUDGET)}</span>
-   <button type="button" className="chat-stop" onClick={cancel}>Cancel</button>
+   <button type="button" className="chat-ctl chat-stop" onClick={cancel}>Cancel</button>
   </div>}
   {!live&&turns.at(-1)?.message&&<p className="inv-status inv-status-done" role="status">{turns.at(-1)!.message!.steps.length} tool {turns.at(-1)!.message!.steps.length===1?'call':'calls'} · {turns.at(-1)!.message!.costUsd!==null?money(turns.at(-1)!.message!.costUsd!):'cost not reported'} of {money(plan?.budgetUsd??BUDGET)}</p>}
   {needsPlan===false&&<form className="chat-composer" onSubmit={e=>{e.preventDefault();void send();}}>

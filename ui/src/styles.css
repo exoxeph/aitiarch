@@ -754,8 +754,23 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .chat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 16px 10px; }
 .chat-head h2 { margin: 0; font: 400 var(--text-panel-title)/1.3 var(--font-body); }
 .chat-close { font-size: 20px; line-height: 1; }
-.chat-context { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 12px; border-bottom: 1px solid var(--rule); }
-.chat-context { position: relative; }
+/* One control language for the whole chat panel: same height, radius, border weight and (keyboard-only) focus ring. */
+.chat-panel { --ctl-h: 28px; --ctl-r: var(--radius-small); }
+.chat-ctl, .chat-chip, .chat-chip-peek, .chat-pick-trigger { box-sizing: border-box; min-height: var(--ctl-h); padding: 0 10px; border: 1px solid var(--control-border); border-radius: var(--ctl-r); background: transparent; color: var(--ink-text); font: 400 var(--text-control)/1.2 var(--font-ui); cursor: pointer; transition: border-color 160ms, background 160ms; }
+.chat-ctl:hover:not(:disabled), .chat-chip:hover:not(:disabled), .chat-chip-peek:hover, .chat-pick-trigger:hover:not(:disabled) { background: var(--accent-soft); }
+.chat-ctl:disabled, .chat-chip:disabled, .chat-pick-trigger:disabled { opacity: .5; cursor: not-allowed; }
+.chat-ctl-quiet { border-color: transparent; color: var(--muted); }
+input.chat-ctl { background: var(--paper); cursor: text; }
+.chat-context { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 0 16px 10px; border-bottom: 1px solid var(--rule); }
+.chat-context-sum { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; }
+.chat-sum-label { color: var(--muted); }
+.chat-context-sum { padding-top: 4px; padding-bottom: 4px; }
+.chat-sum-items { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chat-sum-total { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.chat-sum-caret { flex: none; color: var(--muted); transition: transform 160ms; }
+[aria-expanded="true"] > .chat-sum-caret { transform: rotate(180deg); }
+.chat-context-body { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (prefers-reduced-motion: reduce) { .chat-ctl, .chat-chip, .chat-pick-trigger, .chat-sum-caret { transition: none; } }
 .session-context-add { display: contents; }
 .session-add { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--ink-text); }
 .session-selected-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-text); background: var(--accent-soft); }
@@ -789,13 +804,14 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .session-picker :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 @keyframes session-appear { from { transform: translateY(calc(-1 * var(--space-1))); opacity: .8; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .session-picker { animation: none; } }
-.chat-chip { padding: 4px 10px; border: 1px solid var(--rule); border-radius: 999px; background: transparent; color: var(--muted); font-size: var(--text-meta); cursor: pointer; transition: border-color 160ms, background 160ms; }
-.chat-chip[aria-pressed="true"] { color: var(--ink-text); border-color: var(--accent); background: var(--accent-soft); }
+.chat-chip { color: var(--muted); }
+.chat-chip[aria-pressed="true"] { color: var(--ink-text); background: var(--accent-soft); }
 .chat-log { flex: 1; min-height: 0; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
 .chat-empty p { margin: 0 0 12px; color: var(--muted); font-size: var(--text-control); }
-.chat-empty ul { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.chat-suggestion { width: 100%; padding: 10px 14px; border: 1px solid var(--rule); border-radius: var(--radius-card); background: var(--paper); color: var(--ink-text); font: 400 15px/1.4 var(--font-body); text-align: left; cursor: pointer; transition: border-color 160ms; }
-.chat-suggestion:hover { border-color: var(--accent); }
+.chat-empty ul { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+/* Suggestions are hints, not decisions: plain small text rows, lighter than every control above them. */
+.chat-suggestion { width: 100%; padding: 4px 0; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--muted); font: 400 var(--text-control)/1.4 var(--font-ui); text-align: left; cursor: pointer; }
+.chat-suggestion:hover { color: var(--ink-text); text-decoration: underline; text-underline-offset: 3px; }
 .chat-message p { margin: 2px 0 0; font: 400 15px/1.55 var(--font-body); }
 .chat-who { color: var(--muted); font-size: var(--text-meta); }
 .chat-ai { padding: 10px 14px; border-radius: var(--radius-card); background: var(--ai-surface); }
@@ -817,13 +833,13 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .chat-composer textarea:focus-visible { outline: 0; }
 /* M3: chat chips with estimates, the review card, streaming caret, rich replies, Add to note, warnings, usage. Quiet at rest. */
 .chat-chip-wrap { display: inline-flex; align-items: stretch; }
-.chat-chip-wrap .chat-chip { padding-right: 8px; border-radius: 999px 0 0 999px; }
+.chat-chip-wrap .chat-chip { padding-right: 8px; border-radius: var(--ctl-r) 0 0 var(--ctl-r); }
 .chat-chip-est { color: var(--muted); font-variant-numeric: tabular-nums; }
 .chat-chip[aria-pressed="true"] .chat-chip-est { color: var(--ink-text); opacity: .8; }
-.chat-chip-peek { display: grid; place-items: center; padding: 0 8px; border: 1px solid var(--rule); border-left: 0; border-radius: 0 999px 999px 0; background: transparent; color: var(--muted); cursor: pointer; }
+.chat-chip-peek { display: grid; place-items: center; padding: 0 8px; border-left: 0; border-radius: 0 var(--ctl-r) var(--ctl-r) 0; color: var(--muted); }
 .chat-chip-peek:hover, .chat-chip-peek[aria-expanded="true"] { color: var(--ink-text); background: var(--accent-soft); }
 .chat-context-total { flex-basis: 100%; margin-top: 2px; color: var(--muted); font-size: var(--text-meta); }
-.chat-peek { margin: 0 16px 10px; max-height: 150px; overflow: auto; border: 1px solid var(--rule); border-radius: var(--radius-small); background: var(--paper); }
+.chat-peek { flex-basis: 100%; margin: 0; max-height: 150px; overflow: auto; border: 1px solid var(--rule); border-radius: var(--radius-small); background: var(--paper); }
 .chat-peek pre { margin: 0; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; color: var(--muted); font: 12px/1.5 var(--font-mono); }
 
 .chat-turn { display: flex; flex-direction: column; gap: 10px; }
@@ -984,24 +1000,37 @@ button.claim-chip:focus-visible, .claim-action:focus-visible { outline: 2px soli
 .chat-chip[aria-disabled="true"] { color: var(--muted); border-style: dashed; }
 /* Which conversation a message goes to: the one-off chat or a named Claude Code session the app keeps. */
 .chat-sessions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 16px 8px; font: var(--text-meta)/1.4 var(--font-ui); color: var(--muted); }
-.chat-sessions-pick { display: inline-flex; align-items: center; gap: 6px; }
-.chat-sessions-pick select { max-width: 22ch; font: inherit; color: var(--ink-text); }
-.chat-sessions-name { display: inline-flex; flex-wrap: wrap; gap: 6px; }
-.chat-sessions-name input { min-width: 0; width: 22ch; font: inherit; }
+.chat-pick { position: relative; flex: 1 1 100%; min-width: 0; }
+.chat-pick-trigger { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; }
+.chat-pick-label { color: var(--muted); }
+.chat-pick-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-pick-pop { position: absolute; z-index: 70; inset: calc(100% + 4px) 0 auto; max-height: 50vh; overflow: auto; padding: 4px; background: var(--paper-2); border: 1px solid var(--control-border); border-radius: var(--radius-card); box-shadow: var(--shadow-floating); }
+.chat-pick-opt, .chat-pick-actions button { display: flex; align-items: center; justify-content: space-between; gap: 12px; box-sizing: border-box; width: 100%; min-height: var(--ctl-h); padding: 0 10px; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--ink-text); font: 400 var(--text-control)/1.2 var(--font-ui); text-align: left; cursor: pointer; }
+.chat-pick-opt:hover, .chat-pick-opt:focus, .chat-pick-actions button:hover:not(:disabled), .chat-pick-actions button:focus { background: var(--accent-soft); }
+.chat-pick-actions button:disabled { opacity: .5; cursor: not-allowed; }
+.chat-pick-opt[aria-selected="true"] { font-weight: 600; }
+.chat-pick-meta { color: var(--muted); font-weight: 400; white-space: nowrap; }
+.chat-pick-actions { display: flex; gap: 2px; margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--rule); }
+.chat-pick-actions button { flex: 1; width: auto; justify-content: center; }
+.chat-sessions-name { display: flex; flex-wrap: wrap; flex: 1 1 100%; gap: 6px; }
+.chat-sessions-name input { flex: 1 1 12ch; min-width: 0; font: inherit; color: var(--ink-text); }
 .chat-sessions-note { flex-basis: 100%; margin: 0; }
 .chat-sessions-delete { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--ink-text); }
 .chat-sessions-repo { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
 .chat-sessions-repo code, .inv-plan code { font: 12px/1.4 var(--font-mono); color: var(--ink-text); }
-.chat-mode { display: inline-flex; border: 1px solid var(--control-border); border-radius: 999px; padding: 2px; }
-.chat-mode button { border: 0; border-radius: 999px; padding: 3px 12px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
-.chat-mode button[aria-checked="true"] { background: var(--accent-soft); color: var(--ink-text); box-shadow: inset 0 0 0 1px var(--accent); }
-.chat-mode button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Chat / Investigate: one quiet segmented control. Only the selected segment is outlined (once); the track itself has no border. */
+.chat-mode { display: flex; flex: 1 1 100%; gap: 2px; padding: 2px; border-radius: calc(var(--ctl-r) + 2px); background: var(--paper); }
+.chat-mode button { flex: 1; box-sizing: border-box; min-height: calc(var(--ctl-h) - 4px); padding: 0 12px; border: 1px solid transparent; border-radius: var(--ctl-r); background: transparent; color: var(--muted); font: 400 var(--text-control)/1.2 var(--font-ui); cursor: pointer; }
+.chat-mode button:hover:not(:disabled):not([aria-checked="true"]) { color: var(--ink-text); }
+.chat-mode button[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--ink-text); }
+.chat-mode button:disabled { opacity: .5; cursor: not-allowed; }
 
 /* Investigate: a plan card before the first question, then each turn as a timeline of what Claude did (thinking, one row per Read, Grep or Glob),
    the answer below it, and honest banners. The rail is a 1px line drawn behind the dots, not a border; states are always in words too. */
 .inv { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .inv-empty { margin: 8px 16px; }
-.inv-plan { margin: 0 16px 12px; padding: 12px 14px; border: 1px solid var(--control-border); border-radius: 10px; background: var(--paper-2); font: 13px/1.5 var(--font-ui); }
+.inv-confirm { border-color: var(--accent); background: var(--accent-soft); }
+.inv-plan { margin: 0 16px 12px; padding: 12px 14px; border: 1px solid var(--rule); border-radius: var(--radius-card); background: var(--paper-2); font: 13px/1.5 var(--font-ui); }
 .inv-plan h3 { margin: 0 0 8px; font: 600 14px/1.3 var(--font-ui); }
 .inv-plan dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
 .inv-plan dt { color: var(--muted); }
@@ -1037,11 +1066,11 @@ button.claim-chip:focus-visible, .claim-action:focus-visible { outline: 2px soli
 .inv-narration code { font: .92em/1.4 var(--font-mono); }
 .chat-ai > .chat-caret, .chat-stream > .chat-caret { display: block; margin: 2px 0 0; } /* the caret sits under the streaming answer, outside the rendered Markdown, so the final DOM is the same without it */
 .inv-cap { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.inv-cap input { width: 7ch; font: inherit; color: var(--ink-text); background: transparent; border: 1px solid var(--control-border); border-radius: 6px; padding: 2px 6px; }
+.inv-cap input { box-sizing: border-box; width: 7ch; min-height: var(--ctl-h); font: inherit; color: var(--ink-text); background: var(--paper); border: 1px solid var(--control-border); border-radius: var(--ctl-r); padding: 0 6px; }
 .inv-cap input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .inv-cap-note { color: var(--muted); font-size: 12px; }
 .inv-thinking-text { margin: 6px 0 0; white-space: pre-wrap; color: var(--muted); font-size: 12px; }
-.inv-banner { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--control-border); border-radius: 8px; font: 13px/1.5 var(--font-ui); }
+.inv-banner { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--control-border); border-radius: var(--radius-small); font: 13px/1.5 var(--font-ui); }
 .inv-banner p { margin: 0 0 4px; }
 .inv-banner[data-kind="stopped"] { border-style: dashed; }
 .inv-banner[data-kind="denied"], .inv-banner[data-kind="tripwire"] { border-color: var(--danger); }
@@ -1053,7 +1082,7 @@ button.claim-chip:focus-visible, .claim-action:focus-visible { outline: 2px soli
 .inv-line { display: block; }
 .inv-line[data-here] { background: var(--accent-soft); }
 .inv-line-no { display: inline-block; min-width: 3ch; margin-right: 10px; color: var(--muted); text-align: right; user-select: none; }
-.inv-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 16px 8px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 8px; color: var(--muted); font: 12px/1.4 var(--font-ui); }
+.inv-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 16px 8px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: var(--radius-small); color: var(--muted); font: 12px/1.4 var(--font-ui); }
 .inv-status .chat-stop { margin-left: auto; }
 @media (prefers-reduced-motion: reduce) { .inv-row, .inv-dot { transition: none; } }
 @keyframes agent-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }

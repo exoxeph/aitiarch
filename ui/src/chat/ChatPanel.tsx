@@ -64,7 +64,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  const persona=useNodeSettings('chat');
  const [usage,setUsage]=useState<ChatUsage|null>(null),[persistence,setPersistence]=useState<'private'|'memory'>('memory'),[notice,setNotice]=useState(''),[adding,setAdding]=useState<string|null>(null);
  const input=useRef<HTMLTextAreaElement>(null),log=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),alive=useRef(true);
- const [pickedSessions,setPickedSessions]=useState<PickedSession[]>([]);
+ const [pickedSessions,setPickedSessions]=useState<PickedSession[]>([]),[ctxOpen,setCtxOpen]=useState(false);
  const [conversation,setConversation]=useState(''); // a harness session id; '' is the one-off chat (or no investigation chosen)
  const [kind,setKind]=useState<HarnessMode>('chat'),[investigation,setInvestigation]=useState<HarnessSession|null>(null),[invRefresh,setInvRefresh]=useState(0);
  useEffect(()=>{setPickedSessions([]);setConversation('');},[path]);
@@ -137,7 +137,15 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
    {investigation?<InvestigateView key={investigation.id} session={investigation} onDiscuss={()=>{setConversation('');setKind('chat');}} onTurnDone={()=>setInvRefresh(n=>n+1)}/>
     :<p className="chat-empty inv-empty">Choose an investigation or start a new one. Claude reads a copy of your repo folder, read-only, and shows each file it opens.</p>}
   </>:<>
+  {path&&<ChatSessions path={path} value={conversation} onChange={setConversation} disabled={composing} refresh={turns.filter(t=>t.status==='complete').length} kind={kind} onKind={setKind}/>}
   <div className="chat-context" role="group" aria-label="What the chat can see">
+   <button type="button" className="chat-ctl chat-context-sum" aria-expanded={ctxOpen} aria-controls="chat-context-body" onClick={()=>setCtxOpen(v=>!v)}>
+    <span className="chat-sum-label">Context</span>
+    <span className="chat-sum-items">{chips.map(c=>`${c.label} ${c.on?formatCount(estimate[c.id]):'off'}`).concat(otherNotes.length?[`Constellation ${otherNotes.length}`]:[],pickedSessions.length?[`Sessions ${pickedSessions.length}`]:[]).join(' · ')}</span>
+    <span className="chat-sum-total">{formatCount(total)} tokens</span>
+    <svg className="chat-sum-caret" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6l4 4 4-4"/></svg>
+   </button>
+   {ctxOpen&&<div id="chat-context-body" className="chat-context-body">
    {chips.map(c=><span key={c.id} className="chat-chip-wrap">
     <button type="button" className="chat-chip" aria-pressed={c.on} onClick={()=>setChips(list=>toggleChip(list,c.id))}>{c.label}<span className="chat-chip-est"> · {formatCount(estimate[c.id])}</span></button>
     <button type="button" className="chat-chip-peek" aria-label={`Preview ${c.label}`} aria-expanded={peek===c.id} onClick={()=>setPeek(p=>p===c.id?null:c.id)}>
@@ -150,9 +158,9 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
    </span>}
    <span className="chat-context-total">About {formatCount(total)} tokens of context</span>
    {path&&<SessionPicker key={path} path={path} selected={pickedSessions} onChange={setPickedSessions} disabled={composing} budget={usage?.tokenBudget??50000}/>}
+   {peek&&<div className="chat-peek" role="region" aria-label={`Preview of ${chips.find(c=>c.id===peek)?.label}`}><pre>{previewText(peekText[peek],1200)}</pre></div>}
+   </div>}
   </div>
-  {path&&<ChatSessions path={path} value={conversation} onChange={setConversation} disabled={composing} refresh={turns.filter(t=>t.status==='complete').length} kind={kind} onKind={setKind}/>}
-  {peek&&<div className="chat-peek" role="region" aria-label={`Preview of ${chips.find(c=>c.id===peek)?.label}`}><pre>{previewText(peekText[peek],1200)}</pre></div>}
   <div className="chat-log" role="log" aria-label="Conversation" ref={log}>
    {turns.length===0&&!pending
     ?<div className="chat-empty"><p>Ask about this note. Nothing is sent until you have seen exactly what goes.</p>
