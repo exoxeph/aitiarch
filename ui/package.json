@@ -26,6 +26,7 @@
     "check:chat-send": "vite build && node check/chat-send.mjs",
     "check:persona": "vite build && node check/persona.mjs",
     "check:claim-chips": "vite build && node check/claim-chips.mjs",
+    "check:investigate-ui": "vite build && node check/investigate-ui.mjs",
     "check:skill-diagram-layout": "vite build && node check/skill-diagram-layout.mjs",
     "check:focus-frame": "vite build && node check/focus-frame.mjs",
     "fixture": "node check/manual-fixture.mjs"
