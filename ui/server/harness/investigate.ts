@@ -4,7 +4,7 @@
 // process is killed), and checks each file claim against the real repo file. A tripwire hashes the notebook before and after; restore is explicit.
 import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
-import {mkdir,mkdtemp,realpath,rm,stat,writeFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,readFile,realpath,rename,rm,stat,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {StringDecoder} from 'node:string_decoder';
 import {promisify} from 'node:util';
@@ -153,7 +153,7 @@ export class InvestigateService {
   if(this.running.has(id))throw new InvestigateError('busy');
   const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});this.running.set(id,controller);
   const d=this.snapshotFolder(s.repo),backup=path.join(this.o.dir,'tripwire',id,'before');let before:Record<string,string>|null=null,started=false,turnDir:string|undefined;
-  const tripwire=async():Promise<Tripwire|undefined>=>{if(!before)return undefined;const notebook=await folderChanges(this.o.notebook,before),snapshot=await snapshotDrift(d.files,d.manifest);this.last.set(id,{changes:notebook,backup});return {notebook,snapshot};};
+  const tripwire=async():Promise<Tripwire|undefined>=>{if(!before)return undefined;const notebook=await folderChanges(this.o.notebook,before),snapshot=await snapshotDrift(d.files,d.manifest);this.last.set(id,{changes:notebook,backup});await this.savePending(id,notebook);return {notebook,snapshot};};
   try{
    await syncSnapshot(s.repo,d.files,d.manifest); // re-sync by hash before every turn
    before=await captureFolder(this.o.notebook,backup);
@@ -189,8 +189,21 @@ export class InvestigateService {
  }
  /** Puts the notebook back as it was before the last run, by the change list the tripwire showed. */
  async restore(id:string){
-  await this.session(id);const l=this.last.get(id);if(!l)throw new InvestigateError('nothing_to_restore');
-  await restoreFolder(this.o.notebook,l.backup,l.changes);this.last.delete(id);return l.changes;
+  await this.session(id);const l=this.last.get(id)??await this.loadPending(id);if(!l)throw new InvestigateError('nothing_to_restore');
+  await restoreFolder(this.o.notebook,l.backup,l.changes);this.last.delete(id);await rm(path.join(this.o.dir,'tripwire',id),{recursive:true,force:true});return l.changes;
+ }
+ /** The pending-restore record lives beside the before-run copy, in the app folder outside the repo, so it survives a restart. Nothing pending: no record. */
+ private async savePending(id:string,changes:Drift){
+  const file=path.join(this.o.dir,'tripwire',id,'pending.json');
+  if(!changes.changed.length&&!changes.added.length&&!changes.removed.length){await rm(file,{force:true});return;}
+  await mkdir(path.dirname(file),{recursive:true});const tmp=file+'.tmp';await writeFile(tmp,JSON.stringify({v:1,changes}));await rename(tmp,file);
+ }
+ private async loadPending(id:string):Promise<{changes:Drift;backup:string}|null>{
+  try{
+   const d=JSON.parse(await readFile(path.join(this.o.dir,'tripwire',id,'pending.json'),'utf8')),list=(v:unknown)=>Array.isArray(v)&&v.length<=10000&&v.every(x=>typeof x==='string'&&x.length<=400)?v as string[]:null;
+   const changed=list(d?.changes?.changed),added=list(d?.changes?.added),removed=list(d?.changes?.removed);
+   return d?.v===1&&changed&&added&&removed?{changes:{changed,added,removed},backup:path.join(this.o.dir,'tripwire',id,'before')}:null;
+  }catch{return null;}
  }
  /** Removes the session's tripwire copy (Delete conversation). */
  async forget(id:string){this.plans.delete(id);this.last.delete(id);await rm(path.join(this.o.dir,'tripwire',id),{recursive:true,force:true});}

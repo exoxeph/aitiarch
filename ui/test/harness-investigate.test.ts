@@ -86,6 +86,15 @@ describe('investigation sessions',()=>{
   expect(await readFile(path.join(t.notebook,'plan.md'),'utf8')).toBe('# Plan\n\nKeep this.\n');
   await expect(svc.restore(s.id)).rejects.toThrow('nothing_to_restore');
  });
+ it('a pending restore survives a server restart (a new service reads it from the app folder), and is cleared once restored',async()=>{
+  const t=await setup(),svc=t.service('inv-write-notebook|'+path.join(t.notebook,'plan.md')),{s}=await confirmed(svc,t.repo);
+  const r=await t.run(svc,s.id);expect(r.complete!.message.tripwire.notebook.changed).toEqual(['plan.md']);
+  const fresh=t.service(); // the server restarted: nothing in memory
+  expect(await fresh.restore(s.id)).toEqual({changed:['plan.md'],added:[],removed:[]});
+  expect(await readFile(path.join(t.notebook,'plan.md'),'utf8')).toBe('# Plan\n\nKeep this.\n');
+  await expect(t.service().restore(s.id)).rejects.toThrow('nothing_to_restore');
+  expect((await readdir(path.join(t.harness,'tripwire'))).includes(s.id)).toBe(false); // the copy is gone with the record
+ });
 });
 
 describe('Delete conversation',()=>{
