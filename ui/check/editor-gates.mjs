@@ -52,19 +52,28 @@ await session('caret','\uFEFFSynthetic typing fixture.\r\n',async({page,theme,ro
  await page.evaluate(t=>{document.documentElement.dataset.theme=t;},theme);
  assert.equal(await page.locator('.cm-content').evaluate(e=>getComputedStyle(e).caretColor),'rgba(0, 0, 0, 0)','native caret must remain hidden');
  await page.evaluate(()=>{
-  window.__caretMoves=[];window.__caretFrameProbes=[];
+  window.__caretMoves=[];window.__caretFrameProbes=[];window.__caretTargets=[];
+  const view=window.__aitiarch['n.md'].view;
+  // The browser delivers a transition's event a frame AFTER the transition starts. With keys a frame apart (Playwright's 8 ms delay is about 16 ms on Windows) more
+  // characters land in between, so comparing a transition with where the selection is when its event arrives measures a position it was never heading to. Instead:
+  // each time CodeMirror moves the drawn caret (it writes a new left), record that left with where the text really is at that moment, and match each transition to
+  // the record of the left it runs to. The gap is then to the true text position of that very transition.
+  new MutationObserver(()=>{const c=document.querySelector('.cm-cursor-primary'),left=parseFloat(c?.style.left);if(Number.isFinite(left))window.__caretTargets.push({left,text:view.coordsAtPos(view.state.selection.main.head).left});})
+   .observe(document.querySelector('.cm-cursorLayer'),{attributes:true,attributeFilter:['style'],subtree:true});
   document.querySelector('.cm-editor').addEventListener('transitionrun',e=>{
    if(!e.target.matches('.cm-cursor-primary'))return;
    window.__caretMoves.push(e.propertyName);if(e.propertyName!=='left')return;
    const animation=e.target.getAnimations().find(a=>a.transitionProperty==='left');if(!animation)return;
    const savedTime=animation.currentTime;animation.pause();
-   const v=window.__aitiarch['n.md'].view,target=v.coordsAtPos(v.state.selection.main.head).left;
+   const runsTo=parseFloat(animation.effect.getKeyframes().at(-1).left),record=[...window.__caretTargets].reverse().find(r=>Math.abs(r.left-runsTo)<0.02);
+   const target=record?record.text:Number.NaN; // a left CodeMirror never wrote gives NaN, which fails every gap assertion below
    const gap=()=>Math.abs(e.target.getBoundingClientRect().left-parseFloat(getComputedStyle(e.target).marginLeft)-target);
    // Sample the real browser interpolation at one and two 60-Hz frames. This is
    // independent of test-machine load and catches a caret that chases visible text.
+   animation.currentTime=0;const travel=Math.abs(e.target.getBoundingClientRect().left-parseFloat(getComputedStyle(e.target).marginLeft)-target);
    animation.currentTime=1000/60;const gapAfterOneFrame=gap();
    animation.currentTime=1000/30;const gapAfterTwoFrames=gap();
-   window.__caretFrameProbes.push({gapAfterOneFrame,gapAfterTwoFrames});
+   window.__caretFrameProbes.push({gapAfterOneFrame,gapAfterTwoFrames,travel});
    animation.currentTime=savedTime;animation.play();
   });
  });
@@ -82,7 +91,12 @@ await session('caret','\uFEFFSynthetic typing fixture.\r\n',async({page,theme,ro
  assert.equal(await doc(page),before.slice(0,5)+'rapidtyping'+before.slice(5),'rapid typing must remain immediate');
  await page.waitForTimeout(120);const rapid=await page.evaluate(()=>window.__caretFrameProbes);
  assert(rapid.length>0,'rapid typing must exercise caret animation');
- assert(rapid.every(p=>p.gapAfterOneFrame<1.5&&p.gapAfterTwoFrames<0.1),'rapid-typing-caret-catchup: animation must not accumulate lag');
+ assert(rapid.every(p=>Number.isFinite(p.gapAfterOneFrame)),'every caret transition runs to a position CodeMirror drew');
+ // The 1.5 px bar is 10% of a 15 px move (a 32 ms ease-out has covered 90% of its trip after one 60 Hz frame). Keys a frame apart can put two characters in one transition, which
+ // travels twice as far and is allowed twice the gap: the same share of its own trip, never more than 10%. A caret that accumulates lag still fails, by the share and by the two-frame gap.
+ assert(rapid.every(p=>p.gapAfterOneFrame<Math.max(1.5,0.11*p.travel)&&p.gapAfterTwoFrames<0.1),'rapid-typing-caret-catchup: animation must not accumulate lag');
+ // and when the burst is over the caret is exactly at the insertion point, with nothing still moving
+ assert(await page.evaluate(()=>{const v=window.__aitiarch['n.md'].view,c=document.querySelector('.cm-cursor-primary');return Math.abs(c.getBoundingClientRect().left-parseFloat(getComputedStyle(c).marginLeft)-v.coordsAtPos(v.state.selection.main.head).left)<0.5&&c.getAnimations().length===0;}),'rapid-typing-caret-settle: the caret rests at the insertion point');
  await page.keyboard.press('Control+z');assert.equal(await doc(page),before);
  await page.emulateMedia({reducedMotion:'reduce'});
  assert.equal(await page.locator('.cm-cursor-primary').evaluate(e=>getComputedStyle(e).transitionDuration.split(',').every(t=>parseFloat(t)===0)),true,'reduced motion must disable caret glide');
