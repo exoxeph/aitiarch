@@ -12,7 +12,7 @@ import {claimLines} from '../src/chat/chat-model.ts';
 const dirs:string[]=[];afterEach(async()=>{for(const d of dirs.splice(0))await rm(d,{recursive:true,force:true});});
 const temp=async(n:string)=>{const d=await mkdtemp(path.join(os.tmpdir(),n));dirs.push(d);return d;};
 const SRC='const http = require(\'http\');\n// Sessions live in memory.\nconst sessions = new Map();\nfunction login(name) {\n  return sessions.get(name);\n}\n';
-async function repo(){const r=await temp('aitiarch-fclaims-');await mkdir(path.join(r,'src'));await writeFile(path.join(r,'src','login.js'),SRC);await writeFile(path.join(r,'.env'),'KEY=secret\n');return r;}
+async function repo(){const r=await temp('aitiarch-fclaims-');await mkdir(path.join(r,'src'));await writeFile(path.join(r,'src','login.js'),SRC);await mkdir(path.join(r,'src','chat'));await writeFile(path.join(r,'src','chat','runtime.js'),SRC);await mkdir(path.join(r,'journal'));await writeFile(path.join(r,'journal','plan.js'),SRC);await writeFile(path.join(r,'.env'),'KEY=secret\n');return r;}
 const reply=(claims:unknown)=>`Sessions are kept in memory.\n<claims>${JSON.stringify(claims)}</claims>`;
 
 describe('finishFileReply',()=>{
@@ -36,6 +36,11 @@ describe('finishFileReply',()=>{
    {path:'.env',line:1,quote:'KEY=secret'},{path:'linked/x.js',line:1,quote:'const sessions = new Map();'},{quote:'no path'},{path:'src~1/login.js',line:3,quote:'x'},{path:'src/login.js.',line:3,quote:'x'}]),r);
   expect(out.claims.map((c:{status:string})=>c.status)).toEqual(Array(7).fill('no_valid_source'));
   expect(validClaims(out.claims)).toBe(true);
+ });
+ it('a claim about code in a folder named chat is checked like any other; the notebook folder, when it is inside the repo, is never read',async()=>{
+  const r=await repo(),claims=[{path:'src/chat/runtime.js',line:3,quote:'const sessions = new Map();'},{path:'journal/plan.js',line:3,quote:'const sessions = new Map();'}];
+  expect((await finishFileReply(reply(claims),r)).claims.map((c:{status:string})=>c.status)).toEqual(['found','found']); // no notebook given: both are plain repo files
+  expect((await finishFileReply(reply(claims),r,path.join(r,'journal'))).claims.map((c:{status:string})=>c.status)).toEqual(['found','no_valid_source']);
  });
  it('a reply without a claims block keeps its text and says so',async()=>{
   const out=await finishFileReply('Just prose.',await repo());expect(out).toMatchObject({body:'Just prose.',claims:[],citation:'missing_block'});

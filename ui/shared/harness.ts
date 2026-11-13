@@ -32,8 +32,9 @@ export function validSession(v:unknown):v is HarnessSession{
 }
 
 /**
- * Paths a harness session never sees, in a chat's pasted notes or an investigation's snapshot: the notebook file itself, hidden files and folders,
+ * Paths a harness session never sees inside the NOTEBOOK folder, and in a chat's pasted notes: the notebook file itself, hidden files and folders,
  * Aitiarch's own state and sidecars, secrets and keys, and the folders where chats, runs, measurements and backups live. Matched on every path segment.
+ * These are notebook rules. They are not applied to a repo's paths (see repoDenied): a repo has src/chat/ and runs/ folders like any other code.
  */
 export function harnessDenied(relPath:string):boolean{
  const parts=relPath.replace(/\\/g,'/').split('/').filter(Boolean);
@@ -41,3 +42,14 @@ export function harnessDenied(relPath:string):boolean{
  return parts.some(p=>p.startsWith('.')||/^notebook\.md$/i.test(p)||/^ui-state\.json/i.test(p)||/\.ink\.json$|\.ledger\.jsonl?$/i.test(p)
   ||/\.pem$|^id_|credentials|secrets|\.private\./i.test(p)||/^(?:node_modules|backups|chat|chats|runs|measurements)$/i.test(p));
 }
+
+/**
+ * What a REPO never gives out to an investigation: environment files, keys, credentials and secrets, tooling folders (.git, .claude, .codex, node_modules) and
+ * Aitiarch's own state. Matched on every path segment. Nothing else the notebook rules keep out applies to a repo.
+ */
+export function repoDenied(relPath:string):boolean{
+ const parts=relPath.replace(/\\/g,'/').split('/').filter(Boolean);
+ if(!parts.length)return true;
+ return parts.some(p=>/^\.env/i.test(p)||/\.pem$|^id_|credentials|secrets|\.private\./i.test(p)||/^(?:node_modules|\.git|\.claude|\.codex)$/i.test(p)||/^ui-state\.json/i.test(p));
+}
+

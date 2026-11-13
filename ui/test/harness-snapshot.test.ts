@@ -7,13 +7,14 @@ import {syncSnapshot,snapshotDrift} from '../server/harness/snapshot.ts';
 import {captureFolder,folderChanges,restoreFolder} from '../server/harness/tripwire.ts';
 
 // The folder an investigation reads is a copy the app makes and re-syncs before every turn: tracked and untracked-but-not-ignored files only,
-// never secrets, the notebook file, hidden files, links or very large files. A tripwire hashes folders before and after a run and can restore.
+// never secrets or keys, tooling folders (.git, .claude, .codex, node_modules), Aitiarch's state, the notebook folder, links or very large files. Code in folders
+// named chat, runs or backups is code like any other. A tripwire hashes folders before and after a run and can restore.
 const dirs:string[]=[];afterEach(async()=>{for(const d of dirs.splice(0))await rm(d,{recursive:true,force:true,maxRetries:5,retryDelay:100});});
 const temp=async(n:string)=>{const d=await mkdtemp(path.join(os.tmpdir(),n));dirs.push(d);return d;};
 async function walk(root:string,rel=''):Promise<string[]>{
  const out:string[]=[];for(const e of await readdir(path.join(root,rel),{withFileTypes:true})){const r=rel?rel+'/'+e.name:e.name;if(e.isDirectory())out.push(...await walk(root,r));else out.push(r);}return out;
 }
-const CANARIES=['CANARY-ENV-SNAP','CANARY-NOTEBOOK-SNAP','CANARY-PRIVATE-SNAP','CANARY-LINK-SNAP','CANARY-IGNORED-SNAP'];
+const CANARIES=['CANARY-ENV-SNAP','CANARY-PRIVATE-SNAP','CANARY-LINK-SNAP','CANARY-IGNORED-SNAP'];
 
 async function repo(){
  const root=await temp('aitiarch-snap-repo-'),outside=await temp('aitiarch-snap-outside-');
@@ -21,9 +22,9 @@ async function repo(){
  await writeFile(path.join(root,'.gitignore'),'dist/\n');
  await mkdir(path.join(root,'src'));await writeFile(path.join(root,'src','server.js'),'const port = 4100;\n');
  await writeFile(path.join(root,'README.md'),'# Fixture\n');
- await writeFile(path.join(root,'.env'),'KEY=CANARY-ENV-SNAP\n');await writeFile(path.join(root,'notebook.md'),'CANARY-NOTEBOOK-SNAP\n');await writeFile(path.join(root,'.private-note.md'),'CANARY-PRIVATE-SNAP\n');
+ await writeFile(path.join(root,'.env'),'KEY=CANARY-ENV-SNAP\n');await writeFile(path.join(root,'notebook.md'),'CANARY-NOTEBOOK-SNAP\n');await writeFile(path.join(root,'a.private.md'),'CANARY-PRIVATE-SNAP\n');
  await writeFile(path.join(root,'big.txt'),'x'.repeat(300000));
- execFileSync('git',['add','.gitignore','src/server.js','README.md','.env','notebook.md','.private-note.md','big.txt'],{cwd:root});
+ execFileSync('git',['add','.gitignore','src/server.js','README.md','.env','notebook.md','a.private.md','big.txt'],{cwd:root});
  await mkdir(path.join(root,'notes'));await writeFile(path.join(root,'notes','untracked.md'),'An untracked note.\n'); // untracked, not ignored: included
  await mkdir(path.join(root,'dist'));await writeFile(path.join(root,'dist','bundle.js'),'CANARY-IGNORED-SNAP\n'); // ignored: left out
  await writeFile(path.join(outside,'secret.md'),'CANARY-LINK-SNAP\n');await symlink(outside,path.join(root,'linked'),'junction'); // a junction to outside: never followed
@@ -34,8 +35,8 @@ describe('syncSnapshot',()=>{
  it('copies tracked and untracked-but-not-ignored files, and nothing denied, linked, ignored or too large',async()=>{
   const {root}=await repo(),dest=path.join(await temp('aitiarch-snap-dest-'),'files'),manifest=path.join(path.dirname(dest),'manifest.json');
   const r=await syncSnapshot(root,dest,manifest);
-  expect((await walk(dest)).sort()).toEqual(['README.md','notes/untracked.md','src/server.js']);
-  expect(r.files).toBe(3);expect(r.skipped.denied).toBeGreaterThanOrEqual(4);expect(r.skipped.tooLarge).toBe(1);expect(r.hash).toMatch(/^[0-9a-f]{64}$/);
+  expect((await walk(dest)).sort()).toEqual(['.gitignore','README.md','notebook.md','notes/untracked.md','src/server.js']); // a hidden file or a file named like the notebook is a repo file; secrets are not
+  expect(r.files).toBe(5);expect(r.skipped.denied).toBe(2);expect(r.skipped.tooLarge).toBe(1);expect(r.hash).toMatch(/^[0-9a-f]{64}$/);
   for(const f of await walk(dest)){const t=await readFile(path.join(dest,f),'utf8');for(const c of CANARIES)expect(t,f).not.toContain(c);}
  });
  it('re-syncs by hash: changed files are updated, deleted ones removed, stray files in the copy removed, and an unchanged repo keeps its hash',async()=>{
@@ -45,13 +46,42 @@ describe('syncSnapshot',()=>{
   await writeFile(path.join(root,'src','server.js'),'const port = 5000;\n');await rm(path.join(root,'notes','untracked.md'));await writeFile(path.join(dest,'stray.txt'),'written by someone');
   const second=await syncSnapshot(root,dest,manifest);
   expect(second.hash).not.toBe(first.hash);expect(await readFile(path.join(dest,'src','server.js'),'utf8')).toContain('5000');
-  expect((await walk(dest)).sort()).toEqual(['README.md','src/server.js']);
+  expect((await walk(dest)).sort()).toEqual(['.gitignore','README.md','notebook.md','src/server.js']);
  });
  it('reports drift when something changed the copy after a sync',async()=>{
   const {root}=await repo(),dest=path.join(await temp('aitiarch-snap-dest-'),'files'),manifest=path.join(path.dirname(dest),'manifest.json');
   await syncSnapshot(root,dest,manifest);expect(await snapshotDrift(dest,manifest)).toEqual({changed:[],added:[],removed:[]});
   await writeFile(path.join(dest,'README.md'),'changed');await writeFile(path.join(dest,'new.txt'),'x');
   expect(await snapshotDrift(dest,manifest)).toEqual({changed:['README.md'],added:['new.txt'],removed:[]});
+ });
+});
+
+// A repo is not a notebook. Folders called chat, runs, backups or measurements are ordinary code in a repo; only the notebook folder keeps those names out.
+async function codeRepo(){
+ const root=await temp('aitiarch-snap-code-');execFileSync('git',['init','-q'],{cwd:root});
+ const put=async(rel:string,body='x\n')=>{await mkdir(path.dirname(path.join(root,rel)),{recursive:true});await writeFile(path.join(root,rel),body);};
+ for(const f of ['src/chat/x.ts','runs/y.ts','backups/z.ts','measurements/m.ts','src/app.ts','.github/workflows/ci.yml','chat/log.json','journal/notes.md','journal/chat/c.json'])await put(f);
+ for(const f of ['.env','.env.local','id_rsa','keys/server.pem','node_modules/a.js','config/credentials.json'])await put(f,'CANARY-CODE-SNAP\n');
+ await put('.claude/settings.json','CANARY-CODE-SNAP\n');await put('.codex/config.toml','CANARY-CODE-SNAP\n');await put('ui-state.json','CANARY-CODE-SNAP\n');
+ return root;
+}
+const copy=async(root:string,notebook?:string)=>{const dest=path.join(await temp('aitiarch-snap-dest-'),'files'),manifest=path.join(path.dirname(dest),'manifest.json');const r=await syncSnapshot(root,dest,manifest,undefined,notebook);return {r,files:(await walk(dest)).sort(),dest};};
+describe('repo rules, not notebook rules',()=>{
+ it('includes code in folders named chat, runs and backups, and leaves out secrets, keys, node_modules, tooling folders and state',async()=>{
+  const {r,files,dest}=await copy(await codeRepo());
+  for(const f of ['src/chat/x.ts','runs/y.ts','backups/z.ts','measurements/m.ts','chat/log.json','src/app.ts','.github/workflows/ci.yml'])expect(files,f).toContain(f);
+  for(const f of ['.env','.env.local','id_rsa','keys/server.pem','node_modules/a.js','config/credentials.json','.claude/settings.json','.codex/config.toml','ui-state.json'])expect(files,f).not.toContain(f);
+  expect(r.skipped.denied).toBe(9);for(const f of files)expect(await readFile(path.join(dest,f),'utf8'),f).not.toContain('CANARY-CODE-SNAP');
+ });
+ it('when the repo is the notebook folder, the notebook rules keep chat, runs and the rest of its private folders out',async()=>{
+  const root=await codeRepo(),{files}=await copy(root,root);
+  for(const f of ['chat/log.json','runs/y.ts','backups/z.ts','measurements/m.ts','src/chat/x.ts','.github/workflows/ci.yml','journal/chat/c.json'])expect(files,f).not.toContain(f);
+  expect(files).toContain('src/app.ts');
+ });
+ it('when the notebook folder is inside the repo, all of it is left out as a whole, and the rest of the repo keeps its chat and runs code',async()=>{
+  const root=await codeRepo(),{files}=await copy(root,path.join(root,'journal'));
+  expect(files.filter(f=>f.startsWith('journal/'))).toEqual([]);
+  for(const f of ['src/chat/x.ts','runs/y.ts','backups/z.ts','chat/log.json','src/app.ts'])expect(files,f).toContain(f);
  });
 });
 

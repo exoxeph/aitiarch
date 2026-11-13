@@ -19,7 +19,7 @@ const SRC='const http = require(\'http\');\n// Sessions live in memory.\nconst s
 async function setup(){
  const repo=await temp('aitiarch-inv-repo-'),notebook=await temp('aitiarch-inv-nb-'),harness=await temp('aitiarch-inv-h-'),record=path.join(await temp('aitiarch-inv-rec-'),'calls.jsonl');
  execFileSync('git',['init','-q'],{cwd:repo});await mkdir(path.join(repo,'src'));await writeFile(path.join(repo,'src','login.js'),SRC);await writeFile(path.join(repo,'README.md'),'# Fixture\n');
- await writeFile(path.join(repo,'.env'),'KEY=CANARY-ENV-INV\n');await writeFile(path.join(repo,'notebook.md'),'CANARY-NB-INV\n');await writeFile(path.join(repo,'.private-note.md'),'CANARY-PRIV-INV\n');
+ await writeFile(path.join(repo,'.env'),'KEY=CANARY-ENV-INV\n');await writeFile(path.join(repo,'a.private.md'),'CANARY-PRIV-INV\n');
  await writeFile(path.join(notebook,'plan.md'),'# Plan\n\nKeep this.\n');
  const index=await SessionIndex.open(harness);
  const service=(scenario='inv-ok',limits={})=>new InvestigateService({index,dir:harness,notebook,command:process.execPath,prefixArgs:[cli,scenario,record],limits});
@@ -38,7 +38,9 @@ describe('investigation sessions',()=>{
   const t=await setup(),svc=t.service(),s=await svc.create('x',t.repo);
   await expect(svc.send(s.id,'q',()=>{})).rejects.toThrow('plan_required');
   const p=await svc.plan(s.id);
-  expect(p).toMatchObject({files:2,budgetUsd:0.5,turnLimit:40}); // 40 is the hidden safety backstop, not a limit shown to the userexpect(p.excluded).toContain('notebook.md');
+  expect(p).toMatchObject({files:2,budgetUsd:0.5,turnLimit:40}); // 40 is the hidden safety backstop, not a limit shown to the user
+  expect(p.excluded.join(' | ')).toMatch(/\.env/);expect(p.excluded.join(' | ')).toMatch(/notebook folder/); // in the words the plan card shows
+  expect(p.excluded.join(' | ')).not.toMatch(/\bchat\b|\bruns\b|measurements|backups/); // those are notebook folder names, not repo rules
   await expect(svc.confirm(s.id,'0'.repeat(64))).rejects.toThrow('plan_changed');
   await svc.confirm(s.id,p.planHash);expect((await t.index.get(s.id))!.confirmed).toBe(p.planHash);
  });

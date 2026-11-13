@@ -48,7 +48,7 @@ try {
   // The plan card comes first; there is no composer until it is confirmed, and the server refuses a turn without it.
   const card = panel.getByRole('group', { name: 'Plan for this investigation' }); await card.waitFor();
   const cardText = await card.innerText();
-  for (const s of ['Repo folder', 'Files Claude can read', 'Never copied', 'notebook.md', 'Cost cap per question']) assert(cardText.includes(s), 'plan card shows ' + s);
+  for (const s of ['Repo folder', 'Files Claude can read', 'Never copied', 'your notebook folder, if it is inside this repo', 'Cost cap per question']) assert(cardText.includes(s), 'plan card shows ' + s);
   assert(!/turn limit|12 model turns|of 12/i.test(cardText), 'no turn limit is shown on the plan card');
   // The cost cap is editable (default $0.50); a changed cap must be applied to the plan before it can be confirmed.
   const cap = card.getByLabel('Cost cap per question'); assert.equal(await cap.inputValue(), '0.50');

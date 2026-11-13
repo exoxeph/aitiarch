@@ -1,12 +1,12 @@
 // The folder an investigation reads: a copy of the user's repo that the app makes and re-syncs (by hash) before every turn. Only files git
-// knows about (tracked, plus untracked files that are not ignored), never anything a harness session must not see (shared/harness.ts), never a
+// knows about (tracked, plus untracked files that are not ignored), never what a repo must not give out (secrets, keys, tooling folders, state: deny.ts), never a
 // link or a file reached through a linked folder, never a very large file. The copy holds the files and nothing else; its manifest lives beside it.
 import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {lstat,mkdir,readdir,readFile,realpath,rm,rmdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {promisify} from 'node:util';
-import {harnessDenied} from '../../shared/harness.ts';
+import {repoDeny} from './deny.ts';
 import {safeTarget,safeWrite} from './tripwire.ts';
 const exec=promisify(execFile);
 export const SNAPSHOT_LIMITS=Object.freeze({fileBytes:262144,files:5000,totalBytes:50*1024*1024});
@@ -30,8 +30,10 @@ async function pruneEmpty(root:string,rel=''):Promise<boolean>{
  let empty=true;for(const e of await readdir(path.join(root,rel),{withFileTypes:true})){if(e.isDirectory()){const r=rel?rel+'/'+e.name:e.name;if(await pruneEmpty(root,r))await rmdir(path.join(root,r));else empty=false;}else empty=false;}return empty;
 }
 
-export async function syncSnapshot(repo:string,dest:string,manifestFile:string,limits=SNAPSHOT_LIMITS):Promise<SnapshotResult>{
- const root=await realpath(repo),skipped={denied:0,links:0,tooLarge:0,overCap:0,notFile:0},files:Record<string,string>={},data=new Map<string,Buffer>();
+/** 
+otebook is the notebook folder when it is the repo, inside it, or the repo is inside it: those paths are kept out by the notebook's own rules (deny.ts). */
+export async function syncSnapshot(repo:string,dest:string,manifestFile:string,limits=SNAPSHOT_LIMITS,notebook?:string):Promise<SnapshotResult>{
+ const root=await realpath(repo),denied=repoDeny(root,notebook?await realpath(notebook).catch(()=>path.resolve(notebook)):undefined),skipped={denied:0,links:0,tooLarge:0,overCap:0,notFile:0},files:Record<string,string>={},data=new Map<string,Buffer>();
  const linkedDir=new Map<string,boolean>();
  const throughLink=async(rel:string)=>{ // any folder on the way that is a link or junction: never followed
   let cur='';
@@ -40,7 +42,7 @@ export async function syncSnapshot(repo:string,dest:string,manifestFile:string,l
  };
  let bytes=0;
  for(const rel of await repoFiles(root)){
-  if(harnessDenied(rel)||rel.split('/').some(p=>p==='..'||p===''||/[<>:"|?*\u0000-\u001f]/.test(p))){skipped.denied++;continue;}
+  if(denied(rel)||rel.split('/').some(p=>p==='..'||p===''||/[<>:"|?*\u0000-\u001f]/.test(p))){skipped.denied++;continue;}
   if(await throughLink(rel)){skipped.links++;continue;}
   let s;try{s=await lstat(path.join(root,rel));}catch{skipped.notFile++;continue;}
   if(s.isSymbolicLink()){skipped.links++;continue;}
