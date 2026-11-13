@@ -4,7 +4,10 @@
 //  - the conversation's CLI really gets that line on stdin (also on a resumed turn), with no note text in it;
 //  - opening another note mid-conversation keeps the conversation, says "Open note changed: A -> B" once, and the next message names the new note;
 //  - a reply written on the other note is added to the note that is open, from the chat it is kept in;
-//  - a one-off chat sends the same line as its "editor" field.
+//  - a one-off chat sends the same line as its "editor" field;
+//  - a selection that crosses sections says where it starts and ends;
+//  - a reply's source chip names the note its question was asked on, with the same Found / Not found state, whichever note is open now;
+//  - a conversation started on a note with a very long name: the picker still says "started on", the name is cut with an ellipsis (full name in a tooltip), and nothing overflows in a 374 px panel.
 // Run after `vite build`: BATCH2A_OUTPUT=<folder outside the repo> node check/editor-context.mjs
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -25,10 +28,12 @@ await mkdir(output, { recursive: true });
 const tmp = (n) => mkdtemp(path.join(os.tmpdir(), n));
 const notebook = await tmp('aitiarch-edctx-nb-'), harness = await tmp('aitiarch-edctx-h-'), scratch = await tmp('aitiarch-edctx-s-');
 const scenarioFile = path.join(scratch, 'scenario.txt'), record = path.join(scratch, 'calls.jsonl');
+const LONG = 'a-very-long-note-name-that-would-never-fit-in-a-narrow-chat-panel-without-an-ellipsis';
 const PLAN = '# Plan\n\nA unique sentence for the session.\n\n## Risks\n\nThe risk is the second paragraph.\n', IDEAS = '# Ideas\n\nOne idea only.\n';
 const SEL = 'A unique sentence for the session.';
 execFileSync('git', ['init', '-q'], { cwd: notebook }); await writeFile(path.join(notebook, '.gitignore'), '/chat/\n');
-await writeFile(path.join(notebook, 'plan.md'), PLAN); await writeFile(path.join(notebook, 'ideas.md'), IDEAS); await writeFile(scenarioFile, 'quote-selection');
+await writeFile(path.join(notebook, 'plan.md'), PLAN); await writeFile(path.join(notebook, 'ideas.md'), IDEAS);
+await writeFile(path.join(notebook, LONG + '.md'), '# A very long title for a note that will not fit in a narrow chat panel at all\n\nText.\n'); await writeFile(scenarioFile, 'quote-selection');
 const provider = new FakeChatProvider();
 const store = await Store.open(notebook), watcher = new NoteWatcher(store);
 const app = createApp({ store, watcher, distDir: path.join(here, '../dist'), provider, harness: { command: process.execPath, prefixArgs: [path.join(here, '..', 'test', 'fixtures', 'harness-cli.mjs'), '@' + scenarioFile, record], dir: harness } });
@@ -45,6 +50,8 @@ try {
   const select = (file, text) => page.evaluate(([f, t]) => { const v = window.__aitiarch[f].view, from = v.state.doc.toString().indexOf(t); v.dispatch({ selection: { anchor: from, head: from + t.length } }); }, [file, text]);
   const caret = (file, pos) => page.evaluate(([f, p]) => { const v = window.__aitiarch[f].view; v.dispatch({ selection: { anchor: p } }); }, [file, pos]);
   const text = async (loc) => (await loc.innerText()).replace(/\s+/g, ' ').trim().replace(/\s?([×+])$/, ' $1');
+  const chipOf = (turn) => panel.locator('.chat-turn').nth(turn).locator('.claim-chip').first();
+  const chipWords = async (loc) => ({ label: (await loc.locator('.claim-label').textContent()).trim(), state: (await loc.locator('.claim-state').textContent()).replace(/^\s*·\s*/, '').trim() });
   const ask = async (question) => { const c = panel.getByRole('textbox', { name: 'Message Aitiarch AI' }); await c.fill(question); await c.press('Enter'); const review = panel.getByRole('region', { name: 'What will be sent' }); await review.waitFor(); return review; };
   const sendReview = async (review) => { const done = panel.locator('.chat-ai:not(.chat-streaming) .chat-add').last(); const before = await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').count(); await review.getByRole('button', { name: 'Send', exact: true }).click(); await page.waitForFunction((n) => document.querySelectorAll('#chat-panel .chat-ai:not(.chat-streaming) .chat-add').length > n, before); return done; };
 
@@ -73,6 +80,10 @@ try {
   // A longer selection across two sections: the line range grows, the section follows the head.
   await page.evaluate(() => { const v = window.__aitiarch['plan.md'].view, d = v.state.doc.toString(); v.dispatch({ selection: { anchor: d.indexOf('A unique'), head: d.indexOf('The risk') + 8 } }); });
   await page.waitForFunction(() => /lines 3-7/.test(document.querySelector('#chat-panel [data-chip="selection"]')?.textContent ?? ''));
+  const across = PLAN.slice(PLAN.indexOf('A unique'), PLAN.indexOf('The risk') + 8);
+  const spanReview = await ask('What do these parts mean?');
+  assert.equal(await text(spanReview.locator('.chat-review-manifest')), `Open note: Plan (${PLAN.length} chars). Selection: lines 3-7 (${across.length} chars). Selection spans Plan to Plan > Risks. Cursor section: Plan > Risks.`, 'a selection across two sections says where it starts and ends, and the cursor section');
+  await spanReview.getByRole('button', { name: 'Cancel' }).click();
   await select('plan.md', SEL);
   await page.waitForFunction(() => /line 3 ·/.test(document.querySelector('#chat-panel [data-chip="selection"]')?.textContent ?? ''));
 
@@ -106,6 +117,7 @@ try {
   const second = (await calls())[1];
   assert(second.args.includes('--resume'), 'a resumed turn'); assert.equal(second.stdin, line2 + '\n\nAnd this section?'); assert(!second.addendum.includes('[[source S1'), 'no selection source in the instruction file');
   assert.equal(await chip('selection').getAttribute('aria-pressed'), 'true', 'the selection is back for the next message');
+  assert.deepEqual(await chipWords(chipOf(1)), { label: 'plan › Plan', state: 'Found' }, 'a note claim names the note and the heading it sits under while that note is open');
   // The cursor's section follows the caret: into "Risks", the selection chip goes with the selection, and the next line says so.
   await caret('plan.md', PLAN.indexOf('The risk') + 3);
   await page.waitForFunction(() => !document.querySelector('#chat-panel [data-chip="selection"]'));
@@ -120,8 +132,9 @@ try {
   assert.equal(await text(chip('switched')), 'Open note changed: Plan -> Ideas ×', 'the notice names both notes');
   assert.equal(await chip('switched').getAttribute('role'), 'status');
   assert.equal(await text(chip('note')), 'Open note · Ideas ×', 'the open note chip follows');
-  assert.match(await text(panel.locator('.chat-pick-trigger')), /Conversation 1 · 2 messages · started on plan/, 'the conversation is still selected, and says where it was started');
+  assert.match(await text(panel.locator('.chat-pick-trigger .chat-pick-value')), /^Conversation 1 · 2 messages$/, 'the conversation is still selected'); assert.equal(await text(panel.locator('.chat-pick-trigger .chat-pick-from')), 'started on plan', 'and says where it was started');
   assert.equal(await panel.locator('.chat-turn').count(), 2, 'its earlier messages are still there');
+  assert.deepEqual(await chipWords(chipOf(1)), { label: 'plan', state: 'Found' }, 'the earlier reply\'s chip still names the note it was asked on, with the same state, now that another note is open');
   assert.match(await text(panel.locator('.chat-head h2')), /On ideas$/, 'the header names the open note');
   await page.screenshot({ path: path.join(output, 'editor-context-note-changed.png') });
   review = await ask('And here?');
@@ -133,8 +146,15 @@ try {
   const third = (await calls())[2];
   assert(third.args.includes('--resume'), 'still the same conversation'); assert.equal(third.stdin, line3 + '\n\nAnd here?');
   assert(third.addendum.includes('One idea only.') && !third.addendum.includes(SEL), 'the instruction file holds the note that is open now, not the first one');
+  // A reply asked on Ideas: its quote is not in Ideas. Back on Plan, whose text does hold those words, the chip still names Ideas and still says not found, and offers no Show or Cite.
+  assert.deepEqual(await chipWords(chipOf(2)), { label: 'ideas', state: 'Quote not found' });
   // The notice can be dismissed on its own.
-  await openNote('plan.md'); await chip('switched').waitFor(); assert.equal(await text(chip('switched')), 'Open note changed: Ideas -> Plan ×');
+  await openNote('plan.md'); await chip('switched').waitFor();
+  assert.deepEqual(await chipWords(chipOf(2)), { label: 'ideas', state: 'Quote not found' }, 'the chip names the note it was asked on, not the one open now');
+  assert.deepEqual(await chipWords(chipOf(1)), { label: 'plan › Plan', state: 'Found' }, 'and the reply asked on Plan reads as it did when Plan was open before');
+  await chipOf(2).click();
+  assert.equal(await panel.getByRole('button', { name: 'Show in note' }).count(), 0, 'no Show in note for a quote that belongs to another note'); assert.equal(await panel.getByRole('button', { name: 'Cite in note' }).count(), 0);
+  assert.match(await text(panel.locator('.claim-elsewhere')), /not open now/); await chipOf(2).click(); assert.equal(await text(chip('switched')), 'Open note changed: Ideas -> Plan ×');
   await chip('switched').getByRole('button', { name: 'Dismiss this notice' }).click(); await page.waitForFunction(() => !document.querySelector('#chat-panel [data-chip="switched"]'));
 
   // 7. A reply written while Ideas was open is added to Ideas, from the chat it is kept in (the conversation started on Plan).
@@ -170,6 +190,28 @@ try {
   assert.equal(await text(review.locator('.chat-review-manifest')), 'Open note: Plan (not sent this turn). Cursor section: Plan > Risks.', 'the line says the note was not sent');
   assert.equal(await review.locator('.chat-review-source summary', { hasText: /^This note/ }).count(), 0, 'and no note source is in the review');
   await review.getByRole('button', { name: 'Cancel' }).click();
+
+  // 10. A conversation started on a note with a very long name, then another note opened: the picker says "started on <name>", cut with an ellipsis and the full name in a tooltip; nothing overflows at 374 px.
+  await openNote(LONG + '.md');
+  await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('#chat-panel .chat-pick-trigger [data-x]') === null && /Conversation 2/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
+  await openNote('ideas.md'); await chip('switched').waitFor();
+  const from = panel.locator('.chat-pick-trigger .chat-pick-from'); await from.waitFor();
+  assert.match(await text(from), /^started on a-very-long-note-name/);
+  assert.equal(await from.locator('.chat-pick-from-name').getAttribute('title'), LONG, 'the full name is in a tooltip');
+  await page.setViewportSize({ width: 390, height: 860 });
+  await page.waitForFunction(() => Math.round(document.querySelector('#chat-panel').getBoundingClientRect().width) === 374);
+  const narrow = await page.evaluate(() => {
+    const panel = document.querySelector('#chat-panel'), trigger = panel.querySelector('.chat-pick-trigger'), from = trigger.querySelector('.chat-pick-from'), name = from.querySelector('.chat-pick-from-name');
+    const t = trigger.getBoundingClientRect(), f = from.getBoundingClientRect(), n = name.getBoundingClientRect(), p = panel.getBoundingClientRect();
+    return { panelWidth: Math.round(p.width), panelOverflow: panel.scrollWidth - panel.clientWidth, triggerOverflow: trigger.scrollWidth - trigger.clientWidth, pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      nameCut: name.scrollWidth > name.clientWidth, nameInside: n.right <= t.right + 0.5 && n.left >= t.left, prefixRoom: n.left - f.left, prefixText: from.firstChild.textContent, ellipsis: getComputedStyle(name).textOverflow };
+  });
+  assert.equal(narrow.panelWidth, 374); assert(narrow.panelOverflow <= 1, 'no sideways overflow in the panel at 374px: ' + narrow.panelOverflow); assert(narrow.triggerOverflow <= 1, 'the picker does not overflow: ' + narrow.triggerOverflow); assert(narrow.pageOverflow <= 1, 'nor does the page');
+  assert(narrow.nameCut && narrow.ellipsis === 'ellipsis', 'the long name is cut with an ellipsis'); assert(narrow.nameInside, 'and stays inside the picker');
+  assert.equal(narrow.prefixText.trim(), 'started on', '"started on" is whole'); assert(narrow.prefixRoom > 40, 'and has room: ' + narrow.prefixRoom);
+  await panel.screenshot({ path: path.join(output, 'editor-context-narrow.png') });
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   assert.equal(errors.length, 0, 'no page error: ' + errors.join('; '));
   assert.equal(external.length, 0, 'no network request left the machine: ' + external.join(', '));

@@ -4,6 +4,8 @@ import {claimChips} from './claim-chips.ts';
 
 export interface ClaimChipsProps {
  claims:readonly ChatClaim[]|undefined;path:string|null;noteText:string;
+ /** The question was asked on a note that is not open now: `path` names that note and `noteText` is not its text. */
+ elsewhere?:boolean;
  /** Scrolls the editor to the quote and marks it for a moment; false when the quote is not in the current note. */
  onShow:(quote:string)=>boolean;
  /** Inserts a citation link to the note (and heading) at the cursor; false when it could not. */
@@ -19,8 +21,9 @@ export const QUOTE_MOVED='Quote not found in the current note.';
  * the AI's claim and not as your own link. Quiet and closed when every claim was found; open when something needs a look. Every state is in words.
  * A chip is a button: it shows the claimed quote, and "Show in note" scrolls to it. Escape closes the quote and puts focus back on its chip.
  */
-export function ClaimChips({claims,path,noteText,onShow,onCite,onFile}:ClaimChipsProps){
- const chips=claimChips(claims,{path,text:noteText}),[open,setOpen]=useState<number|null>(null),[said,setSaid]=useState(''),refs=useRef(new Map<number,HTMLButtonElement>()),id=useId();
+export const ELSEWHERE_NOTE='This quote is from a note that is not open now, so it cannot be shown or cited here.';
+export function ClaimChips({claims,path,noteText,elsewhere=false,onShow,onCite,onFile}:ClaimChipsProps){
+ const chips=claimChips(claims,{path,text:noteText},elsewhere),[open,setOpen]=useState<number|null>(null),[said,setSaid]=useState(''),refs=useRef(new Map<number,HTMLButtonElement>()),id=useId();
  if(!chips.length)return null;
  const needsLook=chips.some(c=>c.state!=='found'),current=chips.find(c=>c.key===open)??null;
  const close=()=>{const k=open;setOpen(null);setSaid('');if(k!==null)refs.current.get(k)?.focus();};
@@ -40,6 +43,7 @@ export function ClaimChips({claims,path,noteText,onShow,onCite,onFile}:ClaimChip
     {current?.key===c.key&&<div className="claim-quote" id={`${id}-quote`} role="group" aria-label={`Quote claimed by the AI: ${current.label}`}>
      <p className="claim-quote-label">The AI quoted</p>
      <q className="claim-quote-text">{current.quote}</q>
+     {current.elsewhere&&<p className="claim-elsewhere">{ELSEWHERE_NOTE}</p>}
      <div className="claim-quote-actions">
       {current.canShow&&<button type="button" className="claim-action" onClick={()=>setSaid(onShow(current.quote)?'Shown in the note.':QUOTE_MOVED)}>Show in note</button>}
       {current.file&&onFile&&<button type="button" className="claim-action" onClick={()=>onFile(current.file!.path,current.file!.line)}>Show the file</button>}

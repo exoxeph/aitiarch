@@ -35,7 +35,8 @@ function ConversationMenu({label,empty,value,list,disabled,canCreate,open:openNo
   <button ref={trigger} type="button" className="chat-ctl chat-pick-trigger" aria-haspopup="listbox" aria-expanded={open} data-session={value} disabled={disabled}
    onClick={()=>setOpen(v=>!v)} onKeyDown={e=>{if(e.key==='ArrowDown'&&!open){e.preventDefault();setOpen(true);}}}>
    <span className="chat-pick-label">{label}</span>
-   <span className="chat-pick-value">{current?`${current.label} · ${current.turns} ${current.turns===1?'message':'messages'}${current.note&&current.note!==openNote?` · started on ${noteTitle(current.note)}`:''}`:empty}</span><Caret/>
+   <span className="chat-pick-value">{current?`${current.label} · ${current.turns} ${current.turns===1?'message':'messages'}`:empty}</span><Caret/>
+   {current?.note&&current.note!==openNote&&<span className="chat-pick-from">started on <span className="chat-pick-from-name" title={noteTitle(current.note)}>{noteTitle(current.note)}</span></span>}
   </button>
   {open&&<div className="chat-pick-pop" ref={pop} onKeyDown={onKey}>
    <div role="listbox" aria-label={label}>

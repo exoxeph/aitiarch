@@ -2,7 +2,7 @@ import {useEffect,useMemo,useRef,useState} from 'react';
 import {api,ApiError,streamChat} from '../api.ts';
 import type {InvestigateUsage} from '../../shared/usage.ts';
 import {investigateLine} from './investigate-usage.ts';
-import {CHAT_MESSAGES,type BudgetDetail,type ChatErrorCode,type ChatReview,type ChatUsage} from '../../shared/chat.ts';
+import {CHAT_MESSAGES,type BudgetDetail,type ChatErrorCode,type ChatMessage,type ChatReview,type ChatUsage} from '../../shared/chat.ts';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
 import {SessionPicker} from './SessionPicker.tsx';
 import {sessionChoices,type PickedSession} from './session-picker-model.ts';
@@ -170,6 +170,8 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  };
  // A double tap on Send (or Enter then a click) must not land on the Stop that takes its place: Stop ignores clicks for a moment after a send starts.
  const stop=()=>{if(!path||Date.now()-sentAt.current<STOP_GUARD_MS)return;void api.chatCall('cancel',{path}).catch(()=>{});};
+ // A reply's source chips name the note its question was asked on, not the note that is open now: in a conversation that followed the person to another note, that can differ.
+ const asked=(message:ChatMessage|undefined)=>{const on=message?.askedOn??path,here=on===openPath;return {path:on,noteText:here?noteText:'',elsewhere:!here,onShow:onShowQuote,onCite:onCiteClaim};};
  const add=async(id:string)=>{setAdding(id);try{await onAdd(id,path??undefined);}finally{if(alive.current)setAdding(null);}};
  const keep=async()=>{try{await api.chatCall('enable',{action:'add-ignore-line'});setPersistence('private');}catch(e){setNotice(e instanceof ApiError?e.message:'Could not keep this chat on disk.');}};
  const composing=busy||!!pending;
@@ -220,7 +222,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
       {t.text?<div className="chat-stream"><LiveMarkdown text={t.text} live/></div>:<div className="chat-thinking"><Thinking/></div>}
       <div className="chat-message-tools"><button type="button" className="chat-stop" onClick={stop}>Stop</button></div></div>}
      {t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span><ReplyMarkdown text={t.text}/>{t.message?.unstructured&&<p className="chat-unstructured">{UNSTRUCTURED_LABEL}</p>}{t.message?.echo&&<p className="chat-flag chat-echo">{ECHO_LABEL}</p>}
-      {t.message&&<ReplyNotes message={t.message} question={t.question} busy={composing} onAskAgain={q=>void submit(q)} note={{path:openPath,noteText,onShow:onShowQuote,onCite:onCiteClaim}}/>}<UsedSkills names={t.message?.skills}/>
+      {t.message&&<ReplyNotes message={t.message} question={t.question} busy={composing} onAskAgain={q=>void submit(q)} note={asked(t.message)}/>}<UsedSkills names={t.message?.skills}/>
       {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
       <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}>Add to note</button></div></div>}
      {t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason,t.error.errorName,t.error)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button></div>}

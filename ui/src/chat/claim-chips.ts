@@ -22,6 +22,8 @@ export interface ClaimChip {
  canCite:boolean;
  /** A file claim: the repo file and the real line, for "Show the file". */
  file?:{path:string;line:number};
+ /** A note or selection claim from a question asked on a note that is not open now: it names that note, and its quote cannot be shown or cited here. */
+ elsewhere?:true;
 }
 const KIND:Record<ClaimSourceKind,ClaimChip['kind']>={note:'N',thread:'T',selection:'S',other_note:'O',session:'C'};
 const WORDS:Record<ChipState,ClaimChip['stateWords']>={found:'Found',not_found:'Quote not found',no_valid_source:'No valid source'};
@@ -34,13 +36,15 @@ function headingAt(text:string,from:number):Heading|null{
  return headingsOf(text.slice(0,eol<0?text.length:eol)).at(-1)??null;
 }
 
-export function claimChips(claims:readonly ChatClaim[]|undefined,note:{path:string|null;text:string}):ClaimChip[]{
+/** `note` is the note the question was asked on. When it is not the note that is open now (a conversation followed the person to another note), pass `elsewhere`: the chips still
+ *  name that note and keep the state the server gave them, but have no heading and no Show in note or Cite in note, because the text here is another note's. */
+export function claimChips(claims:readonly ChatClaim[]|undefined,note:{path:string|null;text:string},elsewhere=false):ClaimChip[]{
  return (claims??[]).map((c,key)=>{
   if(c.status==='no_valid_source')return {key,state:c.status,kind:null,label:'Unrecognised source',stateWords:WORDS[c.status],quote:c.quote,heading:null,canShow:false,canCite:false};
   if(c.source==='file')return {key,state:c.status,kind:'F',file:{path:c.path,line:c.line},label:`${c.path}:${c.line}${c.namedLine?` (the AI said line ${c.namedLine})`:''}`,stateWords:WORDS[c.status],quote:c.quote,heading:null,canShow:false,canCite:false};
-  const isNote=c.source==='note',range=isNote?findQuote(note.text,c.quote):null,heading=range?headingAt(note.text,range.from):null;
+  const isNote=c.source==='note',far=elsewhere&&(isNote||c.source==='selection'),range=isNote&&!elsewhere?findQuote(note.text,c.quote):null,heading=range?headingAt(note.text,range.from):null;
   const label=isNote?noteName(note.path)+(heading?' › '+heading.text:''):OTHER_LABEL[c.source];
   return {key,state:c.status,kind:KIND[c.source],label,stateWords:WORDS[c.status],quote:c.quote,heading,
-   canShow:isNote||c.source==='selection',canCite:isNote&&c.status==='found'&&!!range};
+   canShow:(isNote||c.source==='selection')&&!far,canCite:isNote&&c.status==='found'&&!!range,...(far?{elsewhere:true as const}:{})};
  });
 }

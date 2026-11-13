@@ -38,6 +38,20 @@ describe('claimChips',()=>{
   const [c]=claimChips([{sourceId:'banana',quote:'noon',status:'no_valid_source'}],{path:'decisions.md',text:note});
   expect(c).toMatchObject({kind:null,state:'no_valid_source',stateWords:'No valid source',label:'Unrecognised source',canShow:false,canCite:false,quote:'noon'});
  });
+ it('a claim from a question asked on another note names that note, keeps the state the server gave it, and cannot be shown or cited here',()=>{
+  // The open note happens to hold the same words: the chip must not borrow its heading, nor offer to show or cite them.
+  const chips=claimChips([found('N1','note','We chose SQLite for the local store.'),{sourceId:'N2',source:'note',quote:'We chose Postgres',status:'not_found'},found('S1','selection','Parking is a problem.'),found('T1','thread','parking')],{path:'plan.md',text:note},true);
+  expect(chips[0]).toMatchObject({kind:'N',state:'found',stateWords:'Found',label:'plan',canShow:false,canCite:false,elsewhere:true});expect(chips[0].heading).toBeNull();
+  expect(chips[1]).toMatchObject({state:'not_found',stateWords:'Quote not found',label:'plan',canShow:false,canCite:false,elsewhere:true});
+  expect(chips[2]).toMatchObject({kind:'S',state:'found',canShow:false,elsewhere:true});
+  expect(chips[3]).toMatchObject({kind:'T',label:'Thread',canShow:false}); expect(chips[3].elsewhere).toBeUndefined();
+  // Asked on the note that is open: exactly as before.
+  const here=claimChips([found('N1','note','We chose SQLite for the local store.')],{path:'plan.md',text:note},false);
+  expect(here[0]).toMatchObject({label:'plan › Setup choices',canShow:true,canCite:true});expect(here[0].elsewhere).toBeUndefined();
+  // The state of a chip never depends on where it is looked at from.
+  const states=(elsewhere:boolean)=>claimChips([found('N1','note','We chose SQLite for the local store.'),{sourceId:'N2',source:'note',quote:'zzz',status:'not_found'}],{path:'plan.md',text:note},elsewhere).map(c=>c.state);
+  expect(states(true)).toEqual(states(false));
+ });
  it('no note open: the note is just "This note"; older files have no claims',()=>{
   expect(claimChips([found('N1','note','x')],{path:null,text:''})[0].label).toBe('This note');
   expect(claimChips(undefined,{path:'a.md',text:''})).toEqual([]);

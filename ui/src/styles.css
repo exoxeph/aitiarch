@@ -1020,7 +1020,9 @@ button.claim-chip:focus-visible, .claim-action:focus-visible { outline: 2px soli
 /* Which conversation a message goes to: the one-off chat or a named Claude Code session the app keeps. */
 .chat-sessions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 16px 8px; font: var(--text-meta)/1.4 var(--font-ui); color: var(--muted); }
 .chat-pick { position: relative; flex: 1 1 100%; min-width: 0; }
-.chat-pick-trigger { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; }
+.chat-pick-trigger { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; width: 100%; padding-top: 4px; padding-bottom: 4px; text-align: left; }
+.chat-pick-from { display: flex; flex: 1 1 100%; min-width: 0; gap: .4em; color: var(--muted); font-size: var(--text-meta); white-space: nowrap; }
+.chat-pick-from-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .chat-pick-label { color: var(--muted); }
 .chat-pick-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-pick-pop { position: absolute; z-index: 70; inset: calc(100% + 4px) 0 auto; max-height: 50vh; overflow: auto; padding: 4px; background: var(--paper-2); border: 1px solid var(--control-border); border-radius: var(--radius-card); box-shadow: var(--shadow-floating); }
