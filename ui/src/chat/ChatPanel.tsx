@@ -14,6 +14,7 @@ import {useNodeSettings} from '../skills/useNodeSettings.ts';
 import {DEFAULT_CONTEXT,SUGGESTED_PROMPTS,chatHeader,noteTitle,toggleChip,type ContextChip} from './chat-stub.ts';
 import {editorInfo,sameEditorContext,type EditorContext} from '../../shared/editor-context.ts';
 import {linesText,noteChangedText,noteChipText,selectionChipText} from './editor-chips.ts';
+import {readConversationChoice,writeConversationChoice,type ConversationChoice} from './conversation-choice.ts';
 import {applyEvent,buildContext,chipEstimate,errorText,formatCount,fromStored,newTurnId,previewText,usageLine,ECHO_LABEL,UNSTRUCTURED_LABEL,type Turn} from './chat-model.ts';
 import {ReplyNotes} from './ReplyNotes.tsx';
 import {LiveMarkdown} from '../ink/LiveMarkdown.tsx';
@@ -70,23 +71,25 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
 
 /**
  * The right-hand chat. A one-off chat and an investigation belong to the note that is open: another note is another chat. A named conversation follows the person from
- * note to note: it stays selected, its replies stay under the note it was started on, and each message says which note is open now.
+ * note to note: it stays selected (also over a page reload), its history is loaded by its id whichever note is open, its replies stay under the note it was started on, and each
+ * message says which note is open now.
  */
 export function ChatPanel(props:ChatPanelProps){
- const open=props.path,[conversation,setConversation]=useState<{id:string;home:string}|null>(null),[kind,setKind]=useState<HarnessMode>('chat');
+ const open=props.path,[conversation,setChoice]=useState<ConversationChoice|null>(()=>readConversationChoice()),[kind,setKind]=useState<HarnessMode>('chat');
+ const setConversation=(c:ConversationChoice|null)=>{writeConversationChoice(c);setChoice(c);};
  const lastOpen=useRef(open);
  useEffect(()=>{if(lastOpen.current===open)return;lastOpen.current=open;if(kind==='chat'&&conversation?.home)return;setConversation(null);setKind('chat');},[open,kind,conversation]);
  const home=kind==='chat'&&conversation?.home?conversation.home:open;
  return <ChatPanelBody key={home??'none'} {...props} path={home} openPath={open} conversation={conversation?.id??''} kind={kind} onKind={setKind}
-  carry={kind==='chat'&&conversation?.home?conversation:undefined} onConversation={(id,from)=>setConversation(id?{id,home:from}:null)}/>;
+  onConversation={(id,from)=>setConversation(id?{id,home:from}:null)}/>;
 }
 
 interface BodyProps extends Omit<ChatPanelProps,'path'> {
  /** The note this chat is kept under: the open note, or the note a followed conversation was started on. */
  path:string|null;openPath:string|null;
- conversation:string;kind:HarnessMode;onKind:(k:HarnessMode)=>void;carry?:{id:string;home:string};onConversation:(id:string,home:string)=>void;
+ conversation:string;kind:HarnessMode;onKind:(k:HarnessMode)=>void;onConversation:(id:string,home:string)=>void;
 }
-function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,extraNotes=[],onClearExtraNotes,onShowQuote=()=>false,onCiteClaim=()=>false,conversation,kind,onKind:setKind,carry,onConversation}:BodyProps){
+function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,extraNotes=[],onClearExtraNotes,onShowQuote=()=>false,onCiteClaim=()=>false,conversation,kind,onKind:setKind,onConversation}:BodyProps){
  const otherNotes=extraNotes.filter(p=>p!==openPath);
  const setConversation=(id:string,session?:HarnessSession)=>onConversation(id,session?.note??path??'');
  const [chips,setChips]=useState<ContextChip[]>(()=>DEFAULT_CONTEXT.map(c=>({...c}))),[turns,setTurns]=useState<Turn[]>([]),[draft,setDraft]=useState('');
@@ -112,20 +115,27 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  useEffect(()=>{let off=false;api.usage().then(u=>{if(!off)setInv(u.investigate??null);}).catch(()=>{});return()=>{off=true;};},[path,kind,invRefresh,turns.filter(t=>t.status==='complete').length]);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;abort.current?.abort();};},[]);
  useEffect(()=>{input.current?.focus();},[]);
+ // What the panel shows is the history of the chat that is selected, replaced whenever the selection changes. A named conversation is loaded by its id (its replies from the chat record of
+ // the note it was started on, its questions from the app's own folder), whichever note is open; the one-off chat is the open note's own, without the replies of any conversation. What was
+ // sent meanwhile stays: a late load never wipes a turn that is already on the screen. The footer's counters come with the chat they belong to.
  useEffect(()=>{
-  if(!path)return;let off=false;
-  // Questions of named conversations come back from the app's own folder; the one-off chat's are only what this page remembers.
-  Promise.all([api.chat(path,kind==='chat'&&conversation?conversation:undefined),api.harnessQuestions(path).catch(()=>({questions:{} as Record<string,string>}))]).then(([s,h])=>{if(off)return;
-   const merged=new Map(questions);for(const [id,q] of Object.entries(h.questions))if(!merged.has(id))merged.set(id,q);
-   setTurns(prev=>prev.length?prev:fromStored(s.messages,merged));setUsage(s.usage);setPersistence(s.persistence.enabled?'private':'memory');})
+  if(!path)return;let off=false;const named=kind==='chat'?conversation:'';
+  setTurns([]);setPending(null);
+  const settle=(loaded:Turn[])=>setTurns(prev=>[...loaded,...prev.filter(p=>!loaded.some(l=>l.id===p.id))]);
+  if(named){
+   api.harnessHistory(named).then(h=>{if(off)return;
+    const known=new Map(questions);for(const [id,q] of Object.entries(h.questions))if(!known.has(id))known.set(id,q);
+    settle(fromStored(h.messages,known));setUsage(h.usage);setPersistence(h.persistence.enabled?'private':'memory');})
+    .catch(e=>{if(off)return;if(e instanceof ApiError&&e.status===409){setNotice('That conversation no longer exists.');onConversation('',path);}else setNotice('This conversation could not be loaded.');});
+   return()=>{off=true;};
+  }
+  // The one-off chat's questions are only what this page remembers; an older reply that carries no session id but belongs to a conversation (its question was kept) is not the one-off chat's.
+  Promise.all([api.chat(path),api.harnessQuestions(path).catch(()=>({questions:{} as Record<string,string>}))]).then(([s,h])=>{if(off)return;
+   const ofConversations=new Set(Object.keys(h.questions));
+   settle(fromStored(s.messages.filter(m=>!m.session&&!ofConversations.has(m.id)),questions));setUsage(s.usage);setPersistence(s.persistence.enabled?'private':'memory');})
    .catch(()=>{if(!off)setNotice('This note’s chat could not be loaded.');});
   return()=>{off=true;};
- },[path]);
- // The footer counts the chat that is selected: a conversation has its own budget and counters (whichever note is open), a one-off chat its note's. They load with the chat
- // when the panel opens, and again whenever another chat is chosen.
- const usageFor=useRef(kind==='chat'?conversation:'');
- useEffect(()=>{const want=kind==='chat'?conversation:'';if(!path||usageFor.current===want)return;usageFor.current=want;let off=false;
-  api.chat(path,want||undefined).then(s=>{if(!off)setUsage(s.usage);}).catch(()=>{if(!off)setUsage(null);});return()=>{off=true;};},[path,conversation,kind]);
+ },[path,conversation,kind]);
  const stickLog=useStickToBottom(log,turns); // follows the reply smoothly unless the reader scrolled up
 
  const selectionText=ec?.selection?.text??'',openTitle=ec&&ec.note.path===openPath?ec.note.title:openPath?noteTitle(openPath):'',noteEstimate=useMemo(()=>chipEstimate(noteText),[noteText]),threadsEstimate=useMemo(()=>chipEstimate(threadsText),[threadsText]);
@@ -191,7 +201,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
     :<p className="chat-empty inv-empty">Choose an investigation or start a new one. Claude reads a copy of your repo folder, read-only, and shows each file it opens.</p>}
    {inv&&<footer className="chat-foot"><p className="chat-inv-usage" data-usage="investigate">{investigateLine(inv)}</p></footer>}
   </>:<>
-  {openPath&&<ChatSessions path={openPath} value={conversation} onChange={setConversation} disabled={composing} refresh={turns.filter(t=>t.status==='complete').length} kind={kind} onKind={setKind} carry={carry}/>}
+  {openPath&&<ChatSessions path={openPath} value={conversation} onChange={setConversation} disabled={composing} refresh={turns.filter(t=>t.status==='complete').length} kind={kind} onKind={setKind}/>}
   <div className="chat-context" role="group" aria-label="What the chat can see">
    <button type="button" className="chat-ctl chat-context-sum" aria-expanded={ctxOpen} aria-controls="chat-context-body" onClick={()=>setCtxOpen(v=>!v)}>
     <span className="chat-sum-label">Context</span>

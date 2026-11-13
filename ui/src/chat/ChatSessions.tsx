@@ -43,7 +43,7 @@ function ConversationMenu({label,empty,value,list,disabled,canCreate,open:openNo
    <div role="listbox" aria-label={label}>
     <button type="button" role="option" aria-selected={value===''} tabIndex={-1} data-nav="" data-value="" className="chat-pick-opt" onClick={act(()=>onPick(''))}>{empty}</button>
     {list.map(s=><button key={s.id} type="button" role="option" aria-selected={value===s.id} tabIndex={-1} data-nav="" data-value={s.id} className="chat-pick-opt" onClick={act(()=>onPick(s.id))}>
-     <span>{s.label}</span><span className="chat-pick-meta">{s.turns} {s.turns===1?'message':'messages'}</span></button>)}
+     <span>{s.label}</span><span className="chat-pick-meta">{s.turns} {s.turns===1?'message':'messages'}{s.note&&s.note!==openNote?` · ${noteTitle(s.note)}`:''}</span></button>)}
    </div>
    <div className="chat-pick-actions">
     <button type="button" tabIndex={-1} data-nav="" disabled={!canCreate} onClick={act(onNew)}>New</button>
@@ -59,20 +59,14 @@ function ConversationMenu({label,empty,value,list,disabled,canCreate,open:openNo
  * Claude Code session the app keeps for this note. An investigation is a Claude Code session that reads a copy of the project's repo folder (chosen
  * once per project). Shown only when the Claude Code CLI is configured.
  */
-export function ChatSessions({path,value,onChange,disabled,refresh,kind,onKind,carry}:{path:string;value:string;onChange:(id:string,session?:HarnessSession)=>void;disabled:boolean;refresh:number;kind:HarnessMode;onKind:(k:HarnessMode)=>void;
- /** A conversation that followed the person here from the note it was started on: it is listed with this note's own, so it can be seen, kept or left. */
- carry?:{id:string;home:string}}){
+export function ChatSessions({path,value,onChange,disabled,refresh,kind,onKind}:{path:string;value:string;onChange:(id:string,session?:HarnessSession)=>void;disabled:boolean;refresh:number;kind:HarnessMode;onKind:(k:HarnessMode)=>void}){
  const [enabled,setEnabled]=useState(false),[list,setList]=useState<HarnessSession[]>([]),[naming,setNaming]=useState<string|null>(null),[notice,setNotice]=useState(''),[deleting,setDeleting]=useState(false);
  const [repo,setRepo]=useState<string|null>(null),[repoDraft,setRepoDraft]=useState<string|null>(null);
  const field=useRef<HTMLInputElement>(null),keepButton=useRef<HTMLButtonElement>(null),repoField=useRef<HTMLInputElement>(null);
+ // A named conversation follows the person from note to note, so the list holds every conversation of the project (each says where it was started when that is not the open note).
  useEffect(()=>{let off=false;
-  api.harnessSessions(path,kind).then(async r=>{
-   let sessions=r.sessions;
-   if(kind==='chat'&&carry&&carry.home!==path&&!sessions.some(s=>s.id===carry.id)){
-    const home=await api.harnessSessions(carry.home,'chat').catch(()=>null),found=home?.sessions.find(s=>s.id===carry.id);if(found)sessions=[found,...sessions];
-   }
-   if(off)return;setEnabled(r.enabled);setList(sessions);}).catch(()=>{if(!off)setEnabled(false);});
-  if(kind==='investigate')api.investigateRepo().then(r=>{if(!off)setRepo(r.repo);}).catch(()=>{});return()=>{off=true;};},[path,refresh,kind,carry?.id,carry?.home]);
+  api.harnessSessions(path,kind,kind==='chat').then(r=>{if(off)return;setEnabled(r.enabled);setList(r.sessions);}).catch(()=>{if(!off)setEnabled(false);});
+  if(kind==='investigate')api.investigateRepo().then(r=>{if(!off)setRepo(r.repo);}).catch(()=>{});return()=>{off=true;};},[path,refresh,kind]);
  useEffect(()=>{if(naming!==null)field.current?.focus();},[naming]);
  useEffect(()=>{if(deleting)keepButton.current?.focus();},[deleting]);
  // Before a conversation is deleted, the server says which note it was started on and how many saved replies go with it.

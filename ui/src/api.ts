@@ -131,7 +131,9 @@ export const api = {
   chat:(path:string,session?:string)=>ok<ChatSnapshot>('GET',`/api/chat?path=${encodeURIComponent(path)}${session?'&session='+encodeURIComponent(session):''}`),
   chatCall:<T,>(action:string,body:unknown)=>ok<T>('PUT','/api/chat/'+action,body),
   /** Harness chat sessions for a note: whether they are on (the Claude Code CLI is configured) and the list, most recent first. */
-  harnessSessions:(path:string,mode:'chat'|'investigate'='chat')=>ok<{enabled:boolean;sessions:import('../shared/harness.ts').HarnessSession[]}>('GET',`/api/harness/sessions?path=${encodeURIComponent(path)}&mode=${mode}`),
+  harnessSessions:(path:string,mode:'chat'|'investigate'='chat',all=false)=>ok<{enabled:boolean;sessions:import('../shared/harness.ts').HarnessSession[]}>('GET',`/api/harness/sessions?path=${encodeURIComponent(path)}&mode=${mode}${all?'&all=1':''}`),
+  /** A named conversation by its id: its saved replies in order, its questions by message id, its counters. Whichever note is open. */
+  harnessHistory:(id:string)=>ok<{session:import('../shared/harness.ts').HarnessSession;messages:import('../shared/chat.ts').ChatMessage[];questions:Record<string,string>;persistence:{enabled:boolean};usage:import('../shared/chat.ts').ChatUsage|null}>('GET',`/api/harness/sessions/history?id=${encodeURIComponent(id)}`),
   /** Investigations: the project's repo folder, a session's stored turns and plan status, the plan card actions, and a redacted file excerpt. */
   investigateRepo:()=>ok<{repo:string|null}>('GET','/api/harness/investigate/repo'),
   investigateChooseRepo:(repo:string)=>ok<{repo:string}>('PUT','/api/harness/investigate/repo',{repo}),
