@@ -990,6 +990,7 @@ button.claim-chip:focus-visible, .claim-action:focus-visible { outline: 2px soli
 .chat-sessions-name { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .chat-sessions-name input { min-width: 0; width: 22ch; font: inherit; }
 .chat-sessions-note { flex-basis: 100%; margin: 0; }
+.chat-sessions-delete { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--ink-text); }
 .trail { display: flex; flex-direction: column; gap: 8px; }
 .trail-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; }
 .trail-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--muted); font-size: var(--text-meta); cursor: pointer; }
