@@ -26,6 +26,14 @@ export function quoteNearLine(text:string,line:number,quote:string):boolean{
   for(let k=1;k<=QUOTE_LINES&&s+k<=lines.length;k++)if(normalizeQuote(lines.slice(s,s+k).join('\n')).includes(q))return true;
  return false;
 }
+/** The line a quote is on: the named line when it is there (within the slack), else the first line of the quote anywhere in the file, else null. */
+export function quoteLine(text:string,line:number,quote:string):number|null{
+ if(quoteNearLine(text,line,quote))return line;
+ const q=normalizeQuote(quote);if(!q)return null;const lines=text.replace(/^﻿/,'').split(/\r?\n/);
+ for(let k=1;k<=QUOTE_LINES;k++) // the shortest window that holds the quote, so its first line is the quote's own
+  for(let s=0;s+k<=lines.length;s++)if(normalizeQuote(lines.slice(s,s+k).join('\n')).includes(q))return s+1;
+ return null;
+}
 export async function finishFileReply(text:string,repo:string):Promise<{body:string;claims:ChatClaim[];citation?:CitationIssue}>{
  const t=text.replace(/\s+$/,''),lower=t.toLowerCase(),start=lower.lastIndexOf('<claims>');
  if(!lower.endsWith('</claims>')||start<0)return {body:t,claims:[],citation:'missing_block'};
@@ -38,7 +46,9 @@ export async function finishFileReply(text:string,repo:string):Promise<{body:str
   const quote=redact((c as any).quote).slice(0,240),rel=typeof (c as any).path==='string'?(c as any).path.replace(/\\/g,'/').replace(/^\.\//,''):'',line=(c as any).line;
   const file=Number.isSafeInteger(line)&&line>=1?await realFile(root,rel):null;
   if(file===null){claims.push({sourceId:(rel.replace(/[\u0000-\u001f\u007f]/g,'').slice(0,40)||'F'),quote,status:'no_valid_source'});continue;}
-  claims.push({sourceId:'F',source:'file',path:rel,line,quote,status:quoteNearLine(file,line,quote)?'found':'not_found'});
+  const at=quoteLine(file,line,quote);
+  // Found at the line it names, found elsewhere in the file (the real line is kept and the named one noted), or in that file nowhere.
+  claims.push(at===null?{sourceId:'F',source:'file',path:rel,line,quote,status:'not_found'}:{sourceId:'F',source:'file',path:rel,line:at,...(at!==line?{namedLine:line}:{}),quote,status:'found'});
  }
  return {body,claims};
 }

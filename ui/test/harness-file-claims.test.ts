@@ -2,7 +2,7 @@ import {mkdir,mkdtemp,rm,symlink,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {afterEach,describe,expect,it} from 'vitest';
-import {finishFileReply} from '../server/harness/file-claims.ts';
+import {finishFileReply,quoteLine} from '../server/harness/file-claims.ts';
 import {validClaims} from '../shared/chat.ts';
 import {claimChips} from '../src/chat/claim-chips.ts';
 import {claimLines} from '../src/chat/chat-model.ts';
@@ -21,10 +21,11 @@ describe('finishFileReply',()=>{
    {path:'src/login.js',line:3,quote:'const sessions = new Map();'},
    {path:'src\\login.js',line:4,quote:'// Sessions live in memory.'}, // two lines off, backslashes: still found
    {path:'src/login.js',line:3,quote:'Sessions are stored in a map'}, // paraphrase
-   {path:'src/login.js',line:40,quote:'const sessions = new Map();'}, // far from the line it names
+   {path:'src/login.js',line:40,quote:'const sessions = new Map();'}, // far from the line it names: found elsewhere in the file, with the real line
   ]),r);
   expect(out.body).toBe('Sessions are kept in memory.');
-  expect(out.claims.map((c:{status:string})=>c.status)).toEqual(['found','found','not_found','not_found']);
+  expect(out.claims.map((c:{status:string})=>c.status)).toEqual(['found','found','not_found','found']);
+  expect(out.claims[3]).toEqual({sourceId:'F',source:'file',path:'src/login.js',line:3,namedLine:40,quote:'const sessions = new Map();',status:'found'});
   expect(out.claims[0]).toEqual({sourceId:'F',source:'file',path:'src/login.js',line:3,quote:'const sessions = new Map();',status:'found'});
   expect(validClaims(out.claims)).toBe(true);
  });
@@ -41,7 +42,18 @@ describe('finishFileReply',()=>{
  });
 });
 
+describe('quoteLine',()=>{
+ it('prefers the named line, falls back to the whole file, and says nowhere only when it is nowhere',()=>{
+  expect(quoteLine(SRC,3,'const sessions = new Map();')).toBe(3);expect(quoteLine(SRC,99,'const sessions = new Map();')).toBe(3);
+  expect(quoteLine(SRC,1,'sessions.get(name)')).toBe(5);expect(quoteLine(SRC,3,'a paraphrase that is nowhere')).toBeNull();
+ });
+});
+
 describe('file claims in the chips and lines',()=>{
+ it('a corrected line is shown on the chip with the line the AI named',()=>{
+  const [c]=claimChips([{sourceId:'F',source:'file',path:'src/login.js',line:3,namedLine:40,quote:'q',status:'found'}],{path:'plan.md',text:''});
+  expect(c.label).toBe('src/login.js:3 (the AI said line 40)');expect(validClaims([{sourceId:'F',source:'file',path:'a.js',line:3,namedLine:40,quote:'q',status:'found'}])).toBe(true);
+ });
  it('read as the file and line, with the AI kind F, and offer no Show or Cite',()=>{
   const [c]=claimChips([{sourceId:'F',source:'file',path:'src/login.js',line:3,quote:'q',status:'found'}],{path:'plan.md',text:''});
   expect(c).toMatchObject({kind:'F',label:'src/login.js:3',stateWords:'Found',canShow:false,canCite:false});

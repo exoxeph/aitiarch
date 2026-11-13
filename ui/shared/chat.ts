@@ -19,7 +19,7 @@ export interface CheckedClaim {sourceId:string;source:ClaimSourceKind;quote:stri
 /** A claim whose source id was not a valid one (a word, an unknown letter, a number, or none). Kept and shown with its quote; nothing was checked, so it is never evidence. */
 export interface UnsourcedClaim {sourceId:string;quote:string;status:'no_valid_source'}
 /** A claim about code in an investigation: a file in the repo the user picked, the line it names and a verbatim quote, checked against the real file. */
-export interface FileClaim {sourceId:'F';source:'file';path:string;line:number;quote:string;status:'found'|'not_found'}
+export interface FileClaim {sourceId:'F';source:'file';path:string;line:number;/** Set when the quote was found on a different line than the AI named: `line` is the real one. */namedLine?:number;quote:string;status:'found'|'not_found'}
 export type ChatClaim=CheckedClaim|UnsourcedClaim|FileClaim;
 /** Why a reply cites nothing, from a fixed list the model must choose from. */
 export const NO_CITATION_REASONS=['opinion','question_back','no_context_used'] as const;
@@ -31,7 +31,7 @@ const CLAIM_KINDS:readonly string[]=['note','selection','thread','other_note','s
 export function validClaims(v:unknown):v is ChatClaim[]{
  return Array.isArray(v)&&v.length<=32&&v.every(c=>{
   if(!c||typeof c!=='object'||Array.isArray(c))return false;const k=Object.keys(c).sort().join();
-  if((c as FileClaim).source==='file'){const f=c as FileClaim;return k==='line,path,quote,source,sourceId,status'&&f.sourceId==='F'&&(f.status==='found'||f.status==='not_found')&&typeof f.path==='string'&&f.path.length<=400&&!/[\u0000-\u001f]/.test(f.path)&&Number.isSafeInteger(f.line)&&f.line>=1&&typeof f.quote==='string'&&f.quote.length<=240;}
+  if((c as FileClaim).source==='file'){const f=c as FileClaim;return (k==='line,path,quote,source,sourceId,status'||k==='line,namedLine,path,quote,source,sourceId,status'&&Number.isSafeInteger(f.namedLine)&&f.namedLine!>=1)&&f.sourceId==='F'&&(f.status==='found'||f.status==='not_found')&&typeof f.path==='string'&&f.path.length<=400&&!/[\u0000-\u001f]/.test(f.path)&&Number.isSafeInteger(f.line)&&f.line>=1&&typeof f.quote==='string'&&f.quote.length<=240;}
   if((c as ChatClaim).status==='no_valid_source'){const u=c as UnsourcedClaim;return k==='quote,sourceId,status'&&typeof u.sourceId==='string'&&u.sourceId.length<=40&&!/[\u0000-\u001f\u007f]/.test(u.sourceId)&&typeof u.quote==='string'&&u.quote.length<=240;}
   const x=c as CheckedClaim;
   return (k==='quote,source,sourceId,status'&&x.status==='not_found'||k==='quote,source,sourceHash,sourceId,status'&&x.status==='found'&&typeof x.sourceHash==='string'&&/^[a-f0-9]{64}$/.test(x.sourceHash))
