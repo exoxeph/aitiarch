@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {StreamGate,echoes} from '../server/chat/gate.ts';
+import {StreamGate,dropManifestEcho,echoes} from '../server/chat/gate.ts';
 
 // What reaches the screen while a reply streams: only text that has been redacted, contains nothing secret-shaped, is not part of the JSON
 // wrapper, and does not recite Aitiarch's own instructions. The final message still replaces it.
@@ -49,6 +49,28 @@ describe('StreamGate',()=>{
  it('if redaction changes text already shown, the display freezes instead of showing a different version',()=>{
   const {g,shown}=run(['Set password: ','hunter22 and carry on with more words ']);
   expect(shown).toBe('Set password: ');expect(shown).not.toContain('hunter22');expect(g.frozen).toBe(true);
+ });
+});
+describe('StreamGate releases a reply incrementally',()=>{
+ const reply=Array.from({length:150},(_,i)=>'word'+i).join(' ')+'.\n<claims>{"none":"opinion"}</claims>';
+ it('a ~150-word reply arriving in small chunks is shown piece by piece, never held until the end',()=>{
+  const g=new StreamGate({instruction:INSTRUCTION}),releases:number[]=[];let shown='';
+  split(reply,7).forEach((p,i)=>{const d=g.push(p);if(d){releases.push(i);shown+=d;}});
+  expect(releases.length).toBeGreaterThan(60); // many releases, not one at the end
+  expect(releases[0]).toBeLessThan(3); // the first word is out within the first chunks
+  expect(shown).toContain('word149');expect(shown).not.toContain('<claims');
+ });
+ it('after each chunk everything but the one unfinished word has been released',()=>{
+  const g=new StreamGate({instruction:INSTRUCTION});let raw='',shown='';
+  for(const p of split('The store is SQLite because it needs no server and one folder holds every file ',5)){raw+=p;shown+=g.push(p);const lastSpace=raw.lastIndexOf(' ');expect(shown).toBe(raw.slice(0,lastSpace+1));}
+ });
+});
+describe('an echoed manifest line',()=>{
+ it('is dropped from the final answer and from what streams, and nothing shows while it could still be that line',()=>{
+  expect(dropManifestEcho('Sources this turn: none\n\nNo note text was included.')).toBe('No note text was included.');
+  expect(dropManifestEcho('A normal reply.')).toBe('A normal reply.');expect(dropManifestEcho('Sources this t')).toBe('');expect(dropManifestEcho('Sources this turn: N1 This note, 9')).toBe('');
+  expect(run(split('Sources this turn: none\n\nNo note text was included here, so I cannot say. ',4)).shown).toBe('No note text was included here, so I cannot say. ');
+  expect(run(['Sour','ces ',"are lists of things. Here we go "]).shown).toBe('Sources are lists of things. Here we go '); // an ordinary reply that merely starts alike is released
  });
 });
 describe('echoes',()=>{

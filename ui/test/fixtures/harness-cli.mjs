@@ -71,12 +71,12 @@ out({ type: 'system', subtype: 'init', session_id: id, tools: scenario === 'tool
 if (scenario === 'fail-after-init') process.exit(1);
 out({ type: 'system', subtype: 'brand_new_kind', session_id: id }); // an event this version does not know: counted, not fatal
 if (scenario === 'write-cwd') writeFileSync(path.join(process.cwd(), 'stray.txt'), 'x');
-const reply = scenario === 'quote-missing' ? 'It says something else.\n<claims>[{"source":"N1","quote":"Words that are not in the note."}]</claims>'
+const reply = scenario === 'slow-stream' ? Array.from({ length: 150 }, (_, i) => 'word' + i).join(' ') + '.\n<claims>{"none":"opinion"}</claims>' : scenario === 'quote-missing' ? 'It says something else.\n<claims>[{"source":"N1","quote":"Words that are not in the note."}]</claims>'
   : `${args.includes('--resume') ? 'Resumed.' : 'Started.'} The note says the store is local.\n<claims>[{"source":"N1","quote":"A unique sentence for the session."}]</claims>`;
 out({ type: 'stream_event', event: { type: 'message_start', message: {} } });
 out({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } });
 if (scenario === 'tool-use') out({ type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', name: 'Read', input: {} } } });
-for (const piece of [reply.slice(0, 20), reply.slice(20)]) out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: piece } } });
+for (const piece of scenario === 'slow-stream' ? reply.match(/[\s\S]{1,6}/g) : [reply.slice(0, 20), reply.slice(20)]) { out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: piece } } }); if (scenario === 'slow-stream') await new Promise((r) => setTimeout(r, 12)); }
 out({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } });
 out({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'end_turn' } } });
 out({ type: 'stream_event', event: { type: 'message_stop' } });

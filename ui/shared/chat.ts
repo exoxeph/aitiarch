@@ -98,6 +98,13 @@ export interface ChatReview {
  session?:{id:string;label:string;turns:number};
  /** Notes a session never gets (the notebook file, hidden files, sidecars, state, secrets): named here so the review says so. */
  excluded?:string[];
+ /** A conversation turn only: the one line that starts the message, naming this turn's sources (IDs, labels and sizes, never their text). */
+ manifest?:string;
 }
+/** How much a cache read counts against a chat's token budget, next to new input and output (1). Cache reads are cheap and fast, and counting them
+ *  in full made a long conversation look about three quarters spent on tokens it barely paid for. */
+export const CACHE_READ_WEIGHT=0.1;
+/** Tokens that count against the budget: new input (with cache writes) and output in full, cache reads at CACHE_READ_WEIGHT, rounded. */
+export const budgetTokens=(usage:{inputTokens:number;outputTokens:number;cachedTokens?:number})=>usage.inputTokens+Math.round((usage.cachedTokens??0)*CACHE_READ_WEIGHT)+usage.outputTokens;
 export const CHAT_LIMITS=Object.freeze({noteCharacters:40000,questionCharacters:2000,historyPairs:4,historyCharacters:4000,
  sources:8,otherCharacters:20000,tokenBudget:50000,requestReserve:16000,rollingRequestCap:12,windowMinutes:60});

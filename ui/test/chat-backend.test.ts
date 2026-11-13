@@ -111,7 +111,7 @@ it('token budget and rolling request cap stop calls before invocation and appear
  let r=await f.runtime.review(f.input);await expect(f.runtime.send({reviewId:r.reviewId,confirmed:true},()=>{})).rejects.toMatchObject({code:'budget_reached'});expect(f.provider.requests).toHaveLength(0);
  await f.runtime.settings(f.input.path,{tokenBudget:50000,rollingRequestCap:1});await f.runtime.send({reviewId:r.reviewId,confirmed:true},()=>{});
  r=await f.runtime.review({...f.input,id:'second'});await expect(f.runtime.send({reviewId:r.reviewId,confirmed:true},()=>{})).rejects.toMatchObject({code:'hourly_cap'});
- expect(f.runtime.usage()[0]).toMatchObject({calls:1,input:20,cached:5,output:10,spent:35,reserved:0,rollingRequestCap:1,tokenBudget:50000});
+ expect(f.runtime.usage()[0]).toMatchObject({calls:1,input:20,cached:5,output:10,spent:31,reserved:0,rollingRequestCap:1,tokenBudget:50000});
 });
 it('chat insertion reuses AI callout and repairable ledger; source bytes and one-step Undo round-trip BOM+CRLF',async()=>{
  const f=await fixture(),before=await readFile(path.join(f.root,'fixture.md'));

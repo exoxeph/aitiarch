@@ -3,11 +3,11 @@ import type {ChatEvent,ChatInput,ChatReview,ChatMessage,ChatUsage,ChatErrorCode,
 import path from 'node:path';
 import {sessionModules} from './ide-sessions.ts';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
-import {CHAT_LIMITS} from '../../shared/chat.ts';
+import {CHAT_LIMITS,budgetTokens} from '../../shared/chat.ts';
 import {Store} from '../store.ts';import {InkStore} from '../ink-store.ts';import {LedgerStore} from '../ledger-store.ts';
 import {ChatStore} from './store.ts';import {contextModules,hash,estimateTokens} from './context.ts';import {secretKinds} from './secrets.ts';
 import {prepareRequest,ProviderError,redact,type Provider,type Request,type Result} from '../providers/index.ts';
-import {chatSessionInstruction} from './request.ts';
+import {chatSessionInstruction,sourcesManifest,turnMessage} from './request.ts';
 import {harnessDenied} from '../../shared/harness.ts';
 import type {SessionIndex} from '../harness/session-index.ts';
 import type {QuestionStore} from '../harness/questions.ts';
@@ -15,14 +15,16 @@ import type {ClaudeSessionRunner} from '../harness/claude-session.ts';
 import {validateProductResult,ProductValidationError} from '../product-validation.ts';
 import type {ExtrasFor} from '../node-settings.ts';
 import {describeFailure} from '../../shared/chat-failure.ts';
-import {StreamGate,echoes} from './gate.ts';
+import {StreamGate,dropManifestEcho,echoes} from './gate.ts';
 import {finishReply} from './reply.ts';
 import {checkContract} from '../../shared/persona-contract.ts';
 import type {PersonaMode} from '../../shared/persona.ts';
 export class ChatError extends Error {code:ChatErrorCode;constructor(code:ChatErrorCode){super(code);this.code=code;}}
 interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true;
  /** A harness session turn: the session id and the exact file text the CLI gets (instruction, sources, rules last). */
- session?:{id:string};addendum?:string}
+ session?:{id:string};addendum?:string;
+ /** The one line that starts the session message: what this turn was given. */
+ manifest?:string}
 /** Harness chat sessions: the app's index of sessions and the runner that talks to the Claude Code CLI. */
 export interface ChatHarness {index:SessionIndex;runner:Pick<ClaudeSessionRunner,'chatTurn'>;
  /** Where the questions of session turns are kept (outside the repo). Absent: they are not kept. */
@@ -85,17 +87,21 @@ export class ChatRuntime {
   if(extra){request.persona=extra.persona;if(extra.skills.loaded.length)request.skills=extra.skills;}
   const packet=prepareRequest(request);
   // In a session the CLI gets the instruction with the sources pasted before the rules (rules last); the earlier conversation is in the session.
-  const sessionText=session?chatSessionInstruction(request,[...sources.map(x=>({id:x.id,label:x.label,text:redact(x.text)})),...(request.selection?[{id:'S1',label:'Selection',text:request.selection}]:[])]):null;
-  const estimate=sessionText?estimateTokens(sessionText.addendum+request.question):estimateTokens(JSON.stringify(packet));
+  const sessionSources=[...sources.map(x=>({id:x.id,label:x.label,text:redact(x.text)})),...(request.selection?[{id:'S1',label:'Selection',text:request.selection}]:[])];
+  const sessionText=session?chatSessionInstruction(request,sessionSources):null;
+  // Every session message starts with one line naming this turn's sources (no source text), so earlier replies about a missing note cannot outvote it.
+  const manifest=session?sourcesManifest(sessionSources):undefined;
+  const estimate=sessionText?estimateTokens(sessionText.addendum+turnMessage(manifest!,request.question)):estimateTokens(JSON.stringify(packet));
   const privateContext=!!s.privateContext||sources.some(x=>x.ephemeral);
   const review:ChatReview={reviewId:randomUUID(),requestId:input.id,path:input.path,question:request.question,selection:request.selection,sources:sources.map(x=>({id:x.id,label:x.label,text:x.text,characters:x.text.length,estimatedTokens:estimateTokens(x.text)})),historyPairs:history.length,omittedPairs:session?0:s.omittedPairs+sameMode.length-history.length,...(otherModePairs&&!session?{otherModePairs}:{}),instruction:sessionText?.instruction??packet.instruction,history:structuredClone(packet.data.turns),estimatedTokens:estimate,requiresConfirmation:privateContext||!this.dontAsk};
   if(extra?.review)review.skills=extra.review;
   if(privateContext)review.ephemeral=true;
   if(session)review.session={id:session.id,label:session.label,turns:session.turns};
   if(excluded.length)review.excluded=excluded;
+  if(manifest)review.manifest=manifest;
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');
-  this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate+3000,...(privateContext?{privateContext:true as const}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum}:{})});
+  this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate+3000,...(privateContext?{privateContext:true as const}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{})});
   return review;
  }
  async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
@@ -134,7 +140,7 @@ export class ChatRuntime {
    if(controller.signal.aborted)throw new ChatError('cancelled');
    if(result.usage){for(const n of Object.values(result.usage))if(typeof n!=='number'||!Number.isFinite(n)||n<0)throw new ChatError('validation');
     s.usage.input+=result.usage.inputTokens;s.usage.cached+=result.usage.cachedTokens??0;s.usage.output+=result.usage.outputTokens;
-    s.usage.spent+=result.usage.inputTokens+(result.usage.cachedTokens??0)+result.usage.outputTokens;
+    s.usage.spent+=budgetTokens(result.usage); // cache reads count at a reduced weight
    }else{s.usage.spent+=frozen.reservation;s.usage.unreportedCalls++;}charged=true;
    // Enforce exact keys for fake/adapted providers too; never accept owned fields or aliases.
    if(!Array.isArray(result.claims)||result.claims.some(c=>!c||typeof c!=='object'||Object.keys(c).sort().join()!=='quote,sourceId')||Object.keys(result).some(k=>!['id','provider','model','answer','claims','usage','rawReply'].includes(k)))throw new ChatError('validation');
@@ -167,9 +173,9 @@ export class ChatRuntime {
   const session=await h.index.get(frozen.session.id);if(!session||session.mode!=='chat')throw new ChatError('invalid_chat');
   let started=false;
   try{
-   const r=await h.runner.chatTurn({id:session.id,resume:session.turns>0,addendum:frozen.addendum,question:request.question,signal,onTextDelta,onStarted:()=>{started=true;}});
+   const r=await h.runner.chatTurn({id:session.id,resume:session.turns>0,addendum:frozen.addendum,question:turnMessage(frozen.manifest??sourcesManifest([]),request.question),signal,onTextDelta,onStarted:()=>{started=true;}});
    await h.questions?.add(session.id,request.id,request.question).catch(()=>{}); // a failed save must not lose the answer
-   return {id:request.id,provider:'claude',model:null,answer:r.answer,claims:[],usage:r.usage,rawReply:true};
+   return {id:request.id,provider:'claude',model:null,answer:dropManifestEcho(r.answer),claims:[],usage:r.usage,rawReply:true};
   }finally{if(started)await h.index.touch(session.id).catch(()=>{});} // the CLI now knows this id: the next turn must resume it
  }
  private audit(note:string,id:string,event:'chat_started'|'chat_completed'|'chat_failed'){return this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(note),requestId:id,note,event,at:new Date().toISOString()});}
