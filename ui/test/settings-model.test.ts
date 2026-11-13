@@ -1,7 +1,7 @@
 import {describe,expect,it} from 'vitest';
 import {tokenMeter} from '../src/settings/settings-model.ts';
 
-// Settings logic without a browser. (The limits, deny list and permission screens of the old app-side investigator are gone with it.)
+// Settings logic without a browser.
 describe('meters',()=>{
  it('describes spend against the budget, and warns before it is full',()=>{
   expect(tokenMeter({spent:20000,tokenBudget:50000})).toEqual({percent:40,label:'20k of 50k tokens',tone:'ok'});

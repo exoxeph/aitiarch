@@ -44,7 +44,7 @@ it.each([
  ['a status event with a payload',{type:'system',subtype:'status',status:'requesting',payload:'x',...ids}],
  ['a status that is not a plain word',{type:'system',subtype:'status',status:'Requesting now!',...ids}],
 ])('tolerates %s',(_n,status)=>{const texts:string[]=[],s=new ClaudeChatStream(t=>texts.push(t));s.push(Buffer.from(realStream({status})));s.finish();expect(texts).toEqual(['{"answer":"Hi","claims":[]}']);});
-// The investigator already reads the same real stream and accepts any signature_delta. A signature delta may carry more than its signature:
+// The real CLI stream accepts any signature_delta. A signature delta may carry more than its signature:
 // extra plain fields are tolerated (they are never shown), but nested values and oversized ones are not.
 it('tolerates extra plain fields on a signature delta, as the real CLI evidently sends',()=>{
  const texts:string[]=[],s=new ClaudeChatStream(t=>texts.push(t));

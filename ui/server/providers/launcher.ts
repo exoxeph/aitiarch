@@ -3,7 +3,7 @@ import { execFile, spawn, type SpawnOptionsWithoutStdio } from 'node:child_proce
 import { realpathSync, readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { chatSessionArguments,claudeArguments,investigateSessionArguments,investigatorArguments } from './claude-arguments.ts';
+import { chatSessionArguments,claudeArguments,investigateSessionArguments } from './claude-arguments.ts';
 import type { Configuration, ProviderName } from './index.ts';
 
 export function assertLaunch(provider: ProviderName, mode: 'metadata' | 'isolated', args: readonly string[], cwd?: string): void {
@@ -39,14 +39,6 @@ export function spawnIsolated(config: Target, args: string[], options: SpawnOpti
   assertTarget(config);
   assertLaunch(config.provider, 'isolated', args, options.cwd);
   return spawn(config.command, [...(config.prefixArgs ?? []), ...args], { ...options, shell: false, windowsHide: true, stdio: 'pipe' });
-}
-/** Separate tools-off investigator profile. The policy gate supplies a registered working root.
- * No permission bypass, tools, positional prompts or model-supplied CLI arguments. */
-export function spawnInvestigator(config:Target,args:string[],options:SpawnOptionsWithoutStdio&{cwd:string},registeredRoot:string){
- assertTarget(config);
- if(config.provider!=='claude'||JSON.stringify(args)!==JSON.stringify(investigatorArguments())||!path.isAbsolute(options.cwd)||realpathSync(options.cwd)!==realpathSync(registeredRoot))throw new Error('Investigator launch rejected.');
- if(!path.isAbsolute(config.command)||/\.(?:cmd|bat|ps1)$/i.test(config.command))throw new Error('Native executable required.');
- return spawn(config.command,[...(config.prefixArgs??[]),...args],{...options,shell:false,windowsHide:true,stdio:'pipe'});
 }
 /** A chat harness session turn. The arguments are built here from the profile (never passed in), the working folder must be the project's
  *  registered, empty session folder, and the instruction file must live outside it. */

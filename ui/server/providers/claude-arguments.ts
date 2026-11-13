@@ -17,4 +17,3 @@ export const investigateSessionArguments=(p:{id:string;resume:boolean;addendumFi
   '--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--setting-sources','','--settings','{"disableAllHooks":true}','--disable-slash-commands',
   '--max-budget-usd',p.budgetUsd.toFixed(2),'--output-format','stream-json','--verbose','--include-hook-events','--include-partial-messages',
   ...(p.model?['--model',p.model]:[]),p.resume?'--resume':'--session-id',p.id,'--append-system-prompt-file',p.addendumFile];
-export const investigatorArguments=()=>[...claudeArguments({stream:true,partial:true}),'--permission-mode','dontAsk'];

@@ -1,5 +1,0 @@
-// Synthetic fixture only. No provider, auth, filesystem reads or network.
-import {writeFileSync} from 'node:fs';import {spawn} from 'node:child_process';
-const [record,scenario,...args]=process.argv.slice(2);
-if(scenario==='hang'){const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});writeFileSync(record,JSON.stringify({pid:process.pid,childPid:child.pid}));setInterval(()=>{},1000);}
-else{writeFileSync(record,JSON.stringify({args,env:process.env}));process.stdin.resume();process.stdin.on('end',()=>{const result=JSON.stringify({say:'Synthetic.',delegate:[]});const e=event=>({type:'stream_event',event});for(const event of [{type:'system',subtype:'init',tools:[],mcp_servers:[],plugins:[]},e({type:'message_start'}),e({type:'content_block_start',index:0,content_block:{type:'text',text:''}}),e({type:'content_block_delta',index:0,delta:{type:'text_delta',text:result}}),e({type:'content_block_stop',index:0}),e({type:'message_stop'}),{type:'result',subtype:'success',result,usage:{input_tokens:20,output_tokens:10},num_turns:1}])process.stdout.write(JSON.stringify(event)+'\n');});}

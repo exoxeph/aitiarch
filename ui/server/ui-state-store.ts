@@ -1,5 +1,4 @@
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
-import {validatePolicy,type InvestigatorPolicy} from '../shared/investigator.ts';
 import {lstat,readFile,open,rename,unlink,writeFile} from 'node:fs/promises';
 import {execFile} from 'node:child_process';import {promisify} from 'node:util';
 import {randomUUID,createHash} from 'node:crypto';import path from 'node:path';
@@ -8,7 +7,7 @@ import {exactKeys,validAt,validId} from '../shared/threads.ts';
 import {validSavedNodes,type SavedNodeSettings} from '../shared/node-settings.ts';
 const exec=promisify(execFile);
 export interface ThreadDraft {note:string;inkId:string;text:string;updatedAt:string;revision:string}
-export interface SavedUiState {v:1;tabs:string[];active:string|null;treeCollapsed?:boolean;theme?:'ember'|'moss';confirmAdd?:boolean;typingHelp?:boolean;doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];threadDrafts?:Record<string,ThreadDraft>;investigator?:InvestigatorPolicy;starPositions?:Record<string,[number,number]>;nodes?:SavedNodeSettings}
+export interface SavedUiState {v:1;tabs:string[];active:string|null;treeCollapsed?:boolean;theme?:'ember'|'moss';confirmAdd?:boolean;typingHelp?:boolean;doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];threadDrafts?:Record<string,ThreadDraft>;investigator?:Record<string,unknown>;starPositions?:Record<string,[number,number]>;nodes?:SavedNodeSettings}
 export type StarPositions=Record<string,[number,number]>;
 const validStarPositions=(v:unknown):v is StarPositions=>{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;
@@ -52,14 +51,11 @@ export class UiStateStore {
   if(d.starPositions!==undefined){if(!validStarPositions(d.starPositions))throw new Error('Invalid star positions.');state.starPositions=d.starPositions;}
   // A bad nodes block must not make the whole file unreadable: drop it, use defaults, say so.
   if(d.nodes!==undefined){if(validSavedNodes(d.nodes))state.nodes=d.nodes;else console.warn('ui-state.json: ignoring an invalid "nodes" block; using the default persona and no skills.');}
-  // A clone must never supply its own investigator permissions. Verify BEFORE inspecting this field.
-  if(Object.hasOwn(d,'investigator')&&await this.investigatorIgnored())state.investigator=validatePolicy(d.investigator);
+  // The app-side investigator is gone. Its block is the person's data: nothing reads or validates it, and it is written back unchanged. A value that is not an object is dropped.
+  if(d.investigator&&typeof d.investigator==='object'&&!Array.isArray(d.investigator))state.investigator=d.investigator;
   return state;
  }
  private async ignored(temporary:string){try{await exec('git',['check-ignore','-q','--',this.file],{cwd:this.root,windowsHide:true,timeout:3000});await exec('git',['check-ignore','-q','--',temporary],{cwd:this.root,windowsHide:true,timeout:3000});}catch{throw new Error('Draft persistence disabled: ui-state.json must be git-ignored. Add /ui-state.json* explicitly (covers atomic temporary files too).');}}
- private async investigatorIgnored(){try{const tracked=await exec('git',['ls-files','--','ui-state.json'],{cwd:this.root,windowsHide:true,timeout:3000});if(tracked.stdout.trim())return false;await this.ignored(this.file+'.ignore-probe.tmp');return true;}catch{return false;}}
- async investigatorPolicy():Promise<InvestigatorPolicy|null>{if(!await this.investigatorIgnored())return null;return (await this.read()).investigator??null;}
- async saveInvestigatorPolicy(value:InvestigatorPolicy){const policy=validatePolicy(value);if(!await this.investigatorIgnored())throw new Error('Investigator policy persistence requires untracked, git-ignored ui-state.json.');return this.mutate(s=>{s.investigator=policy;return policy;},true);}
  private mutate<T>(fn:(s:SavedUiState)=>T,requireIgnored=false):Promise<T>{
   const job=this.tail.catch(()=>{}).then(()=>this.mutateLocked(fn,requireIgnored));this.tail=job;return job;
  }

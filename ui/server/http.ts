@@ -1,6 +1,5 @@
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
-import {InvestigatorError,type InvestigatorRunner,type AgentName} from '../shared/investigator.ts';
-import {InvestigatorRuntime} from './investigator/runtime.ts';import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {removeTranscript} from './harness/transcripts.ts';import {QuestionStore} from './harness/questions.ts';import {PolicyGate} from './investigator/policy.ts';import {Lookups} from './investigator/lookups.ts';import {LedgerStore} from './ledger-store.ts';
+import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {removeTranscript} from './harness/transcripts.ts';import {QuestionStore} from './harness/questions.ts';
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES} from '../shared/chat.ts';
 import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
@@ -46,7 +45,6 @@ export interface AppOptions {
   /** Front-door rules shared with a multi-project host; when absent this app makes its own. */
   security?: import("./security.ts").Security;
   provider?: Provider;
-  investigator?:Partial<Record<AgentName,InvestigatorRunner>>;
   plan?: ChatGPTPlan;
   usage?: {summary():Promise<import('../shared/usage.ts').UsageSummary>};
   /** Where the Skill library looks. Tests pass temp folders; the real app uses the usual places under your home folder and this project. */
@@ -175,8 +173,6 @@ export function createApp(opts: AppOptions) {
     return skillsCache.list;
   };
   const nodeSettings = new NodeSettingsService(uiStateStore, () => discoveredSkills(false));
-  const investigatorPolicy=new PolicyGate(uiStateStore,path.dirname(store.rootReal));
-  const investigator=new InvestigatorRuntime(investigatorPolicy,new Lookups(investigatorPolicy),new LedgerStore(store.rootReal),opts.investigator??{},undefined,store.rootReal);
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
   const chatStore=new ChatStore(store.rootReal);
   const harnessReady=opts.harness?SessionIndex.open(opts.harness.dir??harnessDirectory(store.rootReal)).then(index=>{const h=opts.harness!;return {index,
@@ -261,27 +257,6 @@ export function createApp(opts: AppOptions) {
         case "/api/explorer/move": { const done = await ex.move(b?.from, b?.to); for (const c of clients) c.write(`event: tree\ndata: ${JSON.stringify({ type: "tree" })}\n\n`); return json(res, 200, done); }
       }
       return json(res, 404, { error: "not_found" });
-    }
-    if(url.pathname==='/api/investigator'&&req.method==='GET')return json(res,200,{...await investigatorPolicy.status(),claudeConfigured:!!opts.investigator?.claude,codex:'Blocked: cannot verify root confinement or pattern denial.'});
-    if(url.pathname.startsWith('/api/investigator/')&&req.method==='PUT'){
-      const b=await readBody(req) as any;
-      try{
-        if(url.pathname==='/api/investigator/configure'){
-          if(b.enabled===true&&b.action!=='enable-investigator')throw new InvestigatorError('invalid_policy');const {action,...patch}=b;const status=await investigatorPolicy.configure(patch);if(b.enabled===false)investigator.stopAll();return json(res,200,status);
-        }
-        if(url.pathname==='/api/investigator/grant'){await investigatorPolicy.grant(b.chat,b.tier,b.duration);return json(res,200,{});}
-        if(url.pathname==='/api/investigator/enable-persistence'){if(b.action!=='add-ignore-line')throw new InvestigatorError('invalid_policy');return json(res,200,await uiStateStore.enableDrafts());}
-        if(url.pathname==='/api/investigator/cancel'){investigator.cancel(b.chat,b.id);return json(res,200,{});}
-        if(url.pathname==='/api/investigator/stop'){investigator.stopAll();return json(res,200,{});}
-        if(url.pathname==='/api/investigator/answer'){
-          const controller=new AbortController(),abort=()=>controller.abort();res.on('close',abort);let bytes=0;
-          try{await investigator.answer(b,event=>{
-            if(res.destroyed)throw new InvestigatorError('cancelled');const frame=`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;bytes+=Buffer.byteLength(frame);if(bytes>1000000||res.writableLength>262144)throw new InvestigatorError('budget');
-            if(!res.headersSent)res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store'});res.write(frame);
-          },controller.signal);res.end();}finally{res.off('close',abort);}return;
-        }
-        throw new InvestigatorError('invalid_envelope');
-      }catch(e){if(res.headersSent)return res.end();const code=e instanceof InvestigatorError?e.code:'invalid_policy';return json(res,409,{error:code,message:code==='blocked'?'Blocked: raise policy to retry':'Investigator: '+code+'. Nothing was retried.'});}
     }
     if(url.pathname==='/api/nodes'&&req.method==='GET')return json(res,200,{nodes:await nodeSettings.get()});
     if(url.pathname==='/api/nodes'&&req.method==='PUT'){
@@ -592,7 +567,6 @@ export function createApp(opts: AppOptions) {
       });
     },
     async close(): Promise<void> {
-      await investigator.close();
       await (await chatReady).close();
       clearInterval(ka);
       for (const c of clients) c.end();
