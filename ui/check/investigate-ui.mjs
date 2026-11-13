@@ -48,7 +48,13 @@ try {
   // The plan card comes first; there is no composer until it is confirmed, and the server refuses a turn without it.
   const card = panel.getByRole('group', { name: 'Plan for this investigation' }); await card.waitFor();
   const cardText = await card.innerText();
-  for (const s of ['Repo folder', 'Files Claude can read', 'Never copied', 'notebook.md', 'Cost cap', '$0.50', 'Turn limit', '12 model turns']) assert(cardText.includes(s), 'plan card shows ' + s);
+  for (const s of ['Repo folder', 'Files Claude can read', 'Never copied', 'notebook.md', 'Cost cap per question']) assert(cardText.includes(s), 'plan card shows ' + s);
+  assert(!/turn limit|12 model turns|of 12/i.test(cardText), 'no turn limit is shown on the plan card');
+  // The cost cap is editable (default $0.50); a changed cap must be applied to the plan before it can be confirmed.
+  const cap = card.getByLabel('Cost cap per question'); assert.equal(await cap.inputValue(), '0.50');
+  await cap.fill('0.25'); assert.equal(await card.getByRole('button', { name: 'Confirm' }).isDisabled(), true, 'Confirm waits for the updated plan');
+  await card.getByRole('button', { name: 'Update the plan' }).click(); await page.waitForFunction(() => document.querySelector('#chat-panel .inv-plan button:not(.ghost)')?.disabled === false);
+  assert.equal(await cap.inputValue(), '0.25'); await cap.fill('0.50'); await card.getByRole('button', { name: 'Update the plan' }).click(); await page.waitForFunction(() => document.querySelector('#chat-panel .inv-plan button:not(.ghost)')?.disabled === false);
   assert.equal(await panel.getByRole('textbox', { name: 'Ask about the repo' }).count(), 0, 'no composer before the plan is confirmed');
   const session = await page.evaluate(() => document.querySelector('#chat-panel .chat-sessions-pick select').value);
   const refused = await page.evaluate(async (s) => (await fetch('/api/harness/investigate/send', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Aitiarch': '1' }, body: JSON.stringify({ session: s, question: 'q' }) })).json(), session);
@@ -85,7 +91,7 @@ try {
   // Cancel while a turn runs: the status bar shows time, turns and the cap; Cancel stops it and says so.
   await scenario('inv-slow'); await composer.fill('Something slow'); await page.keyboard.press('Enter');
   const status = panel.getByRole('status', { name: 'Investigation progress' }); await status.waitFor();
-  assert.match(await status.innerText(), /of 12 turns.*cap \$0\.50/s);
+  assert.match(await status.innerText(), /\d+s.*tool calls?.*cap \$0\.50/s); assert(!/of 12|turns/i.test(await status.innerText()), 'the status bar shows no turn limit');
   await status.getByRole('button', { name: 'Cancel' }).click();
   await panel.locator('.inv-banner[data-kind="stopped"]').last().waitFor();
   assert.match(await panel.locator('.inv-banner[data-kind="stopped"]').last().innerText(), /You cancelled it/);
@@ -94,8 +100,43 @@ try {
   await scenario('inv-turns'); await composer.fill('Look everywhere'); await page.keyboard.press('Enter');
   await page.waitForFunction(() => document.querySelectorAll('#chat-panel .inv-banner[data-kind="stopped"]').length === 2);
   const partial = await panel.locator('.inv-banner[data-kind="stopped"]').last().innerText();
-  assert.match(partial, /It reached the turn limit\. The answer below is partial/); assert.match(partial, /files in the copy were not opened/);
-  await panel.screenshot({ path: path.join(output, 'investigate-partial.png') });
+  assert.match(partial, /Stopped as a safety measure/); assert.doesNotMatch(partial, /turn limit|12/i); assert.match(partial, /files in the copy were not opened/);
+  // The text written before the calls is narration, not an answer: the banner says no answer was written yet.
+  assert.match(partial, /No answer was written yet\./); assert.doesNotMatch(partial, /Partial so far/);
+  assert.match(await panel.locator('.inv-turn').last().locator('.inv-narration').first().innerText(), /Partial so far: login lives in src\./);
+  assert.equal(await panel.locator('.inv-turn').last().locator('.chat-ai').count(), 0, 'narration is not shown as an answer');
+  assert.match(await panel.locator('.inv-turn').last().locator('.inv-trail').innerText(), /stopped before it finished/); assert.doesNotMatch(await panel.locator('.inv-turn').last().locator('.inv-trail').innerText(), /running…/);
+  await panel.locator('.inv-turn').last().screenshot({ path: path.join(output, 'investigate-partial.png') });
+  // The backstop stop also needs a fresh confirmed plan before the same session goes on (the server wants it too).
+  const idle = () => page.waitForFunction(() => !document.querySelector('#chat-panel .inv-status[aria-label="Investigation progress"]'));
+  await scenario('inv-ok'); await panel.locator('.inv-banner[data-kind="stopped"]').last().getByRole('button', { name: 'Continue with a new plan' }).click();
+  await panel.getByRole('group', { name: 'Plan for this investigation' }).getByRole('button', { name: 'Confirm and continue' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('#chat-panel .inv-turn').length === 4); await idle();
+
+  // Narration before the calls is a grey row in order; the answer is only the final text, in two paragraphs.
+  await scenario('inv-narrate'); await composer.fill('Explain it'); await page.keyboard.press('Enter');
+  const narr = panel.locator('.inv-turn').nth(4); await narr.getByText('That is the whole story.').waitFor(); await idle();
+  const order = await narr.locator('.inv-trail > li').evaluateAll((els) => els.map((e) => (e.classList.contains('inv-narration') ? 'narration' : e.querySelector('.inv-tool')?.textContent)));
+  assert.deepEqual(order, ['narration', 'Glob', 'narration', 'Read'], 'narration and tool rows in the order they happened');
+  assert.deepEqual(await narr.locator('.inv-narration').allInnerTexts(), ['I will look at the files first.', 'Now reading the login file.']);
+  const paras = await narr.locator('.chat-ai p').allInnerTexts(); assert.deepEqual(paras.filter(Boolean), ['Login keeps sessions in a Map.', 'That is the whole story.'], 'the answer is only the final text, paragraphs separated');
+  await narr.screenshot({ path: path.join(output, 'investigate-narration.png') });
+
+  // The cost cap: a stop on it offers Continue, which needs a fresh confirmed plan and resumes the same session.
+  await scenario('inv-budget'); await composer.fill('Read everything'); await page.keyboard.press('Enter');
+  const capStop = panel.locator('.inv-banner[data-kind="stopped"]').last(); await capStop.getByText('It reached the cost cap.').waitFor();
+  assert.match(await capStop.innerText(), /No answer was written yet\./); assert.equal(await panel.getByRole('textbox', { name: 'Ask about the repo' }).count(), 0 || await panel.getByRole('textbox', { name: 'Ask about the repo' }).count());
+  const refused2 = await page.evaluate(async (s) => (await fetch('/api/harness/investigate/send', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Aitiarch': '1' }, body: JSON.stringify({ session: s, question: 'again' }) })).json(), session);
+  assert.equal(refused2.error, 'plan_required', 'after a cap stop the server wants a fresh confirmed plan');
+  await scenario('inv-ok'); await capStop.getByRole('button', { name: 'Continue with a new plan' }).click();
+  const card2 = panel.getByRole('group', { name: 'Plan for this investigation' }); await card2.waitFor();
+  assert.match(await card2.innerText(), /Before it continues/); await card2.getByLabel('Cost cap per question').fill('0.40'); await card2.getByRole('button', { name: 'Update the plan' }).click();
+  await page.waitForFunction(() => document.querySelector('#chat-panel .inv-plan button:not(.ghost)')?.disabled === false);
+  await card2.getByRole('button', { name: 'Confirm and continue' }).click();
+  await page.waitForFunction(() => document.querySelectorAll('#chat-panel .inv-turn').length === 7); await idle();
+  assert.equal(await panel.locator('.inv-turn .chat-you p').last().innerText(), 'Please continue where you stopped.');
+  const calls = (await readFile(record, 'utf8')).trim().split('\n').map((l) => JSON.parse(l)), last = calls.at(-1);
+  assert(last.args.includes('--resume') && last.args[last.args.indexOf('--max-budget-usd') + 1] === '0.40', 'it resumed the same session with the new cap');
 
   // The tripwire: a change to the notebook during a run shows a banner; Restore puts it back.
   await scenario('inv-write-notebook|' + path.join(notebook, 'plan.md')); await composer.fill('Anything'); await page.keyboard.press('Enter');
@@ -106,9 +147,9 @@ try {
 
   // A reload shows the questions and answers of this investigation (kept outside the repo).
   await openPanel(); await panel.locator('.chat-sessions-pick select').selectOption(session);
-  await panel.locator('.inv-turn').nth(3).waitFor();
+  await panel.locator('.inv-turn').nth(7).waitFor();
   const questions = await panel.locator('.inv-turn .chat-you p').allInnerTexts();
-  assert.deepEqual(questions, ['How does login work?', 'Something slow', 'Look everywhere', 'Anything']);
+  assert.deepEqual(questions, ['How does login work?', 'Something slow', 'Look everywhere', 'Please continue where you stopped.', 'Explain it', 'Read everything', 'Please continue where you stopped.', 'Anything']);
   assert(path.relative(notebook, harness).startsWith('..'), 'the record is outside the notebook');
 
   // Narrow width: nothing overflows sideways.

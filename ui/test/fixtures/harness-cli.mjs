@@ -35,7 +35,7 @@ if (args[args.indexOf('--tools') + 1] === 'Read,Grep,Glob') { // an investigatio
     tool('g2', 'tg2', 'Grep', { pattern: 'function login', path: process.cwd() }); out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tg2', content: 'src/login.js:4:function login(name) {' }] } });
     tool('g3', 'tg3', 'Read', { file_path: path.join(process.cwd(), 'notes.private.md') }); out({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tg3', is_error: true, content: 'Permission to read notes.private.md has been denied.' }] } });
   }
-  if (kind === 'inv-turns') { out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Partial so far: login lives in src. ' } } }); for (let i = 0; i < 20; i++) tool('m' + i, 't' + i, 'Grep', { pattern: 'login' }); }
+  if (kind === 'inv-turns') { out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Partial so far: login lives in src. ' } } }); for (let i = 0; i < 45; i++) tool('m' + i, 't' + i, 'Grep', { pattern: 'login' }); }
   if (kind === 'inv-outside') tool('m1', 't1', 'Read', { file_path: path.resolve(process.cwd(), '..', '..', 'outside.txt') });
   if (kind === 'inv-path') tool('m1', 't1', extra.startsWith('glob:') ? 'Glob' : 'Read', extra.startsWith('glob:') ? { pattern: extra.slice(5) } : { file_path: extra });
   if (kind === 'inv-bash') out({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', name: 'Bash', input: {} } } });
