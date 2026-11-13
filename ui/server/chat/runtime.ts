@@ -227,6 +227,13 @@ export class ChatRuntime {
  }
  private audit(note:string,id:string,event:'chat_started'|'chat_completed'|'chat_failed',cause?:AbortCause){return this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(note),requestId:id,note,event,at:new Date().toISOString(),...(cause?{cause}:{})});}
  private rememberReplay(id:string,tokens:number){this.replay.delete(id);this.replay.set(id,tokens);while(this.replay.size>200)this.replay.delete(this.replay.keys().next().value as string);}
+ /** How many saved replies Delete conversation would remove, found the way it finds them (the session id they carry, and the ids of the conversation's kept questions for older
+  *  ones), in the note's chat record on disk or in memory and in the private in-memory list. The confirmation says this number, so it must match what is removed. */
+ async conversationReplies(note:string,session:string,messageIds:ReadonlySet<string>):Promise<number>{
+  const mine=(m:ChatMessage)=>m.session===session||messageIds.has(m.id),found=new Set((await this.chats.read(note)).messages.filter(mine).map(m=>m.id));
+  for(const m of this.ephemeral.get(note)??[])if(mine(m))found.add(m.id);
+  return found.size;
+ }
  /** Delete conversation: the replies it saved go too, from the note's chat record (on disk or in memory) and from the private in-memory list. Returns how many. */
  async forgetConversation(note:string,session:string,messageIds:ReadonlySet<string>):Promise<number>{
   let removed=await this.chats.removeConversation(note,session,messageIds);

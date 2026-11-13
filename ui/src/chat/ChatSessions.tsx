@@ -2,6 +2,7 @@ import {useEffect,useRef,useState,type FormEvent,type KeyboardEvent} from 'react
 import {api,ApiError} from '../api.ts';
 import type {HarnessMode,HarnessSession} from '../../shared/harness.ts';
 import {noteTitle} from './chat-stub.ts';
+import {deleteConversationText,type DeleteImpact} from './session-delete.ts';
 
 const Caret=()=><svg className="chat-sum-caret" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6l4 4 4-4"/></svg>;
 
@@ -74,6 +75,9 @@ export function ChatSessions({path,value,onChange,disabled,refresh,kind,onKind,c
   if(kind==='investigate')api.investigateRepo().then(r=>{if(!off)setRepo(r.repo);}).catch(()=>{});return()=>{off=true;};},[path,refresh,kind,carry?.id,carry?.home]);
  useEffect(()=>{if(naming!==null)field.current?.focus();},[naming]);
  useEffect(()=>{if(deleting)keepButton.current?.focus();},[deleting]);
+ // Before a conversation is deleted, the server says which note it was started on and how many saved replies go with it.
+ const [impact,setImpact]=useState<DeleteImpact|'failed'|null>(null),counting=deleting&&kind==='chat'&&value?value:'';
+ useEffect(()=>{setImpact(null);if(!counting)return;let off=false;api.harnessSessionReplies(counting).then(r=>{if(!off)setImpact(r);}).catch(()=>{if(!off)setImpact('failed');});return()=>{off=true;};},[counting]);
  useEffect(()=>{if(repoDraft!==null)repoField.current?.focus();},[repoDraft]);
  if(!enabled)return null;
  const current=list.find(s=>s.id===value);
@@ -99,8 +103,8 @@ export function ChatSessions({path,value,onChange,disabled,refresh,kind,onKind,c
    <button type="submit" className="chat-ctl">Save</button><button type="button" className="chat-ctl chat-ctl-quiet" onClick={()=>setNaming(null)}>Cancel</button>
   </form>}
   {current&&deleting&&<span className="chat-sessions-delete" role="group" aria-label="Delete this conversation" onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();setDeleting(false);}}}>
-   Delete “{current.label}”? Claude's own record of it, its questions{kind==='investigate'?' and its answers':current.note&&current.note!==path?', and the replies it saved in the chat of the note it was started on':', and the replies it saved in this note\u2019s chat'} are removed too.
-   <button type="button" className="chat-ctl" onClick={async()=>{setNotice('');try{await api.harnessSessionDelete(current.id);setList(l=>l.filter(x=>x.id!==current.id));setDeleting(false);onChange('');}catch(e){fail(e);}}}>Delete</button>
+   {kind==='investigate'?`Delete “${current.label}”? Claude's own record of it, its questions and its answers are removed too.`:deleteConversationText(current.label,impact)}
+   <button type="button" className="chat-ctl" disabled={kind==='chat'&&impact===null} onClick={async()=>{setNotice('');try{await api.harnessSessionDelete(current.id);setList(l=>l.filter(x=>x.id!==current.id));setDeleting(false);onChange('');}catch(e){fail(e);}}}>Delete</button>
    <button type="button" className="chat-ctl chat-ctl-quiet" ref={keepButton} onClick={()=>setDeleting(false)}>Keep</button>
   </span>}
   {current&&kind==='chat'&&<p className="chat-sessions-note">Claude remembers this conversation, also after Aitiarch is reopened. Your notes are sent fresh with every message.</p>}

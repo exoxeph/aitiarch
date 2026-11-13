@@ -142,6 +142,8 @@ export const api = {
   harnessSessionCall:(action:'new'|'rename',body:unknown)=>ok<import('../shared/harness.ts').HarnessSession>('PUT','/api/harness/sessions/'+action,body),
   /** Questions asked in this note's named conversations, by message id. */
   harnessQuestions:(path:string)=>ok<{questions:Record<string,string>}>('GET',`/api/harness/questions?path=${encodeURIComponent(path)}`),
+  /** What deleting a conversation would remove from the chat of the note it was started on: that note, and how many saved replies. */
+  harnessSessionReplies:(id:string)=>ok<{note:string|null;replies:number}>('GET',`/api/harness/sessions/replies?id=${encodeURIComponent(id)}`),
   /** Deletes a conversation: the app's entry and Claude Code's own transcript of it. */
   harnessSessionDelete:(id:string)=>ok<{removed:string[]}>('PUT','/api/harness/sessions/delete',{id}),
   chatSessions:(path:string,otherProjects=false)=>ok<{id:import('../shared/chat.ts').ContextChoice['moduleId'];label:string;entries:import('../shared/chat.ts').ContextEntry[];notice?:string}[]>('GET',`/api/chat/modules?path=${encodeURIComponent(path)}&sessions=1&otherProjects=${otherProjects?'1':'0'}`),

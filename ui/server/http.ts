@@ -277,6 +277,13 @@ export function createApp(opts: AppOptions) {
       const h=await harnessReady,mode=url.searchParams.get('mode')==='investigate'?'investigate' as const:'chat' as const,note=mode==='chat'?url.searchParams.get('path')||undefined:undefined;if(note)await store.read(note);
       return json(res,200,{enabled:!!h,sessions:h?await h.index.list({mode,...(note?{note}:{})}):[]});
     }
+    // What Delete conversation would remove from the chat record of the note a conversation was started on: that note and how many saved replies. The confirmation says it.
+    if(url.pathname==='/api/harness/sessions/replies'&&req.method==='GET'){
+      const h=await harnessReady;if(!h)return json(res,409,{error:'disabled',message:'Sessions need the Claude Code CLI. Start Aitiarch with --claude.'});
+      const s=await h.index.get(url.searchParams.get('id')??'');if(!s)return json(res,409,{error:'invalid_session',message:'No such session.'});
+      const replies=s.mode==='chat'&&s.note?await (await chatReady).conversationReplies(s.note,s.id,new Set(Object.keys(await h.questions.read(s.id)))):0;
+      return json(res,200,{note:s.note??null,replies});
+    }
     // Investigations, read-only: the project's repo folder, a session's turns (question and answer, for a reload), whether it still needs its
     // plan confirmed, and a redacted excerpt of a real repo file around a line (for a file claim).
     if(url.pathname.startsWith('/api/harness/investigate/')&&req.method==='GET'){

@@ -6,6 +6,7 @@
 //  - a reply written on the other note is added to the note that is open, from the chat it is kept in;
 //  - a one-off chat sends the same line as its "editor" field;
 //  - a conversation counts against its own budget and counters (the footer, the usage list), whichever note is open; a one-off chat keeps its note's;
+//  - Delete conversation, asked while another note is open, names the note the conversation was started on and how many saved replies go with it;
 //  - a selection that crosses sections says where it starts and ends;
 //  - a reply's source chip names the note its question was asked on, with the same Found / Not found state, whichever note is open now;
 //  - a conversation started on a note with a very long name: the picker still says "started on", the name is cut with an ellipsis (full name in a tooltip), and nothing overflows in a 374 px panel.
@@ -195,6 +196,21 @@ try {
   await page.waitForFunction(() => /^This conversation · 3 calls/.test(document.querySelector('#chat-panel .chat-usage')?.textContent ?? ''));
   assert.equal(await panel.locator('.chat-sends [data-chip="switched"]').count(), 0);
   assert.equal(await text(chip('note')), 'Open note · Plan ×');
+
+  // 8b. Delete conversation, asked from another note: the confirmation names the note the conversation was started on and how many saved replies it will remove. Keep removes nothing.
+  await openNote('ideas.md'); await chip('switched').waitFor();
+  await page.route('**/api/harness/sessions/replies*', async (route) => { await new Promise((r) => setTimeout(r, 700)); await route.continue(); }); // the count takes a moment
+  await panel.locator('.chat-pick-trigger').click(); await panel.locator('.chat-pick-actions').getByRole('button', { name: 'Delete' }).click();
+  const confirm = panel.locator('.chat-sessions-delete'); await confirm.waitFor();
+  const said = () => confirm.evaluate((e) => [...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').replace(/\s+/g, ' ').trim());
+  const del = confirm.getByRole('button', { name: 'Delete', exact: true });
+  assert.equal(await said(), 'Delete “Conversation 1”? Counting its saved replies…', 'while the server counts'); assert.equal(await del.isDisabled(), true, 'Delete waits for the count');
+  await page.waitForFunction(() => !document.querySelector('#chat-panel .chat-sessions-delete button')?.disabled);
+  assert.equal(await said(), 'Delete “Conversation 1”? It was started on plan. 3 saved replies in that note’s chat are removed. Claude’s own record of the conversation and its questions are removed too.', 'the confirmation names the note and the number of saved replies');
+  assert.equal(await del.isEnabled(), true);
+  await confirm.getByRole('button', { name: 'Keep' }).click(); await confirm.waitFor({ state: 'detached' }); await page.unroute('**/api/harness/sessions/replies*');
+  assert.match(await text(panel.locator('.chat-pick-trigger .chat-pick-value')), /^Conversation 1 · 3 messages$/, 'Keep removed nothing'); assert.match(await footer(), /^This conversation · 3 calls · /);
+  await openNote('plan.md'); await chip('switched').waitFor();
 
   // 9. Removing the note for a message: the line says it was not sent, and no note source goes.
   await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click();

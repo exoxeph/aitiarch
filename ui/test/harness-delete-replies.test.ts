@@ -33,8 +33,11 @@ async function server({persist=true}:{persist?:boolean}={}){
  const saved=async()=>{try{return JSON.parse(await readFile(path.join(nb,'chat','plan.md.chat.json'),'utf8')).messages as {id:string;session?:string}[];}catch{return null;}};
  const shown=async()=>(await json<{messages:{id:string}[]}>(await fetch(base+'/api/chat?path=plan.md',{headers:{cookie}}))).messages.map(m=>m.id);
  const del=async(id:string)=>json<{removed:string[];replies:number}>(await put('/api/harness/sessions/delete',{id}));
+ /** What the confirmation asks the server before Delete: the note the conversation was started on and how many saved replies would go. */
+ const countRaw=(id:string)=>fetch(base+'/api/harness/sessions/replies?id='+encodeURIComponent(id),{headers:{cookie}});
+ const counted=async(id:string)=>json<{note:string|null;replies:number}>(await countRaw(id));
  const close=async()=>{watcher.stop();await app.close();};
- return {nb,harness,home,conversation,say,saved,shown,del,close};
+ return {nb,harness,home,conversation,say,saved,shown,del,countRaw,counted,close};
 }
 /** The CLI keeps a session's transcript at <home>/.claude/projects/<working folder>/<id>.jsonl: plant one for a session. */
 async function plantTranscript(s:{harness:string;home:string},id:string){const cwd=await realpath(path.join(s.harness,'chat-cwd')),folder=transcriptFolder(cwd,s.home);await mkdir(folder,{recursive:true});const f=path.join(folder,id+'.jsonl');await writeFile(f,'{"type":"user"}\n');return f;}
@@ -48,8 +51,10 @@ describe('Delete conversation and the replies it saved',()=>{
    const before=await s.saved();expect(before!.map(m=>m.id)).toEqual([a1,a2,b1,one]);
    expect(before!.map(m=>m.session)).toEqual([a.id,a.id,b.id,undefined]); // each conversation reply carries its session id; the one-off reply carries none
    const ta=await plantTranscript(s,a.id),tb=await plantTranscript(s,b.id);
+   expect(await s.counted(a.id)).toEqual({note:'plan.md',replies:2});expect((await s.counted(b.id)).replies).toBe(1); // what the confirmation will say
+   expect((await s.saved())!.map(m=>m.id)).toEqual([a1,a2,b1,one]); // asking changes nothing
    const r=await s.del(a.id);
-   expect(r.replies).toBe(2);expect(r.removed).toEqual([a.id+'.jsonl']);
+   expect(r.replies).toBe(2);expect(r.removed).toEqual([a.id+'.jsonl']); // and it is what is removed
    expect((await s.saved())!.map(m=>m.id)).toEqual([b1,one]);expect(await s.shown()).toEqual([b1,one]);
    expect(await exists(ta)).toBe(false);expect(await exists(tb)).toBe(true); // the CLI's record of A went, B's stayed (in the fake home)
    expect(await exists(path.join(s.harness,'questions',a.id+'.json'))).toBe(false);expect(await exists(path.join(s.harness,'questions',b.id+'.json'))).toBe(true);
@@ -63,6 +68,7 @@ describe('Delete conversation and the replies it saved',()=>{
    for(const m of doc.messages)delete m.session; // the file now looks like one written before replies carried a session id
    await writeFile(file,JSON.stringify(doc,null,2)+'\n');
    expect((await s.saved())!.map(m=>m.session)).toEqual([undefined,undefined,undefined,undefined]);
+   expect((await s.counted(a.id)).replies).toBe(2); // counted the same way, through the ids of A's kept questions
    const r=await s.del(a.id);
    expect(r.replies).toBe(2); // found through the ids of A's kept questions
    expect((await s.saved())!.map(m=>m.id)).toEqual([b1,one]);expect(a1).not.toBe(a2);
@@ -77,11 +83,19 @@ describe('Delete conversation and the replies it saved',()=>{
   const s=await server({persist:false});
   try{const a=await s.conversation('A'),b=await s.conversation('B');const a1=await s.say(a.id),b1=await s.say(b.id);
    expect(await s.saved()).toBeNull();expect(await s.shown()).toEqual([a1,b1]);
+   expect((await s.counted(a.id)).replies).toBe(1);
    expect((await s.del(a.id)).replies).toBe(1);expect(await s.shown()).toEqual([b1]);}finally{await s.close();}
+ });
+ it('refuses to count for a conversation that does not exist',async()=>{
+  const s=await server();
+  try{
+   for(const id of ['00000000-0000-4000-8000-000000000000','not-an-id',''])expect((await s.countRaw(id)).status,id).toBe(409);
+  }finally{await s.close();}
  });
  it('deleting a conversation that saved nothing removes nothing else',async()=>{
   const s=await server();
   try{const empty=await s.conversation('Empty'),keep=await s.conversation('Keep');const k1=await s.say(keep.id),one=await s.say(undefined);
+   expect(await s.counted(empty.id)).toEqual({note:'plan.md',replies:0});
    expect((await s.del(empty.id)).replies).toBe(0);expect((await s.saved())!.map(m=>m.id)).toEqual([k1,one]);}finally{await s.close();}
  });
 });
@@ -99,6 +113,8 @@ describe('private replies in memory',()=>{
   const turn=async(id:string,session:string,context:{moduleId:'this-note'|'claude-sessions';ids:string[]}[])=>{const r=await runtime.review({id,path:'plan.md',question:'Summarise.',context,session});await runtime.send({reviewId:r.reviewId,confirmed:true,dontAskAgain:true},()=>{});};
   await turn('p-1',s.id,[{moduleId:'claude-sessions',ids:[entry.id]}]);await turn('p-2',other.id,[{moduleId:'claude-sessions',ids:[entry.id]}]);
   expect(runtime.memoryMessages('plan.md').map(m=>[m.id,m.session,m.ephemeral])).toEqual([['p-1',s.id,true],['p-2',other.id,true]]);
+  expect(await runtime.conversationReplies('plan.md',s.id,new Set())).toBe(1); // the private in-memory replies are counted too
+  expect(await runtime.conversationReplies('plan.md',other.id,new Set(['p-2']))).toBe(1); // once, though it is found by session id and by its question's id
   expect(await runtime.forgetConversation('plan.md',s.id,new Set())).toBe(1);
   expect(runtime.memoryMessages('plan.md').map(m=>m.id)).toEqual(['p-2']);
   expect(await runtime.forgetConversation('plan.md',other.id,new Set(['p-2']))).toBe(1);expect(runtime.memoryMessages('plan.md')).toEqual([]);
