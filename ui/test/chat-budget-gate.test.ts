@@ -106,7 +106,7 @@ describe('the gate in a named conversation',()=>{
  });
  it('refuses a small budget too, for the same normal note: 28k + about 6k against 30k',async()=>{
   const p=await project();const s=await p.index.create({mode:'chat',label:'Small',note:'decisions.md'});
-  await p.send(p.ask(s.id,'m-1'));await p.runtime.settings('decisions.md',{tokenBudget:30000,rollingRequestCap:12});
+  await p.send(p.ask(s.id,'m-1'));await p.runtime.settings('decisions.md',{tokenBudget:30000,rollingRequestCap:12},s.id); // a conversation's budget is its own
   const review=await p.runtime.review(p.ask(s.id,'m-2'));
   expect(review.budget).toEqual({spent:28000,next:review.estimatedTokens,budget:30000});
   await expect(p.runtime.send({reviewId:review.reviewId,confirmed:true},()=>{})).rejects.toMatchObject({code:'budget_reached',budget:{spent:28000,budget:30000}});

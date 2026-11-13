@@ -40,5 +40,10 @@ it('refuses usage storage inside a notebook or repo',async()=>{
 });
 it('shows per-chat usage and budget without a remaining-requests or price estimate',()=>{
  const html=renderToStaticMarkup(<UsageView summary={{since:new Date().toISOString(),hourlyCap:2,providers:[],chats:[{note:'fixture.md',calls:2,input:30,cached:4,output:12,unreportedCalls:0,tokenBudget:50000,spent:46,reserved:0,rollingRequestCap:12,windowMinutes:60}]}}/>);
- expect(html).toContain('Per-note chat budgets');expect(html).toContain('46');expect(html).toContain('50000');expect(html).not.toMatch(/\$|remaining requests/i);
+ expect(html).toContain('Chat budgets');expect(html).toContain('one per note');expect(html).toContain('46');expect(html).toContain('50000');expect(html).not.toMatch(/\$|remaining requests/i);
+});
+it('lists a conversation on its own row, under the note it started on, next to the note\'s one-off chat',()=>{
+ const row=(extra:Record<string,unknown>)=>({note:'fixture.md',calls:1,input:10,cached:0,output:5,unreportedCalls:0,tokenBudget:50000,spent:15,reserved:0,rollingRequestCap:12,windowMinutes:60,...extra});
+ const html=renderToStaticMarkup(<UsageView summary={{since:new Date().toISOString(),hourlyCap:2,providers:[],chats:[row({}),row({session:'e50d1e40-4aaa-47b0-923c-3a17de41469d',label:'Storage plan',calls:3,spent:900})]}}/>);
+ expect(html).toContain('<th>fixture.md</th>');expect(html).toContain('<th>fixture.md · Storage plan</th>');expect(html).toContain('900');expect(html.match(/<tr>/g)!.length).toBeGreaterThanOrEqual(3);
 });

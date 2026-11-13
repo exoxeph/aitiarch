@@ -115,12 +115,17 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  useEffect(()=>{
   if(!path)return;let off=false;
   // Questions of named conversations come back from the app's own folder; the one-off chat's are only what this page remembers.
-  Promise.all([api.chat(path),api.harnessQuestions(path).catch(()=>({questions:{} as Record<string,string>}))]).then(([s,h])=>{if(off)return;
+  Promise.all([api.chat(path,kind==='chat'&&conversation?conversation:undefined),api.harnessQuestions(path).catch(()=>({questions:{} as Record<string,string>}))]).then(([s,h])=>{if(off)return;
    const merged=new Map(questions);for(const [id,q] of Object.entries(h.questions))if(!merged.has(id))merged.set(id,q);
    setTurns(prev=>prev.length?prev:fromStored(s.messages,merged));setUsage(s.usage);setPersistence(s.persistence.enabled?'private':'memory');})
    .catch(()=>{if(!off)setNotice('This note’s chat could not be loaded.');});
   return()=>{off=true;};
  },[path]);
+ // The footer counts the chat that is selected: a conversation has its own budget and counters (whichever note is open), a one-off chat its note's. They load with the chat
+ // when the panel opens, and again whenever another chat is chosen.
+ const usageFor=useRef(kind==='chat'?conversation:'');
+ useEffect(()=>{const want=kind==='chat'?conversation:'';if(!path||usageFor.current===want)return;usageFor.current=want;let off=false;
+  api.chat(path,want||undefined).then(s=>{if(!off)setUsage(s.usage);}).catch(()=>{if(!off)setUsage(null);});return()=>{off=true;};},[path,conversation,kind]);
  const stickLog=useStickToBottom(log,turns); // follows the reply smoothly unless the reader scrolled up
 
  const selectionText=ec?.selection?.text??'',openTitle=ec&&ec.note.path===openPath?ec.note.title:openPath?noteTitle(openPath):'',noteEstimate=useMemo(()=>chipEstimate(noteText),[noteText]),threadsEstimate=useMemo(()=>chipEstimate(threadsText),[threadsText]);
@@ -247,7 +252,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
    </button>
   </form>
   <footer className="chat-foot">
-   <p className="chat-usage">{usage?usageLine(usage):'No calls yet'}</p>
+   <p className="chat-usage">{usage?(usage.session?'This conversation · ':'')+usageLine(usage):'No calls yet'}</p>
    {inv&&<p className="chat-inv-usage" data-usage="investigate">{investigateLine(inv)}</p>}
    {persistence==='memory'&&turns.some(t=>t.status==='complete'&&!t.message?.ephemeral)&&<p className="chat-persist">Kept in memory only. <button type="button" className="ghost" title="Adds an ignore rule so this chat can be saved privately beside the note" onClick={()=>void keep()}>Keep on disk privately</button></p>}
   </footer>

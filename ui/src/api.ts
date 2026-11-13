@@ -127,7 +127,8 @@ export async function streamInvestigate(body: { session: string; question: strin
 }
 
 export const api = {
-  chat:(path:string)=>ok<ChatSnapshot>('GET',`/api/chat?path=${encodeURIComponent(path)}`),
+  /** A note's chat. With `session`, the same record but with that conversation's counters in `usage` (a conversation has its own budget). */
+  chat:(path:string,session?:string)=>ok<ChatSnapshot>('GET',`/api/chat?path=${encodeURIComponent(path)}${session?'&session='+encodeURIComponent(session):''}`),
   chatCall:<T,>(action:string,body:unknown)=>ok<T>('PUT','/api/chat/'+action,body),
   /** Harness chat sessions for a note: whether they are on (the Claude Code CLI is configured) and the list, most recent first. */
   harnessSessions:(path:string,mode:'chat'|'investigate'='chat')=>ok<{enabled:boolean;sessions:import('../shared/harness.ts').HarnessSession[]}>('GET',`/api/harness/sessions?path=${encodeURIComponent(path)}&mode=${mode}`),

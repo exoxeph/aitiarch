@@ -69,7 +69,9 @@ export interface ChatMessage {
  session?:string;
 }
 export interface ChatUsage {
- note:string;calls:number;input:number;cached:number;output:number;unreportedCalls:number;
+ note:string;
+ /** Set for a named conversation: it counts against its own budget, hourly cap and calls, whichever note is open. Absent for a note's one-off chat. */
+ session?:string;label?:string;calls:number;input:number;cached:number;output:number;unreportedCalls:number;
  /** `spent` counts what the CLI reported (cache reads at CACHE_READ_WEIGHT) plus `estimated`: the estimate charged for calls that reported no counts. */
  tokenBudget:number;spent:number;reserved:number;rollingRequestCap:number;windowMinutes:number;estimated?:number;
 }

@@ -42,11 +42,22 @@ export class ChatRuntime {
  private replay=new Map<string,number>();
  constructor(store:Store,ink:InkStore,chats:ChatStore,provider?:Provider,sessions?:ContextModule[],extras?:ExtrasFor,harness?:ChatHarness){this.harness=harness;this.extras=extras;this.store=store;this.ink=ink;this.chats=chats;this.provider=provider;this.ledger=new LedgerStore(store.rootReal);this.sessions=sessions??sessionModules({project:path.dirname(store.rootReal)});}
  memoryMessages(note:string){return structuredClone(this.ephemeral.get(note)??[]);}
- private state(note:string){let s=this.states.get(note);if(!s){if(this.states.size>=50)throw new ChatError('busy');s={history:[],omittedPairs:0,serial:0,calls:[],running:false,usage:{note,calls:0,input:0,cached:0,output:0,unreportedCalls:0,spent:0,estimated:0,reserved:0,tokenBudget:CHAT_LIMITS.tokenBudget,rollingRequestCap:CHAT_LIMITS.rollingRequestCap,windowMinutes:CHAT_LIMITS.windowMinutes}};this.states.set(note,s);}return s;}
+ /** The counters of one chat: a note's one-off chat (keyed by the note) or a named conversation (keyed by its id), which owns its budget, hourly cap and calls whichever note is open.
+  *  A conversation starts with the budget and cap its note's chat has at that moment. Each kind has its own limit on how many are kept. */
+ private state(note:string,session?:string){
+  const key=session?'session:'+session:note;let s=this.states.get(key);
+  if(!s){
+   if([...this.states.values()].filter(x=>!!x.usage.session===!!session).length>=50)throw new ChatError('busy');
+   const parent=session?this.states.get(note)?.usage:undefined;
+   s={history:[],omittedPairs:0,serial:0,calls:[],running:false,usage:{note,...(session?{session}:{}),calls:0,input:0,cached:0,output:0,unreportedCalls:0,spent:0,estimated:0,reserved:0,tokenBudget:parent?.tokenBudget??CHAT_LIMITS.tokenBudget,rollingRequestCap:parent?.rollingRequestCap??CHAT_LIMITS.rollingRequestCap,windowMinutes:CHAT_LIMITS.windowMinutes}};
+   this.states.set(key,s);
+  }
+  return s;
+ }
  usage(){return [...this.states.values()].map(s=>({...s.usage}));}
- async settings(note:string,input:{tokenBudget:number;rollingRequestCap:number}){
+ async settings(note:string,input:{tokenBudget:number;rollingRequestCap:number},session?:string){
   await this.store.read(note);if(!Number.isSafeInteger(input.tokenBudget)||input.tokenBudget<1000||input.tokenBudget>1000000||!Number.isSafeInteger(input.rollingRequestCap)||input.rollingRequestCap<1||input.rollingRequestCap>60)throw new ChatError('invalid_chat');
-  const s=this.state(note);s.usage.tokenBudget=input.tokenBudget;s.usage.rollingRequestCap=input.rollingRequestCap;return {...s.usage};
+  const s=this.state(note,session);s.usage.tokenBudget=input.tokenBudget;s.usage.rollingRequestCap=input.rollingRequestCap;return {...s.usage};
  }
  async modules(note:string,includeSessions=false,otherProjects=false){await this.store.read(note);return Promise.all([...contextModules(this.store,this.ink,note),...(includeSessions?this.sessions:[])].map(async m=>{try{return {id:m.id,label:m.label,entries:await m.list({otherProjects})};}catch{return {id:m.id,label:m.label,entries:[],notice:SESSION_NOTICES.format};}}));}
  async sessionPreview(note:string,context:ContextChoice[]){
@@ -68,7 +79,7 @@ export class ChatRuntime {
   const open=editor?.path??input.path;
   if(open!==input.path&&(input.session===undefined||open.split('/').some(part=>part.startsWith('.'))))throw new ChatError('invalid_chat');
   await this.store.read(input.path);if(open!==input.path)await this.store.read(open);
-  const s=this.state(input.path),sources:ContextSource[]=[],modules=[...contextModules(this.store,this.ink,open),...this.sessions],seen=new Set<string>();
+  const sources:ContextSource[]=[],modules=[...contextModules(this.store,this.ink,open),...this.sessions],seen=new Set<string>();
   // Other notes the app adds (the Constellation, a picker) pass one filter in every chat, one-off or a conversation: never the notebook file, hidden files, Aitiarch's own
   // state and sidecars, secrets or keys. They are dropped BEFORE anything is read, so they are not read and not audited as read; what was left out is named in the review.
   // The note the chat is open on is the person's own choice and is never filtered (it is the "this-note" module, not an added note).
@@ -94,6 +105,8 @@ export class ChatRuntime {
    session=await this.harness.index.get(input.session);
    if(!session||session.mode!=='chat'||session.note!==undefined&&session.note!==input.path)throw new ChatError('invalid_chat');
   }
+  // A one-off chat counts against its note; a conversation counts against itself (budget, hourly cap, calls), whichever note is open.
+  const s=this.state(input.path,session?.id);if(session)s.usage.label=session.label;
   // The chat node's persona always rides along; its skills only when something loaded. Fixed here, so the review shows what is sent.
   const extra=this.extras?await this.extras('chat'):null;
   // Earlier replies written in another mode are left out, not tagged: a tagged reply is still a worked example of the other style.
@@ -135,7 +148,7 @@ export class ChatRuntime {
   const frozen=this.reviews.get(input.reviewId);if(!frozen)throw new ChatError('review_required');
   if(this.closed||Date.now()-frozen.created>600000)throw new ChatError('stale_review');
   if(frozen.review.requiresConfirmation&&input.confirmed!==true)throw new ChatError('review_required');
-  const {review,request}=frozen,s=this.state(review.path);
+  const {review,request}=frozen,s=this.state(review.path,frozen.session?.id);
   if(s.serial!==frozen.serial)throw new ChatError('stale_review');
   if(s.running||[...this.states.values()].filter(x=>x.running).length>=2)throw new ChatError('busy');
   if(!this.provider||this.provider.name!=='claude')throw new ChatError('disabled');
@@ -219,8 +232,9 @@ export class ChatRuntime {
   let removed=await this.chats.removeConversation(note,session,messageIds);
   const held=this.ephemeral.get(note);
   if(held){const keep=held.filter(m=>m.session!==session&&!messageIds.has(m.id));removed+=held.length-keep.length;if(keep.length)this.ephemeral.set(note,keep);else this.ephemeral.delete(note);}
-  this.replay.delete(session);return removed;
+  this.replay.delete(session);this.states.delete('session:'+session);return removed;
  }
- cancel(note:string){const s=this.states.get(note);if(s?.controller){s.abortCause??='user_stop';s.controller.abort();}}
+ /** Stop: whatever is running for this note, its one-off chat or a conversation that was started on it. */
+ cancel(note:string){for(const s of this.states.values())if(s.usage.note===note&&s.controller){s.abortCause??='user_stop';s.controller.abort();}}
  async close(){this.closed=true;for(const s of this.states.values())if(s.controller){s.abortCause??='server_shutdown';s.controller.abort();}await Promise.allSettled(this.jobs);this.reviews.clear();this.states.clear();this.ephemeral.clear();}
 }

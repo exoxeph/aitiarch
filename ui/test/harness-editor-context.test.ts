@@ -112,6 +112,47 @@ describe('the editor line on a conversation turn',()=>{
  });
 });
 
+describe('a conversation owns its budget and counters; a one-off chat keeps its note\'s',()=>{
+ const usage=(runtime:ChatRuntime)=>runtime.usage().map(u=>[u.note,u.session??null,u.calls]);
+ it('counts a conversation turn against the conversation, whichever note is open, and a one-off chat against its note',async()=>{
+  const p=await project(),{index,runtime}=await p.open(),a=await index.create({mode:'chat',label:'A',note:'plan.md'}),b=await index.create({mode:'chat',label:'B',note:'plan.md'});
+  await turn(runtime,ask(a.id,'m-b1','On plan'));
+  await turn(runtime,ask(a.id,'m-b2','Roaming, other.md is open',{editor:{path:'other.md',title:'other',section:[]}}));
+  await turn(runtime,ask(b.id,'m-b3','The other conversation'));
+  const oneOff=await runtime.review({id:'m-b4',path:'plan.md',question:'One-off',context:[{moduleId:'this-note',ids:['note']}]});
+  expect(oneOff.budget).toEqual({spent:0,next:oneOff.estimatedTokens,budget:50000}); // nothing is spent yet in the note's own chat
+  expect(usage(runtime)).toEqual([['plan.md',a.id,2],['plan.md',b.id,1],['plan.md',null,0]]); // each conversation counts its own calls; the note's one-off chat has none, and other.md (open for one of them) has no counters at all
+  const [ua,ub]=runtime.usage();expect(ua.spent).toBeGreaterThan(0);expect(ua.label).toBe('A');expect(ub.label).toBe('B');expect(ua.input).toBeGreaterThan(ub.input);
+  const next=await runtime.review(ask(a.id,'m-b5','Next in A'));expect(next.budget!.spent).toBe(ua.spent); // its review shows its own spending
+ });
+ it('gates a conversation by its own budget and hourly cap, and a one-off chat on the same note is not held up by it',async()=>{
+  const p=await project(),{index,runtime}=await p.open(),a=await index.create({mode:'chat',label:'A',note:'plan.md'}),b=await index.create({mode:'chat',label:'B',note:'plan.md'});
+  await runtime.settings('plan.md',{tokenBudget:1000,rollingRequestCap:12},a.id); // A is given a budget too small for any message
+  const refused=await runtime.review(ask(a.id,'m-g1','Too big for A'));await expect(runtime.send({reviewId:refused.reviewId,confirmed:true},()=>{})).rejects.toMatchObject({code:'budget_reached'});
+  expect((await turn(runtime,ask(b.id,'m-g2','B is fine'))).error).toBeUndefined(); // B has the default
+  await runtime.settings('plan.md',{tokenBudget:50000,rollingRequestCap:1},b.id);
+  const capped=await runtime.review(ask(b.id,'m-g3','B is at its cap'));await expect(runtime.send({reviewId:capped.reviewId,confirmed:true},()=>{})).rejects.toMatchObject({code:'hourly_cap'});
+  const oneOff=await turn(runtime,{id:'m-g4',path:'plan.md',question:'The note\'s own chat',context:[{moduleId:'this-note',ids:['note']}]}); // neither A's budget nor B's cap holds up the note's own chat
+  expect(oneOff.error).toBeUndefined();expect(oneOff.complete).toBeDefined();
+ });
+ it('a new conversation starts with the budget and cap its note\'s chat has, and Stop for the note stops a running conversation',async()=>{
+  const p=await project(),{index,runtime}=await p.open('slow-stream'),a=await index.create({mode:'chat',label:'A',note:'plan.md'});
+  await runtime.settings('plan.md',{tokenBudget:7777,rollingRequestCap:5});
+  const review=await runtime.review(ask(a.id,'m-s1','Say a lot'));expect(review.budget!.budget).toBe(7777);
+  const events:ChatEvent[]=[],job=runtime.send({reviewId:review.reviewId,confirmed:true},e=>events.push(e));
+  while(!events.some(e=>e.type==='delta'))await new Promise(r=>setTimeout(r,20));
+  runtime.cancel('plan.md');await job;expect(events.find(e=>e.type==='error')).toMatchObject({code:'cancelled',cause:'user_stop'});
+  expect(runtime.usage().find(u=>u.session===a.id)).toMatchObject({tokenBudget:7777,rollingRequestCap:5,reserved:0});
+ });
+ it('Delete conversation drops its counters with its replies, and leaves the note\'s',async()=>{
+  const p=await project(),{index,runtime}=await p.open(),a=await index.create({mode:'chat',label:'A',note:'plan.md'});
+  await runtime.settings('plan.md',{tokenBudget:9000,rollingRequestCap:7});await turn(runtime,ask(a.id,'m-d1','Hello'));
+  expect(usage(runtime)).toEqual([['plan.md',null,0],['plan.md',a.id,1]]);
+  expect(await runtime.forgetConversation('plan.md',a.id,new Set())).toBe(1);
+  expect(usage(runtime)).toEqual([['plan.md',null,0]]);expect(runtime.usage()[0]).toMatchObject({tokenBudget:9000,rollingRequestCap:7});
+ });
+});
+
 describe('the ledger says which note was read and how much was sent',()=>{
  const reads=async(root:string,requestId:string)=>(await new LedgerStore(root).read()).events.filter(e=>e.event==='context_read'&&e.requestId===requestId);
  it('records the note read, its size and the selection by lines and size, never any text; open on another note, it names that note and keeps the chat\'s note apart',async()=>{

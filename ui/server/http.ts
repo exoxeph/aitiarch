@@ -2,6 +2,7 @@ import {validNeverCorrect} from '../shared/typing-preferences.ts';
 import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {removeTranscript} from './harness/transcripts.ts';import {sweepStaleTurnFolders} from './harness/sweep.ts';import {QuestionStore} from './harness/questions.ts';
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES,budgetText} from '../shared/chat.ts';
+import {validSessionId} from '../shared/harness.ts';
 import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
 import {InsertionStore} from './insertion-store.ts';
 import {SKILL_DIAGRAM_CSP_HEADER,SKILL_DIAGRAM_SVG_CSP_HEADER} from '../shared/skill-diagram.ts';
@@ -333,9 +334,10 @@ export function createApp(opts: AppOptions) {
       }
     }
     if(url.pathname==='/api/chat'&&req.method==='GET'){
-      const note=url.searchParams.get('path')??'';await store.read(note);
+      const note=url.searchParams.get('path')??'',session=url.searchParams.get('session')??'';await store.read(note);
+      if(session&&!validSessionId(session))return json(res,409,{error:'invalid_chat',message:CHAT_MESSAGES.invalid_chat});
       const saved=await chatStore.read(note),runtime=await chatReady;
-      return json(res,200,{...saved,messages:[...saved.messages,...runtime.memoryMessages(note)],persistence:await chatStore.status(),questionPlaceholder:'Question unavailable after reload.',usage:runtime.usage().find(c=>c.note===note)??null});
+      return json(res,200,{...saved,messages:[...saved.messages,...runtime.memoryMessages(note)],persistence:await chatStore.status(),questionPlaceholder:'Question unavailable after reload.',usage:runtime.usage().find(c=>c.note===note&&c.session===(session||undefined))??null});
     }
     if(url.pathname==='/api/chat/modules'&&req.method==='GET')return json(res,200,await (await chatReady).modules(url.searchParams.get('path')??'',url.searchParams.get('sessions')==='1',url.searchParams.get('otherProjects')==='1'));
     if(url.pathname.startsWith('/api/chat/')&&req.method==='PUT'){
@@ -343,7 +345,7 @@ export function createApp(opts: AppOptions) {
       try{
         if(url.pathname==='/api/chat/review')return json(res,200,await runtime.review(b));
         if(url.pathname==='/api/chat/session-preview')return json(res,200,await runtime.sessionPreview(b.path,b.context));
-        if(url.pathname==='/api/chat/settings')return json(res,200,await runtime.settings(b.path,b));
+        if(url.pathname==='/api/chat/settings')return json(res,200,await runtime.settings(b.path,b,typeof b.session==='string'&&validSessionId(b.session)?b.session:undefined));
         if(url.pathname==='/api/chat/cancel'){runtime.cancel(b.path);return json(res,200,{});}
         if(url.pathname==='/api/chat/enable'){
           if(b.action!=='add-ignore-line')throw new ChatError('invalid_chat');return json(res,200,await chatStore.enablePersistence());

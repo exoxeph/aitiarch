@@ -5,6 +5,7 @@
 //  - opening another note mid-conversation keeps the conversation, says "Open note changed: A -> B" once, and the next message names the new note;
 //  - a reply written on the other note is added to the note that is open, from the chat it is kept in;
 //  - a one-off chat sends the same line as its "editor" field;
+//  - a conversation counts against its own budget and counters (the footer, the usage list), whichever note is open; a one-off chat keeps its note's;
 //  - a selection that crosses sections says where it starts and ends;
 //  - a reply's source chip names the note its question was asked on, with the same Found / Not found state, whichever note is open now;
 //  - a conversation started on a note with a very long name: the picker still says "started on", the name is cut with an ellipsis (full name in a tooltip), and nothing overflows in a 374 px panel.
@@ -52,6 +53,7 @@ try {
   const text = async (loc) => (await loc.innerText()).replace(/\s+/g, ' ').trim().replace(/\s?([×+])$/, ' $1');
   const chipOf = (turn) => panel.locator('.chat-turn').nth(turn).locator('.claim-chip').first();
   const chipWords = async (loc) => ({ label: (await loc.locator('.claim-label').textContent()).trim(), state: (await loc.locator('.claim-state').textContent()).replace(/^\s*·\s*/, '').trim() });
+  const footer = async () => text(panel.locator('.chat-usage'));
   const ask = async (question) => { const c = panel.getByRole('textbox', { name: 'Message Aitiarch AI' }); await c.fill(question); await c.press('Enter'); const review = panel.getByRole('region', { name: 'What will be sent' }); await review.waitFor(); return review; };
   const sendReview = async (review) => { const done = panel.locator('.chat-ai:not(.chat-streaming) .chat-add').last(); const before = await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').count(); await review.getByRole('button', { name: 'Send', exact: true }).click(); await page.waitForFunction((n) => document.querySelectorAll('#chat-panel .chat-ai:not(.chat-streaming) .chat-add').length > n, before); return done; };
 
@@ -98,6 +100,7 @@ try {
   assert.equal(await text(review.locator('dt', { hasText: /^Starts with/ })), 'Starts with');
   await panel.screenshot({ path: path.join(output, 'editor-context-review.png') });
   await sendReview(review);
+  assert.match(await footer(), /^This conversation · 1 call · /, 'the footer counts the conversation');
   let [first] = await calls();
   assert.equal(first.stdin, line1 + '\n\nWhat does this paragraph mean?', 'the CLI got that line, a blank line and the question');
   assert(!first.stdin.split('\n\n')[0].includes('unique sentence'), 'no note text in the line');
@@ -114,6 +117,7 @@ try {
   const line2 = `Open note: Plan (${PLAN.length} chars). Cursor section: Plan.`;
   assert.equal(await review.locator('dt', { hasText: /^Selection/ }).count(), 0, 'the removed selection is not in the review'); assert.equal(await text(review.locator('.chat-review-manifest')), line2);
   await sendReview(review);
+  assert.match(await footer(), /^This conversation · 2 calls · /);
   const second = (await calls())[1];
   assert(second.args.includes('--resume'), 'a resumed turn'); assert.equal(second.stdin, line2 + '\n\nAnd this section?'); assert(!second.addendum.includes('[[source S1'), 'no selection source in the instruction file');
   assert.equal(await chip('selection').getAttribute('aria-pressed'), 'true', 'the selection is back for the next message');
@@ -136,6 +140,7 @@ try {
   assert.equal(await panel.locator('.chat-turn').count(), 2, 'its earlier messages are still there');
   assert.deepEqual(await chipWords(chipOf(1)), { label: 'plan', state: 'Found' }, 'the earlier reply\'s chip still names the note it was asked on, with the same state, now that another note is open');
   assert.match(await text(panel.locator('.chat-head h2')), /On ideas$/, 'the header names the open note');
+  assert.match(await footer(), /^This conversation · 2 calls · /, 'the footer still counts the conversation, whichever note is open');
   await page.screenshot({ path: path.join(output, 'editor-context-note-changed.png') });
   review = await ask('And here?');
   const line3 = `Open note: Ideas (${IDEAS.length} chars). Cursor section: Ideas.`;
@@ -143,6 +148,7 @@ try {
   assert.equal(await review.locator('.chat-review-source summary', { hasText: /^This note/ }).count(), 1, 'and sends its text');
   await sendReview(review);
   assert.equal(await panel.locator('.chat-sends [data-chip="switched"]').count(), 0, 'the notice goes away once a message is sent');
+  assert.match(await footer(), /^This conversation · 3 calls · /);
   const third = (await calls())[2];
   assert(third.args.includes('--resume'), 'still the same conversation'); assert.equal(third.stdin, line3 + '\n\nAnd here?');
   assert(third.addendum.includes('One idea only.') && !third.addendum.includes(SEL), 'the instruction file holds the note that is open now, not the first one');
@@ -176,9 +182,17 @@ try {
   assert.equal(await text(review.locator('.chat-review-manifest')), line4); assert.equal(await text(review.locator('dt', { hasText: /^Editor line/ })), 'Editor line', 'a one-off message says the line travels with it');
   await sendReview(review);
   assert.equal(provider.requests.length, 1); assert.equal(provider.requests[0].editor, line4, 'the provider request carries the line');
+  assert.match(await footer(), /^1 call · /, 'a one-off chat counts against its note, not against the conversation');
+  const usageNow = (await page.evaluate(() => fetch('/api/usage').then((r) => r.json()))).chats;
+  const owned = usageNow.filter((c) => c.session); assert.equal(owned.length, 1, 'one conversation has counters'); assert.deepEqual([owned[0].note, owned[0].label, owned[0].calls], ['plan.md', 'Conversation 1', 3], 'its own, under the note it started on');
+  assert.equal(usageNow.find((c) => !c.session && c.note === 'ideas.md').calls, 1, 'the note the conversation visited keeps its own one-off count'); assert.equal(usageNow.filter((c) => !c.session && c.note === 'plan.md').reduce((n, c) => n + c.calls, 0), 0, 'and the starting note\'s one-off chat did not pay for the conversation');
   assert.match(provider.requests[0].selection, /^One idea only\.$/);
   // Switching notes in a one-off chat is another chat on the other note, as before: no notice.
   await openNote('plan.md'); await page.waitForFunction(() => /On plan$/.test(document.querySelector('#chat-panel .chat-head h2')?.textContent ?? ''));
+  assert.match(await footer(), /^No calls yet/, 'on Plan the one-off chat has made no calls, though the conversation started there made three');
+  // Choosing the conversation again brings its own counters back from the server.
+  await panel.locator('.chat-pick-trigger').click(); await panel.locator('.chat-pick-opt', { hasText: /^Conversation 1/ }).click();
+  await page.waitForFunction(() => /^This conversation · 3 calls/.test(document.querySelector('#chat-panel .chat-usage')?.textContent ?? ''));
   assert.equal(await panel.locator('.chat-sends [data-chip="switched"]').count(), 0);
   assert.equal(await text(chip('note')), 'Open note · Plan ×');
 
