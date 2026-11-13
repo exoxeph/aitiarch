@@ -90,7 +90,7 @@ async function fixture(options:{enabled?:boolean;hourlyCap?:number;timeoutMs?:nu
   });
   await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));origin='http://127.0.0.1:'+(server.address() as any).port;
   cleanup.push(async()=>{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));});
-  const config={enabled:true,configDirectory:root,testOrigin:origin,hourlyCap:10,timeoutMs:1500,...options};
+  const config={enabled:true,configDirectory:root,testOrigin:origin,hourlyCap:10,timeoutMs:15000,...options}; // the provider's own deadline for the fixture's local requests: generous, because a loaded machine can take over a second for a local fetch (no test here waits for it to fire)
   const provider=new ChatGPTPlan(config);cleanup.push(()=>provider.close());
   const login=async()=>{
     const attempt=await provider.beginSignIn();
@@ -231,7 +231,7 @@ for(const [status,code]of [[429,'subscription_sharing_usage_limit_exceeded'],[40
 }
 for(const mode of ['incomplete','empty','quote-mismatch','unknown','unknown-field','extra-claim','hang'])it(`fails closed on ${mode}`,async()=>{
   const f=await fixture();await f.login();f.setMode(mode);
-  await expect(f.provider.invoke(request,{timeoutMs:400})).rejects.toMatchObject({code:mode==='hang'?'timeout':'invalid_response'});
+  await expect(f.provider.invoke(request,{timeoutMs:mode==='hang'?400:15000})).rejects.toMatchObject({code:mode==='hang'?'timeout':'invalid_response'}); // only the hang must reach its deadline; the others return at once, so their deadline is a ceiling, not a race
 });
 
 it('persists the first stream rejection as names and types only',async()=>{
