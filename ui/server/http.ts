@@ -274,7 +274,8 @@ export function createApp(opts: AppOptions) {
     }
     // Harness chat sessions: the app's own list for this project, a new one for a note, and a new label. Nothing here talks to the CLI.
     if(url.pathname==='/api/harness/sessions'&&req.method==='GET'){
-      const h=await harnessReady,mode=url.searchParams.get('mode')==='investigate'?'investigate' as const:'chat' as const,note=mode==='chat'?url.searchParams.get('path')||undefined:undefined;if(note)await store.read(note);
+      // `all=1`: every chat conversation of the project, whichever note it was started on (a conversation follows the person from note to note, so the picker lists them all).
+      const h=await harnessReady,mode=url.searchParams.get('mode')==='investigate'?'investigate' as const:'chat' as const,note=mode==='chat'&&url.searchParams.get('all')!=='1'?url.searchParams.get('path')||undefined:undefined;if(note)await store.read(note);
       return json(res,200,{enabled:!!h,sessions:h?await h.index.list({mode,...(note?{note}:{})}):[]});
     }
     // What Delete conversation would remove from the chat record of the note a conversation was started on: that note and how many saved replies. The confirmation says it.
@@ -297,8 +298,19 @@ export function createApp(opts: AppOptions) {
       }catch(e){if(e instanceof InvestigateError)return json(res,409,{error:e.code,message:'Investigation: '+e.code.replace(/_/g,' ')+'.'});throw e;}
     }
     // The questions asked in this note's named conversations, by message id, so a reloaded panel can show them.
+    // A named conversation's whole history by its id: its saved replies (from the chat record of the note it was started on, in order), its questions, its counters and the label. It does
+    // not depend on which note is open.
+    if(url.pathname==='/api/harness/sessions/history'&&req.method==='GET'){
+      const h=await harnessReady;if(!h)return json(res,409,{error:'disabled',message:'Sessions need the Claude Code CLI. Start Aitiarch with --claude.'});
+      const s=await h.index.get(url.searchParams.get('id')??'');if(!s||s.mode!=='chat'||!s.note)return json(res,409,{error:'invalid_session',message:'No such conversation.'});
+      const questions=await h.questions.read(s.id),runtime=await chatReady;
+      return json(res,200,{session:s,messages:await runtime.conversationMessages(s.note,s.id,new Set(Object.keys(questions))),questions,persistence:await chatStore.status(),usage:runtime.usage().find(c=>c.session===s.id)??null});
+    }
     if(url.pathname==='/api/harness/questions'&&req.method==='GET'){
-      const h=await harnessReady,note=url.searchParams.get('path')??'';await store.read(note);
+      // `session=<id>`: that conversation's questions by message id, whichever note is open; `path`: every conversation's started on that note.
+      const h=await harnessReady,wanted=url.searchParams.get('session');
+      if(wanted!==null){const s=h?await h.index.get(wanted):null;if(!s||s.mode!=='chat')return json(res,409,{error:'invalid_session',message:'No such conversation.'});return json(res,200,{questions:await h!.questions.read(s.id)});}
+      const note=url.searchParams.get('path')??'';await store.read(note);
       const out:Record<string,string>={};if(h)for(const s of await h.index.list({mode:'chat',note}))Object.assign(out,await h.questions.read(s.id));
       return json(res,200,{questions:out});
     }

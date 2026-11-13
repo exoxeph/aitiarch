@@ -230,9 +230,14 @@ export class ChatRuntime {
  /** How many saved replies Delete conversation would remove, found the way it finds them (the session id they carry, and the ids of the conversation's kept questions for older
   *  ones), in the note's chat record on disk or in memory and in the private in-memory list. The confirmation says this number, so it must match what is removed. */
  async conversationReplies(note:string,session:string,messageIds:ReadonlySet<string>):Promise<number>{
-  const mine=(m:ChatMessage)=>m.session===session||messageIds.has(m.id),found=new Set((await this.chats.read(note)).messages.filter(mine).map(m=>m.id));
-  for(const m of this.ephemeral.get(note)??[])if(mine(m))found.add(m.id);
-  return found.size;
+  return (await this.conversationMessages(note,session,messageIds)).length;
+ }
+ /** A named conversation's saved replies, in the order they were written, whichever note is open: read from the chat record of the note it was started on (found by the session id they carry,
+  *  and for older replies by the ids of the conversation's kept questions) and from the private in-memory list. A reply is listed once. */
+ async conversationMessages(note:string,session:string,messageIds:ReadonlySet<string>):Promise<ChatMessage[]>{
+  const mine=(m:ChatMessage)=>m.session===session||messageIds.has(m.id),found=new Map<string,ChatMessage>();
+  for(const m of [...(await this.chats.read(note)).messages,...(this.ephemeral.get(note)??[])])if(mine(m)&&!found.has(m.id))found.set(m.id,structuredClone(m));
+  return [...found.values()].sort((a,b)=>Date.parse(a.at)-Date.parse(b.at)); // a stable sort: replies saved in the same millisecond keep the order they were written in
  }
  /** Delete conversation: the replies it saved go too, from the note's chat record (on disk or in memory) and from the private in-memory list. Returns how many. */
  async forgetConversation(note:string,session:string,messageIds:ReadonlySet<string>):Promise<number>{
