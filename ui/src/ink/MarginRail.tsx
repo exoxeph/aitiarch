@@ -2,7 +2,7 @@ import {transient} from '../transient.ts';
 import {DiagramSlot} from '../diagrams/DiagramSlot.tsx';
 import {ReplyMarkdown} from './ReplyMarkdown.tsx';
 import {DiagramReveal,Streamed,Thinking} from './streaming.tsx';
-import {useLayoutEffect,useRef,useState,type ReactNode} from 'react';
+import {useEffect,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import type {InkItem} from '../../shared/ink.ts';
 import {UsedSkills} from '../skills/PersonaSwitch.tsx';
 import {bringToFront,dimFor,normalizeOrder,overlapDepths,overlappingIds} from '../../shared/thought-placement.ts';
@@ -41,7 +41,7 @@ export function MarginRail({placed,renderDraft,blobs}:{placed:PlacedMargin[];ren
  const [scrolling,setScrolling]=useState(false);
  useLayoutEffect(()=>{const surface=rail.current?.closest('.ink-surface');let timer:ReturnType<typeof setTimeout>;const scroll=()=>{setScrolling(true);clearTimeout(timer);timer=setTimeout(()=>setScrolling(false),200);};surface?.addEventListener('scroll',scroll,true);return()=>{clearTimeout(timer);surface?.removeEventListener('scroll',scroll,true);};},[]);
  // Where each blob really is: its automatic place, the spot the person chose, or where it is being dragged right now.
- const [live,setLive]=useState<{id:string;left:number;top:number}|null>(null),liveRef=useRef<typeof live>(null),start=useRef<{id:string;x:number;y:number;left:number;top:number;width:number}|null>(null);
+ const [live,setLive]=useState<{id:string;left:number;top:number;settle?:boolean}|null>(null),liveRef=useRef<typeof live>(null),start=useRef<{id:string;x:number;y:number;left:number;top:number;width:number}|null>(null);
  const sideAt=(left:number,width:number):ThoughtSide=>geometry&&left+width/2<(geometry.left+geometry.right)/2?'left':'right';
  const frames=geometry?placed.map(p=>{
   const base=blobBox(geometry.width,geometry.left,geometry.right,p.side),lv=live?.id===p.item.id?live:null;
@@ -63,9 +63,18 @@ export function MarginRail({placed,renderDraft,blobs}:{placed:PlacedMargin[];ren
   setBoth({id:s.id,left:clamp(s.left+e.clientX-s.x,0,Math.max(0,geometry.width-s.width)),top:Math.max(-blobs.getScroll(),s.top+e.clientY-s.y)});
  };
  const gripUp=()=>{
-  const s=start.current,l=liveRef.current;start.current=null;setBoth(null);
-  if(s&&l&&blobs&&(l.left!==s.left||l.top!==s.top))blobs.onMove(s.id,{left:l.left,top:l.top+blobs.getScroll()});
+  const s=start.current,l=liveRef.current;start.current=null;
+  if(s&&l&&blobs&&(l.left!==s.left||l.top!==s.top)){
+   // The saved place arrives a frame or two after the drop. Hold the dropped spot until the layout has it, so the blob never flashes back to where it started.
+   setBoth({...l,settle:true});blobs.onMove(s.id,{left:l.left,top:l.top+blobs.getScroll()});
+  }else setBoth(null);
  };
+ useLayoutEffect(()=>{
+  if(!live?.settle)return;
+  const p=placed.find(x=>x.item.id===live.id);
+  if(p&&p.manual&&Math.abs(p.top-live.top)<1&&Math.abs(p.manual.left-live.left)<1)setBoth(null);
+ },[placed,live]);
+ useEffect(()=>{if(!live?.settle)return;const t=setTimeout(()=>setBoth(null),700);return()=>clearTimeout(t);},[live]); // never hold it for long, whatever happens
  // The keyboard does everything dragging does: arrows move 8px (Shift 40px), Home puts the blob back where the app would place it.
  const gripKey=(e:ReactKeyboardEvent<HTMLButtonElement>,id:string)=>{
   const f=frameOf(id);if(!f||!blobs||!geometry)return;
