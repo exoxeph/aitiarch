@@ -42,6 +42,7 @@ import type { ChatEvent, ChatMessage, ChatUsage } from "../shared/chat.ts";
 import { sseFrames } from "./chat/chat-model.ts";
 import type { InvestigatorEvent } from "../shared/investigator.ts";
 import { investigatorFrames } from "./chat/trail-model.ts";
+import { investigateFrames } from "./chat/investigate-model.ts";
 export interface InkSnapshot { document: InkDocument; version: string | null }
 
 export type SaveResult =
@@ -105,6 +106,25 @@ export async function streamChat(body: { reviewId: string; confirmed?: boolean; 
 }
 
 /** PUT /api/investigator/answer as a server-sent-event stream of M4 investigator events. Rejects with ApiError when refused before streaming. */
+/** One investigation turn as server-sent events. Unknown event types are passed on (the trail counts them); broken frames are dropped. */
+export async function streamInvestigate(body: { session: string; question: string }, onEvent: (e: { type: string }) => void, signal?: AbortSignal): Promise<void> {
+  const res = await fetch(scoped("/api/harness/investigate/send"), { method: "PUT", credentials: "same-origin", signal, headers: { "Content-Type": "application/json", "X-Aitiarch": "1" }, body: JSON.stringify(body) });
+  if (!res.ok || !res.body) {
+    let data: any = null;
+    try { data = await res.json(); } catch { /* empty body */ }
+    throw new ApiError(res.status, data?.error ?? "error", data?.message ?? `Request failed (${res.status})`);
+  }
+  const reader = res.body.getReader(), decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    if (buffer.length > 2_000_000) throw new ApiError(0, "budget", "The investigation sent too much at once and was stopped.");
+    const parsed = investigateFrames(buffer); buffer = parsed.rest;
+    for (const e of parsed.events) onEvent(e);
+  }
+}
 export async function streamInvestigator(body: { chat: string; id: string; note: string; question: string }, onEvent: (e: InvestigatorEvent) => void, signal?: AbortSignal): Promise<void> {
   const res = await fetch(scoped("/api/investigator/answer"), { method: "PUT", credentials: "same-origin", signal, headers: { "Content-Type": "application/json", "X-Aitiarch": "1" }, body: JSON.stringify(body) });
   if (!res.ok || !res.body) {
@@ -129,7 +149,14 @@ export const api = {
   chat:(path:string)=>ok<ChatSnapshot>('GET',`/api/chat?path=${encodeURIComponent(path)}`),
   chatCall:<T,>(action:string,body:unknown)=>ok<T>('PUT','/api/chat/'+action,body),
   /** Harness chat sessions for a note: whether they are on (the Claude Code CLI is configured) and the list, most recent first. */
-  harnessSessions:(path:string)=>ok<{enabled:boolean;sessions:import('../shared/harness.ts').HarnessSession[]}>('GET',`/api/harness/sessions?path=${encodeURIComponent(path)}`),
+  harnessSessions:(path:string,mode:'chat'|'investigate'='chat')=>ok<{enabled:boolean;sessions:import('../shared/harness.ts').HarnessSession[]}>('GET',`/api/harness/sessions?path=${encodeURIComponent(path)}&mode=${mode}`),
+  /** Investigations: the project's repo folder, a session's stored turns and plan status, the plan card actions, and a redacted file excerpt. */
+  investigateRepo:()=>ok<{repo:string|null}>('GET','/api/harness/investigate/repo'),
+  investigateChooseRepo:(repo:string)=>ok<{repo:string}>('PUT','/api/harness/investigate/repo',{repo}),
+  investigateTurns:(session:string)=>ok<{turns:import('../server/harness/investigate.ts').InvestigateTurn[]}>('GET',`/api/harness/investigate/turns?session=${encodeURIComponent(session)}`),
+  investigateStatus:(session:string)=>ok<{needsPlan:boolean}>('GET',`/api/harness/investigate/status?session=${encodeURIComponent(session)}`),
+  investigateCall:<T,>(action:'plan'|'confirm'|'cancel'|'restore',body:unknown)=>ok<T>('PUT','/api/harness/investigate/'+action,body),
+  investigateExcerpt:(session:string,path:string,line:number)=>ok<{path:string;line:number;from:number;lines:string[]}>('GET',`/api/harness/investigate/excerpt?session=${encodeURIComponent(session)}&path=${encodeURIComponent(path)}&line=${line}`),
   harnessSessionCall:(action:'new'|'rename',body:unknown)=>ok<import('../shared/harness.ts').HarnessSession>('PUT','/api/harness/sessions/'+action,body),
   /** Questions asked in this note's named conversations, by message id. */
   harnessQuestions:(path:string)=>ok<{questions:Record<string,string>}>('GET',`/api/harness/questions?path=${encodeURIComponent(path)}`),

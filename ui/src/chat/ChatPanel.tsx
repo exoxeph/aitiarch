@@ -17,6 +17,8 @@ import {DEFAULT_CONTEXT,SUGGESTED_PROMPTS,chatHeader,toggleChip,type ContextChip
 import {applyEvent,buildContext,chipEstimate,errorText,formatCount,fromStored,newTurnId,previewText,usageLine,ECHO_LABEL,UNSTRUCTURED_LABEL,type Turn} from './chat-model.ts';
 import {ReplyNotes} from './ReplyNotes.tsx';
 import {ChatSessions} from './ChatSessions.tsx';
+import {InvestigateView} from './InvestigateView.tsx';
+import type {HarnessMode,HarnessSession} from '../../shared/harness.ts';
 
 /** One-off chat: questions are not stored by the server; this page remembers them so a closed and reopened panel still reads as a conversation.
  *  A named conversation (harness session) is different: its questions are kept in the app's own folder outside the repo and loaded back below. */
@@ -71,8 +73,11 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  const input=useRef<HTMLTextAreaElement>(null),log=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),alive=useRef(true);
  const [inv,setInv]=useState({enabled:false,claude:false,persistence:false}),[investigating,setInvestigating]=useState(false),[addingText,setAddingText]=useState<string|null>(null);
  const [pickedSessions,setPickedSessions]=useState<PickedSession[]>([]);
- const [conversation,setConversation]=useState(''); // a harness chat session id; '' is the one-off chat
+ const [conversation,setConversation]=useState(''); // a harness session id; '' is the one-off chat (or no investigation chosen)
+ const [kind,setKind]=useState<HarnessMode>('chat'),[investigation,setInvestigation]=useState<HarnessSession|null>(null),[invRefresh,setInvRefresh]=useState(0);
  useEffect(()=>{setPickedSessions([]);setConversation('');},[path]);
+ useEffect(()=>{let off=false;if(kind!=='investigate'||!conversation||!path){setInvestigation(null);return;}
+  api.harnessSessions(path,'investigate').then(r=>{if(!off)setInvestigation(r.sessions.find(s=>s.id===conversation)??null);}).catch(()=>{if(!off)setInvestigation(null);});return()=>{off=true;};},[kind,conversation,path]);
  const chatId=useRef(crypto.randomUUID()); // "this chat" for permissions lasts as long as this panel stays open
  useEffect(()=>{let off=false;api.investigator().then((s:any)=>{if(!off)setInv({enabled:!!s.policy?.enabled,claude:!!s.claudeConfigured,persistence:!!s.persistence});}).catch(()=>{});return()=>{off=true;};},[settingsVersion]);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;abort.current?.abort();};},[]);
@@ -158,6 +163,11 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
 
  return <aside id="chat-panel" className="chat-panel" aria-label="Aitiarch AI chat" onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();onClose();}}}>
   <header className="chat-head"><h2>{chatHeader(path)}</h2><button type="button" className="ghost chat-close" aria-label="Close chat" onClick={onClose}>×</button></header>
+  {path&&kind==='investigate'?<>
+   <ChatSessions path={path} value={conversation} onChange={setConversation} disabled={false} refresh={invRefresh} kind={kind} onKind={setKind}/>
+   {investigation?<InvestigateView key={investigation.id} session={investigation} onDiscuss={()=>{setConversation('');setKind('chat');}} onTurnDone={()=>setInvRefresh(n=>n+1)}/>
+    :<p className="chat-empty inv-empty">Choose an investigation or start a new one. Claude reads a copy of your repo folder, read-only, and shows each file it opens.</p>}
+  </>:<>
   <div className="chat-context" role="group" aria-label="What the chat can see">
    {chips.map(c=><span key={c.id} className="chat-chip-wrap">
     <button type="button" className="chat-chip" aria-pressed={c.on} onClick={()=>setChips(list=>toggleChip(list,c.id))}>{c.label}<span className="chat-chip-est"> · {formatCount(estimate[c.id])}</span></button>
@@ -175,7 +185,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
    <span className="chat-context-total">About {formatCount(total)} tokens of context</span>
    {path&&<SessionPicker key={path} path={path} selected={pickedSessions} onChange={setPickedSessions} disabled={composing||investigating} budget={usage?.tokenBudget??50000}/>}
   </div>
-  {path&&!investigating&&<ChatSessions path={path} value={conversation} onChange={setConversation} disabled={composing} refresh={turns.filter(t=>t.status==='complete').length}/>}
+  {path&&!investigating&&<ChatSessions path={path} value={conversation} onChange={setConversation} disabled={composing} refresh={turns.filter(t=>t.status==='complete').length} kind={kind} onKind={setKind}/>}
   {investigating&&investigatorReady&&<p className="chat-investigating">Investigating: agents may read files in your registered folders, read-only. Nothing is written.</p>}
   {peek&&<div className="chat-peek" role="region" aria-label={`Preview of ${chips.find(c=>c.id===peek)?.label}`}><pre>{previewText(peekText[peek],1200)}</pre></div>}
   <div className="chat-log" role="log" aria-label="Conversation" ref={log}>
@@ -212,5 +222,6 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
    <p className="chat-usage">{usage?usageLine(usage):'No calls yet'}</p>
    {persistence==='memory'&&turns.some(t=>t.status==='complete'&&!t.message?.ephemeral)&&<p className="chat-persist">Kept in memory only. <button type="button" className="ghost" title="Adds an ignore rule so this chat can be saved privately beside the note" onClick={()=>void keep()}>Keep on disk privately</button></p>}
   </footer>
+  </>}
  </aside>;
 }

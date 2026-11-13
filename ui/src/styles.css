@@ -991,6 +991,61 @@ button.claim-chip:focus-visible, .claim-action:focus-visible { outline: 2px soli
 .chat-sessions-name input { min-width: 0; width: 22ch; font: inherit; }
 .chat-sessions-note { flex-basis: 100%; margin: 0; }
 .chat-sessions-delete { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--ink-text); }
+.chat-sessions-repo { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
+.chat-sessions-repo code, .inv-plan code { font: 12px/1.4 var(--font-mono); color: var(--ink-text); }
+.chat-mode { display: inline-flex; border: 1px solid var(--control-border); border-radius: 999px; padding: 2px; }
+.chat-mode button { border: 0; border-radius: 999px; padding: 3px 12px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.chat-mode button[aria-checked="true"] { background: var(--accent-soft); color: var(--ink-text); box-shadow: inset 0 0 0 1px var(--accent); }
+.chat-mode button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Investigate: a plan card before the first question, then each turn as a timeline of what Claude did (thinking, one row per Read, Grep or Glob),
+   the answer below it, and honest banners. The rail is a 1px line drawn behind the dots, not a border; states are always in words too. */
+.inv { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.inv-empty { margin: 8px 16px; }
+.inv-plan { margin: 0 16px 12px; padding: 12px 14px; border: 1px solid var(--control-border); border-radius: 10px; background: var(--paper-2); font: 13px/1.5 var(--font-ui); }
+.inv-plan h3 { margin: 0 0 8px; font: 600 14px/1.3 var(--font-ui); }
+.inv-plan dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
+.inv-plan dt { color: var(--muted); }
+.inv-plan dd { margin: 0; overflow-wrap: anywhere; }
+.inv-plan dd ul { margin: 0; padding-left: 16px; }
+.inv-plan-note { margin: 8px 0 0; color: var(--muted); }
+.inv-plan-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.inv-log { flex: 1; overflow: auto; padding: 0 16px; }
+.inv-turn { margin: 0 0 16px; }
+.inv-trail { position: relative; list-style: none; margin: 8px 0; padding: 0 0 0 18px; font: 13px/1.45 var(--font-ui); }
+.inv-trail::before { content: ""; position: absolute; left: 4px; top: 6px; bottom: 6px; width: 1px; background: var(--rule); }
+.inv-row { position: relative; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 4px 0; min-width: 0; }
+.inv-dot { position: absolute; left: -18px; top: 10px; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.inv-row[data-state="ok"] .inv-dot { background: var(--ok); }
+.inv-row[data-state="denied"] .inv-dot { background: var(--danger); }
+.inv-row[data-state="running"] .inv-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--muted); }
+.inv-row-main { min-width: 0; overflow-wrap: anywhere; }
+.inv-tool { font-weight: 700; color: var(--ink-text); }
+.inv-target { font: 12px/1.4 var(--font-mono); color: var(--link); background: transparent; border: 0; padding: 0; overflow-wrap: anywhere; text-align: left; }
+.inv-target-link { cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.inv-target-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.inv-result { flex-basis: 100%; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.inv-row[data-state="denied"] .inv-result { color: var(--danger); }
+.inv-denied-word { font-weight: 700; }
+.inv-thinking details summary { cursor: pointer; color: var(--muted); }
+.inv-thinking details summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.inv-tag { margin-left: 6px; font-size: 12px; opacity: .85; }
+.inv-thinking-text { margin: 6px 0 0; white-space: pre-wrap; color: var(--muted); font-size: 12px; }
+.inv-banner { margin: 8px 0; padding: 8px 12px; border: 1px solid var(--control-border); border-radius: 8px; font: 13px/1.5 var(--font-ui); }
+.inv-banner p { margin: 0 0 4px; }
+.inv-banner[data-kind="stopped"] { border-style: dashed; }
+.inv-banner[data-kind="denied"], .inv-banner[data-kind="tripwire"] { border-color: var(--danger); }
+.inv-excerpt { margin: 0 16px 8px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--paper-2); }
+.inv-excerpt header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--rule); }
+.inv-excerpt header code { font: 12px/1.4 var(--font-mono); overflow-wrap: anywhere; }
+.inv-excerpt-note { color: var(--muted); font-size: 12px; margin-right: auto; }
+.inv-excerpt pre { margin: 0; padding: 8px 10px; max-height: 40vh; overflow: auto; font: 12px/1.5 var(--font-mono); }
+.inv-line { display: block; }
+.inv-line[data-here] { background: var(--accent-soft); }
+.inv-line-no { display: inline-block; min-width: 3ch; margin-right: 10px; color: var(--muted); text-align: right; user-select: none; }
+.inv-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 16px 8px; padding: 6px 10px; border: 1px solid var(--rule); border-radius: 8px; color: var(--muted); font: 12px/1.4 var(--font-ui); }
+.inv-status .chat-stop { margin-left: auto; }
+@media (prefers-reduced-motion: reduce) { .inv-row, .inv-dot { transition: none; } }
 .trail { display: flex; flex-direction: column; gap: 8px; }
 .trail-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; }
 .trail-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--muted); font-size: var(--text-meta); cursor: pointer; }

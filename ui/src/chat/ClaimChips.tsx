@@ -8,6 +8,8 @@ export interface ClaimChipsProps {
  onShow:(quote:string)=>boolean;
  /** Inserts a citation link to the note (and heading) at the cursor; false when it could not. */
  onCite:(heading:{text:string;slug:string;level:number}|null)=>boolean;
+ /** File claims (investigations): opens a read-only excerpt of the real repo file at that line. */
+ onFile?:(path:string,line:number)=>void;
 }
 const KIND_WORDS={N:'Note',T:'Thread',S:'Selection',O:'Another note',C:'Session',F:'File in the repo'} as const;
 export const QUOTE_MOVED='Quote not found in the current note.';
@@ -17,7 +19,7 @@ export const QUOTE_MOVED='Quote not found in the current note.';
  * the AI's claim and not as your own link. Quiet and closed when every claim was found; open when something needs a look. Every state is in words.
  * A chip is a button: it shows the claimed quote, and "Show in note" scrolls to it. Escape closes the quote and puts focus back on its chip.
  */
-export function ClaimChips({claims,path,noteText,onShow,onCite}:ClaimChipsProps){
+export function ClaimChips({claims,path,noteText,onShow,onCite,onFile}:ClaimChipsProps){
  const chips=claimChips(claims,{path,text:noteText}),[open,setOpen]=useState<number|null>(null),[said,setSaid]=useState(''),refs=useRef(new Map<number,HTMLButtonElement>()),id=useId();
  if(!chips.length)return null;
  const needsLook=chips.some(c=>c.state!=='found'),current=chips.find(c=>c.key===open)??null;
@@ -40,6 +42,7 @@ export function ClaimChips({claims,path,noteText,onShow,onCite}:ClaimChipsProps)
      <q className="claim-quote-text">{current.quote}</q>
      <div className="claim-quote-actions">
       {current.canShow&&<button type="button" className="claim-action" onClick={()=>setSaid(onShow(current.quote)?'Shown in the note.':QUOTE_MOVED)}>Show in note</button>}
+      {current.file&&onFile&&<button type="button" className="claim-action" onClick={()=>onFile(current.file!.path,current.file!.line)}>Show the file</button>}
       {current.canCite&&<button type="button" className="claim-action" onClick={()=>setSaid(onCite(current.heading)?'Cited in the note, at the cursor.':'The citation could not be added.')}>Cite in note</button>}
       <button type="button" className="claim-action" onClick={close}>Close</button>
      </div>
