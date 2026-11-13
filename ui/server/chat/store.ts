@@ -27,7 +27,7 @@ export class ChatStore {
   for(const rel of ['chat/ignore-probe.chat.json','chat/ignore-probe.chat.json.atomic.tmp'])await exec('git',['check-ignore','-q','--',rel],{cwd:this.root,windowsHide:true,timeout:3000});
   const tracked=await exec('git',['ls-files','--','chat'],{cwd:this.root,windowsHide:true,timeout:3000});
   enabled=!tracked.stdout.trim();
- }catch{}return {enabled,ignoreLine:'/chat/',ignoreFile:path.join(this.root,'.gitignore'),notice:enabled?null:'Chat replies stay in memory until /chat/ is verified git-ignored. Questions and resend history are never saved.'};}
+ }catch{}return {enabled,ignoreLine:'/chat/',ignoreFile:path.join(this.root,'.gitignore'),notice:enabled?null:'Chat replies stay in memory until /chat/ is verified git-ignored. In a one-off chat, questions and resend history are never saved; a named conversation keeps its questions in Aitiarch\'s own folder outside the repo.'};}
  /** Explicit authenticated button only. Existing bytes, including BOM and CRLF, survive. */
  async enablePersistence(){return this.serial(async()=>{
   if((await this.status()).enabled)return this.status();
