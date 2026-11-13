@@ -1080,6 +1080,8 @@ button.claim-chip:focus-visible, .claim-action:focus-visible { outline: 2px soli
 .settings-problem { color: var(--danger); font-size: var(--text-meta); }
 .settings-problem-bar { margin: 0; padding: 8px 20px; border-top: 1px solid var(--rule); }
 .settings-dialog input:not([type="checkbox"]), .settings-dialog select { padding: 6px 10px; border: 1px solid var(--control-border); border-radius: var(--radius-small); background: var(--paper); color: var(--ink-text); font: inherit; }
+.settings-dialog button:not([role="tab"]):not(.ghost) { padding: 6px 14px; border: 1px solid var(--control-border); border-radius: 999px; background: transparent; color: var(--ink-text); font-size: var(--text-control); cursor: pointer; }
+.settings-dialog button:not([role="tab"]):not(.ghost):hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
 .settings-dialog button:disabled { opacity: .5; cursor: not-allowed; }
 .settings-dialog :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .meters { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
