@@ -51,10 +51,13 @@ export type SaveResult =
 export class ApiError extends Error {
   status: number;
   code: string;
-  constructor(status: number, code: string, message: string) {
+  /** The rest of the server's error body (for a budget refusal: the numbers). */
+  detail: any;
+  constructor(status: number, code: string, message: string, detail?: any) {
     super(message);
     this.status = status;
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -78,7 +81,7 @@ async function call(method: "GET" | "PUT", url: string, body?: unknown, keepaliv
 async function ok<T>(method: "GET" | "PUT", url: string, body?: unknown): Promise<T> {
   const { status, data } = await call(method, url, body);
   if (status >= 200 && status < 300) return data as T;
-  throw new ApiError(status, data?.error ?? "error", data?.message ?? `Request failed (${status})`);
+  throw new ApiError(status, data?.error ?? "error", data?.message ?? `Request failed (${status})`, data);
 }
 
 /** What GET /api/chat returns: accepted assistant messages only (questions are not stored), plus where the chat is kept. */
@@ -89,7 +92,7 @@ export async function streamChat(body: { reviewId: string; confirmed?: boolean; 
   if (!res.ok || !res.body) {
     let data: any = null;
     try { data = await res.json(); } catch { /* empty body */ }
-    throw new ApiError(res.status, data?.error ?? "error", data?.message ?? `Request failed (${res.status})`);
+    throw new ApiError(res.status, data?.error ?? "error", data?.message ?? `Request failed (${res.status})`, data);
   }
   const reader = res.body.getReader(), decoder = new TextDecoder();
   let buffer = "";
@@ -109,7 +112,7 @@ export async function streamInvestigate(body: { session: string; question: strin
   if (!res.ok || !res.body) {
     let data: any = null;
     try { data = await res.json(); } catch { /* empty body */ }
-    throw new ApiError(res.status, data?.error ?? "error", data?.message ?? `Request failed (${res.status})`);
+    throw new ApiError(res.status, data?.error ?? "error", data?.message ?? `Request failed (${res.status})`, data);
   }
   const reader = res.body.getReader(), decoder = new TextDecoder();
   let buffer = "";

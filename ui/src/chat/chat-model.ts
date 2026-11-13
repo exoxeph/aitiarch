@@ -1,12 +1,12 @@
 // Pure chat state for the panel: turns, streamed events, context chips and the one-line usage summary. No DOM and no network here.
 import {failureText,type FailureReason} from '../../shared/chat-failure.ts';
-import {CHAT_MESSAGES,type ChatClaim,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatUsage,type CitationIssue,type ClaimSourceKind,type ContextChoice} from '../../shared/chat.ts';
+import {CHAT_MESSAGES,budgetText,cancelText,formatTokens,textTokens,type AbortCause,type BudgetDetail,type ChatClaim,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatUsage,type CitationIssue,type ClaimSourceKind,type ContextChoice} from '../../shared/chat.ts';
 import {contractText} from '../../shared/persona-contract.ts';
 import type {ContextChip} from './chat-stub.ts';
 
 export type TurnStatus='review'|'streaming'|'complete'|'error';
 /** One question and its answer. `text` is provisional while streaming and the accepted message body once complete. */
-export interface Turn {id:string;question:string|null;status:TurnStatus;text:string;message?:ChatMessage;error?:{code:ChatErrorCode;rule?:string;reason?:FailureReason;errorName?:string}}
+export interface Turn {id:string;question:string|null;status:TurnStatus;text:string;message?:ChatMessage;error?:{code:ChatErrorCode;rule?:string;reason?:FailureReason;errorName?:string;cause?:AbortCause;budget?:BudgetDetail}}
 
 export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
  if(!turns.some(t=>t.id===event.id))return [...turns];
@@ -16,7 +16,7 @@ export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
    case 'start':return {...t,status:'streaming'};
    case 'delta':return {...t,status:'streaming',text:t.text+event.text};
    case 'complete':return {...t,status:'complete',text:event.message.body,message:event.message};
-   case 'error':{const {message:_dropped,...rest}=t;return {...rest,status:'error',text:'',error:{code:event.code,...(event.rule?{rule:event.rule}:{}),...(event.reason?{reason:event.reason}:{}),...(event.errorName?{errorName:event.errorName}:{})}};} // a partial reply is never kept
+   case 'error':{const {message:_dropped,...rest}=t;return {...rest,status:'error',text:'',error:{code:event.code,...(event.rule?{rule:event.rule}:{}),...(event.reason?{reason:event.reason}:{}),...(event.errorName?{errorName:event.errorName}:{}),...(event.cause?{cause:event.cause}:{}),...(event.budget?{budget:event.budget}:{})}};} // a partial reply is never kept
   }
  });
 }
@@ -36,11 +36,9 @@ export function sseFrames(buffer:string):{events:ChatEvent[];rest:string}{
 }
 
 /** Same measure as the server's estimate (UTF-8 bytes): a conservative upper bound, not a promise. */
-export const chipEstimate=(text:string)=>new TextEncoder().encode(text).length;
-export function formatCount(n:number):string{
- if(n<1000)return String(n);
- const k=n/1000;return (k>=10?String(Math.round(k)):k.toFixed(1).replace(/\.0$/,''))+'k';
-}
+/** The chips use the same token estimate as the review card and the budget gate (see textTokens in shared/chat.ts), so the numbers agree before and after Send. */
+export const chipEstimate=textTokens;
+export const formatCount=formatTokens; // one wording of a token count for the page and the server's own messages
 /** What the review will send for the chosen chips: this note and its threads are one server module; the selection is its own field. */
 export function buildContext(chips:readonly ContextChip[],selection:string):{context:ContextChoice[];selection?:string}{
  const ids=(['note','threads'] as const).filter(id=>chips.some(c=>c.id===id&&c.on)),picked=chips.some(c=>c.id==='selection'&&c.on)&&selection.trim()?selection:'';
@@ -55,7 +53,7 @@ export const newTurnId=()=>'m-'+Date.now().toString(36)+'-'+Math.random().toStri
 export function usageLine(u:ChatUsage):string{
  // Cached tokens (cache reads) are shown apart from new input: they are cheap and count for little against the budget.
  const calls=u.calls===0?'No calls yet':`${u.calls} ${u.calls===1?'call':'calls'} · ${formatCount(u.input)} in${u.cached>0?` · ${formatCount(u.cached)} cached`:''} · ${formatCount(u.output)} out`;
- return `${calls} · ${formatCount(u.spent)} of ${formatCount(u.tokenBudget)} tokens`+(u.unreportedCalls>0?' (some counts unreported)':'');
+ return `${calls} · ${formatCount(u.spent)} of ${formatCount(u.tokenBudget)} tokens`+(u.unreportedCalls>0?` (some counts unreported: ${u.unreportedCalls} ${u.unreportedCalls===1?'call is':'calls are'} counted by estimate${u.estimated?`, ${formatCount(u.estimated)} of the total`:''})`:'');
 }
 /** Shown quietly under a reply the model gave as plain prose: it has no claims, so there is nothing to check against the note. */
 export const UNSTRUCTURED_LABEL='Unstructured reply: no claims to check';
@@ -80,7 +78,9 @@ export function claimLines(claims:readonly ChatClaim[]|undefined):ClaimLine[]{
 /** Shown under a reply that recites a long run of the instructions Aitiarch sent with the question. */
 export const ECHO_LABEL='Part of this reply repeats the instructions Aitiarch sent with your question.';
 /** A failed Claude call says why when the server gave a reason it understands; otherwise the same generic sentence as ever. */
-export function errorText(code:ChatErrorCode,reason?:FailureReason,errorName?:string):string{
+export function errorText(code:ChatErrorCode,reason?:FailureReason,errorName?:string,extra?:{cause?:AbortCause;budget?:BudgetDetail}):string{
+ if(code==='cancelled')return extra?.cause?cancelText(extra.cause):CHAT_MESSAGES.cancelled;
+ if(code==='budget_reached'&&extra?.budget)return budgetText(extra.budget);
  if(code==='internal'&&typeof errorName==='string'&&/^[A-Za-z]{1,40}$/.test(errorName))return `Something went wrong inside Aitiarch while handling this request (${errorName}). No retry was made.`;
  if(code==='provider_failed'&&reason&&typeof reason==='object'&&typeof reason.kind==='string'){
   const why=failureText(reason);if(typeof why==='string')return `Claude could not complete this request. ${why} No retry was made.`;

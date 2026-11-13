@@ -3,7 +3,7 @@ import type {ChatEvent,ChatInput,ChatReview,ChatMessage,ChatUsage,ChatErrorCode,
 import path from 'node:path';
 import {sessionModules} from './ide-sessions.ts';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
-import {CHAT_LIMITS,budgetTokens} from '../../shared/chat.ts';
+import {CHAT_LIMITS,REPLY_ALLOWANCE,budgetTokens,isAbortCause,nextTurnEstimate,type AbortCause,type BudgetDetail} from '../../shared/chat.ts';
 import {Store} from '../store.ts';import {InkStore} from '../ink-store.ts';import {LedgerStore} from '../ledger-store.ts';
 import {ChatStore} from './store.ts';import {contextModules,hash,estimateTokens} from './context.ts';import {secretKinds} from './secrets.ts';
 import {prepareRequest,ProviderError,redact,type Provider,type Request,type Result} from '../providers/index.ts';
@@ -19,7 +19,7 @@ import {StreamGate,dropManifestEcho,echoes} from './gate.ts';
 import {finishReply} from './reply.ts';
 import {checkContract} from '../../shared/persona-contract.ts';
 import type {PersonaMode} from '../../shared/persona.ts';
-export class ChatError extends Error {code:ChatErrorCode;constructor(code:ChatErrorCode){super(code);this.code=code;}}
+export class ChatError extends Error {code:ChatErrorCode;/** For budget_reached: the numbers the gate used. */budget?:BudgetDetail;constructor(code:ChatErrorCode,budget?:BudgetDetail){super(code);this.code=code;if(budget)this.budget=budget;}}
 interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true;
  /** A harness session turn: the session id and the exact file text the CLI gets (instruction, sources, rules last). */
  session?:{id:string};addendum?:string;
@@ -30,15 +30,17 @@ export interface ChatHarness {index:SessionIndex;runner:Pick<ClaudeSessionRunner
  /** Where the questions of session turns are kept (outside the repo). Absent: they are not kept. */
  questions?:QuestionStore}
 type Pair={id:string;user:string;assistant:string;persona?:PersonaMode};
-interface State {history:Pair[];omittedPairs:number;serial:number;usage:ChatUsage;calls:number[];running:boolean;privateContext?:true;controller?:AbortController}
+interface State {history:Pair[];omittedPairs:number;serial:number;usage:ChatUsage;calls:number[];running:boolean;privateContext?:true;controller?:AbortController;/** Why the running request was stopped; set once, by whoever stops it first. */abortCause?:AbortCause}
 
 export class ChatRuntime {
  private store:Store;private ink:InkStore;private chats:ChatStore;private provider?:Provider;private ledger:LedgerStore;
  private states=new Map<string,State>();private reviews=new Map<string,Frozen>();private dontAsk=false;private jobs=new Set<Promise<void>>();private closed=false;
  private extras?:ExtrasFor;private sessions:ContextModule[];private ephemeral=new Map<string,ChatMessage[]>();private harness?:ChatHarness;
+ /** What each conversation already holds (its last prompt plus reply, in tokens): the next turn re-reads it from the CLI's cache, so it counts at the cache weight. */
+ private replay=new Map<string,number>();
  constructor(store:Store,ink:InkStore,chats:ChatStore,provider?:Provider,sessions?:ContextModule[],extras?:ExtrasFor,harness?:ChatHarness){this.harness=harness;this.extras=extras;this.store=store;this.ink=ink;this.chats=chats;this.provider=provider;this.ledger=new LedgerStore(store.rootReal);this.sessions=sessions??sessionModules({project:path.dirname(store.rootReal)});}
  memoryMessages(note:string){return structuredClone(this.ephemeral.get(note)??[]);}
- private state(note:string){let s=this.states.get(note);if(!s){if(this.states.size>=50)throw new ChatError('busy');s={history:[],omittedPairs:0,serial:0,calls:[],running:false,usage:{note,calls:0,input:0,cached:0,output:0,unreportedCalls:0,spent:0,reserved:0,tokenBudget:CHAT_LIMITS.tokenBudget,rollingRequestCap:CHAT_LIMITS.rollingRequestCap,windowMinutes:CHAT_LIMITS.windowMinutes}};this.states.set(note,s);}return s;}
+ private state(note:string){let s=this.states.get(note);if(!s){if(this.states.size>=50)throw new ChatError('busy');s={history:[],omittedPairs:0,serial:0,calls:[],running:false,usage:{note,calls:0,input:0,cached:0,output:0,unreportedCalls:0,spent:0,estimated:0,reserved:0,tokenBudget:CHAT_LIMITS.tokenBudget,rollingRequestCap:CHAT_LIMITS.rollingRequestCap,windowMinutes:CHAT_LIMITS.windowMinutes}};this.states.set(note,s);}return s;}
  usage(){return [...this.states.values()].map(s=>({...s.usage}));}
  async settings(note:string,input:{tokenBudget:number;rollingRequestCap:number}){
   await this.store.read(note);if(!Number.isSafeInteger(input.tokenBudget)||input.tokenBudget<1000||input.tokenBudget>1000000||!Number.isSafeInteger(input.rollingRequestCap)||input.rollingRequestCap<1||input.rollingRequestCap>60)throw new ChatError('invalid_chat');
@@ -91,9 +93,11 @@ export class ChatRuntime {
   const sessionText=session?chatSessionInstruction(request,sessionSources):null;
   // Every session message starts with one line naming this turn's sources (no source text), so earlier replies about a missing note cannot outvote it.
   const manifest=session?sourcesManifest(sessionSources):undefined;
-  const estimate=sessionText?estimateTokens(sessionText.addendum+turnMessage(manifest!,request.question)):estimateTokens(JSON.stringify(packet));
+  const sent=sessionText?estimateTokens(sessionText.addendum+turnMessage(manifest!,request.question)):estimateTokens(JSON.stringify(packet));
+  // The next message's cost, the same number the review shows and the gate uses: what is sent now in full, the conversation already in a session at the cache weight, room for the reply.
+  const estimate=nextTurnEstimate(sent,session?this.replay.get(session.id)??0:0).total;
   const privateContext=!!s.privateContext||sources.some(x=>x.ephemeral);
-  const review:ChatReview={reviewId:randomUUID(),requestId:input.id,path:input.path,question:request.question,selection:request.selection,sources:sources.map(x=>({id:x.id,label:x.label,text:x.text,characters:x.text.length,estimatedTokens:estimateTokens(x.text)})),historyPairs:history.length,omittedPairs:session?0:s.omittedPairs+sameMode.length-history.length,...(otherModePairs&&!session?{otherModePairs}:{}),instruction:sessionText?.instruction??packet.instruction,history:structuredClone(packet.data.turns),estimatedTokens:estimate,requiresConfirmation:privateContext||!this.dontAsk};
+  const review:ChatReview={reviewId:randomUUID(),requestId:input.id,path:input.path,question:request.question,selection:request.selection,sources:sources.map(x=>({id:x.id,label:x.label,text:x.text,characters:x.text.length,estimatedTokens:estimateTokens(x.text)})),historyPairs:history.length,omittedPairs:session?0:s.omittedPairs+sameMode.length-history.length,...(otherModePairs&&!session?{otherModePairs}:{}),instruction:sessionText?.instruction??packet.instruction,history:structuredClone(packet.data.turns),estimatedTokens:estimate,budget:{spent:s.usage.spent,next:estimate,budget:s.usage.tokenBudget},requiresConfirmation:privateContext||!this.dontAsk};
   if(extra?.review)review.skills=extra.review;
   if(privateContext)review.ephemeral=true;
   if(session)review.session={id:session.id,label:session.label,turns:session.turns};
@@ -101,7 +105,7 @@ export class ChatRuntime {
   if(manifest)review.manifest=manifest;
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');
-  this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate+3000,...(privateContext?{privateContext:true as const}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{})});
+  this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(privateContext?{privateContext:true as const}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{})});
   return review;
  }
  async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
@@ -114,12 +118,14 @@ export class ChatRuntime {
   if(!this.provider||this.provider.name!=='claude')throw new ChatError('disabled');
   s.calls=s.calls.filter(at=>Date.now()-at<3600000);
   if(s.calls.length>=s.usage.rollingRequestCap)throw new ChatError('hourly_cap');
-  if(s.usage.spent+frozen.reservation>s.usage.tokenBudget)throw new ChatError('budget_reached');
+  if(s.usage.spent+frozen.reservation>s.usage.tokenBudget)throw new ChatError('budget_reached',{spent:s.usage.spent,next:frozen.reservation,budget:s.usage.tokenBudget});
   if([...(await this.chats.read(review.path)).messages,...this.memoryMessages(review.path)].some(m=>m.id===request.id))throw new ChatError('invalid_chat');
   // Reserve synchronously before availability/provider awaits; two requests cannot overspend one chat.
   if(s.running||s.serial!==frozen.serial)throw new ChatError('busy');
   s.running=true;s.serial++;s.usage.reserved=frozen.reservation;this.reviews.delete(input.reviewId);
-  const controller=new AbortController();s.controller=controller;const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
+  const controller=new AbortController();s.controller=controller;s.abortCause=undefined;
+  // Every stop goes through this controller, so one place records why. The caller's signal carries its own reason (the page went away, a stream limit).
+  const abort=()=>{const why=signal?.reason;s.abortCause??=isAbortCause(why)?why:undefined;controller.abort();};signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   let resolve!:()=>void;const done=new Promise<void>(r=>{resolve=r;});this.jobs.add(done);
   let called=false,charged=false,stage:'run'|'save'='run';
   try{
@@ -129,10 +135,11 @@ export class ChatRuntime {
    if(input.dontAskAgain===true&&!frozen.privateContext)this.dontAsk=true;
    if(frozen.privateContext)s.privateContext=true;
    s.calls.push(Date.now());s.usage.calls++;called=true;emit({type:'start',id:request.id});
-   let json='';const outputRoom=s.usage.tokenBudget-s.usage.spent-review.estimatedTokens,gate=new StreamGate({instruction:review.instruction});
+   let json='';const outputRoom=s.usage.tokenBudget-s.usage.spent-(frozen.reservation-REPLY_ALLOWANCE),gate=new StreamGate({instruction:review.instruction});
    const onTextDelta=(text:string)=>{
+    if(controller.signal.aborted)return; // stopped: the CLI is being ended, nothing more is taken
     json+=text;if(json.length>100000)throw new ProviderError('output_limit');
-    if(estimateTokens(json)>outputRoom)throw new ChatError('budget_reached');
+    if(estimateTokens(json)>outputRoom){s.abortCause??='budget_gate';controller.abort();return;} // the reply no longer fits the budget: end the CLI; the partial reply is never kept
     // Only what the output gate lets through reaches the page. The final, validated message replaces it.
     const delta=gate.push(text);if(delta)emit({type:'delta',id:request.id,text:delta,provisional:true});
    };
@@ -141,7 +148,8 @@ export class ChatRuntime {
    if(result.usage){for(const n of Object.values(result.usage))if(typeof n!=='number'||!Number.isFinite(n)||n<0)throw new ChatError('validation');
     s.usage.input+=result.usage.inputTokens;s.usage.cached+=result.usage.cachedTokens??0;s.usage.output+=result.usage.outputTokens;
     s.usage.spent+=budgetTokens(result.usage); // cache reads count at a reduced weight
-   }else{s.usage.spent+=frozen.reservation;s.usage.unreportedCalls++;}charged=true;
+    if(frozen.session)this.rememberReplay(frozen.session.id,result.usage.inputTokens+(result.usage.cachedTokens??0)+result.usage.outputTokens);
+   }else{s.usage.spent+=frozen.reservation;s.usage.estimated=(s.usage.estimated??0)+frozen.reservation;s.usage.unreportedCalls++;}charged=true;
    // Enforce exact keys for fake/adapted providers too; never accept owned fields or aliases.
    if(!Array.isArray(result.claims)||result.claims.some(c=>!c||typeof c!=='object'||Object.keys(c).sort().join()!=='quote,sourceId')||Object.keys(result).some(k=>!['id','provider','model','answer','claims','usage','rawReply'].includes(k)))throw new ChatError('validation');
    // The output gate's final part: the body, each claim checked on its own, and whether the citations need attention.
@@ -161,10 +169,12 @@ export class ChatRuntime {
    while(s.history.length>4||s.history.reduce((n,p)=>n+p.user.length+p.assistant.length,0)>4000){s.history.shift();s.omittedPairs++;}
    emit({type:'complete',id:request.id,message,persistence,usage:{...s.usage,reserved:0}});
   }catch(e){
-   if(called&&!charged){s.usage.spent+=frozen.reservation;s.usage.unreportedCalls++;}
-   const code:ChatErrorCode=e instanceof ChatError?e.code:e instanceof ProductValidationError?'validation':e instanceof ProviderError&&e.code==='cancelled'?'cancelled':e instanceof ProviderError?'provider_failed':stage==='save'?'persistence':'internal';
-   try{await this.audit(review.path,request.id,'chat_failed');}catch{/* No text or exceptions are logged. */}
-   emit({type:'error',id:request.id,code,...(e instanceof ProductValidationError?{rule:e.record.rule}:{}),...(code==='provider_failed'&&e instanceof ProviderError?{reason:describeFailure(e.code,e.reason)}:{}),...(code==='internal'&&e instanceof Error&&/^[A-Za-z]{1,40}$/.test(e.name)?{errorName:e.name}:{})});
+   const budgetNow:BudgetDetail={spent:s.usage.spent,next:frozen.reservation,budget:s.usage.tokenBudget};
+   if(called&&!charged){s.usage.spent+=frozen.reservation;s.usage.estimated=(s.usage.estimated??0)+frozen.reservation;s.usage.unreportedCalls++;}
+   const cause=controller.signal.aborted?s.abortCause:undefined;
+   const code:ChatErrorCode=cause==='budget_gate'?'budget_reached':e instanceof ChatError?e.code:e instanceof ProductValidationError?'validation':e instanceof ProviderError&&e.code==='cancelled'?'cancelled':e instanceof ProviderError?'provider_failed':stage==='save'?'persistence':'internal';
+   try{await this.audit(review.path,request.id,'chat_failed',cause);}catch{/* No text or exceptions are logged. */}
+   emit({type:'error',id:request.id,code,...(cause&&(code==='cancelled'||code==='budget_reached')?{cause}:{}),...(code==='budget_reached'?{budget:e instanceof ChatError&&e.budget?e.budget:budgetNow}:{}),...(e instanceof ProductValidationError?{rule:e.record.rule}:{}),...(code==='provider_failed'&&e instanceof ProviderError?{reason:describeFailure(e.code,e.reason)}:{}),...(code==='internal'&&e instanceof Error&&/^[A-Za-z]{1,40}$/.test(e.name)?{errorName:e.name}:{})});
   }finally{s.running=false;s.controller=undefined;s.usage.reserved=0;signal?.removeEventListener('abort',abort);resolve();this.jobs.delete(done);}
  }
  /** One turn in a harness session. The first turn starts it with the app's id; every later one resumes it, also after the project is reopened. */
@@ -178,7 +188,8 @@ export class ChatRuntime {
    return {id:request.id,provider:'claude',model:null,answer:dropManifestEcho(r.answer),claims:[],usage:r.usage,rawReply:true};
   }finally{if(started)await h.index.touch(session.id).catch(()=>{});} // the CLI now knows this id: the next turn must resume it
  }
- private audit(note:string,id:string,event:'chat_started'|'chat_completed'|'chat_failed'){return this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(note),requestId:id,note,event,at:new Date().toISOString()});}
- cancel(note:string){this.states.get(note)?.controller?.abort();}
- async close(){this.closed=true;for(const s of this.states.values())s.controller?.abort();await Promise.allSettled(this.jobs);this.reviews.clear();this.states.clear();this.ephemeral.clear();}
+ private audit(note:string,id:string,event:'chat_started'|'chat_completed'|'chat_failed',cause?:AbortCause){return this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(note),requestId:id,note,event,at:new Date().toISOString(),...(cause?{cause}:{})});}
+ private rememberReplay(id:string,tokens:number){this.replay.delete(id);this.replay.set(id,tokens);while(this.replay.size>200)this.replay.delete(this.replay.keys().next().value as string);}
+ cancel(note:string){const s=this.states.get(note);if(s?.controller){s.abortCause??='user_stop';s.controller.abort();}}
+ async close(){this.closed=true;for(const s of this.states.values())if(s.controller){s.abortCause??='server_shutdown';s.controller.abort();}await Promise.allSettled(this.jobs);this.reviews.clear();this.states.clear();this.ephemeral.clear();}
 }

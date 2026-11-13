@@ -65,8 +65,8 @@ describe('server-sent events',()=>{
 });
 
 describe('context and estimates',()=>{
- it('estimates tokens as UTF-8 bytes, like the server, and formats them quietly',()=>{
-  expect(chipEstimate('abc')).toBe(3);expect(chipEstimate('é')).toBe(2);expect(chipEstimate('')).toBe(0);
+ it('estimates tokens the way the server does (about 3 UTF-8 bytes each, rounded up), and formats them quietly',()=>{
+  expect(chipEstimate('abc')).toBe(1);expect(chipEstimate('abcd')).toBe(2);expect(chipEstimate('a'.repeat(300))).toBe(100);expect(chipEstimate('é')).toBe(1);expect(chipEstimate('')).toBe(0); // 'é' is 2 bytes
   expect(formatCount(0)).toBe('0');expect(formatCount(420)).toBe('420');expect(formatCount(3200)).toBe('3.2k');expect(formatCount(48000)).toBe('48k');
  });
  it('sends only the chosen modules: this note and threads as one module, the selection separately',()=>{

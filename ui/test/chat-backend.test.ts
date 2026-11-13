@@ -166,7 +166,8 @@ it('oversized sources reject instead of silent truncation; a revoked ignore rule
 it('ContextModule contract estimates/previews redacted sources, rejects unselected paths, and never reads outside the notebook',async()=>{
  const f=await fixture(),modules=contextModules(f.store,f.ink,f.input.path),other=modules.find(m=>m.id==='other-notes')!;
  expect(await other.list()).toEqual([{id:'other.md',label:'other.md'}]);
- const sources=await other.read(['other.md'],{maxSources:1,maxCharacters:100});expect(other.preview(sources)[0]).toMatchObject({id:'O1',label:'other.md',characters:23});expect(other.estimateTokens('abc')).toBe(3);
+ const sources=await other.read(['other.md'],{maxSources:1,maxCharacters:100});expect(other.preview(sources)[0]).toMatchObject({id:'O1',label:'other.md',characters:23});expect(other.estimateTokens('abc')).toBe(1);expect(other.estimateTokens('a'.repeat(300))).toBe(100); // about 3 bytes per token, rounded up (textTokens)
+ expect(other.preview(sources)[0].estimatedTokens).toBe(Math.ceil(23/3));
  await expect(other.read(['../private.md'],{maxSources:1,maxCharacters:100})).rejects.toThrow();
  await expect(other.read(['fixture.md'],{maxSources:1,maxCharacters:100})).rejects.toThrow();
  await mkdir(path.join(f.root,'.private'));await writeFile(path.join(f.root,'.private/hidden.md'),'Synthetic private source.');

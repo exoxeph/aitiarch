@@ -71,7 +71,8 @@ try{
  await summary.click();assert.equal(await summary.getAttribute('aria-expanded'),'true');
  const noteChip=panel.getByRole('button',{name:/^This note/});
  const chipText=await noteChip.innerText();assert.match(chipText,/· \d/,'the chip shows an estimate');
- assert.ok(Math.abs(Number(/· (\d+)/.exec(chipText)?.[1]??NaN)-noteBytes)<=12,`This note estimate should be about ${noteBytes} (got ${chipText})`);
+ const noteTokens=Math.ceil(noteBytes/3); // the chat's one token estimate: about 3 UTF-8 bytes a token, the same on the chips, the review card and the budget gate
+ assert.ok(Math.abs(Number(/· (\d+)/.exec(chipText)?.[1]??NaN)-noteTokens)<=4,`This note estimate should be about ${noteTokens} (got ${chipText})`);
  assert.match(await panel.locator('.chat-context-total').innerText(),/About .* tokens of context/);
  await panel.getByRole('button',{name:'Preview This note',exact:true}).click();
  assert.match(await panel.getByRole('region',{name:'Preview of This note'}).innerText(),/Chat fixture/);
@@ -80,7 +81,7 @@ try{
  await page.evaluate(()=>{const {view}=window.__aitiarch['fixture.md'],q='A unique selected sentence.',from=view.state.doc.toString().indexOf(q);view.dispatch({selection:{anchor:from,head:from+q.length}});});
  const selChip=panel.getByRole('button',{name:/^Selection/});assert.equal(await selChip.getAttribute('aria-pressed'),'false');
  await selChip.click();assert.equal(await selChip.getAttribute('aria-pressed'),'true');
- assert.match(await selChip.innerText(),/· 27/,'27 bytes of selected text');
+ assert.match(await selChip.innerText(),/· 9\b/,'27 bytes of selected text is 9 tokens');
 
  // ---- the first-message review card: nothing is sent until Send
  script={kind:'normal',answer:'**Synthetic** reply. It has [a link](https://example.com) and enough words to see it stream in.',hold:holdOpen()};
@@ -162,8 +163,20 @@ try{
  await panel.getByRole('button',{name:'Stop',exact:true}).click();
  await panel.locator('.chat-error').waitFor();
  assert.match(await panel.locator('.chat-error').innerText(),/cancelled/i);
+ assert.match(await panel.locator('.chat-error').innerText(),/You pressed Stop/,'the banner says Stop only because the cause recorded for this stop is user_stop');
  assert.equal(await panel.locator('.chat-stream').count(),0,'the partial reply is discarded');
+ await panel.locator('.chat-error').getByRole('button',{name:'Dismiss'}).click();
  assert.equal(calls.length,beforeCancel+1,'the cancelled turn was sent once and is never retried');
+
+ // ---- budget refusal: the banner says the real numbers, and nothing is sent
+ const setBudget=n=>page.evaluate(async tokenBudget=>(await fetch('/api/chat/settings',{method:'PUT',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Aitiarch':'1'},body:JSON.stringify({path:'fixture.md',tokenBudget,rollingRequestCap:12})})).status,n);
+ assert.equal(await setBudget(1000),200);const beforeBudget=calls.length;
+ await ask('Does this still fit?');
+ await panel.locator('.chat-error').waitFor();
+ assert.match(await panel.locator('.chat-error').innerText(),/token budget: [\d.]+k? used \+ about [\d.]+k? for the next message is more than the 1k budget/,'the budget banner says what was used, what the next message needs, and the limit');
+ assert.equal(calls.length,beforeBudget,'a refused message never reaches the provider');
+ await panel.locator('.chat-error').getByRole('button',{name:'Dismiss'}).click();
+ assert.equal(await setBudget(50000),200);
 
  // ---- reload: accepted replies come back, questions do not
  await page.reload();await page.waitForSelector('.cm-editor');await page.getByRole('button',{name:/^Chat/}).click();await panel.waitFor();

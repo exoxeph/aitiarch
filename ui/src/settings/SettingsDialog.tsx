@@ -21,7 +21,7 @@ function UsagePane(){
   <p className="settings-lead">Each chat has its own budget. These bars update while this screen is open.</p>
   {failed&&<p className="settings-warn" role="status">The usage log is unavailable right now.</p>}
   {usage&&(usage.chats?.length?<ul className="meters" aria-label="Chat token budgets">{usage.chats.map(c=><li key={c.note}><span className="meter-name">{c.note}</span><MeterBar meter={tokenMeter(c)} label={`Token budget for ${c.note}`}/><span className="meter-sub">{c.calls} {c.calls===1?'call':'calls'} · limit {c.rollingRequestCap} per {c.windowMinutes} minutes</span></li>)}</ul>:<p className="settings-lead">No chat has used tokens yet.</p>)}
-  {usage&&usage.providers.length>0&&<><h3>Providers</h3><table className="usage-table"><thead><tr><th>Provider</th><th>Calls this session</th><th>Input</th><th>Output</th></tr></thead><tbody>
+  {usage&&usage.providers.length>0&&<><h3>Providers</h3><p className="settings-lead">Raw counts, as the provider reported them: Input includes cached tokens in full. The chat budgets above count cached tokens at a tenth, so these totals are larger.</p><table className="usage-table"><thead><tr><th>Provider</th><th>Calls this session</th><th>Input (raw)</th><th>Output</th></tr></thead><tbody>
    {usage.providers.map(p=><tr key={p.provider}><th>{p.provider==='claude'?'Claude':'ChatGPT plan'}</th><td>{p.callsThisSession}</td><td>{formatCount(p.input+p.cached)}</td><td>{formatCount(p.output)}</td></tr>)}</tbody></table></>}
  </div>;
 }

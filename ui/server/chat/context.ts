@@ -1,11 +1,11 @@
 import {createHash} from 'node:crypto';
 import type {ContextModule,ContextSource,ContextLimits} from '../../shared/chat.ts';
-import {CHAT_LIMITS} from '../../shared/chat.ts';
+import {CHAT_LIMITS,textTokens} from '../../shared/chat.ts';
 import {Store} from '../store.ts';import {InkStore} from '../ink-store.ts';
 import {redact,ProviderError} from '../providers/index.ts';
 export const hash=(text:string)=>createHash('sha256').update(text).digest('hex');
-/** Conservative UTF-8-byte upper estimate, not a promise of tokenizer/provider overhead. */
-export const estimateTokens=(text:string)=>Buffer.byteLength(text,'utf8');
+/** The chat's one token estimate (see textTokens): shown on the chips and the review card and used by the budget gate, so they always agree. */
+export const estimateTokens=textTokens;
 export function contextModules(store:Store,ink:InkStore,notePath:string):ContextModule[]{
  const common={redact,estimateTokens,preview:(sources:readonly ContextSource[])=>sources.map(s=>({id:s.id,label:s.label,characters:s.text.length,estimatedTokens:estimateTokens(s.text)}))};
  const bounded=(sources:ContextSource[],limits:ContextLimits)=>{

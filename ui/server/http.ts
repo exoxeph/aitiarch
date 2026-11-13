@@ -1,7 +1,7 @@
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
 import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {removeTranscript} from './harness/transcripts.ts';import {QuestionStore} from './harness/questions.ts';
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
-import {CHAT_MESSAGES} from '../shared/chat.ts';
+import {CHAT_MESSAGES,budgetText} from '../shared/chat.ts';
 import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
 import {InsertionStore} from './insertion-store.ts';
 import {SKILL_DIAGRAM_CSP_HEADER,SKILL_DIAGRAM_SVG_CSP_HEADER} from '../shared/skill-diagram.ts';
@@ -350,20 +350,24 @@ export function createApp(opts: AppOptions) {
         if(url.pathname==='/api/chat/bring-complete')return json(res,200,await (await chatInsertion).complete(b.path,b.operationId));
         if(url.pathname==='/api/chat/bring-cancel')return json(res,200,await (await chatInsertion).cancel(b.path,b.operationId));
         if(url.pathname==='/api/chat/send'){
-          const controller=new AbortController(),abort=()=>controller.abort();res.on('close',abort);
+          // A stop is never a throw inside the stream callback (the CLI runner would swallow it as bad output): it aborts the request with its cause,
+          // and the runtime records that cause and ends the turn. The closing frame (error or complete) is small and is still sent unless the page is gone.
+          const controller=new AbortController(),abort=()=>controller.abort('client_disconnect');res.on('close',abort);
           let emitted=0;
           try{await runtime.send(b,event=>{
-            if(res.destroyed)throw new ChatError('cancelled');
+            if(res.destroyed){controller.abort('client_disconnect');return;}
+            const closing=event.type==='error'||event.type==='complete';
+            if(controller.signal.aborted&&!closing)return;
             if(!res.headersSent)res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'});
             const frame=`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
-            emitted+=Buffer.byteLength(frame);if(emitted>512000)throw new ChatError('cancelled');
-            res.write(frame);if(res.writableLength>262144)throw new ChatError('cancelled');
+            if(!closing){emitted+=Buffer.byteLength(frame);if(emitted>512000){controller.abort('sse_limit');return;}}
+            res.write(frame);if(!closing&&res.writableLength>262144)controller.abort('sse_limit');
           },controller.signal);res.end();}finally{res.off('close',abort);}return;
         }
       }catch(e){
         if(res.headersSent)return res.end();
         const code=e instanceof ChatError?e.code:e instanceof ProviderError?'provider_failed':'invalid_chat';
-        return json(res,409,{error:code,message:CHAT_MESSAGES[code]});
+        return json(res,409,{error:code,message:e instanceof ChatError&&e.budget?budgetText(e.budget):CHAT_MESSAGES[code],...(e instanceof ChatError&&e.budget?{budget:e.budget}:{})});
       }
       throw new PathError(400,'bad_body','Unknown chat action.');
     }

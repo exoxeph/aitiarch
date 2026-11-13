@@ -1,6 +1,6 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {api,ApiError,streamChat} from '../api.ts';
-import {CHAT_MESSAGES,type ChatErrorCode,type ChatReview,type ChatUsage} from '../../shared/chat.ts';
+import {CHAT_MESSAGES,type BudgetDetail,type ChatErrorCode,type ChatReview,type ChatUsage} from '../../shared/chat.ts';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
 import {SessionPicker} from './SessionPicker.tsx';
 import {sessionChoices,type PickedSession} from './session-picker-model.ts';
@@ -55,6 +55,7 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
   <SkillsReviewList review={review.skills}/>
   <details className="chat-review-source"><summary>Instructions Claude gets</summary><pre>{review.instruction}</pre></details>
   <p className="chat-review-total">About {formatCount(review.estimatedTokens)} tokens in all</p>
+  {review.budget&&<p className="chat-review-budget">Budget: {formatCount(review.budget.spent)} used + about {formatCount(review.budget.next)} for this message of {formatCount(review.budget.budget)}{review.budget.spent+review.budget.next>review.budget.budget?'. This will not fit; the send will be refused.':'.'}</p>}
   {review.ephemeral?<><p>{SESSION_NOTICES.privacy}</p><details><summary>Recent messages included</summary>{review.history.map(t=><div key={t.id}><pre>{t.user}</pre><pre>{t.assistant}</pre></div>)}</details></>:<label className="chat-review-ask"><input type="checkbox" checked={stopAsking} onChange={e=>setStopAsking(e.target.checked)}/> Don’t ask again this session</label>}
   <div className="chat-review-actions"><button ref={send} type="button" className="chat-review-send" onClick={onSend}>Send</button><button type="button" className="ghost" onClick={onCancel}>Cancel</button></div>
  </section>;
@@ -92,7 +93,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
  const total=chips.filter(c=>c.on).reduce((n,c)=>n+estimate[c.id],0);
  const peekText:Record<ContextChip['id'],string>={note:noteText||'This note is empty.',threads:threadsText||'No AI replies in this note yet.',selection:selectionText||'Select text in the note, then turn this on.'};
 
- const fail=(id:string,code:ChatErrorCode)=>setTurns(t=>applyEvent(t,{type:'error',id,code}));
+ const fail=(id:string,code:ChatErrorCode,budget?:BudgetDetail)=>setTurns(t=>applyEvent(t,{type:'error',id,code,...(budget?{budget}:{})}));
  const send=async(review:ChatReview,dontAskAgain:boolean)=>{
   setPending(null);setBusy(true);sentAt.current=Date.now();const id=review.requestId,controller=new AbortController();abort.current=controller;
   setTurns(t=>t.map(x=>x.id===id?{...x,status:'streaming' as const}:x));
@@ -107,7 +108,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
    if(!finished&&alive.current)fail(id,'provider_failed');
   }catch(e){
    if(!alive.current||controller.signal.aborted)return;
-   fail(id,e instanceof ApiError&&knownCode(e.code)?e.code:'provider_failed');
+   fail(id,e instanceof ApiError&&knownCode(e.code)?e.code:'provider_failed',e instanceof ApiError?e.detail?.budget:undefined);
   }finally{abort.current=null;if(alive.current)setBusy(false);}
  };
  /** `again` re-asks an earlier question through the same review, without touching the draft. */
@@ -180,7 +181,7 @@ export function ChatPanel({path,noteText,threadsText,getSelection,onAdd,onClose,
       {t.message&&<ReplyNotes message={t.message} question={t.question} busy={composing} onAskAgain={q=>void submit(q)} note={{path,noteText,onShow:onShowQuote,onCite:onCiteClaim}}/>}<UsedSkills names={t.message?.skills}/>
       {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
       <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}>Add to note</button></div></div>}
-     {t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason,t.error.errorName)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button></div>}
+     {t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason,t.error.errorName,t.error)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button></div>}
     </div>)}
    <span className="chat-sr" role="status">{busy&&!pending?'Claude is replying…':''}</span>
   </div>
