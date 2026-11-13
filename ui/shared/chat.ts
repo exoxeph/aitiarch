@@ -107,7 +107,7 @@ export interface ChatReview {
  ephemeral?:true;
  /** Sent in a harness chat session: the earlier conversation lives in the session, so no earlier messages are pasted. */
  session?:{id:string;label:string;turns:number};
- /** Notes a session never gets (the notebook file, hidden files, sidecars, state, secrets): named here so the review says so. */
+ /** Notes no chat gets unless it is the note the chat is open on (the notebook file, hidden files, sidecars, state, secrets): named here so the review says so. */
  excluded?:string[];
  /** A conversation turn only: the one line that starts the message, naming this turn's sources (IDs, labels and sizes, never their text). */
  manifest?:string;

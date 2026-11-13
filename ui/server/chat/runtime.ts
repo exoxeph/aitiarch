@@ -60,25 +60,25 @@ export class ChatRuntime {
   // Validate target even when no context module is selected. Never implicitly send it.
   if(input.path.split('/').some(part=>part.startsWith('.')))throw new ChatError('invalid_chat');
   await this.store.read(input.path);const s=this.state(input.path),sources:ContextSource[]=[],modules=[...contextModules(this.store,this.ink,input.path),...this.sessions],seen=new Set<string>();
+  // Other notes the app adds (the Constellation, a picker) pass one filter in every chat, one-off or a conversation: never the notebook file, hidden files, Aitiarch's own
+  // state and sidecars, secrets or keys. They are dropped BEFORE anything is read, so they are not read and not audited as read; what was left out is named in the review.
+  // The note the chat is open on is the person's own choice and is never filtered (it is the "this-note" module, not an added note).
+  const excluded:string[]=[];
   for(const c of input.context){
    const module=modules.find(m=>m.id===c?.moduleId);
    if(!module||seen.has(c.moduleId)||!Array.isArray(c.ids)||c.ids.length>CHAT_LIMITS.sources||c.ids.some(id=>typeof id!=='string')||new Set(c.ids).size!==c.ids.length)throw new ChatError('invalid_chat');seen.add(c.moduleId);
+   const ids=module.id==='other-notes'?c.ids.filter(id=>{if(!harnessDenied(id))return true;excluded.push(id);return false;}):c.ids;
    // Metadata audit precedes EVERY read, including failed attempts. No paths/text from a module enter the ledger.
-   for(const id of c.ids)await this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(input.path),requestId:input.id,note:input.path,event:'context_read',moduleId:module.id,sourceHash:hash(id),at:new Date().toISOString()});
-   try{sources.push(...await module.read(c.ids,{maxSources:CHAT_LIMITS.sources-sources.length,maxCharacters:module.id==='this-note'?60000:CHAT_LIMITS.otherCharacters}));}catch(e){if(module.id==='claude-sessions'||module.id==='codex-sessions')throw new ChatError(e instanceof Error&&e.message===SESSION_NOTICES.limit?'session_limit':e instanceof Error&&e.message===SESSION_NOTICES.selection?'session_selection':'session_format');throw e;}
+   for(const id of ids)await this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(input.path),requestId:input.id,note:input.path,event:'context_read',moduleId:module.id,sourceHash:hash(id),at:new Date().toISOString()});
+   try{sources.push(...await module.read(ids,{maxSources:CHAT_LIMITS.sources-sources.length,maxCharacters:module.id==='this-note'?60000:CHAT_LIMITS.otherCharacters}));}catch(e){if(module.id==='claude-sessions'||module.id==='codex-sessions')throw new ChatError(e instanceof Error&&e.message===SESSION_NOTICES.limit?'session_limit':e instanceof Error&&e.message===SESSION_NOTICES.selection?'session_selection':'session_format');throw e;}
   }
   if(sources.length>CHAT_LIMITS.sources||sources.reduce((n,x)=>n+Buffer.byteLength(x.text),0)>85000)throw new ProviderError('context_limit');
-  // A harness session: it must be a chat session for this note, and the notes it gets pass the session filter (never the notebook file, hidden
-  // files, sidecars, state or secrets). What was left out is named in the review.
-  let session:Awaited<ReturnType<SessionIndex['get']>>=null,excluded:string[]=[];
+  // A harness session: it must be a chat session for this note.
+  let session:Awaited<ReturnType<SessionIndex['get']>>=null;
   if(input.session!==undefined){
    if(!this.harness)throw new ChatError('disabled');
    session=await this.harness.index.get(input.session);
    if(!session||session.mode!=='chat'||session.note!==undefined&&session.note!==input.path)throw new ChatError('invalid_chat');
-   // The note the chat is open on is the user's own choice (the one-off chat sees it too), so it is never filtered; other notes are.
-   const keep=(x:ContextSource)=>x.id.startsWith('O')?!harnessDenied(x.label):true;
-   excluded=sources.filter(x=>!keep(x)).map(x=>x.label);
-   sources.splice(0,sources.length,...sources.filter(keep));
   }
   // The chat node's persona always rides along; its skills only when something loaded. Fixed here, so the review shows what is sent.
   const extra=this.extras?await this.extras('chat'):null;

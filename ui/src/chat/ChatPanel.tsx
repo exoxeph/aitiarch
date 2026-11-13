@@ -49,7 +49,7 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
    <dt>Context</dt>
    <dd>{review.sources.length===0?<span className="chat-review-none">None. Only your question is sent.</span>:review.sources.map(s=>
     <details key={s.id} className="chat-review-source"><summary>{s.label} <span className="chat-review-est">about {formatCount(s.estimatedTokens)} tokens</span></summary><pre>{review.ephemeral?s.text:previewText(s.text,2000)}</pre></details>)}</dd>
-   {review.excluded&&review.excluded.length>0&&<><dt>Left out</dt><dd>{review.excluded.join(', ')}: a conversation never gets the notebook file, hidden files, Aitiarch's own files or secrets.</dd></>}
+   {review.excluded&&review.excluded.length>0&&<><dt>Left out</dt><dd>{review.excluded.join(', ')}: a chat never gets the notebook file, hidden files, Aitiarch's own files or secrets, apart from the note it is open on.</dd></>}
    {review.manifest&&<><dt>Starts with</dt><dd>{review.manifest}</dd></>}
    <dt>Earlier messages</dt>
    <dd>{review.session?`Kept in the conversation “${review.session.label}” (${review.session.turns} so far), not pasted again.`:review.historyPairs===0?'None yet.':`${review.historyPairs} earlier ${review.historyPairs===1?'exchange':'exchanges'} included${review.omittedPairs>0?`, ${review.omittedPairs} older left out`:''}.`}{review.otherModePairs?` ${review.otherModePairs} earlier ${review.otherModePairs===1?'exchange':'exchanges'} left out: different mode.`:''}</dd>
