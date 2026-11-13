@@ -12,7 +12,8 @@ export interface ChatDocument {v:1;note:string;messages:ChatMessage[]}
 export class ChatStore {
  private root:string;private memory=new Map<string,ChatDocument>();private tail:Promise<unknown>=Promise.resolve();
  constructor(root:string){this.root=root;}
- private note(note:string){if(normalizeRel(note)!==note||!isNotePath(note)||note.split('/').some(s=>s.startsWith('.')))throw new Error('Invalid chat note.');return note;}
+ private validNote(note:string){return normalizeRel(note)===note&&isNotePath(note)&&!note.split('/').some(s=>s.startsWith('.'));}
+ private note(note:string){if(!this.validNote(note))throw new Error('Invalid chat note.');return note;}
  private async confined(rel:string,create=false){
   const segments=rel.split('/');let file=this.root;
   for(let n=0;n<segments.length;n++){
@@ -48,8 +49,8 @@ export class ChatStore {
   if(!exactKeys(d,['v','note','messages'])||d.v!==1||d.note!==note||!Array.isArray(d.messages)||d.messages.length>200)throw new Error('Invalid chat sidecar.');
   const ids=new Set<string>();
   for(const m of d.messages){
-   if(!exactKeys(m,['id','role','body','at','provider','model','evidence','usage','insertionBlocked',...(m.skills===undefined?[]:['skills']),...(m.unstructured===undefined?[]:['unstructured']),...(m.echo===undefined?[]:['echo']),...(m.claims===undefined?[]:['claims']),...(m.noCitation===undefined?[]:['noCitation']),...(m.citation===undefined?[]:['citation']),...(m.persona===undefined?[]:['persona']),...(m.contract===undefined?[]:['contract']),...(m.session===undefined?[]:['session'])])
-    ||(m.session!==undefined&&!validSessionId(m.session))||(m.claims!==undefined&&!validClaims(m.claims))||(m.noCitation!==undefined&&!(NO_CITATION_REASONS as readonly unknown[]).includes(m.noCitation))
+   if(!exactKeys(m,['id','role','body','at','provider','model','evidence','usage','insertionBlocked',...(m.skills===undefined?[]:['skills']),...(m.unstructured===undefined?[]:['unstructured']),...(m.echo===undefined?[]:['echo']),...(m.claims===undefined?[]:['claims']),...(m.noCitation===undefined?[]:['noCitation']),...(m.citation===undefined?[]:['citation']),...(m.persona===undefined?[]:['persona']),...(m.contract===undefined?[]:['contract']),...(m.session===undefined?[]:['session']),...(m.askedOn===undefined?[]:['askedOn'])])
+    ||(m.session!==undefined&&!validSessionId(m.session))||(m.askedOn!==undefined&&(typeof m.askedOn!=='string'||!this.validNote(m.askedOn)))||(m.claims!==undefined&&!validClaims(m.claims))||(m.noCitation!==undefined&&!(NO_CITATION_REASONS as readonly unknown[]).includes(m.noCitation))
     ||(m.citation!==undefined&&!(CITATION_ISSUES as readonly unknown[]).includes(m.citation))||(m.persona!==undefined&&!isPersona(m.persona))||(m.contract!==undefined&&(!validContract(m.contract)||m.contract.mode!==m.persona))||(m.skills!==undefined&&!validSkillRefs(m.skills))||(m.unstructured!==undefined&&m.unstructured!==true)||(m.echo!==undefined&&m.echo!==true)||!validId(m.id)||ids.has(m.id)||m.role!=='assistant'||m.provider!=='claude'||!validAt(m.at)||typeof m.body!=='string'||!m.body.trim()||m.body.length>100000||typeof m.insertionBlocked!=='boolean'||!(m.model===null||typeof m.model==='string'&&/^[\w.:-]{1,100}$/.test(m.model))||!Array.isArray(m.evidence)||m.evidence.length>32)throw new Error('Invalid chat message.');
    ids.add(m.id);
    for(const e of m.evidence)if(!exactKeys(e,['sourceId','sourceHash','quote'])||typeof e.sourceId!=='string'||!/^[A-Z][0-9]{1,3}$/.test(e.sourceId)||typeof e.sourceHash!=='string'||!/^[a-f0-9]{64}$/.test(e.sourceHash)||typeof e.quote!=='string'||e.quote.length>240)throw new Error('Invalid chat evidence.');

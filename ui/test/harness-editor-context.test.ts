@@ -67,6 +67,17 @@ describe('the editor line on a conversation turn',()=>{
   const o=await turn(runtime,ask(s.id,'m-ec-others','Hi again',{context:[{moduleId:'this-note',ids:['note']},{moduleId:'other-notes',ids:['other.md']}]}));
   expect(o.review.manifest).toBe(`Open note: Plan (${NOTE.length} chars). Also sent: O1 other.md (18 chars).`);
  });
+ it('says where a selection that crosses sections starts and ends, on the first turn and on a resumed one; inside one section the line is as before',async()=>{
+  const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'Spans',note:'plan.md'}),sel='A unique sentence for the session.\n\n## Risks\n\nThe risk';
+  const one=await turn(runtime,ask(s.id,'m-sp1','What does this part mean?',{selection:sel,editor:{path:'plan.md',title:'Plan',section:['Plan','Risks'],lines:{from:3,to:7},spans:{from:['Plan'],to:['Plan','Risks']}}}));
+  const two=await turn(runtime,ask(s.id,'m-sp2','And this one?',{selection:SEL,editor:{path:'plan.md',title:'Plan',section:['Plan'],lines:{from:3,to:3}}}));
+  expect(one.error).toBeUndefined();expect(two.error).toBeUndefined();
+  const [a,b]=await p.calls();
+  expect(a.stdin.split('\n\n')[0]).toBe(`Open note: Plan (${NOTE.length} chars). Selection: lines 3-7 (${sel.length} chars). Selection spans Plan to Plan > Risks. Cursor section: Plan > Risks.`);
+  expect(b.args).toContain('--resume');expect(b.stdin.split('\n\n')[0]).toBe(`Open note: Plan (${NOTE.length} chars). Selection: line 3 (${SEL.length} chars). Cursor section: Plan.`);
+  const none=await turn(runtime,ask(s.id,'m-sp3','No selection',{editor:{path:'plan.md',title:'Plan',section:['Plan'],spans:{from:['Plan'],to:['Plan','Risks']}}})); // a span with no selection is ignored
+  expect(none.review.manifest).not.toContain('spans');
+ });
  it('without editor information the line still names the open note and its size (older pages, other callers)',async()=>{
   const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'x',note:'plan.md'});
   await turn(runtime,ask(s.id,'m-ec-none','Hello?'));const [c]=await p.calls();
@@ -115,6 +126,11 @@ describe('a conversation that follows the person to another note',()=>{
   expect(two.review.path).toBe('plan.md');expect(two.review.editor!.path).toBe('other.md');
   const chat=new ChatStore(p.root);expect((await chat.read('plan.md')).messages.map(m=>m.id)).toEqual(['m-f1','m-f2']);expect((await chat.read('other.md')).messages).toEqual([]);
   expect((await chat.read('plan.md')).messages.every(m=>m.session===s.id)).toBe(true);
+  // Each reply remembers the note its question was asked on, when that is not the note the chat is kept under (source chips name that note).
+  const kept=(await chat.read('plan.md')).messages;expect(kept[0].askedOn).toBeUndefined();expect(kept[1].askedOn).toBe('other.md');
+  expect(JSON.stringify(await readFile(path.join(p.root,'chat','plan.md.chat.json'),'utf8'))).toContain('askedOn'); // it is on disk too
+  await expect(chat.append('plan.md',{...kept[1],id:'m-bad-asked',askedOn:'.hidden/x.md'})).rejects.toThrow(); // and only a real note path is accepted
+  await expect(chat.append('plan.md',{...kept[1],id:'m-bad-asked2',askedOn:'../outside.md'})).rejects.toThrow();
  });
  it('lets a reply written while another note was open be added to that note, from the chat it is kept in',async()=>{
   const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'Follow',note:'plan.md'});

@@ -5,7 +5,7 @@ import {SKILL_HEADING,type SkillBlock} from '../../shared/instruction.ts';
 
 /** What the user's pointing words mean, in both prompts. The editor line (the "editor" field of a one-off message, the first line of a conversation message) says what is open, selected and under the cursor. */
 export const EDITOR_WORDS=
-`What the user's words point at: "this note" is the open note (source N1). "This section" is the section the cursor is in. "This part", "this paragraph", "this" and "here" are the selection (source S1) when the editor line says something is selected, and otherwise the section the cursor is in. If it is really unclear which of these the user means, ask ONE short question instead of guessing.`;
+`What the user's words point at: "this note" is the open note (source N1). "This section" is the section the cursor is in. "This part", "this paragraph", "this" and "here" are the selection (source S1) when the editor line says something is selected, and otherwise the section the cursor is in. When the editor line says the selection spans from one section to another, the selection runs across both and everything between them, and "this section" is still the section the cursor is in. If it is really unclear which of these the user means, ask ONE short question instead of guessing.`;
 
 export const CHAT_INVARIANTS=
 `You are a thinking partner in a chat about one note. Reply in a single response, without tools.
@@ -66,14 +66,18 @@ export interface ManifestParts {
  selection:{chars:number;lines?:{from:number;to:number;cut?:boolean}}|null;
  /** The cursor's heading path. Absent when the editor did not say; empty when the cursor is above the first heading. */
  section?:readonly string[];
+ /** The sections the selection starts and ends in, when they differ. */
+ span?:{from:readonly string[];to:readonly string[]};
  /** Every other source this message carries (threads, other notes, sessions). */
  others:readonly {id:string;label:string;chars:number}[];
 }
 const chars=(n:number)=>`${n.toLocaleString('en-US')} ${n===1?'char':'chars'}`;
 const oneLine=(s:string)=>s.replace(/[\r\n\]]/g,' ');
+const sectionName=(path:readonly string[])=>path.length?path.join(' > '):'above the first heading';
 /**
  * The one line that tells the model where the person is, with no note text in it:
- * "Open note: <title> (N chars). Selection: lines a-b (M chars). Cursor section: <heading>." Each session message starts with it and each one-off message carries
+ * "Open note: <title> (N chars). Selection: lines a-b (M chars). Cursor section: <heading>." A selection that crosses sections adds "Selection spans <start section> to <end section>."
+ * Each session message starts with it and each one-off message carries
  * it in its "editor" field, so what this turn was given is stated next to the question and outweighs anything an earlier reply said about it.
  */
 export function editorManifest(m:ManifestParts):string{
@@ -81,6 +85,7 @@ export function editorManifest(m:ManifestParts):string{
  if(m.selection){
   const l=m.selection.lines,range=l?(l.from===l.to?`line ${l.from}`:`lines ${l.from}-${l.to}`):'';
   out.push(range?`Selection: ${range} (${chars(m.selection.chars)}${l?.cut?', cut short':''}).`:`Selection: ${chars(m.selection.chars)}${l?.cut?', cut short':''}.`);
+  if(m.span)out.push(`Selection spans ${sectionName(m.span.from)} to ${sectionName(m.span.to)}.`);
  }
  if(m.section)out.push(m.section.length?`Cursor section: ${m.section.join(' > ')}.`:'Cursor section: none, above the first heading.');
  if(m.others.length)out.push(`Also sent: ${m.others.map(o=>`${o.id} ${oneLine(o.label)} (${chars(o.chars)})`).join('; ')}.`);

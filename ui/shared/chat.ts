@@ -62,6 +62,9 @@ export interface ChatMessage {
  skills?:string[];
  /** Session-derived replies never enter the repository or Add to note. */
  ephemeral?:true;
+ /** The note that was open when the question was asked, when it is not the note this chat is kept under (a conversation follows the person from note to note).
+  *  Absent: the note whose chat holds the reply. Source chips name this note, not the one that is open now. */
+ askedOn?:string;
  /** The named conversation (harness session) this reply was written in. Delete conversation removes the replies that carry its id. Absent in a one-off chat and in older files. */
  session?:string;
 }
