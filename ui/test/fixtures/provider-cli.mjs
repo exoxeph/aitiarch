@@ -105,6 +105,8 @@ if (scenario.startsWith('verified-')) {
     // A claims block with claims whose source ids are not valid (a word, an unknown letter, a number, none), next to one good claim.
     'verified-chat-claims-badsource':'Several points.\n<claims>[{"source":"N1","quote":"The venue is the library"},{"source":"banana","quote":"The budget is 40 dollars"},{"source":"Z9","quote":"Volunteers bring their own food"},{"source":7,"quote":"the event starts at noon"},{"quote":"the second Saturday of June"}]</claims>',
     // A prose reply with a key in it, streamed in small pieces (synthetic key shape).
+    // A Markdown reply streamed in small pieces with a short pause between them, and a longer one before the end, so a browser check can watch every frame (all synthetic).
+    'verified-chat-reply-markdown':'Sessions live in a **Map** called `sessions`.\n\n- first it *checks* the name\n- then it calls `sessions.get(name)`\n\n1. read the file\n2. follow the call\n\n```js\nfunction login(name) {\n  return sessions.get(name);\n}\n```\n\nThat is the whole story.\n<claims>{"none":"no_context_used"}</claims>',
     'verified-chat-reply-secret-split':'The key is sk-abcdefghijklmnopqrstuvwxyz0123 in the file, and nothing else is needed for this.',
     // A reply that recites the instruction it was given (a prompt-injection outcome), built below from the real packet.
     'verified-chat-reply-echo':'',
@@ -117,8 +119,9 @@ if (scenario.startsWith('verified-')) {
     const text=replies[scenario],mid=Math.floor(text.length/2),emit=event=>console.log(JSON.stringify({type:'stream_event',event}));
     emit({type:'message_start',message:{role:'assistant'}});emit({type:'content_block_start',index:0,content_block:{type:'text',text:''}});
     // Small pieces where the test is about what a partial reply can show; two halves otherwise.
-    const pieces=['verified-chat-reply-secret-split','verified-chat-reply-echo'].includes(scenario)?text.match(/[\s\S]{1,6}/g):[text.slice(0,mid),text.slice(mid)];
-    for(const piece of pieces)emit({type:'content_block_delta',index:0,delta:{type:'text_delta',text:piece}});
+    const slow=scenario==='verified-chat-reply-markdown',pieces=['verified-chat-reply-secret-split','verified-chat-reply-echo'].includes(scenario)?text.match(/[\s\S]{1,6}/g):slow?text.match(/[\s\S]{1,5}/g):[text.slice(0,mid),text.slice(mid)];
+    for(const piece of pieces){emit({type:'content_block_delta',index:0,delta:{type:'text_delta',text:piece}});if(slow)await new Promise(r=>setTimeout(r,8));}
+    if(slow)await new Promise(r=>setTimeout(r,900)); // the last streamed frame stays on screen here
     emit({type:'content_block_stop',index:0});emit({type:'message_stop'});
     console.log(JSON.stringify({type:'assistant',message:{content:[{type:'text',text}]}}));
     console.log(JSON.stringify({type:'result',subtype:'success',result:text,usage:{input_tokens:20,output_tokens:10}}));process.exit(0);

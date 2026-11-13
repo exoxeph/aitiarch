@@ -19,7 +19,7 @@ function useFrameText(text:string,live:boolean):string{
 export function LiveMarkdown({text,live}:{text:string;live:boolean}){
  const shown=useFrameText(text,live);
  return <>
-  <ReplyMarkdown text={live?healMarkdown(shown):text}/>
+  <ReplyMarkdown text={live?healMarkdown(shown.replace(/\s+$/,'')):text}/>
   {live&&<span className="chat-caret" aria-hidden="true"/>}
  </>;
 }

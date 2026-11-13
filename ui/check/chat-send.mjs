@@ -101,6 +101,36 @@ try {
     await page.screenshot({ path: path.join(out, 'chat-send-claims-no-valid-source.png') });
   });
 
+  // 1d. The reply is rendered as Markdown WHILE it streams, by the same component as the Investigate answer (LiveMarkdown): every animation frame is recorded, and no raw
+  // ** or backtick is ever in the DOM text, nothing is rendered twice in one frame, and the formatted reply when it ends is what the last streamed frame showed.
+  await inApp('verified-chat-reply-markdown', async ({ page, panel }) => {
+    await page.evaluate(() => {
+      const rec = window.__chatRec = { snaps: [], batches: [], done: false }; let batches = 0, observed = null, observer = null, seen = false;
+      const tick = () => {
+        const live = document.querySelector('#chat-panel .chat-streaming .reply-markdown'), done = [...document.querySelectorAll('#chat-panel .chat-ai:not(.chat-streaming) .reply-markdown')].at(-1);
+        if (live) {
+          seen = true;
+          if (live !== observed) { observer?.disconnect(); observer = new MutationObserver(() => { batches++; }); observer.observe(live, { childList: true, subtree: true, characterData: true, attributes: true }); observed = live; }
+          rec.snaps.push({ running: true, html: live.innerHTML, text: live.innerText, caret: !!document.querySelector('#chat-panel .chat-streaming .chat-caret') }); rec.batches.push(batches); batches = 0;
+        } else if (seen && done) { rec.snaps.push({ running: false, html: done.innerHTML, text: done.innerText }); rec.done = true; return; }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    await page.waitForFunction(() => window.__chatRec.done, null, { timeout: 30000 });
+    const rec = await page.evaluate(() => window.__chatRec), live = rec.snaps.filter((s) => s.running), fin = rec.snaps.at(-1);
+    assert(live.length > 20, `the reply was captured while streaming (${live.length} frames)`);
+    assert(new Set(live.map((s) => s.html)).size >= 12, 'the rendered reply changed many times as it streamed');
+    const raw = rec.snaps.filter((s) => /\*\*|`|~~|\]\(/.test(s.text) || /^\s*(?:[-*+]|\d+[.)]|>|#{1,6})\s*$/m.test(s.text)).map((s) => JSON.stringify(s.text.slice(-60)));
+    assert.deepEqual(raw, [], 'no raw ** or backtick, and no lone list marker, ever appeared while the reply streamed: ' + raw.slice(0, 3).join(' | '));
+    assert(live.some((s) => /<strong>/.test(s.html) && /<code>/.test(s.html) && /<li>/.test(s.html) && /<pre/.test(s.html)), 'bold, code, a list and a code block were formatted while streaming');
+    assert(live.every((s) => s.caret), 'the caret shows while it streams');
+    assert.equal(live.at(-1).html, fin.html, 'the formatted reply after the end is what the last streamed frame showed');
+    assert(Math.max(...rec.batches) <= 1, 'the reply re-rendered at most once per animation frame (most in one frame: ' + Math.max(...rec.batches) + ')');
+    assert.equal(await panel.locator('.chat-ai a').count(), 0, 'links are never clickable');
+    await page.screenshot({ path: path.join(out, 'chat-send-markdown-stream.png') });
+  });
+
   for (const wrapped of ['verified-chat-reply-wrapped', 'verified-chat-reply-fenced']) await inApp(wrapped, async ({ panel }) => {
     await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').waitFor();
     // JSON wrapped in prose or a fence is no longer extracted: the reply is shown exactly as written, JSON included, and it is not an error.

@@ -4,6 +4,7 @@ import {describe,expect,it} from 'vitest';
 import {healMarkdown} from '../src/ink/heal-markdown.ts';
 import {createFrameBatcher,inlineCodeParts} from '../src/ink/live-text.ts';
 import {ReplyMarkdown} from '../src/ink/ReplyMarkdown.tsx';
+import {LiveMarkdown} from '../src/ink/LiveMarkdown.tsx';
 
 // A reply that is still arriving can stop in the middle of a mark. healMarkdown closes what is open (temporarily: the next chunk replaces it) and drops a mark that has
 // nothing after it yet, so the one renderer the final answer uses never shows a raw ** or ` and never flashes one before re-rendering.
@@ -99,6 +100,17 @@ describe('every prefix of a reply renders without a raw mark',()=>{
  it('the formatting appears as soon as the span closes: an open bold already renders bold',()=>{
   const html=renderToStaticMarkup(createElement(ReplyMarkdown,{text:healMarkdown('It is **very impor')}));expect(html).toContain('<strong>very impor</strong>');expect(textOf(html)).not.toContain('*');
  });
+});
+
+describe('LiveMarkdown: the same renderer as the final answer',()=>{
+ const html=(text:string,live:boolean)=>renderToStaticMarkup(createElement(LiveMarkdown,{text,live}));
+ const final=(text:string)=>renderToStaticMarkup(createElement(ReplyMarkdown,{text}));
+ it('when not live it is exactly the final renderer on the exact text',()=>{expect(html(SAMPLE,false)).toBe(final(SAMPLE));});
+ it('while live, a finished reply looks the same as the final one, apart from the caret (trailing newlines from the stream do not show)',()=>{
+  expect(html(SAMPLE+'\n',true)).toBe(final(SAMPLE)+'<span class="chat-caret" aria-hidden="true"></span>');
+  expect(html('Done.\n\n',true)).toBe(final('Done.')+'<span class="chat-caret" aria-hidden="true"></span>');
+ });
+ it('while live, an open mark is already formatted and no raw mark shows',()=>{const h=html('A **very impo',true);expect(h).toContain('<strong>very impo</strong>');expect(textOf(h)).not.toContain('*');});
 });
 
 describe('createFrameBatcher: at most one render per animation frame',()=>{
