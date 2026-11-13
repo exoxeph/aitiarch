@@ -122,6 +122,11 @@ try {
   check("Path between lights the chain of links", (await page.locator(".cn-path-words").innerText().catch(() => "")) === "Home → Plan → Base", await page.locator(".cn-path-words").innerText().catch(() => ""));
   await page.screenshot({ path: path.join(shots, "constellation-path.png") });
   await page.getByRole("button", { name: "Use as chat context" }).click();
+  // The chat's context is one summary line until it is opened: it must already name the constellation notes, and opening it shows the chip.
+  const summary = page.getByRole("button", { name: /^Context/ });
+  await summary.waitFor({ timeout: 4000 });
+  check("the collapsed Context line names the constellation notes", /Constellation 1\b/.test(await summary.innerText()), await summary.innerText());
+  if ((await summary.getAttribute("aria-expanded")) !== "true") await summary.click();
   await page.locator(".chat-from-map").waitFor({ timeout: 4000 });
   check("Use as chat context hands the notes to the chat (the open note is already there)", /1 note/.test(await page.locator(".chat-from-map").innerText()), await page.locator(".chat-from-map").innerText());
   await page.locator('textarea[aria-label="Message Aitiarch AI"]').fill("How do these connect?");
