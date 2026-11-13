@@ -24,6 +24,19 @@ if (args[args.indexOf('--tools') + 1] === 'Read,Grep,Glob') { // an investigatio
     out({ type: 'assistant', message: { id: 'n3', content: [{ type: 'text', text: final }] } });
     out({ type: 'result', subtype: 'success', is_error: false, result: final, num_turns: 3, total_cost_usd: 0.02, usage: { input_tokens: 10, output_tokens: 20 }, permission_denials: [] }); process.exit(0);
   }
+  if (kind === 'inv-md') { // narration with inline code and other marks, a tool, then a Markdown answer streamed in small pieces, a pause on the claims block, then the result
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    textBlock('I will read `src/login.js` first, **not bold** here. '); tool('d1', 'td1', 'Read', { file_path: path.join(process.cwd(), 'src', 'login.js') }); done('td1', '3 const sessions = new Map();');
+    const md = ['Sessions live in a **Map** called `sessions`, set up in [src/login.js](https://example.test/src/login.js).', '', '- first it *checks* the name', '- then it calls `sessions.get(name)`', '', '1. read the file', '2. follow the call', '',
+      '```js', 'function login(name) {', '  return sessions.get(name);', '}', '```', '', '> Note: **nothing** is written to disk.', '', 'That is the whole story.'].join('\n');
+    out({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } });
+    for (const piece of (md + '\n<claims>[]</claims>').match(/[\s\S]{1,5}/g)) { out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: piece } } }); await sleep(8); }
+    out({ type: 'stream_event', event: { type: 'content_block_stop', index: 0 } });
+    await sleep(900); // the last streamed frame stays on screen here, so a check can compare it with the final render
+    const final = md + '\n<claims>[]</claims>';
+    out({ type: 'assistant', message: { id: 'd2', content: [{ type: 'text', text: final }] } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: final, num_turns: 2, total_cost_usd: 0.01, usage: { input_tokens: 10, output_tokens: 20 }, permission_denials: [] }); process.exit(0);
+  }
   if (kind === 'inv-notail') { textBlock('Let me check the router first. '); tool('z1', 'tz1', 'Glob', { pattern: '**/*.js' }); done('tz1', 'src/login.js'); await new Promise((r) => setTimeout(r, 20000)); }
   if (kind === 'inv-budget') { textBlock('Reading the code. '); tool('b1', 'tb1', 'Read', { file_path: path.join(process.cwd(), 'src', 'login.js') }); done('tb1', '3 const sessions = new Map();');
     out({ type: 'result', subtype: 'error_max_budget_usd', is_error: true, result: '', num_turns: 2, total_cost_usd: 0.5, permission_denials: [] }); process.exit(0); }

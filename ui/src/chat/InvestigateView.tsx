@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import {api,ApiError,streamInvestigate} from '../api.ts';
 import type {HarnessSession} from '../../shared/harness.ts';
 import type {Plan} from '../../server/harness/investigate.ts';
-import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
+import {InlineCode,LiveMarkdown} from '../ink/LiveMarkdown.tsx';
 import {ClaimChips} from './ClaimChips.tsx';
 import {stepFailure} from '../../shared/tool-errors.ts';
 import {applyInvestigate,canContinue,deniedSteps,formatElapsed,fromStoredTurn,startTurn,stepSummary,stopSummary,toolCalls,tripwireChanged,type LiveTurn,type ToolStep} from './investigate-model.ts';
@@ -26,7 +26,7 @@ function StepRow({step,onOpen,ended}:{step:ToolStep;onOpen:(path:string)=>void;e
 function NarrationRow({text}:{text:string}){
  const long=text.length>240||text.split('\n').length>3;
  return <li className="inv-row inv-narration" data-state="note"><span className="inv-dot" aria-hidden="true"/>
-  {long?<details><summary>{text.replace(/\s+/g,' ').slice(0,100)}… <span className="inv-tag">Click to expand</span></summary><p className="inv-narration-text">{text}</p></details>:<p className="inv-narration-text">{text}</p>}</li>;
+  {long?<details><summary><InlineCode text={text.replace(/\s+/g,' ').slice(0,100)} heal/>… <span className="inv-tag">Click to expand</span></summary><p className="inv-narration-text"><InlineCode text={text}/></p></details>:<p className="inv-narration-text"><InlineCode text={text}/></p>}</li>;
 }
 
 function TurnView({turn,snapshotFiles,onOpen,onRestore,restoring,onContinue}:{turn:LiveTurn;snapshotFiles?:number;onOpen:(path:string,line?:number)=>void;onRestore:()=>void;restoring:boolean;onContinue:()=>void}){
@@ -48,7 +48,7 @@ function TurnView({turn,snapshotFiles,onOpen,onRestore,restoring,onContinue}:{tu
    {canContinue(turn)&&<button type="button" onClick={onContinue}>Continue with a new plan</button>}
   </div>}
   {(turn.text||turn.message)&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span>
-   {turn.running?<p className="chat-stream">{turn.text}<span className="chat-caret" aria-hidden="true"/></p>:<ReplyMarkdown text={turn.text}/>}
+   <LiveMarkdown text={turn.text} live={turn.running}/>
    {turn.message&&<ClaimChips claims={turn.message.claims} path={null} noteText="" onShow={()=>false} onCite={()=>false} onFile={(p,l)=>onOpen(p,l)}/>}
   </div>}
   {denied.length>0&&!turn.running&&<div className="inv-banner" data-kind="denied" role="note"><p><strong>Denied reads:</strong> {denied.map(s=>`${s.tool} ${s.target}`).join('; ')}.</p></div>}

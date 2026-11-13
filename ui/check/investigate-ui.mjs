@@ -163,6 +163,46 @@ try {
   await panel.screenshot({ path: path.join(output, 'investigate-narrow.png') });
   await page.setViewportSize({ width: 1440, height: 900 });
 
+  // Markdown renders while the answer streams, by the same renderer as the final answer. Every animation frame is recorded: no raw ** or backtick ever reaches the DOM text,
+  // the DOM re-renders at most once per frame, nothing above the answer moves, and the DOM after the final replace is exactly what the last streamed frame showed.
+  await scenario('inv-md'); await composer.fill('Explain it with formatting');
+  await page.evaluate(() => {
+    const rec = window.__rec = { snaps: [], batches: [], tops: [], done: false }; let batches = 0, observed = null, observer = null, seenRunning = false;
+    const tick = () => {
+      const turn = [...document.querySelectorAll('#chat-panel .inv-turn')].at(-1), ai = turn?.querySelector('.chat-ai .reply-markdown'), running = turn?.dataset.running !== undefined;
+      seenRunning ||= running; // nothing is recorded until the new turn is on the page (the last turn before that is the previous one)
+      if (!seenRunning) { requestAnimationFrame(tick); return; }
+      if (ai) {
+        if (ai !== observed) { observer?.disconnect(); observer = new MutationObserver(() => { batches++; }); observer.observe(ai, { childList: true, subtree: true, characterData: true, attributes: true }); observed = ai; }
+        rec.snaps.push({ running, html: ai.innerHTML, text: ai.innerText, caret: !!turn.querySelector('.chat-ai > .chat-caret') });
+        rec.batches.push(batches); batches = 0;
+        rec.tops.push([turn.querySelector('.chat-you').getBoundingClientRect().top, turn.querySelector('.inv-trail').getBoundingClientRect().top]);
+        if (seenRunning && !running) { rec.done = true; return; }
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__rec.done, null, { timeout: 30000 });
+  const rec = await page.evaluate(() => window.__rec), live = rec.snaps.filter((s) => s.running), fin = rec.snaps.at(-1);
+  assert(live.length > 20, `the answer was captured while streaming (${live.length} frames)`);
+  assert(new Set(live.map((s) => s.html)).size >= 15, 'the rendered answer changed many times as it streamed');
+  const rawMark = /\*\*|`|~~|\]\(/, loneMarker = /^\s*(?:[-*+]|\d+[.)]|>|#{1,6})\s*$/m;
+  const raw = rec.snaps.filter((s) => rawMark.test(s.text) || loneMarker.test(s.text)).map((s) => JSON.stringify(s.text.slice(-60)));
+  assert.deepEqual(raw, [], 'no raw ** or backtick, and no lone list marker, ever appeared in the answer text: ' + raw.slice(0, 3).join(' | '));
+  assert(live.some((s) => /<strong>/.test(s.html) && /<code>/.test(s.html) && /<li>/.test(s.html) && /<pre/.test(s.html)), 'bold, code, a list and a code block were already formatted while streaming');
+  assert(live.every((s) => s.caret) && !fin.caret, 'the caret shows while it streams and goes when it ends');
+  assert.equal(fin.running, false); const lastLive = live.at(-1);
+  assert.equal(lastLive.html, fin.html, 'the DOM after the final replace is exactly the last streamed render');
+  assert(Math.max(...rec.batches) <= 1, 'the answer re-rendered at most once per animation frame (most in one frame: ' + Math.max(...rec.batches) + ')');
+  for (const col of [0, 1]) { const ys = rec.tops.map((t) => t[col]); assert(Math.max(...ys) - Math.min(...ys) <= 0.5, `nothing above the answer moved while it streamed (${col ? 'trail' : 'question'}: ${Math.min(...ys)}..${Math.max(...ys)})`); }
+  const narr2 = panel.locator('.inv-turn').last().locator('.inv-narration').first();
+  assert.equal(await narr2.locator('code').allInnerTexts().then((a) => a.join('|')), 'src/login.js', 'narration shows inline code as code');
+  assert.equal(await narr2.locator('strong, em, a, ul, li').count(), 0, 'and nothing else is formatted in narration'); assert.match(await narr2.innerText(), /\*\*not bold\*\*/);
+  assert.equal(await panel.locator('.inv-turn').last().locator('.chat-ai a').count(), 0, 'links are not clickable, while streaming or after');
+  await panel.locator('.inv-turn').last().screenshot({ path: path.join(output, 'investigate-markdown.png') });
+
   // Delete removes it from the list and removes its stored turns.
   await panel.getByRole('button', { name: 'Delete', exact: true }).click();
   await panel.getByRole('group', { name: 'Delete this conversation' }).getByRole('button', { name: 'Delete', exact: true }).click();
