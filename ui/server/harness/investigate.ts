@@ -59,13 +59,18 @@ export class InvestigateStream {
  get turns(){return this.ids.size;}
  push(b:Buffer){this.pending+=this.decoder.write(b);let n;while((n=this.pending.indexOf('\n'))>=0){const line=this.pending.slice(0,n).trim();this.pending=this.pending.slice(n+1);if(line)this.event(line);}}
  finish(){this.pending+=this.decoder.end();if(this.pending.trim())this.event(this.pending.trim());this.pending='';if(!this.inited||!this.result)throw new InvestigateError('isolation');}
- private inside(p:string){const r=path.relative(this.o.cwd,path.resolve(this.o.cwd,p));return !r.startsWith('..')&&!path.isAbsolute(r);}
+ /** A path the tool may use: no home (~) or variable ($, %) expansion, no UNC or device path, no stream suffix, and it resolves inside the copy. */
+ private inside(p:string){
+  if(!p||/^~/.test(p)||/[$%]/.test(p)||/^[\\/]{2}/.test(p))return false; // home, variables, UNC and device paths
+  const afterDrive=p.replace(/^[A-Za-z]:(?=[\\/])/,'');if(afterDrive.includes(':'))return false; // C:x (drive-relative) and file:stream
+  const r=path.relative(this.o.cwd,path.resolve(this.o.cwd,p));return !r.startsWith('..')&&!path.isAbsolute(r);
+ }
  private tool(c:any){
   if(!TOOLS.has(c?.name))throw new InvestigateError('tool_refused');
   const input=c.input&&typeof c.input==='object'?c.input:{};
   for(const k of ['file_path','path'])if(input[k]!==undefined&&(typeof input[k]!=='string'||!this.inside(input[k])))throw new InvestigateError('outside_path');
   const globs=c.name==='Glob'?[input.pattern]:[input.glob];
-  for(const g of globs)if(typeof g==='string'&&(path.isAbsolute(g)||/^[A-Za-z]:/.test(g)||g.split(/[\\/]/).includes('..')))throw new InvestigateError('outside_path');
+  for(const g of globs)if(typeof g==='string'&&(path.isAbsolute(g)||/^[A-Za-z]:/.test(g)||/^~|[$%]|^[\\/]{2}/.test(g)||g.split(/[\\/]/).includes('..')))throw new InvestigateError('outside_path');
   const where=String(input.file_path??input.path??'');
   const rel=where&&path.isAbsolute(where)?path.relative(this.o.cwd,where).split(path.sep).join('/'):where;
   const target=redact(c.name==='Grep'?`${String(input.pattern??'')}${rel?' in '+rel:''}`:c.name==='Glob'?String(input.pattern??''):rel).slice(0,200);

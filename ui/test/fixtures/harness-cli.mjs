@@ -15,6 +15,7 @@ if (args[args.indexOf('--tools') + 1] === 'Read,Grep,Glob') { // an investigatio
   const tool = (msg, toolId, name, input) => { out({ type: 'assistant', message: { id: msg, content: [{ type: 'tool_use', id: toolId, name, input }] } }); };
   if (kind === 'inv-turns') for (let i = 0; i < 20; i++) tool('m' + i, 't' + i, 'Grep', { pattern: 'login' });
   if (kind === 'inv-outside') tool('m1', 't1', 'Read', { file_path: path.resolve(process.cwd(), '..', '..', 'outside.txt') });
+  if (kind === 'inv-path') tool('m1', 't1', extra.startsWith('glob:') ? 'Glob' : 'Read', extra.startsWith('glob:') ? { pattern: extra.slice(5) } : { file_path: extra });
   if (kind === 'inv-bash') out({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', name: 'Bash', input: {} } } });
   tool('m1', 't1', 'Read', { file_path: path.join(process.cwd(), 'src', 'login.js') });
   out({ type: 'user', message: { content: [kind === 'inv-denied' ? { type: 'tool_result', tool_use_id: 't1', is_error: true, content: 'Permission to use Read has been denied.' } : { type: 'tool_result', tool_use_id: 't1', content: '3 const sessions = new Map();' }] } });

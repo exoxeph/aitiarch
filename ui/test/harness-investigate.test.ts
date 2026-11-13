@@ -65,6 +65,13 @@ describe('investigation sessions',()=>{
    expect((await t.run(svc,s.id)).error?.code,scenario).toBe(code);
   }
  });
+ it('kills the run at home, variable, UNC, stream and parent-folder tricks in a path or a glob, and lets a plain path inside the copy through',async()=>{
+  for(const p of ['~/.ssh/id_rsa','%USERPROFILE%\\x.txt','$HOME/x.txt','\\\\server\\share\\x.txt','//server/share/x.txt','src/../../x.txt','src/login.js:secret','C:x.txt','glob:~/**','glob:%TEMP%/**','glob:../**']){
+   const t=await setup(),svc=t.service('inv-path|'+p),{s}=await confirmed(svc,t.repo);
+   expect((await t.run(svc,s.id)).error?.code,p).toBe('outside_path');
+  }
+  const t=await setup(),svc=t.service('inv-path|src/login.js'),{s}=await confirmed(svc,t.repo);expect((await t.run(svc,s.id)).error).toBeUndefined();
+ });
  it('reports a denied read as a step with its denial and in the permission denials',async()=>{
   const t=await setup(),svc=t.service('inv-denied'),{s}=await confirmed(svc,t.repo),r=await t.run(svc,s.id);
   expect(r.complete!.message.steps[0]).toMatchObject({tool:'Read',ok:false,denial:expect.stringContaining('denied')});expect(r.complete!.message.permissionDenials).toEqual(['Read']);
