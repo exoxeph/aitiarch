@@ -3,10 +3,12 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import {isAbortCause,type AbortCause} from '../shared/chat.ts';
 import type {TurnUsage,TurnStatus} from './providers/turn.ts';
-export interface CouncilAudit {provider:'claude'|'codex'|'kiro';status:TurnStatus;usage:TurnUsage[];durationMs:number}
+export interface CouncilAudit {provider:'claude'|'codex'|'kiro';status:TurnStatus;usage:TurnUsage[];durationMs:number;/** How many code attempts the host blocked. A count only, never content. */blockedAttempts?:number}
 export function validCouncilAudit(v:unknown):v is CouncilAudit{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;const c=v as CouncilAudit;
- return Object.keys(c).sort().join()==='durationMs,provider,status,usage'&&['claude','codex','kiro'].includes(c.provider)&&['ok','refused','unavailable','timeout','error'].includes(c.status)&&Number.isFinite(c.durationMs)&&c.durationMs>=0&&Array.isArray(c.usage)&&c.usage.length<=20&&c.usage.every(u=>u&&Object.keys(u).sort().join()==='afterTurn,amount,unit'&&['usd','tokens','credits'].includes(u.unit)&&Number.isFinite(u.amount)&&u.amount>=0&&typeof u.afterTurn==='boolean');
+ const keys=Object.keys(c).sort().join();
+ if(!(keys==='durationMs,provider,status,usage'||(keys==='blockedAttempts,durationMs,provider,status,usage'&&Number.isInteger(c.blockedAttempts)&&c.blockedAttempts!>=1&&c.blockedAttempts!<=10)))return false;
+ return ['claude','codex','kiro'].includes(c.provider)&&['ok','refused','unavailable','timeout','error'].includes(c.status)&&Number.isFinite(c.durationMs)&&c.durationMs>=0&&Array.isArray(c.usage)&&c.usage.length<=20&&c.usage.every(u=>u&&Object.keys(u).sort().join()==='afterTurn,amount,unit'&&['usd','tokens','credits'].includes(u.unit)&&Number.isFinite(u.amount)&&u.amount>=0&&typeof u.afterTurn==='boolean');
 }
 export interface InvestigationAudit {kind:'mother'|'agent'|'lookup';agent:'claude'|'codex'|null;filesRead:string[];durationMs:number;tokens:number|null;cost:number|null;cancelled:boolean;outcome:'completed'|'failed'|'cancelled'}
 export function validInvestigation(v:unknown):v is InvestigationAudit {if(!v||typeof v!=='object'||Array.isArray(v))return false;const x=v as InvestigationAudit;return Object.keys(x).sort().join()==='agent,cancelled,cost,durationMs,filesRead,kind,outcome,tokens'&&['mother','agent','lookup'].includes(x.kind)&&['claude','codex',null].includes(x.agent)&&Array.isArray(x.filesRead)&&x.filesRead.length<=100&&x.filesRead.every(p=>typeof p==='string'&&p.length<=400)&&[x.durationMs,x.tokens??0,x.cost??0].every(n=>typeof n==='number'&&Number.isFinite(n)&&n>=0)&&typeof x.cancelled==='boolean'&&['completed','failed','cancelled'].includes(x.outcome);}

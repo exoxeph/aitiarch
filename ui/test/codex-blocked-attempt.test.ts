@@ -1,0 +1,36 @@
+import {afterEach,expect,it} from 'vitest';
+import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
+import {createCliAdapter,CODEX_BLOCKED_MESSAGE,isBlockedCodeAttempt} from '../server/providers/tool-less.ts';
+import {runTurn,BLOCKED_NOTE,type TurnAdapter,type TurnInput} from '../server/providers/turn.ts';
+import {validCouncilAudit,LedgerStore} from '../server/ledger-store.ts';
+import {CouncilService} from '../server/council.ts';import {SessionIndex} from '../server/harness/session-index.ts';import {Store} from '../server/store.ts';import {InkStore} from '../server/ink-store.ts';
+// The captured stream is a sanitised copy of a REAL Codex 0.167.0 run with the pinned flags: the fail-closed notice arrives BEFORE turn.started, then the answer.
+const real=(await readFile(path.resolve('test/fixtures/codex-blocked-attempt.jsonl'),'utf8')).split('\n').filter(Boolean).map(l=>JSON.parse(l));
+const [thread,blocked,started,answer,done]=real;
+const fixtureCli=path.resolve('test/fixtures/codex-replay-cli.mjs');
+const input:TurnInput={question:'Give one sentence on why plans beat guesses.',notes:[],deadlineMs:8000,maxOutputBytes:20000,cap:{unit:'tokens',amount:100000}};
+const dirs:string[]=[];afterEach(async()=>{for(const d of dirs.splice(0)){console.info('CLEANUP TARGET:',d);await rm(d,{recursive:true,force:true});}});
+async function run(events:any[]){const dir=await mkdtemp(path.join(os.tmpdir(),'aitiarch-codex-blocked-'));dirs.push(dir);const file=path.join(dir,'stream.jsonl');await writeFile(file,events.map(e=>JSON.stringify(e)).join('\n')+'\n');return runTurn(createCliAdapter({id:'codex',command:process.execPath,prefixArgs:[fixtureCli,file]}),input);}
+const errorWith=(message:string)=>({...blocked,item:{...blocked.item,message}});
+it('the captured stream really is the shape we allow-list',()=>{expect(blocked.item.message).toBe(CODEX_BLOCKED_MESSAGE);expect(isBlockedCodeAttempt(blocked)).toBe(true);expect(real.map(e=>e.type)).toEqual(['thread.started','item.completed','turn.started','item.completed','turn.completed']);});
+it('a blocked attempt followed by an answer passes, with the note and the count',async()=>{const r=await run(real);expect(r.status).toBe('ok');expect(r.answer).toContain('Plans beat guesses');expect(r.note).toBe(BLOCKED_NOTE);expect(r.blockedAttempts).toBe(1);expect(r.usage).toEqual([{unit:'tokens',amount:14395,afterTurn:true}]);});
+it('a run without any blocked attempt carries no note and no count',async()=>{const r=await run([thread,started,answer,done]);expect(r.status).toBe('ok');expect(r.note).toBeUndefined();expect(r.blockedAttempts).toBeUndefined();});
+it('a blocked attempt with a turn that completes without an answer fails',async()=>{const r=await run([thread,blocked,started,done]);expect(r.status).toBe('error');expect(r.code).toBe('blocked_no_answer');expect(r.answer).toBe('');});
+it('a blocked attempt with a stream that ends before any completion fails',async()=>{const r=await run([thread,blocked,started]);expect(r.status).toBe('error');expect(r.code).toBe('incomplete');});
+it('three blocked attempts still pass; the fourth fails the turn',async()=>{const three=await run([thread,blocked,blocked,blocked,started,answer,done]);expect(three.status).toBe('ok');expect(three.blockedAttempts).toBe(3);const four=await run([thread,blocked,blocked,blocked,blocked,started,answer,done]);expect(four.status).toBe('error');expect(four.code).toBe('blocked_attempt_limit');expect(four.blockedAttempts).toBe(4);expect(four.answer).toBe('');});
+it('a different Codex error still kills the turn as before',async()=>{const r=await run([thread,errorWith('Rate limit reached.'),started,answer,done]);expect(r.status).toBe('unavailable');expect(r.code).toBe('codex_runtime_error');expect(r.message).toContain('Rate limit');expect(r.blockedAttempts).toBeUndefined();});
+it('a changed message text still kills the turn',async()=>{for(const changed of [CODEX_BLOCKED_MESSAGE.replace('fail closed','fail open'),CODEX_BLOCKED_MESSAGE.replace(/\.$/,''),CODEX_BLOCKED_MESSAGE+' ',CODEX_BLOCKED_MESSAGE.toLowerCase()]){const r=await run([thread,errorWith(changed),started,answer,done]);expect(r.code).toBe('codex_runtime_error');expect(r.status).toBe('unavailable');}});
+it('the same text in another event type, or with extra keys, still kills the turn',async()=>{for(const odd of [{...blocked,type:'item.started'},{...blocked,extra:true},{...blocked,item:{...blocked.item,extra:1}},{type:'error',message:CODEX_BLOCKED_MESSAGE}]){const r=await run([thread,odd,started,answer,done]);expect(['codex_runtime_error','provider_error']).toContain(r.code);expect(r.status).not.toBe('ok');}});
+it.each(['command_execution','mcp_tool_call','file_change','apply_patch'])('a %s item still kills the turn, even after a blocked attempt',async kind=>{for(const state of ['item.started','item.completed']){const r=await run([thread,blocked,started,{type:state,item:{id:'item_9',type:kind,command:'synthetic',status:'completed',aggregated_output:'synthetic output'}},answer,done]);expect(r.status).toBe('error');expect(r.code).toBe('tool_attempt');expect(r.answer).toBe('');}});
+it('an unknown event after a blocked attempt still kills the turn',async()=>{const r=await run([thread,blocked,{type:'surprise'},started,answer,done]);expect(r.code).toBe('unknown_event');});
+it('the ledger accepts a blocked-attempt COUNT and nothing else new',()=>{const base={provider:'codex',status:'ok',usage:[],durationMs:5};expect(validCouncilAudit(base)).toBe(true);expect(validCouncilAudit({...base,blockedAttempts:1})).toBe(true);expect(validCouncilAudit({...base,blockedAttempts:10})).toBe(true);for(const bad of [0,11,1.5,-1,'1',null])expect(validCouncilAudit({...base,blockedAttempts:bad})).toBe(false);expect(validCouncilAudit({...base,blockedAttempts:1,note:'Code Mode'})).toBe(false);});
+it('a Council turn records the attempt count in the ledger and never its content',async()=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'aitiarch-codex-ledger-'));dirs.push(root);await writeFile(path.join(root,'plan.md'),'Launch in June.');
+ const store=await Store.open(root),ink=await InkStore.open(root),index=await SessionIndex.open(path.join(root,'private-index')),session=await index.create({mode:'chat',label:'Synthetic'}),ledger=new LedgerStore(root);
+ const adapter:TurnAdapter={id:'codex',label:'Codex',safetyLabel:'contained',async *startTurn(){yield {type:'blocked',count:1};yield {type:'complete',answer:'June.\n<claims>[{"source":"N1","quote":"Launch in June."}]</claims>'};}};
+ const service=new CouncilService({store,ink,index,ledger,adapters:[adapter]}),req={conversation:session.id,providers:['codex'],notes:['plan.md'],question:'What month?'};
+ const plan=await service.plan(req);await service.approve({...req,hash:plan.hash});const r=await service.run(req);
+ expect(r.results[0].status).toBe('ok');expect(r.results[0].note).toBe(BLOCKED_NOTE);
+ const events=(await ledger.read()).events.filter(e=>e.event==='council_turn');expect(events).toHaveLength(1);expect(events[0].council?.blockedAttempts).toBe(1);
+ const text=JSON.stringify(await ledger.read());expect(text).not.toContain('Code Mode');expect(text).not.toContain('Launch');expect(text).not.toContain('What month');
+});

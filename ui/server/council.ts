@@ -47,7 +47,7 @@ export class CouncilService {
    }
    const version=adapter?.status?.().version,key=b.conversation+':'+id;
    if(id==='codex'&&version&&version!=='unknown'&&!this.versionsLogged.has(key)){const saved=await appendLedger(this.o.ledger,{id:randomUUID(),inkId:b.conversation,requestId:randomUUID(),note:'',event:'cli_version',at:new Date().toISOString(),cli:{provider:'codex',session:b.conversation,version}});if(saved)this.versionsLogged.add(key);else ledgerUnavailable=true;}
-   const saved=await appendLedger(this.o.ledger,{id:randomUUID(),inkId:b.conversation,requestId:randomUUID(),note:'',event:'council_turn',at:new Date().toISOString(),council:{provider:id,status:result.status,usage:result.usage,durationMs:Math.round(result.durationMs)}});if(!saved)ledgerUnavailable=true;
+   const saved=await appendLedger(this.o.ledger,{id:randomUUID(),inkId:b.conversation,requestId:randomUUID(),note:'',event:'council_turn',at:new Date().toISOString(),council:{provider:id,status:result.status,usage:result.usage,durationMs:Math.round(result.durationMs),...(result.blockedAttempts?{blockedAttempts:result.blockedAttempts}:{})}});if(!saved)ledgerUnavailable=true;
    return result;
   }));
    // Single-response transport: publish only validated, redacted answers, never rejected partial output.
