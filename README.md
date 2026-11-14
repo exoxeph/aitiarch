@@ -109,9 +109,13 @@ One click puts the answer in the note as an AI-labelled callout. It is ordinary 
 
 <br>
 
-<img src="docs/media/diagram-blob.png" alt="Select a sentence, press Visualize, and a diagram appears in the margin" width="100%">
+<img src="docs/media/diagram-blob.png" alt="Select a sentence, press Visualize, and the diagram appears in the margin, with See it larger and Export SVG" width="100%">
 
-Select a sentence, press **Visualize**, review, send. The diagram appears in the margin; bring it into the note and it is saved beside it as an image that follows light and dark.
+<br>
+
+<img src="docs/media/diagram-in-note.png" alt="The same diagram added to the note as an image, under an AI-labelled callout" width="100%">
+
+Select a sentence, press **Visualize**, review, send. The diagram appears in the margin, ready to enlarge or export as SVG. Bring it into the note and it sits under an AI-labelled callout, saved beside the file as an image that follows light and dark.
 
 <br>
 
