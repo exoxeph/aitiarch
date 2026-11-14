@@ -8,6 +8,7 @@ import {SessionIndex} from '../server/harness/session-index.ts';
 import {InvestigateService,type InvestigateEvent} from '../server/harness/investigate.ts';
 import {projectFolderName,removeTranscript} from '../server/harness/transcripts.ts';
 import {LedgerStore,appendLedger} from '../server/ledger-store.ts';
+import {createElement} from 'react';import {renderToStaticMarkup} from 'react-dom/server';import {UsageView} from '../src/UsagePanel.tsx';
 
 // Investigation sessions against a synthetic CLI (no model): a confirmed plan before the first turn, the copy as the only folder it can read,
 // every event checked (tools, paths, turns), file claims checked against the real repo, a tripwire around each run, and Delete conversation.
@@ -30,6 +31,14 @@ async function setup(){
 }
 async function confirmed(svc:InvestigateService,repo:string){const s=await svc.create('Login code',repo),p=await svc.plan(s.id);await svc.confirm(s.id,p.planHash);return {s,p};}
 
+it('Investigate cost cap stops, clears approval and reports cost despite an always-failing ledger',async()=>{
+ const t=await setup(),svc=t.service('inv-budget'),s=await svc.create('Synthetic',t.repo),plan=await svc.plan(s.id,0.25);await svc.confirm(s.id,plan.planHash);
+ const write=vi.spyOn(LedgerStore.prototype,'append').mockRejectedValue(new Error('ledger unavailable')),warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+ try{const r=await t.run(svc,s.id);expect(r.error).toMatchObject({code:'budget'});expect(r.complete).toBeUndefined();
+  expect((await t.calls())[0].args).toContain('0.25');await expect(svc.send(s.id,'Again',()=>{})).rejects.toThrow('plan_required');expect(await t.calls()).toHaveLength(1);
+  const usage=await svc.usage();expect(usage).toMatchObject({turns:1,costUsd:0.5});expect(renderToStaticMarkup(createElement(UsageView,{summary:{since:new Date().toISOString(),hourlyCap:2,providers:[],investigate:usage}}))).toContain('<td>$0.50</td>');expect(warn).toHaveBeenCalled();
+ }finally{write.mockRestore();warn.mockRestore();}
+});
 it('Investigate reply survives a taken-over ledger lock with visible retry and later delivery',async()=>{
  const t=await setup(),svc=t.service(),{s}=await confirmed(svc,t.repo),write=vi.spyOn(LedgerStore.prototype,'append').mockRejectedValue(new Error('The ledger lock was taken over; nothing was written.')),log=vi.spyOn(console,'warn').mockImplementation(()=>{});
  try{const r=await t.run(svc,s.id);expect(r.error).toBeUndefined();expect(r.complete).toBeDefined();expect(write).toHaveBeenCalledTimes(2);expect(log).toHaveBeenCalledTimes(2);}

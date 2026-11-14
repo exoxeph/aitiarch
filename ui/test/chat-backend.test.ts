@@ -34,6 +34,19 @@ it('ledger failure at chat start, completion and context reads never loses the r
   expect(events.at(-1)?.type).toBe('complete');expect((await f.chats.read(f.input.path)).messages).toHaveLength(1);expect(write.mock.calls.length).toBeGreaterThanOrEqual(8);expect(log).toHaveBeenCalled();
  }finally{write.mockRestore();log.mockRestore();await f.runtime.close();}
 });
+it('token preflight and streaming budget gate remain active when every ledger append fails',async()=>{
+ const f=await fixture(),write=vi.spyOn(LedgerStore.prototype,'append').mockRejectedValue(new Error('ledger unavailable')),warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+ try{
+  await f.runtime.settings(f.input.path,{tokenBudget:1000,rollingRequestCap:12});const small=await f.runtime.review(f.input);
+  await expect(f.runtime.send({reviewId:small.reviewId,confirmed:true},()=>{})).rejects.toMatchObject({code:'budget_reached'});expect(f.provider.requests).toHaveLength(0);
+  await f.runtime.settings(f.input.path,{tokenBudget:5000,rollingRequestCap:12});
+  const review=await f.runtime.review({...f.input,id:'budget-stream'}),events:ChatEvent[]=[];
+  const original=f.provider.invoke.bind(f.provider);f.provider.invoke=async(request,options)=>{options?.onTextDelta?.('a'.repeat(30000));return original(request,options);};
+  await f.runtime.send({reviewId:review.reviewId,confirmed:true},e=>events.push(e));
+  expect(events.at(-1)).toMatchObject({type:'error',code:'budget_reached',cause:'budget_gate',budget:{budget:5000}});expect(events.some(e=>e.type==='complete')).toBe(false);
+  expect(f.runtime.usage()[0]).toMatchObject({calls:1,unreportedCalls:1,reserved:0});expect(f.runtime.usage()[0].spent).toBeGreaterThan(0);expect(warn).toHaveBeenCalled();
+ }finally{write.mockRestore();warn.mockRestore();await f.runtime.close();}
+});
 it('session sources force preview on every send and keep replies, evidence and later history out of repository storage',async()=>{
  const f=await fixture(),sessions=path.join(f.root,'sessions-fixture');await mkdir(sessions);
  await writeFile(path.join(sessions,'synthetic.jsonl'),[{type:'user',cwd:f.root,message:{role:'user',content:'Synthetic session context'}},{type:'assistant',cwd:f.root,message:{role:'assistant',stop_reason:'end_turn',content:[{type:'text',text:'Synthetic final session reply'}]}}].map(x=>JSON.stringify(x)).join('\n')+'\n');

@@ -55,6 +55,15 @@ async function turn(runtime:ChatRuntime,input:ChatInput){
   reads:events.filter(e=>e.type==='diagram_read') as Extract<ChatEvent,{type:'diagram_read'}>[]};
 }
 const ask=(session:string,id:string,question:string,path='plan.md'):ChatInput=>({id,path,question,context:[{moduleId:'this-note',ids:['note']}],session});
+it('diagram cost cap and named-conversation token budget do not depend on ledger delivery',async()=>{
+ const p=await project(),{index,runtime}=await p.open('dg-budget'),s=await index.create({mode:'chat',label:'Synthetic cap',note:'plan.md'}),write=vi.spyOn(LedgerStore.prototype,'append').mockRejectedValue(new Error('ledger unavailable')),warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+ try{const r=await turn(runtime,ask(s.id,'cap-ledger','Look'));expect(r.error).toMatchObject({code:'provider_failed',fence:'budget',costUsd:0.52,capUsd:DIAGRAM_TURN_CAP_USD});expect(r.complete).toBeUndefined();
+  expect(at((await p.calls())[0].args,'--max-budget-usd')).toBe('0.50');
+  const row=runtime.usage().find(u=>u.session===s.id)!;expect(row.calls).toBe(1);expect(row.spent).toBeGreaterThan(0);
+  await runtime.settings('plan.md',{tokenBudget:1000,rollingRequestCap:12},s.id);const review=await runtime.review(ask(s.id,'next-cap','Again'));
+  await expect(runtime.send({reviewId:review.reviewId,confirmed:true},()=>{})).rejects.toMatchObject({code:'budget_reached'});expect(await p.calls()).toHaveLength(1);expect(warn).toHaveBeenCalled();
+ }finally{write.mockRestore();warn.mockRestore();await runtime.close();}
+});
 it('diagram Read and conversation CLI audit failures never discard a validated conversation reply',async()=>{
  const p=await project(),{index,runtime}=await p.open('dg-read2',true),s=await index.create({mode:'chat',label:'Synthetic',note:'plan.md'}),write=vi.spyOn(LedgerStore.prototype,'append').mockRejectedValue(new Error('The ledger lock was taken over; nothing was written.')),log=vi.spyOn(console,'warn').mockImplementation(()=>{});
  try{const r=await turn(runtime,ask(s.id,'audit-failure','Compare the first two diagrams'));expect(r.error).toBeUndefined();expect(r.complete).toBeDefined();expect(r.reads).toHaveLength(2);expect(log).toHaveBeenCalled();}

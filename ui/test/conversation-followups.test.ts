@@ -43,6 +43,17 @@ async function server(scenarioFile?:string){
  return {nb,repo,harness,home,put,get,calls,conversation,turn,close:async()=>{watcher.stop();await app.close();}};
 }
 
+it('conversation grant cap is enforced and visible after every audit append fails',async()=>{
+ const scenario=path.join(await temp('aitiarch-cap-scenario-'),'scenario.txt');await writeFile(scenario,'inv-budget');const s=await server(scenario),c=await s.conversation();
+ const write=vi.spyOn(LedgerStore.prototype,'append').mockRejectedValue(new Error('ledger unavailable')),warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+ try{const input={conversationId:c.id,path:'plan.md',attachments:{repo:true}},plan=await (await s.put('/api/conversation/plan',{...input,budgetUsd:0.25})).json();
+  expect((await s.put('/api/conversation/approve',{...input,budgetUsd:0.25,hash:plan.hash})).status).toBe(200);
+  const r=await s.put('/api/conversation/turn',{...input,id:'cap-turn',text:'Synthetic question'}),body=await r.text();expect(body).toContain('"code":"budget"');expect(body).not.toContain('"type":"complete"');
+  const calls=await s.calls(),args=calls[0].args;expect(args[args.indexOf('--max-budget-usd')+1]).toBe('0.25');
+  const blocked=await s.put('/api/conversation/turn',{...input,id:'blocked',text:'Again'});expect(blocked.status).toBe(409);expect(await blocked.text()).toContain('plan_required');expect(await s.calls()).toHaveLength(1);
+  const usage=await (await s.get('/api/usage')).json();expect(usage.investigate).toMatchObject({turns:1,costUsd:0.5});expect(warn).toHaveBeenCalled();
+ }finally{write.mockRestore();warn.mockRestore();await s.close();}
+});
 it('conversation turn audit failures are visible and queued while the complete reply survives',async()=>{
  const s=await server(),c=await s.conversation(),write=vi.spyOn(LedgerStore.prototype,'append').mockRejectedValue(new Error('ledger unavailable')),log=vi.spyOn(console,'warn').mockImplementation(()=>{});
  try{const events=await s.turn(c.id,{repo:true});expect(events).toContain('"type":"complete"');expect(log).toHaveBeenCalled();}
