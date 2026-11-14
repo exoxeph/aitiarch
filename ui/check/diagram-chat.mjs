@@ -73,7 +73,10 @@ try {
   const text = async (loc) => (await loc.innerText()).replace(/\s+/g, ' ').trim();
   const openNote = async (file) => { for (let attempt = 0; ; attempt++) { await page.keyboard.press('Control+k'); const palette = page.getByRole('dialog', { name: 'Command palette' }); await palette.waitFor(); const search = palette.getByRole('textbox'); await search.fill('Jump to note: ' + file); await search.press('Enter'); try { await page.waitForFunction((f) => window.__aitiarch?.[f] && document.querySelector('.tab.on')?.textContent?.toLowerCase().includes(f.replace('.md', '')), file, { timeout: 6000 }); return; } catch (e) { if (attempt >= 2) throw e; await page.keyboard.press('Escape'); } } };
   const composer = () => panel.getByRole('textbox', { name: 'Message Aitiarch AI' });
-  const submit = async (question) => { await page.waitForFunction(() => { const t = document.querySelector('.chat-composer textarea'); return t && !t.disabled; }); await composer().fill(question); await composer().press('Enter'); const review = panel.getByRole('region', { name: 'What will be sent' }); await review.waitFor(); return review; };
+  let cards = 0; const submit = async (question) => { await page.waitForFunction(() => { const t = document.querySelector('.chat-composer textarea'); return t && !t.disabled; }); await composer().fill(question); await composer().press('Enter'); const plan = panel.getByRole('group', { name: 'Plan for this conversation' }), review = panel.getByRole('region', { name: 'What will be sent' });
+    // a conversation opens diagrams only after its plan card is approved: the card comes first (once per conversation and note), then the review
+    await page.waitForFunction(() => document.querySelector('#chat-panel .chat-plan') || document.querySelector('#chat-panel .chat-review'));
+    if (await plan.count()) { cards++; await plan.getByRole('button', { name: 'Approve and send' }).click(); } await review.waitFor(); return review; };
   const settled = (n) => page.waitForFunction((k) => document.querySelectorAll('#chat-panel .chat-turn[data-status="complete"], #chat-panel .chat-turn[data-status="error"]').length > k, n);
   const done = () => page.evaluate(() => document.querySelectorAll('#chat-panel .chat-turn[data-status="complete"], #chat-panel .chat-turn[data-status="error"]').length);
   const ask = async (scenario, question) => { await writeFile(scenarioFile, scenario); const before = await done(), review = await submit(question); await review.getByRole('button', { name: 'Send', exact: true }).click(); await settled(before); return panel.locator('.chat-turn').last(); };
@@ -99,19 +102,9 @@ try {
   assert.equal(await panel.locator('[data-chip^="diagram-"]').count(), 0, 'a one-off chat has no diagram chips');
   await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click(); await page.waitForFunction(() => /Conversation 1/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
   assert.equal(await panel.locator('[data-chip^="diagram-"]').count(), 0, 'a conversation has no diagram chips either');
-  // A conversation opens diagrams only after its plan card is approved (the server refuses the turn otherwise). The page will show that card; here the approval is made through the one conversation API.
-  const approveAll = () => page.evaluate(async () => {
-    const headers = { 'Content-Type': 'application/json', 'X-Aitiarch': '1' }, out = [];
-    for (const s of (await (await fetch('/api/harness/sessions?mode=chat&all=1')).json()).sessions) {
-      const body = { conversationId: s.id, path: 'plan.md', attachments: {} }, plan = await (await fetch('/api/conversation/plan', { method: 'PUT', headers, body: JSON.stringify(body) })).json();
-      out.push({ status: (await fetch('/api/conversation/approve', { method: 'PUT', headers, body: JSON.stringify({ ...body, hash: plan.hash }) })).status, profile: plan.profile });
-    }
-    return out;
-  });
-  assert.deepEqual(await approveAll(), [{ status: 200, profile: 'diagrams' }], 'the card for a note with diagrams is approved through the one conversation API');
 
   // 3. The review card: which diagrams Claude may open, the cap, the one withheld and why, and the editor line.
-  let review = await submit('Which box feeds which in the diagram?');
+  let review = await submit('Which box feeds which in the diagram?'); assert.equal(cards, 1, 'the plan card came first, once');
   assert.equal(await text(review.locator('.chat-review-diagrams')), "Claude may open these diagrams: D1 'alpha-skill', D2 'bravo-skill', D3 'charlie-skill' (up to $0.50). It opens one only when your question needs it.");
   assert.equal(await text(review.locator('.chat-review-block')), "D4 'broken-skill' withheld: no picture yet.");
   assert.equal(await review.locator('img').count(), 0, 'no thumbnails');
@@ -158,8 +151,7 @@ try {
   const ready = async () => { for (let i = 0; i < 100; i++) { const ok = await Promise.all(three.slice(0, 3).map((d) => info(d.base))); if (ok.every((m) => m && m.width <= 1600)) return ok; await page.waitForTimeout(200); } throw new Error('the pictures were not made'); };
   const made3 = await ready(); assert.deepEqual(made3.map((m) => m.width), [1000, 1000, 1000], 'the missing picture was made and the oversize one replaced');
   await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click(); await page.waitForFunction(() => /Conversation 2/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
-  await approveAll(); // another conversation, another card
-  review = await submit('Explain the diagrams');
+  review = await submit('Explain the diagrams'); assert.equal(cards, 2, 'another conversation, another note: the card again');
   assert.equal(await text(review.locator('.chat-review-diagrams')), "Claude may open these diagrams: D1 'Diagram 1 under Three', D2 'no-picture', D3 'oversize' (up to $0.50). It opens one only when your question needs it.");
   assert.deepEqual(await review.locator('.chat-review-block[data-status="withheld"]').allInnerTexts(), ["D4 'keys' withheld: looks like a secret (it holds text that looks like a secret)."]);
   assert.match(await text(review.locator('.chat-review-manifest')), /Diagrams: D1 'Diagram 1 under Three', D2 'no-picture', D3 'oversize'\. D4 'keys' withheld: looks like a secret/);

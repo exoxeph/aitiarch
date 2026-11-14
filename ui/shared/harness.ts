@@ -41,7 +41,7 @@ export function validSession(v:unknown):v is HarnessSession{
 /** Only the shape: whether a grant belongs to this conversation and project is decided when it is used (grantFor), so a mis-bound record is refused, not lost. */
 export function validGrantShape(v:unknown):v is Grant{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;const g=v as Grant,strings=(l:unknown,max:number)=>Array.isArray(l)&&l.length<=max&&l.every(x=>typeof x==='string'&&x.length<=400);
- return g.v===1&&typeof g.project==='string'&&g.project.length<=100&&validSessionId(g.session)&&isProfile(g.profile)&&strings(g.files,20)&&typeof g.repo==='boolean'&&typeof g.diagrams==='boolean'
+ return g.v===1&&typeof g.project==='string'&&g.project.length<=100&&validSessionId(g.session)&&isProfile(g.profile)&&strings(g.files,20)&&typeof g.repo==='boolean'&&typeof g.diagrams==='boolean'&&(g.diagramNote===undefined||typeof g.diagramNote==='string'&&g.diagramNote.length<=400)
   &&typeof g.budgetUsd==='number'&&Number.isFinite(g.budgetUsd)&&g.budgetUsd>0&&g.budgetUsd<=5&&typeof g.confirmed==='string'&&/^[0-9a-f]{64}$/.test(g.confirmed);
 }
 export function validCliShape(v:unknown):v is CliSession&{cwd?:string}{

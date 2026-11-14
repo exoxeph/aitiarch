@@ -17,6 +17,8 @@ export interface Turn {id:string;question:string|null;status:TurnStatus;text:str
  opened?:{n:number;title:string;/** Set when it could not be opened (withheld): the reason. */why?:string}[];
  error?:{code:ChatErrorCode;rule?:string;reason?:FailureReason;errorName?:string;cause?:AbortCause;budget?:BudgetDetail;fence?:FenceCode;costUsd?:number;capUsd?:number}}
 
+/** The rows a saved reply shows above it: the diagrams it opened, then the ones it asked for and could not open (with the reason). */
+export const openedRows=(m:Pick<ChatMessage,'diagramReads'|'diagramMisses'>):NonNullable<Turn['opened']>=>[...(m.diagramReads??[]).map(r=>({n:r.n,title:r.title})),...(m.diagramMisses??[]).map(r=>({n:r.n,title:r.title,why:r.why}))];
 export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
  if(!turns.some(t=>t.id===event.id))return [...turns];
  return turns.map(t=>{
@@ -26,14 +28,14 @@ export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
    case 'delta':return {...t,status:'streaming',text:t.text+event.text};
    case 'diagram_read':return {...t,opened:[...(t.opened??[]),{n:event.n,title:event.title}]};
    case 'diagram_unavailable':return {...t,opened:[...(t.opened??[]),{n:event.n,title:event.title,why:event.why}]};
-   case 'complete':return {...t,status:'complete',text:event.message.body,message:event.message,...(event.message.diagramReads||t.opened?.some(o=>o.why)?{opened:[...(event.message.diagramReads??[]).map(r=>({n:r.n,title:r.title})),...(t.opened??[]).filter(o=>o.why)]}:{})}; // what it could not open stays on the trail too
+   case 'complete':{const rows=t.opened?.length?t.opened:openedRows(event.message);return {...t,status:'complete',text:event.message.body,message:event.message,...(rows.length?{opened:rows}:{})};} // the live rows are in the order they happened; a reply loaded from disk has them from what was saveds on the trail too
    case 'error':{const {message:_dropped,...rest}=t;return {...rest,status:'error',text:'',error:{code:event.code,...(event.rule?{rule:event.rule}:{}),...(event.reason?{reason:event.reason}:{}),...(event.errorName?{errorName:event.errorName}:{}),...(event.cause?{cause:event.cause}:{}),...(event.budget?{budget:event.budget}:{}),...(isFenceCode(event.fence)?{fence:event.fence}:{}),...(typeof event.costUsd==='number'?{costUsd:event.costUsd}:{}),...(typeof event.capUsd==='number'?{capUsd:event.capUsd}:{})}};} // a partial reply is never kept; the rows of what it opened stay
   }
  });
 }
 /** Accepted messages come back from the server without their questions; this session may still remember them. */
 export const fromStored=(messages:readonly ChatMessage[],questions:ReadonlyMap<string,string>):Turn[]=>
- messages.map(m=>({id:m.id,question:questions.get(m.id)??null,status:'complete' as const,text:m.body,message:m,...(m.diagramReads?{opened:m.diagramReads.map(r=>({n:r.n,title:r.title}))}:{})}));
+ messages.map(m=>({id:m.id,question:questions.get(m.id)??null,status:'complete' as const,text:m.body,message:m,...(openedRows(m).length?{opened:openedRows(m)}:{})}));
 
 const EVENT_TYPES=new Set(['start','delta','diagram_read','diagram_unavailable','complete','error']);
 /** Splits a server-sent-events buffer into whole chat events plus the unfinished tail. Malformed or unknown frames are dropped. */

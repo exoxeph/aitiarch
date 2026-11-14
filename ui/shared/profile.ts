@@ -46,18 +46,20 @@ export function deriveProfile(a:Pick<Attachments,'files'|'repo'>,noteHasDiagrams
 }
 
 /** What a conversation was approved for on its plan card, and for which conversation and project. `confirmed` is a hash of every other field. */
-export interface Grant {v:1;project:string;session:string;profile:Profile;files:string[];repo:boolean;diagrams:boolean;budgetUsd:number;confirmed:string}
+export interface Grant {v:1;project:string;session:string;profile:Profile;files:string[];repo:boolean;diagrams:boolean;
+ /** The note whose diagrams diagrams was approved for. An approval for the diagrams of one note never covers another note's. Absent on an older grant: it covers no diagrams until the card is approved again. */
+ diagramNote?:string;budgetUsd:number;confirmed:string}
 /** What a turn needs. */
-export interface Need {profile:Profile;files:string[];repo:boolean;diagrams:boolean}
-export const needOf=(a:Pick<Attachments,'files'|'repo'>,noteHasDiagrams:boolean):Need=>{const profile=deriveProfile(a,noteHasDiagrams);return {profile,files:[...a.files],repo:a.repo,diagrams:profile==='diagrams'};};
+export interface Need {profile:Profile;files:string[];repo:boolean;diagrams:boolean;/** The note the diagrams are of (the note the turn is about); empty when the turn opens none. */diagramNote:string}
+export const needOf=(a:Pick<Attachments,'files'|'repo'>,noteHasDiagrams:boolean,diagramNote=''):Need=>{const profile=deriveProfile(a,noteHasDiagrams),diagrams=profile==='diagrams';return {profile,files:[...a.files],repo:a.repo,diagrams,diagramNote:diagrams?diagramNote:''};};
 
-/** Does the grant cover the need? Never more than was shown and approved: a higher profile, a file not on the card, the repo, or diagrams not granted all say no. No grant is notes only. */
-export function covers(grant:Pick<Grant,'profile'|'files'|'repo'|'diagrams'>|null,need:Need):boolean{
+/** Does the grant cover the need? Never more than was shown and approved: a higher profile, a file not on the card, the repo, or diagrams not granted (or granted for another note) all say no. No grant is notes only. */
+export function covers(grant:Pick<Grant,'profile'|'files'|'repo'|'diagrams'|'diagramNote'>|null,need:Need):boolean{
  const g=grant??{profile:'notes' as Profile,files:[],repo:false,diagrams:false};
  if(PROFILE_RANK[need.profile]>PROFILE_RANK[g.profile])return false;
  if(need.repo&&!g.repo)return false;
  if(!g.repo&&need.files.some(f=>!g.files.includes(f)))return false; // a repo grant reaches any file that passes the path rules; a files grant only its own
- if(need.diagrams&&!g.diagrams)return false;
+ if(need.diagrams&&(!g.diagrams||!need.diagramNote||(g as Pick<Grant,'diagramNote'>).diagramNote!==need.diagramNote))return false; // the diagrams of THIS note, and only if the grant names this note
  return true;
 }
 

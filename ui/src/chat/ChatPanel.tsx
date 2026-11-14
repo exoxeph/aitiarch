@@ -24,7 +24,7 @@ import {LiveMarkdown} from '../ink/LiveMarkdown.tsx';
 import {ChatSessions} from './ChatSessions.tsx';
 import {CONTINUE_QUESTION,InvestigateTurnView,money} from './InvestigateView.tsx';
 import {PlanCard} from './PlanCard.tsx';
-import {FILE_REFUSAL_TEXT,addChip,attachmentsOf,autoName,blockedByRefusals,chipKey,isLegacyInvestigation,isPlaceholder,markRefused,needsCard,refusalText,routeOf,waitText,type AttachmentChip,type Route} from './conversation-model.ts';
+import {FILE_REFUSAL_TEXT,addChip,chipsFromGrant,attachmentsOf,autoName,blockedByRefusals,chipKey,isLegacyInvestigation,isPlaceholder,markRefused,needsCard,refusalText,routeOf,waitText,type AttachmentChip,type Route} from './conversation-model.ts';
 import {applyInvestigate,formatElapsed,fromStoredTurn,startTurn,toolCalls} from './investigate-model.ts';
 import type {InvestigateEvent} from '../../server/harness/investigate.ts';
 import type {ConversationPlan} from '../../server/harness/conversation.ts';
@@ -142,6 +142,13 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
   if(conversation&&openPath)setSwitched({from});},[openPath]);
  // An investigation made before the single box always reads the repo: its repo chip is there and cannot be removed. Leaving it takes that chip away.
  useEffect(()=>{setAttach(list=>{const rest=list.filter(c=>!(c.kind==='repo'&&c.fixed));return isLegacyInvestigation(current)&&current?.id===conversation?[...rest.filter(c=>c.kind!=='repo'),{kind:'repo',fixed:true}]:rest;});},[current?.id,current?.mode,conversation]);
+ // The chips of a conversation come back after a reload (or when it is picked) from what the server says it was approved for: the files, or the repo. Display only: a chip taken off is taken off the next
+ // message, never off the approval (nothing is sent to the server), and a chip the person already picked for this message is theirs and stays. Another conversation's restored chips go.
+ useEffect(()=>{
+  setAttach(list=>list.filter(c=>!(c.kind!=='note'&&c.granted)));
+  if(!conversation)return;let off=false;
+  api.conversationGrant(conversation).then(r=>{if(off)return;const restored=chipsFromGrant(r.grant);setAttach(list=>list.some(c=>c.kind==='file'||c.kind==='repo')?list:[...list,...restored]);}).catch(()=>{});
+  return()=>{off=true;};},[conversation]);
  useEffect(()=>{let off=false;api.investigateRepo().then(r=>{if(!off)setRepo(r.repo);}).catch(()=>{});return()=>{off=true;};},[]);
  // What Investigate has used in this notebook, from the ledger: its own line, never part of the chat budget above it. Read again after each turn.
  const [inv,setInv]=useState<InvestigateUsage|null>(null);
@@ -223,7 +230,10 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  };
  /** Notes sent with a turn: the ones picked with "@" and the ones chosen in the Constellation. */
  const noteIdsOf=(a:Attachments)=>[...new Set([...otherNotes,...a.notes])].filter(n=>n!==openPath);
- const body=(a:Attachments):ConversationBody=>({conversationId:conversation,path:path??'',attachments:{...a,notes:noteIdsOf(a)}});
+ /** What every conversation call sends: the conversation's own note in path, and the note OPEN NOW in openNote: the server derives the diagrams of the turn from that one (and checks it), and an approval for diagrams is for it only. */
+ const body=(a:Attachments):ConversationBody=>({conversationId:conversation,path:path??'',...(openPath?{openNote:openPath}:{}),attachments:{...a,notes:noteIdsOf(a)}});
+ /** The editor line of a turn: about the open note (a line about another note is never sent). */
+ const infoFor=(live:EditorContext|null,hasSelection:boolean)=>live&&live.note.path===openPath?editorInfo(live,hasSelection):openPath?{path:openPath,title:noteTitle(openPath)}:undefined;
  /** Asks the server for the card and shows it. A refusal is said in words; nothing is sent. */
  const showPlan=async(p:Omit<PendingPlan,'plan'>&{plan?:ConversationPlan},budgetUsd?:number)=>{
   try{const plan=p.plan??await api.conversationPlan({...body(p.attachments),...(budgetUsd!==undefined?{budgetUsd}:{})});setAttach(a=>markRefused(a,plan.files));setPlanCard({...p,plan});setBusy(false);return plan;}
@@ -232,7 +242,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  /** One conversation turn through the one conversation API. The `start` event says which shape it streams in: the chat shape, or the Investigate trail. */
  const runConversation=async(id:string,question:string,a:Attachments)=>{
   setBusy(true);sentAt.current=Date.now();const controller=new AbortController();abort.current=controller;stickLog.follow();startStreaming(id,question);setSwitched(null);
-  const live=editor.get(),{context,selection}=buildContext(chips,live?.selection?.text??''),info=live?editorInfo(live,!!selection):openPath?{path:openPath,title:noteTitle(openPath)}:undefined;
+  const live=editor.get(),{context,selection}=buildContext(chips,live?.selection?.text??''),info=infoFor(live,!!selection);
   let profile:Profile|null=null,finished=false;
   try{
    await streamConversation({...body(a),id,text:question,context:[...context,...sessionChoices(pickedSessions)],...(selection?{selection}:{}),...(info?{editor:info}:{})},event=>{
@@ -282,14 +292,14 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
 
   questions.set(id,question);setTurns(t=>[...t,{id,question,status:'review',text:''}]);if(again===undefined)setDraft('');
   if(route==='investigate'){
-   const b={conversationId:conv,path,attachments:{...a,notes:noteIdsOf(a)}};
+   const b={conversationId:conv,path,...(openPath?{openNote:openPath}:{}),attachments:{...a,notes:noteIdsOf(a)}};
    let plan:ConversationPlan;try{plan=await api.conversationPlan(b);}catch(e){setNotice(e instanceof ApiError?refusalText(e.code):'The plan could not be prepared. Nothing was sent.');setTurns(t=>t.filter(x=>x.id!==id));setDraft(question);setBusy(false);return;}
    const marked=markRefused(attach,plan.files);setAttach(marked);setCapUsd(plan.budgetUsd);
    if(needsCard({route,plan})||blockedByRefusals(marked)){setPlanCard({plan,id,question,route,attachments:a});setBusy(false);return;}
    await runConversation(id,question,a);return;
   }
   const live=editor.get(),{context,selection}=buildContext(chips,live?.selection?.text??'');
-  const info=live?editorInfo(live,!!selection):openPath?{path:openPath,title:noteTitle(openPath)}:undefined;
+  const info=infoFor(live,!!selection);
   try{
    const notes=noteIdsOf(a),fromMap=notes.length?[{moduleId:'other-notes' as const,ids:notes}]:[];
    const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...fromMap,...sessionChoices(pickedSessions)],...(selection?{selection}:{}),...(conv?{session:conv}:{}),...(info?{editor:info}:{})});
@@ -398,7 +408,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
     {ec?.selection&&sel&&<button type="button" className="chat-send-chip" data-chip="selection" aria-pressed={sel.on} aria-label={sel.on?`Remove the selection (${linesText(ec.selection.fromLine,ec.selection.toLine)}) from the next message`:`Add the selection (${linesText(ec.selection.fromLine,ec.selection.toLine)}) back to the next message`} onClick={()=>setChips(l=>toggleChip(l,'selection'))}><span>{sel.on?selectionChipText(ec.selection):`Selection · ${linesText(ec.selection.fromLine,ec.selection.toLine)} · off`}</span><span aria-hidden="true">{sel.on?'×':'+'}</span></button>}
    </>;})()}
    {attach.map(c=>{const label=c.kind==='repo'?'The repo':c.kind==='note'?noteTitle(c.path):c.path,refused=c.kind==='file'&&c.refused?FILE_REFUSAL_TEXT[c.refused]:'';
-    return <span key={chipKey(c)} className="chat-send-chip chat-attach" data-chip={c.kind==='repo'?'repo':`${c.kind}:${c.path}`} data-refused={refused?'true':undefined}>
+    return <span key={chipKey(c)} className="chat-send-chip chat-attach" data-chip={c.kind==='repo'?'repo':`${c.kind}:${c.path}`} data-refused={refused?'true':undefined} data-granted={c.kind!=='note'&&c.granted?'true':undefined}>
      <span>{c.kind==='file'?'File · ':c.kind==='note'?'Note · ':''}{label}{refused?<span className="chat-attach-why"> · refused: {refused}</span>:null}{c.kind==='repo'&&c.fixed?<span className="chat-attach-why"> · an investigation always reads it</span>:null}</span>
      {!(c.kind==='repo'&&c.fixed)&&<button type="button" aria-label={`Remove ${label} from the next message`} onClick={()=>setAttach(a=>a.filter(x=>chipKey(x)!==chipKey(c)))}>×</button>}</span>;})}
    {switched&&<span className="chat-send-chip chat-switched" data-chip="switched" role="status"><span>{noteChangedText(switched.from,openTitle)}</span><button type="button" aria-label="Dismiss this notice" onClick={()=>setSwitched(null)}>×</button></span>}

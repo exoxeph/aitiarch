@@ -158,9 +158,9 @@ try {
   assert.deepEqual(questions, ['How does login work?', 'Something slow', 'Look everywhere', 'Please continue where you stopped.', 'Explain it', 'Read everything', 'Please continue where you stopped.', 'Anything']);
   assert(path.relative(notebook, harness).startsWith('..'), 'the record is outside the notebook');
   await scenario('inv-ok');
-  // Chips belong to the draft, so after a reload the repo is picked again with "@" (the folder is remembered); the conversation's approval still covers it: no card.
-  assert.equal(await panel.locator('[data-chip="repo"]').count(), 0, 'no chip carried over a reload');
-  await composer.fill('@rep'); await panel.locator('.chat-at [data-at="repo"]').waitFor(); assert((await panel.locator('.chat-at [data-at="repo"]').innerText()).includes('The repo (' + repo + ')'), 'the folder is remembered'); await page.keyboard.press('Enter'); await panel.locator('[data-chip="repo"]').waitFor();
+  // After a reload the chip of the repo is back, restored from what the server says the conversation was approved for (display only); the approval still covers it: no card.
+  await panel.locator('[data-chip="repo"]').waitFor(); assert.equal(await panel.locator('[data-chip="repo"]').getAttribute('data-granted'), 'true', 'the repo chip is restored from the approval');
+  assert.equal(await panel.locator('.chat-attach').count(), 1, 'and nothing more than the approval covers');
 
   // Narrow width: nothing overflows sideways.
   await page.setViewportSize({ width: 420, height: 860 });

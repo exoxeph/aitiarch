@@ -30,7 +30,14 @@ describe('a grant covers a need only up to what the card showed',()=>{
   expect(covers(g,needOf({files:['a.ts','b.ts'],repo:false},false))).toBe(false); // a file the card did not list
   expect(covers(g,needOf({files:['a.ts'],repo:true},false))).toBe(false); // the repo was not granted
   expect(covers(grant({profile:'diagrams'}),needOf({files:[],repo:false},true))).toBe(false); // diagrams not granted
-  expect(covers(grant({profile:'diagrams',diagrams:true}),needOf({files:[],repo:false},true))).toBe(true);
+  expect(covers(grant({profile:'diagrams',diagrams:true,diagramNote:'a.md'}),needOf({files:[],repo:false},true,'a.md'))).toBe(true);
+  // the diagrams of ONE note: another note's, an unbound (older) grant and a need with no note are all refused
+  expect(covers(grant({profile:'diagrams',diagrams:true,diagramNote:'a.md'}),needOf({files:[],repo:false},true,'b.md'))).toBe(false);
+  expect(covers(grant({profile:'diagrams',diagrams:true}),needOf({files:[],repo:false},true,'a.md'))).toBe(false);
+  expect(covers(grant({profile:'diagrams',diagrams:true,diagramNote:'a.md'}),needOf({files:[],repo:false},true))).toBe(false);
+  expect(covers(grant({profile:'investigate',repo:true,diagrams:false}),needOf({files:[],repo:false},true,'a.md'))).toBe(false);
+  expect(covers(grant({profile:'diagrams',diagrams:true,diagramNote:''}),needOf({files:[],repo:false},true))).toBe(false); // an empty note names nothing: never covers
+  expect(needOf({files:[],repo:false},true,'a.md')).toMatchObject({diagrams:true,diagramNote:'a.md'});expect(needOf({files:[],repo:true},true,'a.md')).toMatchObject({diagrams:false,diagramNote:''});expect(needOf({files:[],repo:false},false,'a.md')).toMatchObject({diagrams:false,diagramNote:''});
   expect(covers(grant({profile:'notes'}),needOf({files:['a.ts'],repo:false},false))).toBe(false); // a lower profile never covers a higher one
  });
  it('a repo grant reaches any file; a lower need is always covered',()=>{

@@ -116,6 +116,7 @@ try {
   await openNote('flow.md'); await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click(); await page.waitForFunction(() => /Conversation 2/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
   await scenario('dg-read'); t = await ask('What does the diagram show?', { expectCard: true });
   assert.equal(await t.card.getAttribute('data-profile'), 'diagrams'); assert.match(await text(t.card), /Before Claude opens diagrams/); assert.match(await text(t.card), /open the pictures of this note's diagrams with Read/);
+  assert.equal(await text(t.card.locator('[data-plan="diagrams"]')), "Claude may open this diagram: D1 'pipeline' (up to $0.50). It opens one only when your question needs it.", 'the card lists the diagrams of the open note, as the review does');
   await panel.screenshot({ path: path.join(output, 'box-diagram-card.png') });
   let before4 = await done(); await t.card.getByRole('button', { name: 'Approve and send' }).click();
   if (await t.review.count()) await t.review.getByRole('button', { name: 'Send', exact: true }).click();
@@ -125,7 +126,7 @@ try {
   await composer().fill('@src/login'); await panel.locator('.chat-at [data-at="file:src/login.js"]').waitFor(); await page.keyboard.press('Enter');
   await scenario('inv-ok'); t = await ask('How does login work with this flow?', { expectCard: true });
   assert.equal(await t.card.getAttribute('data-profile'), 'investigate', 'an escalation shows the card again');
-  assert.match(await text(t.card.locator('.chat-plan-withheld')), /D1 ‘pipeline’ withheld: not available together with repo access/);
+  assert.match(await text(t.card.locator('.chat-plan-withheld')), /D1 'pipeline' withheld: not available together with repo access\./);
   assert.match(await text(t.card.locator('[data-file="src/login.js"]')), /^src\/login\.js$/);
   await panel.screenshot({ path: path.join(output, 'box-escalation-card.png') });
   before4 = await done(); await t.card.getByRole('button', { name: 'Approve and send' }).click(); await settled(before4);
@@ -135,9 +136,29 @@ try {
   t = await ask('One more on login?'); await t.finish();
   assert.equal(await panel.locator('.chat-plan').count(), 0, 'and not again for the same files');
 
+  // 4b. The chips come back after a reload, from what the server says the conversation was approved for (and nothing more); the next send needs no card. A chip taken off is only off the next
+  // message: the stored approval is not narrowed, so a reload brings it back. (A note without diagrams, so that taking the file off does not turn the turn into a diagram turn.)
+  const grantNow = () => page.evaluate(() => fetch('/api/conversation/grant?id=' + document.querySelector('#chat-panel .chat-pick-trigger').dataset.session).then((r) => r.json()));
+  const grantBefore = await grantNow(); assert.deepEqual([grantBefore.grant.profile, grantBefore.grant.files, grantBefore.grant.repo], ['investigate', ['src/login.js'], false]);
+  const reopen = async () => { await page.reload(); await page.waitForFunction(() => document.querySelector('.cm-editor') && window.__aitiarch); await openNote('plan.md'); await page.getByRole('button', { name: /^Chat/ }).click(); await panel.waitFor(); await ready(); };
+  await reopen();
+  const restored = panel.locator('[data-chip="file:src/login.js"]'); await restored.waitFor();
+  assert.equal(await restored.getAttribute('data-granted'), 'true', 'restored from the approval'); assert.equal(await panel.locator('.chat-attach').count(), 1, 'exactly what the approval covers: this file, no repo and no note');
+  t = await ask('Where is the session map kept?'); await t.finish(); c = (await calls()).at(-1);
+  assert.equal(arg(c, '--tools'), 'Read,Grep,Glob', 'it ran as Investigate again, with no card'); assert.match(c.stdin.split('\n\n')[0], /Attached this turn: src\/login\.js/);
+  await panel.screenshot({ path: path.join(output, 'box-chips-restored.png') });
+  await restored.getByRole('button', { name: /Remove/ }).click(); assert.equal(await panel.locator('.chat-attach').count(), 0);
+  t = await ask('A question without the file'); await t.finish(); c = (await calls()).at(-1);
+  assert.equal(arg(c, '--tools'), '', 'with the chip off it is a notes turn, with no card');
+  assert.deepEqual(await grantNow(), grantBefore, 'the stored approval is exactly as it was: not narrowed, not widened');
+  await reopen(); await panel.locator('[data-chip="file:src/login.js"]').waitFor();
+  assert.deepEqual(await grantNow(), grantBefore, 'and still, after another reload; the chip is back');
+  assert.equal(await panel.locator('.chat-plan').count(), 0);
+
   // 5. One list: the two conversations under the names of their first questions, and an investigation made the old way. Rename still works; Delete works for both kinds.
   const old = await call({ mode: 'investigate', label: 'Old investigation' }, '/api/harness/sessions/new'); assert(old.id, 'an investigation was made');
-  await openNote('plan.md'); await panel.locator('.chat-pick-trigger').click();
+  await openNote('ideas.md'); await openNote('plan.md'); // the list is read again when another note is opened
+  await panel.locator('.chat-pick-trigger').click();
   const opts = await panel.locator('.chat-pick-opt').evaluateAll((els) => els.map((e) => e.innerText.replace(/\s+/g, ' ').trim()));
   report.list = opts;
   assert(opts.some((o) => /^What does the diagram show\? \d+ messages/.test(o)), 'the diagram conversation is named after its first question: ' + opts.join(' | '));

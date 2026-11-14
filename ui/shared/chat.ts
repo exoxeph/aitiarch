@@ -50,6 +50,11 @@ const DIAGRAM_ASSET=/^(?:ai-)?diagram-[a-f0-9]{64}$/;
 export function validDiagramReads(v:unknown):v is DiagramRead[]{
  return Array.isArray(v)&&v.length<=24&&v.every(r=>r&&typeof r==='object'&&!Array.isArray(r)&&Object.keys(r).sort().join()==='asset,n,title'&&Number.isInteger(r.n)&&r.n>=1&&r.n<=9&&typeof r.asset==='string'&&DIAGRAM_ASSET.test(r.asset)&&typeof r.title==='string'&&r.title.length<=80&&!/[\u0000-\u001f\u007f]/.test(r.title));
 }
+/** A diagram the model tried to open and could not (it is withheld, or not in the note): D<n>, the title and the reason in words. Saved with the reply, so the row "Could not open D3: ..." is still there after a reload. */
+export interface DiagramMiss {n:number;title:string;why:string}
+export function validDiagramMisses(v:unknown):v is DiagramMiss[]{
+ return Array.isArray(v)&&v.length<=24&&v.every(r=>r&&typeof r==='object'&&!Array.isArray(r)&&Object.keys(r).sort().join()==='n,title,why'&&Number.isInteger(r.n)&&r.n>=1&&r.n<=99&&typeof r.title==='string'&&r.title.length<=80&&typeof r.why==='string'&&r.why.length>=1&&r.why.length<=200&&!/[\u0000-\u001f\u007f]/.test(r.title+r.why));
+}
 export interface ChatMessage {
  id:string;role:'assistant';body:string;at:string;provider:'claude';model:string|null;
  evidence:{sourceId:string;sourceHash:string;quote:string}[];
@@ -78,6 +83,8 @@ export interface ChatMessage {
  askedOn?:string;
  /** The diagrams the model opened with Read while writing this reply (in order, once each). Absent when it opened none. */
  diagramReads?:DiagramRead[];
+ /** The diagrams it asked for and could not open (withheld or not in the note), in order, once each. Absent when there were none. */
+ diagramMisses?:DiagramMiss[];
  /** What the CLI said this turn cost, in dollars (a conversation turn). Absent in older files and when the CLI did not say. */
  costUsd?:number;
  /** The named conversation (harness session) this reply was written in. Delete conversation removes the replies that carry its id. Absent in a one-off chat and in older files. */

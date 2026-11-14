@@ -367,26 +367,41 @@ export function createApp(opts: AppOptions) {
       const h=await harnessReady;if(!h)return json(res,409,{error:'disabled',message:'Conversations need the Claude Code CLI. Start Aitiarch with --claude.'});
       return json(res,200,await h.gate.suggest(url.searchParams.get('q')??''));
     }
+    // What the conversation was approved for, as the server would honour it now (a stored grant that does not belong to this conversation and project, or whose record was changed, is nothing): for the page to
+    // show the chips of the files and repo it covers. Display only; every turn is still decided by the gate.
+    if(url.pathname==='/api/conversation/grant'&&req.method==='GET'){
+      const h=await harnessReady;if(!h)return json(res,409,{error:'disabled',message:'Conversations need the Claude Code CLI. Start Aitiarch with --claude.'});
+      const s=await h.index.get(url.searchParams.get('id')??'');if(!s)return json(res,409,{error:'invalid_session',message:'No such conversation.'});
+      const g=h.gate.effective(s).grant;
+      return json(res,200,{grant:g?{profile:g.profile,files:[...g.files],repo:g.repo,diagrams:g.diagrams,...(g.diagramNote?{diagramNote:g.diagramNote}:{}),budgetUsd:g.budgetUsd}:null});
+    }
     if(url.pathname.startsWith('/api/conversation/')&&req.method==='PUT'){
       const h=await harnessReady,b=await readBody(req) as any;
       if(!h)return json(res,409,{error:'disabled',message:'Conversations need the Claude Code CLI. Start Aitiarch with --claude.'});
       try{
         const runtime=await chatReady;
-        // Whether the note has diagrams a conversation can open is decided from the note here, never taken from the page.
-        const base=async()=>{const note=typeof b?.path==='string'?b.path:'',d=note?await runtime.openableDiagrams(note).catch(()=>({has:false,items:[] as {n:number;title:string}[]})):{has:false,items:[] as {n:number;title:string}[]};
-          return {conversation:b?.conversationId,attachments:b?.attachments,hasDiagrams:d.has,diagrams:d.items};};
-        if(url.pathname==='/api/conversation/plan')return json(res,200,await h.gate.plan({...await base(),budgetUsd:b?.budgetUsd}));
+        // Which diagrams a turn may open is decided here from the note the turn is about: the note open now (`openNote`; the conversation's own note when the page names none), which must be a real note of this project.
+        // Never a path the page merely claims: openableDiagrams reads it through the store (and refuses hidden folders), and the editor line the turn carries must be about the same note.
+        const base=async()=>{
+          if(b?.openNote!==undefined&&typeof b.openNote!=='string')throw new PathError(400,'invalid_note','The open note is not a note of this project.');
+          const note=typeof b?.openNote==='string'?b.openNote:typeof b?.path==='string'?b.path:'';
+          if(b?.editor!==undefined&&(!b.editor||typeof b.editor!=='object'||(note&&b.editor.path!==note)))throw new PathError(400,'invalid_note','The editor line is about another note than the open one.');
+          const d=note?await runtime.openableDiagrams(note).catch(()=>{throw new PathError(400,'invalid_note','The open note is not a note of this project.');}):null;
+          return {conversation:b?.conversationId,attachments:b?.attachments,hasDiagrams:!!d?.has,diagrams:d?.all??[],...(d?{diagramNote:d.note}:{})};
+        };        if(url.pathname==='/api/conversation/plan')return json(res,200,await h.gate.plan({...await base(),budgetUsd:b?.budgetUsd}));
         if(url.pathname==='/api/conversation/approve')return json(res,200,{grant:await h.gate.approve({...await base(),budgetUsd:b?.budgetUsd,hash:b?.hash})});
+        // SEND PATH 2 of 2. This entry runs a conversation turn that carries files or the repo (profile "investigate") through plan, approve and turn; it also runs a notes or diagrams turn when the page uses it
+        // (the page itself sends those through /api/chat/review + /api/chat/send, path 1). The two paths are NOT merged yet: both ask the same gate (ConversationGate.authorize) before anything starts.
         if(url.pathname==='/api/conversation/turn'){
           if(typeof b?.text!=='string'||!b.text.trim())return json(res,400,{error:'invalid',message:'Write a question first.'});
           const input=await base(),auth=await h.gate.authorize(input); // refuses, with the card to show, anything the conversation was not approved for
           const controller=new AbortController(),abort=()=>controller.abort('client_disconnect');res.on('close',abort);
           const write=(event:{type:string})=>{if(res.destroyed){controller.abort('client_disconnect');return;}if(!res.headersSent)res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'});res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);};
           try{
-            if(auth.profile==='investigate')await h.investigate.sendGranted(auth,b.text,write,controller.signal,input.hasDiagrams?input.diagrams:undefined);
+            if(auth.profile==='investigate')await h.investigate.sendGranted(auth,b.text,write,controller.signal,input.diagrams.length?input.diagrams:undefined);
             else{
               const notes=auth.attachments.notes,context=(Array.isArray(b.context)?b.context.filter((c:any)=>c?.moduleId!=='other-notes'):[{moduleId:'this-note',ids:['note']}]).concat(notes.length?[{moduleId:'other-notes',ids:notes}]:[]);
-              const review=await runtime.review({id:typeof b.id==='string'?b.id:randomUUID(),path:b.path,question:b.text,context,session:auth.session.id,...(typeof b.selection==='string'?{selection:b.selection}:{}),...(b.editor!==undefined?{editor:b.editor}:{})});
+              const review=await runtime.review({id:typeof b.id==='string'?b.id:randomUUID(),path:b.path,question:b.text,context,session:auth.session.id,...(typeof b.selection==='string'?{selection:b.selection}:{}),...(b.editor!==undefined?{editor:b.editor}:input.diagramNote&&input.diagramNote!==b.path?{editor:{path:input.diagramNote,title:input.diagramNote}}:{})}); // the review is about the same note the gate decided on
               await runtime.send({reviewId:review.reviewId,confirmed:true},write,controller.signal);
             }
             res.end();
@@ -410,6 +425,8 @@ export function createApp(opts: AppOptions) {
       return json(res,200,{...saved,messages:[...saved.messages,...runtime.memoryMessages(note)],persistence:await chatStore.status(),questionPlaceholder:'Question unavailable after reload.',usage:runtime.usage().find(c=>c.note===note&&c.session===(session||undefined))??null});
     }
     if(url.pathname==='/api/chat/modules'&&req.method==='GET')return json(res,200,await (await chatReady).modules(url.searchParams.get('path')??'',url.searchParams.get('sessions')==='1',url.searchParams.get('otherProjects')==='1'));
+    // SEND PATH 1 of 2. /api/chat/review + /api/chat/send run the one-off chat and conversation turns whose profile is "notes" (no tools) or "diagrams" (Read in the PNG folder); the review shows what is sent and
+    // send re-asks the gate. A turn that carries files or the repo (profile "investigate") never goes through here: it goes through /api/conversation/plan, approve and turn (path 2).
     if(url.pathname.startsWith('/api/chat/')&&req.method==='PUT'){
       const b=await readBody(req) as any,runtime=await chatReady;
       try{

@@ -127,7 +127,7 @@ export async function streamInvestigate(body: { session: string; question: strin
 }
 
 /** What every conversation call sends: the conversation, the note it is kept under, and the attachments. Never a profile or a cap: the server derives those. */
-export interface ConversationBody { conversationId: string; path: string; attachments: import("../shared/profile.ts").Attachments }
+export interface ConversationBody { conversationId: string; path: string; /** The note open now: the server derives the diagrams of a turn from it, and checks it is a note of this project. */ openNote?: string; attachments: import("../shared/profile.ts").Attachments }
 /** PUT /api/conversation/turn as server-sent events, in either shape (chat or Investigate): the `start` event's `profile` says which. Unknown types are passed on. */
 export async function streamConversation(body: ConversationBody & { id: string; text: string; context?: unknown; selection?: string; editor?: unknown }, onEvent: (e: { type: string; [k: string]: unknown }) => void, signal?: AbortSignal): Promise<void> {
   const res = await fetch(scoped("/api/conversation/turn"), { method: "PUT", credentials: "same-origin", signal, headers: { "Content-Type": "application/json", "X-Aitiarch": "1" }, body: JSON.stringify(body) });
@@ -151,6 +151,8 @@ export async function streamConversation(body: ConversationBody & { id: string; 
 
 export const api = {
   /** The one conversation API: "@" picker matches, the plan card for given attachments, and approving exactly that card. */
+  /** What a conversation was approved for, as the server would honour it now; null when nothing (or a grant it would refuse). For the chips only: the server decides every turn. */
+  conversationGrant:(id:string)=>ok<{grant:{profile:import('../shared/profile.ts').Profile;files:string[];repo:boolean;diagrams:boolean;diagramNote?:string;budgetUsd:number}|null}>('GET','/api/conversation/grant?id='+encodeURIComponent(id)),
   conversationFiles:(q:string)=>ok<{files:string[];notes:string[]}>('GET',`/api/conversation/files?q=${encodeURIComponent(q)}`),
   conversationPlan:(body:ConversationBody&{budgetUsd?:number})=>ok<import('../server/harness/conversation.ts').ConversationPlan>('PUT','/api/conversation/plan',body),
   conversationApprove:(body:ConversationBody&{budgetUsd?:number;hash:string})=>ok<{grant:unknown}>('PUT','/api/conversation/approve',body),

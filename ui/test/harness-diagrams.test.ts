@@ -271,6 +271,15 @@ describe('every diagram of the note is listed, available or withheld with its re
   expect(r.events.filter(e=>e.type==='diagram_unavailable')).toEqual([{type:'diagram_unavailable',id:'m-u1',n:3,title:'no-png',why:WITHHELD_WORDS.no_picture}]);
   expect(r.reads).toEqual([]);expect(r.complete!.message.diagramReads).toBeUndefined();expect((await m.p.ledger()).filter(e=>e.event==='diagram_read')).toEqual([]);
  });
+ it('keeps the "Could not open" rows with the reply, on disk, so they are still there after a restart and a reload',async()=>{
+  const m=await many('dg-unavailable|3'),r=await turn(m.runtime,ask(m.s.id,'m-u3','What does D3 show?','shapes.md'));
+  const miss=[{n:3,title:'no-png',why:WITHHELD_WORDS.no_picture}];
+  expect(r.complete!.message.diagramMisses).toEqual(miss);
+  const saved=(await new ChatStore(m.p.root).read('shapes.md')).messages.find(x=>x.id==='m-u3')!;expect(saved.diagramMisses).toEqual(miss); // on disk with the reply
+  const {fromStored}=await import('../src/chat/chat-model.ts'); // and the page's loader turns it back into the same row
+  expect(fromStored([saved],new Map([['m-u3','What does D3 show?']]))[0].opened).toEqual([{n:3,title:'no-png',why:WITHHELD_WORDS.no_picture}]);
+  const opened=await many('dg-read'),r2=await turn(opened.runtime,ask(opened.s.id,'m-u4','Explain D1','shapes.md'));expect(r2.complete!.message.diagramMisses).toBeUndefined();expect(r2.complete!.message.diagramReads).toBeTruthy();
+ });
  it('answers a diagram number that is not in the note as "not in this note"',async()=>{
   const p=await project(),{index,runtime}=await p.open('dg-unavailable|7'),s=await index.create({mode:'chat',label:'Seven',note:'plan.md'});
   const r=await turn(runtime,ask(s.id,'m-u7','What does D7 show?'));expect(r.error).toBeUndefined();

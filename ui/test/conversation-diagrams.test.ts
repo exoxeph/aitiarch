@@ -28,7 +28,8 @@ async function project(){
  execFileSync('git',['init','-q'],{cwd:root,stdio:'pipe'});await writeFile(path.join(root,'.gitignore'),'/chat/\n');await mkdir(path.join(root,'assets'));
  const d=svgFor('Alpha feeds Bravo');await writeFile(path.join(root,'assets',d.base+'.svg'),d.svg);
  await writeFile(path.join(root,'plan.md'),['# Plan','',`> ![AI diagram: alpha-skill](assets/${d.base}.svg)`,''].join('\n'));
- const store=await Store.open(root),ink=await InkStore.open(root),images=new DiagramImageStore(root);await images.save(d.base+'.png',makePng(800,420));
+ const e=svgFor('Other note feeds');await writeFile(path.join(root,'assets',e.base+'.svg'),e.svg);await writeFile(path.join(root,'other.md'),['# Other','',`> ![AI diagram: omega-skill](assets/${e.base}.svg)`,''].join('\n'));
+ const store=await Store.open(root),ink=await InkStore.open(root),images=new DiagramImageStore(root);await images.save(d.base+'.png',makePng(800,420));await images.save(e.base+'.png',makePng(500,300));
  const index=await SessionIndex.open(harness),questions=new QuestionStore(harness),gate=new ConversationGate({index,notebook:store.rootReal,repo:()=>projectRepo(harness)});
  const runner=new ClaudeSessionRunner({command:process.execPath,prefixArgs:[cli,'dg-read',record],dir:harness});
  const runtime=new ChatRuntime(store,ink,new ChatStore(root),new FakeChatProvider(),[],undefined,{index,runner,questions,gate},images);
@@ -48,7 +49,7 @@ describe('a conversation about a note that shows diagrams',()=>{
  });
  it('once approved it runs the Read-only diagram profile, at no more than the cap it always had, and says so on start',async()=>{
   const p=await project(),s=await p.chat(),open=await p.runtime.openableDiagrams('plan.md');expect(open.has).toBe(true);
-  const input={conversation:s.id,attachments:{},hasDiagrams:open.has,diagrams:open.items},plan=await p.gate.plan(input);
+  const input={conversation:s.id,attachments:{},hasDiagrams:open.has,diagrams:open.all,diagramNote:open.note},plan=await p.gate.plan(input);
   expect(plan.profile).toBe('diagrams');expect(plan.needsApproval).toBe(true);await p.gate.approve({...input,hash:plan.hash});
   const review=await p.runtime.review(ask(s.id,'m-2'));expect(review.needsPlan).toBeUndefined();
   const events:ChatEvent[]=[];await p.runtime.send({reviewId:review.reviewId,confirmed:true},e=>events.push(e));
@@ -59,7 +60,7 @@ describe('a conversation about a note that shows diagrams',()=>{
  });
  it('a diagram turn never gets a larger cap than it always had, even when the card was approved with a higher cap',async()=>{
   const p=await project(),s=await p.chat(),open=await p.runtime.openableDiagrams('plan.md');
-  const input={conversation:s.id,attachments:{},hasDiagrams:open.has,diagrams:open.items,budgetUsd:2},plan=await p.gate.plan(input);
+  const input={conversation:s.id,attachments:{},hasDiagrams:open.has,diagrams:open.all,diagramNote:open.note,budgetUsd:2},plan=await p.gate.plan(input);
   expect((await p.gate.approve({...input,hash:plan.hash})).budgetUsd).toBe(2);
   const review=await p.runtime.review(ask(s.id,'m-4'));await p.runtime.send({reviewId:review.reviewId,confirmed:true},()=>{});
   const [c]=await p.calls();expect(at(c.args,'--max-budget-usd')).toBe(DIAGRAM_TURN_CAP_USD.toFixed(2));
@@ -71,5 +72,22 @@ describe('a conversation about a note that shows diagrams',()=>{
   const input={conversation:s.id,attachments:{files:['a.ts']},hasDiagrams:false},plan=await gate.plan(input);await gate.approve({...input,hash:plan.hash});
   const review=await p.runtime.review(ask(s.id,'m-3'));expect(review.needsPlan).toBe(true);
   await expect(p.runtime.send({reviewId:review.reviewId,confirmed:true},()=>{})).rejects.toMatchObject({code:'plan_required'});expect(await p.calls()).toEqual([]);
+ });
+});
+
+describe('an approval is for the diagrams of one note',()=>{
+ const onNote=(session:string,id:string,open:string):ChatInput=>({id,path:'plan.md',question:'What does it show?',context:[{moduleId:'this-note',ids:['note']}],session,editor:{path:open,title:open}});
+ it('the review and the send for another open note need the card again, and the plan lists that note\'s diagrams',async()=>{
+  const p=await project(),s=await p.chat(),here=await p.runtime.openableDiagrams('plan.md'),input={conversation:s.id,attachments:{},hasDiagrams:here.has,diagrams:here.all,diagramNote:here.note},plan=await p.gate.plan(input);await p.gate.approve({...input,hash:plan.hash});
+  const mine=await p.runtime.review(onNote(s.id,'m-a','plan.md'));expect(mine.needsPlan).toBeUndefined();expect(mine.diagrams).toEqual([{n:1,title:'alpha-skill'}]);
+  const other=await p.runtime.review(onNote(s.id,'m-b','other.md'));
+  expect(other.needsPlan).toBe(true);expect(other.diagrams).toEqual([{n:1,title:'omega-skill'}]);expect(other.manifest).toContain("Diagrams: D1 'omega-skill'");expect(other.manifest).not.toContain('alpha-skill');
+  await expect(p.runtime.send({reviewId:other.reviewId,confirmed:true},()=>{})).rejects.toMatchObject({code:'plan_required'});expect(await p.calls()).toEqual([]);
+  const theirs=await p.runtime.openableDiagrams('other.md'),again={conversation:s.id,attachments:{},hasDiagrams:theirs.has,diagrams:theirs.all,diagramNote:theirs.note};
+  expect((await p.gate.plan(again)).openDiagrams).toEqual([{n:1,title:'omega-skill'}]);expect((await p.gate.plan(again)).needsApproval).toBe(true);
+ });
+ it('refuses a note that is not a note of the project, and a hidden one',async()=>{
+  const p=await project();
+  for(const bad of ['../x.md','missing.md','.hidden/a.md','chat/plan.md',''])await expect(p.runtime.openableDiagrams(bad),bad).rejects.toBeTruthy();
  });
 });

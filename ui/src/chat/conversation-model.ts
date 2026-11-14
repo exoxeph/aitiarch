@@ -7,12 +7,20 @@ import type {HarnessSession} from '../../shared/harness.ts';
 /** One chip above the composer, picked with "@": another note, a repo file, or the repo itself. A file the server refused carries the reason. */
 export type AttachmentChip=
  |{kind:'note';path:string}
- |{kind:'file';path:string;refused?:FileRefusal}
- |{kind:'repo';fixed?:true};
+ |{kind:'file';path:string;refused?:FileRefusal;/** Restored from the conversation's approval after a reload: shown, never trusted (the server decides). */granted?:true}
+ |{kind:'repo';fixed?:true;granted?:true};
 export const chipKey=(c:AttachmentChip)=>c.kind==='repo'?'repo':c.kind+':'+c.path;
 /** The attachments a turn sends: what the chips say, nothing else. */
 export function attachmentsOf(chips:readonly AttachmentChip[]):Attachments{
  return {notes:chips.flatMap(c=>c.kind==='note'?[c.path]:[]),files:chips.flatMap(c=>c.kind==='file'?[c.path]:[]),repo:chips.some(c=>c.kind==='repo')};
+}
+/**
+ * The chips that show what a conversation was approved for: its files, or the repo (which reaches every file, so it is one chip). Nothing the approval does not cover is shown, and notes and diagrams
+ * are not chips. Display only: a chip taken off is taken off this message, never off the approval.
+ */
+export function chipsFromGrant(g:{profile:Profile;files:readonly string[];repo:boolean}|null|undefined):AttachmentChip[]{
+ if(!g||g.profile!=='investigate')return [];
+ return g.repo?[{kind:'repo',granted:true}]:g.files.map(path=>({kind:'file' as const,path,granted:true as const}));
 }
 /** Adds a chip once (the same note, file or the repo twice is one chip). */
 export const addChip=(chips:readonly AttachmentChip[],c:AttachmentChip)=>chips.some(x=>chipKey(x)===chipKey(c))?[...chips]:[...chips,c];

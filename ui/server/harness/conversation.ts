@@ -17,7 +17,7 @@ export const CARRY_TOKEN_CAP=6000;
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
 /** Which project a grant belongs to: the notebook folder, hashed. A grant carried into another project is not a grant there. */
 export const projectId=(notebookRoot:string)=>sha(path.resolve(notebookRoot).toLowerCase()).slice(0,16);
-export const grantHash=(g:Omit<Grant,'confirmed'>)=>sha(JSON.stringify({v:g.v,project:g.project,session:g.session,profile:g.profile,files:[...g.files].sort(),repo:g.repo,diagrams:g.diagrams,budgetUsd:g.budgetUsd}));
+export const grantHash=(g:Omit<Grant,'confirmed'>)=>sha(JSON.stringify({v:g.v,project:g.project,session:g.session,profile:g.profile,files:[...g.files].sort(),repo:g.repo,diagrams:g.diagrams,budgetUsd:g.budgetUsd,...(g.diagramNote?{diagramNote:g.diagramNote}:{})})); // the note is part of the hash only when there is one: a grant made before notes were bound keeps its hash (and covers no diagrams)
 
 export type RefusalCode='attachments'|'plan_required'|'grant_mismatch'|'file_refused'|'no_repo'|'invalid_conversation'|'plan_changed'|'invalid_cap';
 export class GateRefusal extends Error {
@@ -29,13 +29,18 @@ export interface FileCheck {path:string;ok:boolean;reason?:FileRefusal}
 /** Words for a refused file on the card. */
 export const FILE_REFUSAL_WORDS:Readonly<Record<FileRefusal,string>>=Object.freeze({bad_path:'not an acceptable repo path',denied:'a file the repo rules keep out (secrets, keys, tooling, state)',missing:'no such file in the repo',too_large:'larger than the size cap',outside_snapshot:'not part of the copy Claude reads (ignored, linked or outside the repo)',not_file:'not a regular file'});
 
-export interface DiagramLine {n:number;title:string}
+/** One diagram of the note a turn is about. why is set when it is withheld: the reason in words, the same words the review card and the manifest use. */
+export interface DiagramLine {n:number;title:string;why?:string}
 export interface ConversationPlan {
  conversation:string;project:string;profile:Profile;attachments:Attachments;
  /** Every attached file with the verdict; only the ones that pass are granted. */
  files:FileCheck[];repo:{path:string}|null;
- /** The note's diagrams when the profile is Investigate: withheld, with the reason. */
- withheldDiagrams:{items:DiagramLine[];reason:string}|null;
+ /** The diagrams of the note the turn is about that Claude may open (the diagram profile), as the review card lists them. */
+ openDiagrams?:{n:number;title:string}[];
+ /** The diagrams of that note that are withheld, each with its reason: with the repo (Investigate) all of them, otherwise the ones with no usable picture or text that looks like a secret. eason is the one shared reason of the Investigate case. */
+ withheldDiagrams:{items:DiagramLine[];reason?:string}|null;
+ /** The note the diagrams are of: the grant is bound to it. */
+ diagramNote?:string;
  budgetUsd:number;needsApproval:boolean;
  /** True when earlier turns of this conversation ran at another profile: their questions and answers are carried over, not resumed. */
  carriedOver:boolean;
@@ -49,7 +54,7 @@ export async function projectRepo(dir:string):Promise<string|null>{
  try{const d=JSON.parse(await readFile(path.join(dir,'repo.json'),'utf8'));return d?.v===1&&typeof d.repo==='string'?d.repo:null;}catch{return null;}
 }
 export interface GateConfig {index:SessionIndex;notebook:string;repo:()=>Promise<string|null>;/** The notes of the project (paths), for the "@" picker. */notes?:()=>Promise<string[]>}
-export interface TurnInput {conversation:string;attachments:unknown;/** Decided by the server from the note, never taken from the page. */hasDiagrams:boolean;diagrams?:DiagramLine[]}
+export interface TurnInput {conversation:string;attachments:unknown;/** Decided by the server from the note the turn is about, never taken from the page. */hasDiagrams:boolean;/** Every diagram of that note (withheld ones carry their reason). */diagrams?:DiagramLine[];/** The note the turn is about (validated by the server to be a note of this project): diagrams are of it, and the grant is for it. */diagramNote?:string}
 export interface Authorized {session:HarnessSession;profile:Profile;need:Need;attachments:Attachments;grant:Pick<Grant,'profile'|'files'|'repo'|'diagrams'|'budgetUsd'>;files:string[];repo:string|null}
 
 export class ConversationGate {
@@ -114,18 +119,20 @@ export class ConversationGate {
  async plan(input:TurnInput&{budgetUsd?:unknown}):Promise<ConversationPlan>{
   const s=await this.session(input.conversation),clean=cleanAttachments(input.attachments);
   if(!clean.ok)throw new GateRefusal('attachments',{message:clean.reason});
-  const att=clean.value,need=needOf(att,input.hasDiagrams),{grant:have}=this.effective(s);
+  const att=clean.value,need=needOf(att,input.hasDiagrams,input.diagramNote??''),{grant:have}=this.effective(s);
   const budget=input.budgetUsd===undefined||input.budgetUsd===null?have?.budgetUsd??DEFAULT_BUDGET_USD:Number(input.budgetUsd);
   if(!Number.isFinite(budget)||budget<BUDGET_MIN_USD||budget>BUDGET_MAX_USD)throw new GateRefusal('invalid_cap');
   const cap=Math.round(budget*100)/100,files=await this.checkFiles(att.files),repo=need.profile==='investigate'?await this.o.repo():null;
   if(need.profile==='investigate'&&(att.repo||att.files.length)&&!repo)throw new GateRefusal('no_repo');
-  const grant:Omit<Grant,'confirmed'>={v:1,project:this.project,session:s.id,profile:need.profile,files:files.filter(f=>f.ok).map(f=>f.path).sort(),repo:att.repo,diagrams:need.diagrams,budgetUsd:cap};
+  const grant:Omit<Grant,'confirmed'>={v:1,project:this.project,session:s.id,profile:need.profile,files:files.filter(f=>f.ok).map(f=>f.path).sort(),repo:att.repo,diagrams:need.diagrams,...(need.diagrams?{diagramNote:need.diagramNote}:{}),budgetUsd:cap};
   const sameCap=have!==null&&Math.abs(have.budgetUsd-cap)<0.0001;
   // Needs the card when the grant does not cover the need, or when the cap would change (a cap can only be raised on the card).
   const needsApproval=!covers(have,need)||(need.profile!=='notes'&&have!==null&&!sameCap&&cap>have.budgetUsd);
   const carriedOver=s.turns>0&&resumePlan(s.cli,s.turns,need.profile,s.mode==='investigate'?'investigate':'notes').fresh;
   return {conversation:s.id,project:this.project,profile:need.profile,attachments:att,files,repo:repo?{path:repo}:null,
-   withheldDiagrams:need.profile==='investigate'&&input.hasDiagrams?{items:input.diagrams??[],reason:WITHHELD_WITH_REPO}:null,
+   ...(need.diagrams?{openDiagrams:(input.diagrams??[]).filter(d=>!d.why).map(d=>({n:d.n,title:d.title})),diagramNote:need.diagramNote}:{}),
+   withheldDiagrams:need.profile==='investigate'&&(input.diagrams?.length??0)>0?{items:(input.diagrams??[]).map(d=>({n:d.n,title:d.title})),reason:WITHHELD_WITH_REPO}
+    :need.diagrams&&(input.diagrams??[]).some(d=>d.why)?{items:(input.diagrams??[]).filter(d=>d.why).map(d=>({n:d.n,title:d.title,why:d.why}))}:null,
    budgetUsd:cap,needsApproval,carriedOver,grant,hash:grantHash(grant)};
  }
 
@@ -141,7 +148,7 @@ export class ConversationGate {
  async authorize(input:TurnInput):Promise<Authorized>{
   const s=await this.session(input.conversation),clean=cleanAttachments(input.attachments);
   if(!clean.ok)throw new GateRefusal('attachments',{message:clean.reason});
-  const att=clean.value,need=needOf(att,input.hasDiagrams),{grant,mismatch}=this.effective(s);
+  const att=clean.value,need=needOf(att,input.hasDiagrams,input.diagramNote??''),{grant,mismatch}=this.effective(s);
   let files:FileCheck[]=[];
   if(need.profile==='investigate'){
    const repo=await this.o.repo();if(!repo)throw new GateRefusal('no_repo');
