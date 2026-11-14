@@ -5,6 +5,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { chatSessionArguments,claudeArguments,investigateSessionArguments } from './claude-arguments.ts';
 import type { Configuration, ProviderName } from './index.ts';
+import {CODEX_FLAGS,TOOLLESS_AGENT} from './tool-less-arguments.ts';
+
+/** Separate notes-only profiles. Never shares or alters the Claude/Investigate/diagram profiles below.
+ * The host builds every argument; prompts go to stdin only. No shell or native prefix arguments. */
+export function spawnToolless(config:{id:'codex'|'kiro';command:string;prefixArgs?:string[]},mode:'metadata'|'isolated',options:SpawnOptionsWithoutStdio&{cwd:string}){
+  const reject=()=>{throw new Error('Provider launch rejected: invalid tool-less profile.');};
+  if(config.id!=='codex'&&config.id!=='kiro')reject();
+  if(config.prefixArgs?.length&&config.command!==process.execPath)reject();
+  if(!path.isAbsolute(config.command)||/\.(cmd|bat|ps1)$/i.test(config.command)||/(?:^|[\\/])claude(?:\.exe)?$/i.test(config.command))reject();
+  if(mode!=='metadata'&&mode!=='isolated')reject();
+  const args=mode==='metadata'?(config.id==='kiro'?['acp','--help']:['exec','--help']):config.id==='kiro'?['acp','--agent-engine','v2','--agent',TOOLLESS_AGENT]:[...CODEX_FLAGS,'-C',options.cwd,'-'];
+  // Reuse the existing empty, real OS-temp folder check; do not accept a repo or a linked folder.
+  assertLaunch('codex','isolated',args,options.cwd);
+  return spawn(config.command,[...(config.prefixArgs??[]),...args],{...options,shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:'pipe'});
+}
 
 export function assertLaunch(provider: ProviderName, mode: 'metadata' | 'isolated', args: readonly string[], cwd?: string): void {
   const reject = () => { throw new Error('Provider launch rejected: only exact metadata or the isolated provider profile is allowed.'); };

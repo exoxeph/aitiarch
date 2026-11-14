@@ -19,6 +19,7 @@ import {skillDiagramInstruction} from '../../shared/skill-diagram.ts';
 import {personaInstruction,type PersonaMode} from '../../shared/persona.ts';
 import {claudeUsageRecord,type UsageLog} from './usage.ts';
 import { ProductValidationError, validateResponseSchema, type ValidationRecord } from '../product-validation.ts';
+import {StringDecoder} from 'node:string_decoder';
 
 export type CLIProviderName = 'claude' | 'codex';
 export type ProviderName = CLIProviderName | 'chatgpt-plan';
@@ -58,12 +59,17 @@ export class ProviderError extends Error {
   constructor(code: ErrorCode, detail?: string) { super(detail ?? messages[code]); this.name = 'ProviderError'; this.code = code; }
 }
 export interface Result {
+  /** CLI-reported dollars only; absent when not supplied. No computed price. */
+  costUsd?:number;
   id: string; provider: ProviderName; model: string | null; answer: string;
   claims: unknown[]; diagram?:unknown; usage: { inputTokens: number; outputTokens: number; cachedTokens?:number } | null;
   /** Chat only: `answer` is the model's raw reply (Markdown and its claims block), read by the chat's output gate. */
   rawReply?:true;
 }
-export interface InvokeOptions { signal?: AbortSignal; timeoutMs?: number; retry503?:boolean; onTextDelta?:(text:string)=>void }
+export interface InvokeOptions { signal?: AbortSignal; timeoutMs?: number; retry503?:boolean; onTextDelta?:(text:string)=>void;
+  /** Optional in-memory protocol observer. It cannot bypass the existing isolation/completion checks. Never persist these events. */
+  onStreamEvent?:(event:unknown)=>void;
+}
 export interface Provider {
   readonly name?: ProviderName;
   checkAvailability(): Promise<Availability>;
@@ -167,7 +173,7 @@ export function validateProviderResponse(response:unknown) {
 }
 function parseResult(provider: ProviderName, id: string, stdout: string, stream = false, chat = false): Result {
   try {
-    let response: unknown, model: string | null = null, usage: Result['usage'] = null;
+    let response: unknown, model: string | null = null, usage: Result['usage'] = null, costUsd:number|undefined;
     if (provider === 'claude') {
       const events = stream ? stdout.trim().split(/\r?\n/).map(line => JSON.parse(line)) : [];
       // Chat uses the tolerant normalizer (only harmful events are fatal); Think and Ask keep the canary's stricter check for now.
@@ -178,6 +184,7 @@ function parseResult(provider: ProviderName, id: string, stdout: string, stream 
       if (chat) response = { answer: envelope.result, claims: [] };
       else response = parseAnswerJson(envelope.result);
       model = typeof envelope.model === 'string' ? envelope.model : null;
+      if(typeof envelope.total_cost_usd==='number'&&Number.isFinite(envelope.total_cost_usd)&&envelope.total_cost_usd>=0)costUsd=envelope.total_cost_usd;
       if (Number.isFinite(envelope.usage?.input_tokens) && Number.isFinite(envelope.usage?.output_tokens))
         usage = { inputTokens: envelope.usage.input_tokens, outputTokens: envelope.usage.output_tokens,
           ...(Number.isFinite(envelope.usage.cache_read_input_tokens)?{cachedTokens:envelope.usage.cache_read_input_tokens}:{}) };
@@ -199,7 +206,7 @@ function parseResult(provider: ProviderName, id: string, stdout: string, stream 
     // A chat reply is raw Markdown with its claims block: redacting it here would be redacting before parsing (the bug fixed for JSON). The
     // chat's output gate redacts the body and each claim after it has read them.
     const safe = chat ? (validateResponseSchema(response), response as {answer:string;claims:unknown[];diagram?:unknown}) : validateProviderResponse(response);
-    return { id, provider, model, answer: safe.answer, claims: safe.claims, ...(safe.diagram===undefined?{}:{diagram:safe.diagram}), usage,...(chat?{rawReply:true as const}:{}) };
+    return { id, provider, model, answer: safe.answer, claims: safe.claims, ...(safe.diagram===undefined?{}:{diagram:safe.diagram}), usage,...(costUsd===undefined?{}:{costUsd}),...(chat?{rawReply:true as const}:{}) };
   } catch(error) {
     const failure=new ProviderError('invalid_response');
     if(error instanceof ProductValidationError)failure.validation=error.record;
@@ -243,6 +250,8 @@ export function createProvider(configuration: Configuration): Provider {
       if (options.signal?.aborted) throw new ProviderError('cancelled');
       const output = await new Promise<string>((resolve, reject) => {
         const partial=options.onTextDelta?new ClaudeChatStream(options.onTextDelta):undefined;
+        const decoder=new StringDecoder('utf8');let pending='';
+        const observe=(chunk?:Buffer)=>{if(!options.onStreamEvent||!stream)return;pending+=chunk?decoder.write(chunk):decoder.end();let n;while((n=pending.indexOf('\n'))>=0){const line=pending.slice(0,n);pending=pending.slice(n+1);if(line.trim())options.onStreamEvent(JSON.parse(line));}if(!chunk&&pending.trim()){options.onStreamEvent(JSON.parse(pending));pending='';}};
         const child = spawnIsolated(config, argumentsFor(config.provider, availability.hardening, stream,!!partial),
           { cwd:cwd!, env: environment(), shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: 'pipe' });
         let bytes = 0, failure: ProviderError | undefined;
@@ -262,6 +271,7 @@ export function createProvider(configuration: Configuration): Provider {
           bytes += chunk.length;
           if (bytes > 262144) { stop('output_limit'); return; }
           (stream === 'out' ? stdout : stderr).push(chunk);
+          if(stream==='out'&&options.onStreamEvent){try{observe(chunk);}catch{stop('invalid_response');}}
           // Only our own parser's message is shown (it names an event by type words). A JSON syntax error can quote the line, so it never is.
           if(stream==='out'&&partial){try{partial.push(chunk);}catch(e){const own=e instanceof Error&&e.message.startsWith('Invalid chat stream: ');stop('invalid_response',{kind:'unparseable',detail:own?(e as Error).message.slice('Invalid chat stream: '.length):'the output was not valid JSON lines'});}}
         };
@@ -285,7 +295,7 @@ export function createProvider(configuration: Configuration): Provider {
             exited.reason = login ? { kind: 'login' } : flag ? { kind: 'flag_rejected', flag } : { kind: 'exited', ...(code === null ? {} : { exitCode: code }), ...(safeTail(text, input) ? { detail: safeTail(text, input) } : {}) };
             reject(exited);
           }
-          else {try{partial?.finish();resolve(Buffer.concat(stdout).toString('utf8'));}catch{const early=new ProviderError('invalid_response');early.reason={kind:'unparseable',detail:'the reply ended before it was complete'};reject(early);}}
+          else {try{observe();partial?.finish();resolve(Buffer.concat(stdout).toString('utf8'));}catch{const early=new ProviderError('invalid_response');early.reason={kind:'unparseable',detail:'the reply ended before it was complete'};reject(early);}}
         });
         child.stdin.end(input);
       });
