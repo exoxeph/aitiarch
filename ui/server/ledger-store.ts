@@ -50,6 +50,18 @@ export function validConversationTurn(c:unknown):c is ConversationTurnAudit{
   &&countOf(t.files,50)&&countOf(t.notes,50)&&countOf(t.diagrams,200)&&typeof t.repo==='boolean'&&typeof t.fresh==='boolean'&&typeof t.budgetUsd==='number'&&Number.isFinite(t.budgetUsd)&&t.budgetUsd>=0&&t.budgetUsd<=5;
 }
 interface Ledger { v: 1; events: LedgerEvent[] }
+/** A file operation can fail for a moment on Windows (a scanner or another handle holds the file; one just removed is still delete-pending): EPERM, EBUSY and EACCES are tried again, briefly, and anything else is raised at once. */
+const PASSING = new Set(['EPERM', 'EBUSY', 'EACCES']);
+const pause = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+async function retried<T>(op: () => Promise<T>, withinMs = 2000): Promise<T> {
+  const end = Date.now() + withinMs;
+  for (let wait = 10; ; wait = Math.min(wait * 2, 100)) {
+    try { return await op(); }
+    catch (e) { if (!PASSING.has((e as NodeJS.ErrnoException).code ?? '') || Date.now() >= end) throw e; await pause(wait); }
+  }
+}
+/** How long an append waits for the lock file before it gives up (as it always did: about 5 s). */
+const LOCK_WAIT_MS = 5_000;
 export class LedgerStore {
   private tail: Promise<unknown> = Promise.resolve();
   private file: string;
@@ -60,7 +72,7 @@ export class LedgerStore {
   }
   async read(): Promise<Ledger> {
     await this.safe(); let text: string;
-    try { text = await readFile(this.file, 'utf8'); }
+    try { text = await retried(() => readFile(this.file, 'utf8')); }
     catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { v: 1, events: [] }; throw e; }
     const d = JSON.parse(text);
     if (d.v !== 1 || !Array.isArray(d.events) || Object.keys(d).sort().join() !== 'events,v' || d.events.some((e: LedgerEvent) =>
@@ -68,11 +80,16 @@ export class LedgerStore {
       ![e.id, e.inkId, e.requestId, e.note, e.at].every(v => typeof v === 'string'))) throw new Error('Invalid ledger; original preserved.');
     return d;
   }
-  /** Several parts of the app keep their own LedgerStore on the same file. Their appends are serialised by this lock file; one that finds it taken waits its turn (up to about 5 s) instead of failing. */
+  /** Several parts of the app keep their own LedgerStore on the same file. Their appends are serialised by this lock file; one that finds it taken, or finds the file system saying no for a moment, waits its turn (up to 5 s) instead of failing. */
   private async lock(lockPath: string) {
-    for (let tries = 0; ; tries++) {
+    const end = Date.now() + LOCK_WAIT_MS;
+    for (;;) {
       try { return await open(lockPath, 'wx', 0o600); }
-      catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST' || tries >= 200) throw e; await new Promise(r => setTimeout(r, 25)); }
+      catch (e) {
+        const code = (e as NodeJS.ErrnoException).code ?? '';
+        if ((code !== 'EEXIST' && !PASSING.has(code)) || Date.now() >= end) throw e;
+        await pause(15 + Math.random() * 25);
+      }
     }
   }
   append(event: LedgerEvent): Promise<void> {
@@ -91,8 +108,8 @@ export class LedgerStore {
         d.events.push(event);
         const f = await open(temp, 'wx', 0o600);
         try { await f.writeFile(JSON.stringify(d, null, 2) + '\n'); await f.sync(); } finally { await f.close(); }
-        await this.safe(); await rename(temp, this.file);
-      } finally { await unlink(temp).catch(() => {}); await lock.close(); await unlink(lockPath); }
+        await this.safe(); await retried(() => rename(temp, this.file));
+      } finally { await unlink(temp).catch(() => {}); await lock.close().catch(() => {}); await retried(() => unlink(lockPath)).catch(() => {}); } // the event is saved: a lock that cannot be removed now is only left behind (as a crash would leave it)
     });
     this.tail = job; return job;
   }

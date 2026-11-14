@@ -29,11 +29,23 @@ for(const kind of ['no-completed','truncated','empty','mismatch','unknown-event'
 });
 
 // Real loopback HTTP responses; no account, credentials or captured output.
+/** The loopback connection itself can fail for a moment on a loaded machine (a reset or a refusal: "TypeError: fetch failed"): that is the machine, not the code under test, so connecting is tried again a few times; when it still
+ *  does not work the error says what the connection said, instead of the bare "fetch failed". Only the connection is retried: once a response exists it is read once, as it is. */
+async function loopbackFetch(port:number):Promise<Response>{
+  let last:any;
+  for(let attempt=0;attempt<4;attempt++){
+    try{return await fetch('http://127.0.0.1:'+port);}
+    catch(e){last=e;await new Promise(r=>setTimeout(r,25*(attempt+1)));}
+  }
+  throw new Error('loopback fetch failed after 4 tries: '+(last?.cause?.code??last?.cause?.message??last?.message),{cause:last});
+}
 async function localStream(data:any[],run:(response:Response)=>Promise<void>,contentType:string|null='text/event-stream',body?:string){
   const raw=body??await response(data).text();
-  const server=createServer((_req,res)=>res.writeHead(200,contentType===null?{}:{'Content-Type':contentType}).end(raw));
+  // Connection: close: nothing is kept alive between tests, so a later server that is handed the same port can never be reached through an old pooled socket.
+  const server=createServer((_req,res)=>res.writeHead(200,{...(contentType===null?{}:{'Content-Type':contentType}),Connection:'close'}).end(raw));
+  server.on('clientError',(_e,socket)=>socket.destroy()); // a client that hangs up mid-body (a rejected stream is cancelled early) is not an error of the test
   await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
-  try{await run(await fetch('http://127.0.0.1:'+(server.address() as any).port));}
+  try{await run(await loopbackFetch((server.address() as any).port));}
   finally{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}
 }
 const reasoning=()=>({id:'r',type:'reasoning',summary:[{type:'summary_text',text:'PRIVATE_REASONING_SENTINEL'}],content:[{type:'reasoning_text',text:'PRIVATE_REASONING_SENTINEL'}]});
