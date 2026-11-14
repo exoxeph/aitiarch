@@ -18,6 +18,18 @@
 
 <br>
 
+<div align="center">
+<img src="docs/media/wall.png" alt="Sessions, citations, diagrams and the constellation" width="100%">
+</div>
+
+<br>
+
+## &nbsp;How a question travels
+
+<img src="docs/media/flow.png" alt="Note, threads, selection, Claude Code sessions and Codex sessions go into a review card you approve. An answer comes back with every claim checked. You keep it as a note, a diagram or a thread." width="100%">
+
+<br>
+
 ## &nbsp;01 &nbsp; Ink beside the text, never inside it
 
 <img src="docs/media/editor.png" alt="The editor: AI thoughts float in the margin, tied to the exact sentence they are about" width="100%">
@@ -35,11 +47,64 @@ Every message gets a review card first: your question, the note, the threads, th
 
 <br>
 
-## &nbsp;03 &nbsp; Watch the notebook connect
+## &nbsp;03 &nbsp; Bring in your Claude Code and Codex sessions
 
-<img src="docs/media/constellation.png" alt="The constellation: notes as stars, open threads glowing" width="100%">
+<div align="center">
+<img src="docs/media/sessions.gif" alt="Picking a Claude Code session and a Codex session, previewing the redacted text, sending, and getting a cited answer" width="86%">
+</div>
 
-Notes become stars. Open threads glow. Broken links and threads nobody cites are one glance away.
+<br>
+
+<img src="docs/media/session-preview.png" alt="The session picker lists Claude Code and Codex sessions for this project, with a redacted preview of exactly what will be sent" width="100%">
+
+Past **Claude Code** and **Codex** sessions for this project show up in one picker. Tick the ones that matter and read the redacted text, key-like tokens already blanked, before a word is sent.
+Chats that carry sessions stay in memory only, and *Add to note* is switched off for them.
+
+<br>
+
+## &nbsp;04 &nbsp; Every claim, checked against its source
+
+<img src="docs/media/citations.png" alt="Source chips under an answer: the note, a thread and two sessions found; one quote not found" width="100%">
+
+Each claim in an answer becomes a chip: the note, a thread, a session. The app looks for the quoted words in that exact source and says **Found** or **Quote not found**. Words, never colour alone.
+
+<br>
+
+## &nbsp;05 &nbsp; Add to note, as plain Markdown
+
+<div align="center">
+<img src="docs/media/addnote.gif" alt="Asking a question, then adding the answer to the note under the sentence it is about" width="86%">
+</div>
+
+One click puts the answer in the note as an AI-labelled callout. It is ordinary Markdown, one undo away.
+
+<br>
+
+## &nbsp;06 &nbsp; Turn a sentence into a diagram
+
+<div align="center">
+<img src="docs/media/diagram.gif" alt="Selecting a sentence, choosing Visualize, reviewing, and getting a diagram that is then added to the note" width="86%">
+</div>
+
+<br>
+
+<img src="docs/media/diagram-blob.png" alt="Select a sentence, press Visualize, and a diagram appears in the margin" width="100%">
+
+Select a sentence, press **Visualize**, review, send. The diagram appears in the margin; bring it into the note and it is saved beside it as an image that follows light and dark.
+
+<br>
+
+## &nbsp;07 &nbsp; See the whole notebook at once
+
+<div align="center">
+<img src="docs/media/constellation.gif" alt="Flying through the constellation: notes as stars, links between them, open threads glowing" width="86%">
+</div>
+
+<br>
+
+<img src="docs/media/constellation-full.png" alt="Fourteen notes in three folders, linked, with open threads glowing and one broken link flagged" width="100%">
+
+Notes become stars and links become lines. Open threads glow. Notes nothing cites and links that lead nowhere are one glance away. Filter by folder or state, or find a note by name.
 
 <br>
 
@@ -55,7 +120,7 @@ Notes become stars. Open threads glow. Broken links and threads nobody cites are
 |---|---|
 | **The why is yours** | AI never writes your takeaway, your reasons, or a failed reason. |
 | **Asked, not assumed** | No proactive comments. Edits come only from something you did: typing, a toolbar, a shortcut, a click. |
-| **Look, then send** | A plan card for anything bigger than a chat: files, repo, diagrams, a cost cap. Raising it asks again. |
+| **Look, then send** | A review card for every message. A plan card for anything bigger: files, repo, diagrams, a cost cap. Raising it asks again. |
 | **Read-only investigations** | *Investigate* reads a throwaway copy of your repo, never the repo itself, with secrets filtered out. |
 | **Your files, byte-exact** | Rendering is display only. Decorations never change the document. |
 | **Local** | No accounts, no hosted backend, no network fonts. The app never handles your Claude credentials. |
@@ -83,4 +148,4 @@ The notebook opens in your browser. Details and the practice notebook: [ui/READM
 
 <br>
 
-<div align="center"><sub>Screenshots are of the real app on a synthetic notebook.</sub></div>
+<div align="center"><sub>Every screenshot and clip is the real app on a synthetic notebook, with fake providers and fake sessions.</sub></div>
