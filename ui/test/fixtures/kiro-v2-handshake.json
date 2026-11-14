@@ -1,0 +1,26 @@
+{
+  "initialize": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+      "loadSession": true,
+      "promptCapabilities": {"image": true, "audio": false, "embeddedContext": false},
+      "mcpCapabilities": {"http": true, "sse": false},
+      "sessionCapabilities": {},
+      "auth": {}
+    },
+    "authMethods": [],
+    "agentInfo": {"name": "Kiro CLI Agent", "title": "Kiro CLI Agent", "version": "3.3.0"}
+  },
+  "session": {
+    "sessionId": "synthetic-session",
+    "modes": {
+      "currentModeId": "aitiarch-tool-less",
+      "availableModes": [{"id": "aitiarch-tool-less", "name": "Aitiarch"}, {"id": "kiro_default", "name": "kiro_default"}]
+    },
+    "models": {"currentModelId": "synthetic-model", "availableModels": []}
+  },
+  "inventory": {
+    "method": "_kiro.dev/commands/available",
+    "params": {"sessionId": "synthetic-session", "commands": [], "prompts": [], "tools": [], "mcpServers": []}
+  }
+}

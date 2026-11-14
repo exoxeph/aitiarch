@@ -1,9 +1,11 @@
 // Synthetic protocol data only. Never invokes a provider.
 import readline from 'node:readline';import fs from 'node:fs';import path from 'node:path';
 const mode=process.argv[2];const args=process.argv.slice(3);const out=e=>console.log(JSON.stringify(e));
+const record=args[0]&&path.isAbsolute(args[0])?args.shift():null;
+if(record&&(args.includes('--version')||args.includes('--help')))fs.appendFileSync(record,JSON.stringify(args)+'\n');
 if(fs.readdirSync(process.cwd()).length)process.exit(91);
 if(args.includes('--version')){console.log(mode.startsWith('kiro')||['permission','no-inventory','refusal','replay'].includes(mode)?'kiro-cli 3.3.0':'codex-cli 0.145.0');process.exit();}
-if(args.includes('--help')){if(mode==='metadata-hang'){setInterval(()=>{},1000);}else{console.log(args.includes('acp')?'--agent-engine --agent':'--json --ephemeral --ignore-user-config --ignore-rules --sandbox read-only --skip-git-repo-check --color --cd --config --disable');process.exit();}}
+if(args.includes('--help')){if(['metadata-hang','help-hang'].includes(mode)){setInterval(()=>{},1000);}else{console.log(args.includes('acp')?'--agent-engine --agent':'--json --ephemeral --ignore-user-config --ignore-rules --sandbox read-only --skip-git-repo-check --color --cd --config --disable');process.exit();}}
 if(!args.includes('acp')){
  process.stdin.resume();process.stdin.on('end',()=>{if(mode==='hang')setInterval(()=>{},1000);else if(mode==='codex'){out({type:'item.completed',item:{type:'agent_message',text:'June.'}});out({type:'turn.completed',usage:{input_tokens:10,output_tokens:2}});}else{out({type:'item.started',item:{type:mode}});setInterval(()=>{},1000);}});
 }else{
@@ -14,7 +16,13 @@ if(!args.includes('acp')){
  else if(e.method==='session/new'||e.method==='session/load'){
   if(e.params.mcpServers.length||e.params.cwd!==process.cwd())process.exit(93);
   if(mode==='replay'){out({method:'_kiro.dev/metadata',params:{data:{stopReason:'CONTENT_FILTERED',refusal:{category:'SYNTHETIC'}}}});out({method:'session/update',params:{update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'old replay'}}}});}
-  reply({sessionId:'synthetic-session',modes:{currentModeId:'aitiarch-tool-less',availableModes:[{id:'aitiarch-tool-less',name:'Aitiarch'}]},...(mode==='no-inventory'?{}:{tools:[],mcpServers:[]})});
+  const shape=JSON.parse(fs.readFileSync(new URL('./kiro-v2-handshake.json',import.meta.url),'utf8'));
+  if(mode==='no-inventory')shape.inventory.params.tools=undefined;
+  if(mode==='kiro-tools')shape.inventory.params.tools=[{name:'read'}];
+  if(mode==='kiro-mcp')shape.inventory.params.mcpServers=[{name:'synthetic'}];
+  if(mode==='kiro-agent')shape.session.modes.availableModes=[];
+  if(mode==='kiro-unreadable')shape.inventory.params=null;
+  if(mode==='kiro-after'){reply(shape.session);out(shape.inventory);}else{out(shape.inventory);reply(shape.session);}
  }else if(e.method==='session/prompt'){
   if(mode==='no-inventory')process.exit(94);
   if(mode==='permission'){requestId=100;out({jsonrpc:'2.0',id:requestId,method:'session/request_permission',params:{options:[{optionId:'allow_once',kind:'allow_once'},{optionId:'reject_once',kind:'reject_once'}]}});return;}
