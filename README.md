@@ -36,7 +36,7 @@
 ## &nbsp;01 &nbsp; Ink beside the text, never inside it
 
 <div align="center">
-<img src="docs/media/pipe-ink.gif" alt="Select a sentence, press Think on this, and Aitiarch AI puts a thought in the margin. The thought and its anchor live in a file beside yours, and your Markdown stays untouched." width="100%">
+<img src="docs/media/motion-ink.gif" alt="Dragging across a sentence, pressing Think on this, reviewing what will be sent, and a thought typing itself into the margin beside the text" width="100%">
 </div>
 
 <br>
@@ -51,7 +51,7 @@ Your note stays **byte-for-byte your Markdown**. The ink lives next to the file,
 ## &nbsp;02 &nbsp; See exactly what leaves the machine
 
 <div align="center">
-<img src="docs/media/pipe-review.gif" alt="Your question, the note, the threads, the instructions and the budget are gathered into a review card. Nothing is sent until you press Send." width="100%">
+<img src="docs/media/motion-review.gif" alt="Typing a question in the chat, the review card appearing with the note, threads, instructions and budget, and Send pressed only after reading it" width="100%">
 </div>
 
 <br>
@@ -65,7 +65,7 @@ Every message gets a review card first: your question, the note, the threads, th
 ## &nbsp;03 &nbsp; Bring in your Claude Code and Codex sessions
 
 <div align="center">
-<img src="docs/media/pipe-sessions.gif" alt="Pick Claude Code and Codex sessions, secrets are redacted, you preview exactly what will be sent, and they join as context chips on the review card" width="100%">
+<img src="docs/media/motion-sessions.gif" alt="Opening the session picker, ticking a Claude Code session and a Codex session, and opening the redacted preview of exactly what will be sent" width="100%">
 </div>
 
 <br>
@@ -80,7 +80,7 @@ Chats that carry sessions stay in memory only, and *Add to note* is switched off
 ## &nbsp;04 &nbsp; Every claim, checked against its source
 
 <div align="center">
-<img src="docs/media/pipe-cites.gif" alt="Each quoted claim in an answer is searched for in its own source and comes back as Found or Quote not found" width="100%">
+<img src="docs/media/motion-cites.gif" alt="An answer arrives with source chips, and clicking each one shows the quoted words and whether they were Found or Quote not found" width="100%">
 </div>
 
 <br>
@@ -94,7 +94,7 @@ Each claim in an answer becomes a chip: the note, a thread, a session. The app l
 ## &nbsp;05 &nbsp; Add to note, as plain Markdown
 
 <div align="center">
-<img src="docs/media/pipe-addnote.gif" alt="Add to note inserts the reply as an AI-labelled Markdown callout under the sentence it is about, with one undo and your bytes untouched" width="100%">
+<img src="docs/media/motion-addnote.gif" alt="Hovering an answer, pressing Add to note, and the reply landing in the note as an AI-labelled callout with an Undo" width="100%">
 </div>
 
 One click puts the answer in the note as an AI-labelled callout. It is ordinary Markdown, one undo away, and your BOM and line endings stay as they were.
@@ -104,7 +104,7 @@ One click puts the answer in the note as an AI-labelled callout. It is ordinary 
 ## &nbsp;06 &nbsp; Turn a sentence into a diagram
 
 <div align="center">
-<img src="docs/media/pipe-diagram.gif" alt="Select a sentence and press Visualize, review, Aitiarch AI sketches the diagram, it is checked and repaired, appears in the margin, and can be added to the note as an image" width="100%">
+<img src="docs/media/motion-diagram.gif" alt="Dragging across a sentence, pressing Visualize, sending, a flow diagram appearing in the margin, and Add to note placing it in the document as an image" width="100%">
 </div>
 
 <br>
@@ -122,7 +122,7 @@ Select a sentence, press **Visualize**, review, send. The diagram appears in the
 ## &nbsp;07 &nbsp; See the whole notebook at once
 
 <div align="center">
-<img src="docs/media/pipe-constellation.gif" alt="Your notes are read for links and drawn as a constellation: links become lines, open threads glow, broken links are flagged" width="100%">
+<img src="docs/media/motion-constellation.gif" alt="Opening the constellation, switching to the whole notebook, and clicking through notes while their links and open threads light up" width="100%">
 </div>
 
 <br>
