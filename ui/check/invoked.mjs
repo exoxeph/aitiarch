@@ -8,6 +8,7 @@ import { chromium } from 'playwright-core';
 import { Store } from '../server/store.ts';
 import { NoteWatcher } from '../server/watch.ts';
 import { createApp } from '../server/http.ts';
+import { LedgerStore } from '../server/ledger-store.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = await mkdtemp(path.join(os.tmpdir(), 'aitiarch-invoked-browser-'));
@@ -21,6 +22,11 @@ const app = createApp({ store, watcher, distDir: path.join(here, '../dist'), pro
   invoke: async request => new Promise(resolve => { calls.push(request); pending.push(() => resolve({ id: request.id,
     provider: 'claude', model: null, answer: `Synthetic answer ${calls.length}.`, claims: [], usage: { inputTokens: 30, outputTokens: 5 } })); }),
 } });
+// Hold a real append at the durability boundary: a click is not an acknowledgement.
+const strictAppend=LedgerStore.prototype.append;
+let releaseDismiss,signalDismiss;
+const dismissalStarted=new Promise(resolve=>{signalDismiss=resolve;}),dismissalAllowed=new Promise(resolve=>{releaseDismiss=resolve;});
+LedgerStore.prototype.append=function(event){if(event.event==='dismissed'){signalDismiss();return dismissalAllowed.then(()=>strictAppend.call(this,event));}return strictAppend.call(this,event);};
 let browser;
 try {
   const url = `http://127.0.0.1:${await app.listen(0)}/?debug=1`;
@@ -72,9 +78,12 @@ try {
   // The thread conversation now opens from its thought (here the orphaned one has no blob, so it opens as the floating panel).
   await page.evaluate(async () => { const s = await (await fetch('/api/threads?path=fixture.md')).json(); const id = s.document.items.find(i => i.generation)?.id; window.dispatchEvent(new CustomEvent('open-thread', { detail: { id, thought: true } })); });
   await page.getByRole('region', { name: 'AI thought conversation' }).waitFor();
+  const dismissalResponse=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/threads/action'&&r.request().postDataJSON()?.action?.type==='dismiss');
   await page.getByRole('button', { name: 'Dismiss thread', exact: true }).first().click();
   console.log('invoked check: dismissal reached');
-  await page.waitForTimeout(400);
+  await dismissalStarted;
+  assert(!JSON.parse(await readFile(path.join(root,'ledger.json'),'utf8')).events.some(e=>e.event==='dismissed'),'held append is not durable merely because the button was clicked');
+  releaseDismiss();assert((await dismissalResponse).ok(),'dismissal must acknowledge its saved state');
   const ledger = JSON.parse(await readFile(path.join(root, 'ledger.json'), 'utf8'));
   assert(ledger.events.some(e => e.event === 'shown'));
   assert(ledger.events.some(e => e.event === 'dismissed'));
@@ -127,4 +136,4 @@ try {
   await page.screenshot({ path: path.join(screenshots, 'invoked-narrow.png'), fullPage: true });
   console.log(JSON.stringify({ passed: true, calls: calls.length, provider: 'fake only', checks: ['toolbar', 'Ctrl+Enter', 'Ask', 'preview-no-call', 'frozen selection',
     'typing while loading', 'delayed mapping', 'preview-time duplication persisted', 'orphan preservation', 'reload', 'save-only retry after reload', 'shown/dismissed ledger', 'BOM+CRLF preserved', 'wide/narrow'] }));
-} finally { await browser?.close(); await app.close(); await rm(root, { recursive: true, force: true }); }
+} finally { releaseDismiss();LedgerStore.prototype.append=strictAppend;await browser?.close(); await app.close(); await rm(root, { recursive: true, force: true }); }

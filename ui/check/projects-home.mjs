@@ -50,6 +50,15 @@ const key = async (k) => { await page.keyboard.press(k); await sleep(110); }; //
 const focused = () => page.evaluate(() => document.activeElement?.dataset.path);
 const alerts = () => page.evaluate(() => `input=[${document.querySelector("#project-path")?.value}] ` + [...document.querySelectorAll('[role="alert"], .dialog')].map((e) => e.innerText.replace(/\s+/g, " ").slice(0, 120)).join(" || ")).catch(() => "");
 const until = async (fn, ms = 6000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await sleep(100); } return false; };
+const openAddProject=async()=>{
+  await page.click('button:has-text("Add project")');
+  // Initial folder browsing populates this controlled input asynchronously. Do not
+  // race Playwright's select-all/insertText with that initial value assignment.
+  await page.waitForFunction(()=>{
+    const input=document.querySelector('#project-path'),here=document.querySelector('.browse-here');
+    return input&&here&&here.textContent!=='Loading…'&&input.value===here.textContent;
+  });
+};
 
 try {
   // ---- the notebook: Main note, default tab, keyboard tree
@@ -118,12 +127,12 @@ try {
   check("the card draws its constellation", (await page.locator(".card-thumb circle").count()) >= 3);
 
   // ---- Add project: an already-notebook folder, then a plain folder with a preview
-  await page.click('button:has-text("Add project")');
+  await openAddProject();
   await page.fill("#project-path", B); await page.getByRole("button", { name: "Go", exact: true }).click();
   await page.waitForSelector("text=already an Aitiarch notebook");
   await page.click('button:has-text("Add this project")');
   check("an existing notebook is added to the list", await until(async () => (await page.locator(".project-card").count()) === 2));
-  await page.click('button:has-text("Add project")');
+  await openAddProject();
   await page.fill("#project-path", C); await page.getByRole("button", { name: "Go", exact: true }).click();
   await page.waitForFunction((p) => document.querySelector(".browse-here")?.textContent === p, C, { timeout: 8000 }); // the listing is for gamma
   await page.waitForSelector('.add-detail:has-text("not an Aitiarch notebook yet")');
