@@ -64,6 +64,13 @@ export type InvestigateEvent=
  |{type:'complete';message:InvestigateMessage}
  |{type:'error';code:InvestigateCode;tripwire?:Tripwire;partial?:PartialTurn};
 
+/** A path a tool may use inside the folder `cwd`: no home (~) or variable ($, %) expansion, no UNC or device path (\\?\, \\.\, \\host), no stream suffix or drive-relative form (C:x, file:stream),
+ *  and it resolves inside `cwd`. Shared by Investigate's watcher and the diagram watcher of a conversation turn: one definition of "inside". */
+export function pathInside(cwd:string,p:string):boolean{
+ if(!p||/^~/.test(p)||/[$%]/.test(p)||/^[\\/]{2}/.test(p))return false; // home, variables, UNC and device paths
+ const afterDrive=p.replace(/^[A-Za-z]:(?=[\\/])/,'');if(afterDrive.includes(':'))return false; // C:x (drive-relative) and file:stream
+ const r=path.relative(cwd,path.resolve(cwd,p));return !r.startsWith('..')&&!path.isAbsolute(r);
+}
 const TOOLS=new Set(['Read','Grep','Glob']);
 interface StreamHooks {cwd:string;turnLimit:number;onText:(t:string)=>void;onBlock?:()=>void;onStep:(i:number,s:ToolStep)=>void;onStepResult:(i:number,ok:boolean,denial?:string,error?:string)=>void;onStarted:()=>void;
  onThinking?:(t:string)=>void;onTurn?:(turns:number)=>void}
@@ -78,12 +85,8 @@ export class InvestigateStream {
  get turns(){return this.ids.size;}
  push(b:Buffer){this.pending+=this.decoder.write(b);let n;while((n=this.pending.indexOf('\n'))>=0){const line=this.pending.slice(0,n).trim();this.pending=this.pending.slice(n+1);if(line)this.event(line);}}
  finish(){this.pending+=this.decoder.end();if(this.pending.trim())this.event(this.pending.trim());this.pending='';if(!this.inited||!this.result)throw new InvestigateError('isolation');}
- /** A path the tool may use: no home (~) or variable ($, %) expansion, no UNC or device path, no stream suffix, and it resolves inside the copy. */
- private inside(p:string){
-  if(!p||/^~/.test(p)||/[$%]/.test(p)||/^[\\/]{2}/.test(p))return false; // home, variables, UNC and device paths
-  const afterDrive=p.replace(/^[A-Za-z]:(?=[\\/])/,'');if(afterDrive.includes(':'))return false; // C:x (drive-relative) and file:stream
-  const r=path.relative(this.o.cwd,path.resolve(this.o.cwd,p));return !r.startsWith('..')&&!path.isAbsolute(r);
- }
+ /** A path the tool may use: it resolves inside the copy (see pathInside). */
+ private inside(p:string){return pathInside(this.o.cwd,p);}
  private tool(c:any){
   if(!TOOLS.has(c?.name))throw new InvestigateError('tool_refused');
   const input=c.input&&typeof c.input==='object'?c.input:{};

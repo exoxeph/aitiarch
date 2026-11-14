@@ -43,6 +43,13 @@ export function validClaims(v:unknown):v is ChatClaim[]{
    &&typeof x.sourceId==='string'&&/^[A-Z][0-9]{1,3}$/.test(x.sourceId)&&CLAIM_KINDS.includes(x.source)&&typeof x.quote==='string'&&x.quote.length<=240;
  });
 }
+/** A diagram the model opened with Read during a turn: D<n> as the note numbered it then, the diagram's name in the assets folder, and its title. Saved with the reply, so what the
+ *  conversation has looked at survives a restart (a claim about a diagram is accepted only for one of these). */
+export interface DiagramRead {n:number;asset:string;title:string}
+const DIAGRAM_ASSET=/^(?:ai-)?diagram-[a-f0-9]{64}$/;
+export function validDiagramReads(v:unknown):v is DiagramRead[]{
+ return Array.isArray(v)&&v.length<=24&&v.every(r=>r&&typeof r==='object'&&!Array.isArray(r)&&Object.keys(r).sort().join()==='asset,n,title'&&Number.isInteger(r.n)&&r.n>=1&&r.n<=9&&typeof r.asset==='string'&&DIAGRAM_ASSET.test(r.asset)&&typeof r.title==='string'&&r.title.length<=80&&!/[\u0000-\u001f\u007f]/.test(r.title));
+}
 export interface ChatMessage {
  id:string;role:'assistant';body:string;at:string;provider:'claude';model:string|null;
  evidence:{sourceId:string;sourceHash:string;quote:string}[];
@@ -69,6 +76,10 @@ export interface ChatMessage {
  /** The note that was open when the question was asked, when it is not the note this chat is kept under (a conversation follows the person from note to note).
   *  Absent: the note whose chat holds the reply. Source chips name this note, not the one that is open now. */
  askedOn?:string;
+ /** The diagrams the model opened with Read while writing this reply (in order, once each). Absent when it opened none. */
+ diagramReads?:DiagramRead[];
+ /** What the CLI said this turn cost, in dollars (a conversation turn). Absent in older files and when the CLI did not say. */
+ costUsd?:number;
  /** The named conversation (harness session) this reply was written in. Delete conversation removes the replies that carry its id. Absent in a one-off chat and in older files. */
  session?:string;
 }
@@ -98,19 +109,20 @@ export interface BudgetDetail {spent:number;next:number;budget:number}
 export type ChatEvent=
  |{type:'start';id:string}
  |{type:'delta';id:string;text:string;provisional:true}
+ /** The model opened a diagram's picture with Read (a conversation turn): a live row "Opened D1 'title'". */
+ |{type:'diagram_read';id:string;n:number;title:string}
  |{type:'complete';id:string;message:ChatMessage;persistence:'private'|'memory';usage:ChatUsage}
  |{type:'error';id:string;code:ChatErrorCode;rule?:string;/** For internal errors: the kind of error (for example TypeError), never its message. */errorName?:string;/** For provider_failed: why, in a safe form the page can say in words. */reason?:import('./chat-failure.ts').FailureReason;
+  /** For a turn that may open diagrams and was stopped by the fence: why (see shared/diagram-fence.ts), what the CLI said it had cost so far, and the cap it had. */fence?:import('./diagram-fence.ts').FenceCode;costUsd?:number;capUsd?:number;
   /** For a stopped request (cancelled, or budget_reached part-way): what stopped it. Absent when it is not known. */cause?:AbortCause;/** For budget_reached: the numbers. */budget?:BudgetDetail};
 export interface ChatInput {id:string;path:string;question:string;selection?:string;context:ContextChoice[];
  /** A harness chat session (the app's id) to send this message in. Absent: the classic one-shot chat. */
  session?:string;
- /** Diagrams of the open note whose pictures go with this message (`diagram-<hash>` names, at most two). Only a conversation can carry pictures; the server checks each one and says which it attached. */
- diagrams?:string[];
+
  /** Where the person is in the editor: the open note, the section the cursor is in and the line range of the selection that is sent. `path` is the note the chat is kept under;
   *  in a conversation, `editor.path` is the note open now, which may be another note of the same project (the conversation followed the person there). */
  editor?:EditorInfo}
-/** One diagram picture in a review: D<n>, what the note calls it, the file's name (shown through GET /api/diagram-image), its size and its estimated token cost. */
-export interface ReviewImage {n:number;asset:string;title:string;width:number;height:number;tokens:number}
+
 export interface ChatReview {
  reviewId:string;requestId:string;path:string;question:string;selection:string;
  sources:(ContextPreview&{text:string})[];historyPairs:number;omittedPairs:number;
@@ -133,8 +145,9 @@ export interface ChatReview {
  manifest?:string;
  /** The editor information this message was sent with, as the server accepted it. */
  editor?:EditorInfo;
- /** The diagram pictures that go with this message (a conversation only), with what each is expected to cost, and the diagrams that were asked for but are not attached, with the reason in words. */
- images?:ReviewImage[];notAttached?:{n:number;title:string;why:string}[];
+ /** A conversation about a note that shows diagrams: the ones Claude may open with Read in this turn (D<n> and the note's title for it), the ones withheld with the reason in words,
+  *  and the most the turn can cost (the CLI's own cap). The pictures are copies the server makes; the page chooses nothing. */
+ diagrams?:{n:number;title:string}[];diagramsWithheld?:{n:number;title:string;why:string}[];diagramCapUsd?:number;
 }
 /** How much a cache read counts against a chat's token budget, next to new input and output (1). Cache reads are cheap and fast, and counting them
  *  in full made a long conversation look about three quarters spent on tokens it barely paid for. */

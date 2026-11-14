@@ -27,10 +27,9 @@ describe('saving and serving the picture of a diagram',()=>{
   const s=await server();
   try{
    const png=makePng(800,420),name=s.base+'.png';
-   expect((await s.get('/api/diagram-image?name='+name)).status).toBe(404);expect(await (await s.get('/api/diagram-images?names='+name)).json()).toEqual({images:[]});
+   expect(await (await s.get('/api/diagram-images?names='+name)).json()).toEqual({images:[]});
    const saved=await s.put({name,data:b64(png)});expect(saved.status).toBe(200);expect(await saved.json()).toEqual({name,width:800,height:420,bytes:png.length});
-   const served=await s.get('/api/diagram-image?name='+name);expect(served.status).toBe(200);expect(served.headers.get('content-type')).toBe('image/png');expect(served.headers.get('x-content-type-options')).toBe('nosniff');
-   expect(served.headers.get('content-security-policy')).toContain("default-src 'none'");expect(Buffer.from(await served.arrayBuffer()).equals(png)).toBe(true);
+   const served=await s.get('/api/diagram-image?name='+name);expect(served.headers.get('content-type')).not.toBe('image/png');expect(Buffer.from(await served.arrayBuffer()).includes(png.subarray(0,64))).toBe(false); // saved, but never served back to the page
    expect(await (await s.get('/api/diagram-images?names='+name)).json()).toEqual({images:[{name,width:800,height:420,bytes:png.length}]});
    expect((await readdir(path.join(s.nb,'assets'))).sort()).toEqual([name,s.base+'.svg'].sort());
   }finally{await s.close();}
@@ -43,7 +42,6 @@ describe('saving and serving the picture of a diagram',()=>{
    }
    expect((await s.put({data:png})).status).toBe(400);
    expect(await readdir(path.join(s.nb,'assets'))).toEqual([s.base+'.svg']);expect(await readdir(s.nb)).not.toContain('x.png');
-   for(const name of [`../${s.base}.png`,`..%5C${s.base}.png`,'x.png',`${s.base}.svg`])expect((await s.get('/api/diagram-image?name='+encodeURIComponent(name))).status,name).toBe(404);
    expect((await s.get('/api/diagram-images?names=../x.png')).status).toBe(400);expect((await s.get('/api/diagram-images?names='+Array(41).fill(s.base+'.png').join(','))).status).toBe(400);
    expect((await s.get(`/api/diagram-images?names=${s.base}.png,${s.base}.svg`)).status).toBe(400);
   }finally{await s.close();}

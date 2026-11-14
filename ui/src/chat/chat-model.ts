@@ -2,11 +2,16 @@
 import {failureText,type FailureReason} from '../../shared/chat-failure.ts';
 import {CHAT_MESSAGES,budgetText,cancelText,formatTokens,textTokens,type AbortCause,type BudgetDetail,type ChatClaim,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatUsage,type CitationIssue,type ClaimSourceKind,type ContextChoice} from '../../shared/chat.ts';
 import {contractText} from '../../shared/persona-contract.ts';
+import {isFenceCode,type FenceCode} from '../../shared/diagram-fence.ts';
+import {stoppedText} from './diagram-words.ts';
 import type {ContextChip} from './chat-stub.ts';
 
 export type TurnStatus='review'|'streaming'|'complete'|'error';
 /** One question and its answer. `text` is provisional while streaming and the accepted message body once complete. */
-export interface Turn {id:string;question:string|null;status:TurnStatus;text:string;message?:ChatMessage;error?:{code:ChatErrorCode;rule?:string;reason?:FailureReason;errorName?:string;cause?:AbortCause;budget?:BudgetDetail}}
+export interface Turn {id:string;question:string|null;status:TurnStatus;text:string;message?:ChatMessage;
+ /** The diagrams Claude opened in this turn, as live rows (a conversation turn that may open diagrams); the saved reply's diagramReads replace them once it is in. */
+ opened?:{n:number;title:string}[];
+ error?:{code:ChatErrorCode;rule?:string;reason?:FailureReason;errorName?:string;cause?:AbortCause;budget?:BudgetDetail;fence?:FenceCode;costUsd?:number;capUsd?:number}}
 
 export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
  if(!turns.some(t=>t.id===event.id))return [...turns];
@@ -15,16 +20,17 @@ export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
   switch(event.type){
    case 'start':return {...t,status:'streaming'};
    case 'delta':return {...t,status:'streaming',text:t.text+event.text};
-   case 'complete':return {...t,status:'complete',text:event.message.body,message:event.message};
-   case 'error':{const {message:_dropped,...rest}=t;return {...rest,status:'error',text:'',error:{code:event.code,...(event.rule?{rule:event.rule}:{}),...(event.reason?{reason:event.reason}:{}),...(event.errorName?{errorName:event.errorName}:{}),...(event.cause?{cause:event.cause}:{}),...(event.budget?{budget:event.budget}:{})}};} // a partial reply is never kept
+   case 'diagram_read':return {...t,opened:[...(t.opened??[]),{n:event.n,title:event.title}]};
+   case 'complete':return {...t,status:'complete',text:event.message.body,message:event.message,...(event.message.diagramReads?{opened:event.message.diagramReads.map(r=>({n:r.n,title:r.title}))}:{})};
+   case 'error':{const {message:_dropped,...rest}=t;return {...rest,status:'error',text:'',error:{code:event.code,...(event.rule?{rule:event.rule}:{}),...(event.reason?{reason:event.reason}:{}),...(event.errorName?{errorName:event.errorName}:{}),...(event.cause?{cause:event.cause}:{}),...(event.budget?{budget:event.budget}:{}),...(isFenceCode(event.fence)?{fence:event.fence}:{}),...(typeof event.costUsd==='number'?{costUsd:event.costUsd}:{}),...(typeof event.capUsd==='number'?{capUsd:event.capUsd}:{})}};} // a partial reply is never kept; the rows of what it opened stay
   }
  });
 }
 /** Accepted messages come back from the server without their questions; this session may still remember them. */
 export const fromStored=(messages:readonly ChatMessage[],questions:ReadonlyMap<string,string>):Turn[]=>
- messages.map(m=>({id:m.id,question:questions.get(m.id)??null,status:'complete' as const,text:m.body,message:m}));
+ messages.map(m=>({id:m.id,question:questions.get(m.id)??null,status:'complete' as const,text:m.body,message:m,...(m.diagramReads?{opened:m.diagramReads.map(r=>({n:r.n,title:r.title}))}:{})}));
 
-const EVENT_TYPES=new Set(['start','delta','complete','error']);
+const EVENT_TYPES=new Set(['start','delta','diagram_read','complete','error']);
 /** Splits a server-sent-events buffer into whole chat events plus the unfinished tail. Malformed or unknown frames are dropped. */
 export function sseFrames(buffer:string):{events:ChatEvent[];rest:string}{
  const parts=buffer.split(/\r?\n\r?\n/),rest=parts.pop()??'',events:ChatEvent[]=[];
@@ -81,7 +87,8 @@ export function claimLines(claims:readonly ChatClaim[]|undefined):ClaimLine[]{
 /** Shown under a reply that recites a long run of the instructions Aitiarch sent with the question. */
 export const ECHO_LABEL='Part of this reply repeats the instructions Aitiarch sent with your question.';
 /** A failed Claude call says why when the server gave a reason it understands; otherwise the same generic sentence as ever. */
-export function errorText(code:ChatErrorCode,reason?:FailureReason,errorName?:string,extra?:{cause?:AbortCause;budget?:BudgetDetail}):string{
+export function errorText(code:ChatErrorCode,reason?:FailureReason,errorName?:string,extra?:{cause?:AbortCause;budget?:BudgetDetail;fence?:FenceCode;costUsd?:number;capUsd?:number}):string{
+ if(code==='provider_failed'&&extra?.fence&&isFenceCode(extra.fence))return stoppedText(extra.fence,extra.capUsd,extra.costUsd);
  if(code==='cancelled')return extra?.cause?cancelText(extra.cause):CHAT_MESSAGES.cancelled;
  if(code==='budget_reached'&&extra?.budget)return budgetText(extra.budget);
  if(code==='internal'&&typeof errorName==='string'&&/^[A-Za-z]{1,40}$/.test(errorName))return `Something went wrong inside Aitiarch while handling this request (${errorName}). No retry was made.`;

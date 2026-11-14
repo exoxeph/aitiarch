@@ -1,8 +1,9 @@
 import {describe,expect,it} from 'vitest';
-import {MAX_DIAGRAM_IMAGES,autoDiagrams,diagramsIn,imageTokens,mentionsDiagram,pickAttached,type DiagramRef} from '../shared/diagram-refs.ts';
-import {diagramChipText,notAttachedText,overLimitText,reviewImageText} from '../src/chat/diagram-chips.ts';
+import {diagramFileName,diagramNumberOf,diagramsIn} from '../shared/diagram-refs.ts';
+import {openedText,reviewDiagramsText,stoppedText,turnCostText,withheldText} from '../src/chat/diagram-words.ts';
+import {FENCE_CODES,FENCE_WORDS,TESTED_CLI_VERSION} from '../shared/diagram-fence.ts';
 
-// The diagrams of a note as chat chips: numbered by the note's own text, off until the question or the cursor points at them, at most two pictures to a message.
+// The diagrams of a note: numbered by the note's own text. A conversation may open their pictures, copied as d<n>.png; the chat words what it may open, what it opened and why a turn stopped.
 const H=(c:string)=>c.repeat(64),A=`diagram-${H('a')}`,B=`diagram-${H('b')}`,C=`ai-diagram-${H('c')}`,D=`diagram-${H('d')}`;
 const NOTE=['# Plan','',`> ![AI diagram: claude-design](assets/${A}.svg)`,'','Some text.','',`![Flow of the release](../assets/${B}.svg)`,'',`> ![AI diagram: archify](assets/${C}.svg)`,'','End.'].join('\n');
 
@@ -23,57 +24,30 @@ describe('the diagrams of a note',()=>{
   const many=Array.from({length:12},(_,i)=>`![d${i}](assets/diagram-${i.toString(16).padStart(64,'0')}.svg)`).join('\n');
   expect(diagramsIn(many)).toHaveLength(9);expect(diagramsIn('Just words.\n')).toEqual([]);expect(diagramsIn('')).toEqual([]);
  });
- it('cost about width x height / 750 tokens, a long side beyond 1,568 px being scaled down first',()=>{
-  expect(imageTokens(800,420)).toBe(448);expect(imageTokens(1600,1600)).toBe(Math.ceil(1568*1568/750));expect(imageTokens(0,10)).toBe(0);expect(imageTokens(1,1)).toBe(1);
-  expect(imageTokens(1600,1000)).toBeLessThanOrEqual(imageTokens(1568,980)+2);
+
+});
+
+describe('the copies of a diagram',()=>{
+ it('are named d<n>.png, and only those names are read back as a diagram number',()=>{
+  expect(diagramFileName(1)).toBe('d1.png');expect(diagramFileName(9)).toBe('d9.png');
+  expect([1,9].map(n=>diagramNumberOf(diagramFileName(n)))).toEqual([1,9]);
+  for(const name of ['d0.png','d10.png','D1.png','d1.PNG','d1.png.txt','xd1.png','d1png','d-1.png','d1.png ','',' d1.png'])expect(diagramNumberOf(name),name).toBeNull();
  });
 });
 
-describe('which diagrams go with a message',()=>{
- const d=diagramsIn(NOTE),auto=(question:string,more:{cursorLine?:number;selection?:{fromLine:number;toLine:number}}={})=>autoDiagrams(d,{question,...more});
- it('none, when the question and the cursor say nothing about a diagram',()=>{expect(auto('What is the main risk here?')).toEqual([]);expect(auto('Summarise the note',{cursorLine:1})).toEqual([]);});
- it('the ones a question talks about: diagram, figure, chart, picture, arrow, flow (any case, plural), nearest to the cursor first',()=>{
-  for(const q of ['Which box feeds which in the diagram?','what do the arrows mean','Explain this FLOW','Is the chart right?','Describe the picture','Is figure 2 clear?','Are these flows right?'])expect(mentionsDiagram(q),q).toBe(true);
-  for(const q of ['Where is the arrowhead','What does the diagrammer do','Summarise the flowering','pictured as','A disagreement'])expect(mentionsDiagram(q),q).toBe(false);
-  expect(auto('Which box feeds which in the diagram?',{cursorLine:8})).toEqual([B,C,A]); // the one nearest the cursor first, then by distance
-  expect(auto('Which box feeds which in the diagram?')).toEqual([A,B,C]);
+describe('what the chat says about diagrams',()=>{
+ it('says in the review which diagrams Claude may open and the cap, and nothing when there are none',()=>{
+  expect(reviewDiagramsText({diagrams:[{n:1,title:'claude-design'},{n:2,title:'archify'}],diagramCapUsd:0.5})).toBe("Claude may open these diagrams: D1 'claude-design', D2 'archify' (up to $0.50)");
+  expect(reviewDiagramsText({diagrams:[{n:3,title:'flow'}],diagramCapUsd:0.25})).toBe("Claude may open this diagram: D3 'flow' (up to $0.25)");
+  expect(reviewDiagramsText({diagrams:[]})).toBeNull();expect(reviewDiagramsText({})).toBeNull();
+  expect(withheldText({n:4,title:'keys',why:'it holds text that looks like a secret'})).toBe("D4 'keys': withheld, it holds text that looks like a secret.");
  });
- it('the one the cursor is on, or the one inside the selection, without a word about it',()=>{
-  expect(auto('What does this mean?',{cursorLine:7})).toEqual([B]);expect(auto('Explain',{selection:{fromLine:2,toLine:5}})).toEqual([A]);expect(auto('Explain',{selection:{fromLine:2,toLine:9}})).toEqual([A,B,C]);
-  expect(auto('Explain',{cursorLine:5,selection:{fromLine:5,toLine:6}})).toEqual([]);
- });
- it('the ones a question names (D2), whatever else it says',()=>{expect(auto('Compare D2 with d3')).toEqual([B,C]);expect(auto('Is D9 fine?')).toEqual([]);expect(auto('The D in D2 stands for done')).toEqual([B]);});
- it('only the first two switched on with a picture go; the rest are over the limit, and one without a picture is missing',()=>{
-  const have=new Set([A,B,C]),none=new Map<string,boolean>();
-  expect(pickAttached(d,none,[A,B,C],have)).toEqual({attached:[A,B],over:[C],missing:[]});expect(MAX_DIAGRAM_IMAGES).toBe(2);
-  expect(pickAttached(d,none,[A,B,C],new Set([B,C]))).toEqual({attached:[B,C],over:[],missing:[A]});
-  expect(pickAttached(d,none,[],have)).toEqual({attached:[],over:[],missing:[]});
- });
- it('a switch the person made beats the automatic choice, either way, and is listed first',()=>{
-  const have=new Set([A,B,C]);
-  expect(pickAttached(d,new Map([[A,false]]),[A,B],have)).toEqual({attached:[B],over:[],missing:[]}); // switched off although the question asked for it
-  expect(pickAttached(d,new Map([[C,true]]),[A,B],have)).toEqual({attached:[C,A],over:[B],missing:[]}); // switched on, and it takes a place before the automatic ones
-  expect(pickAttached(d,new Map([[A,true],[B,true],[C,true]]),[],have)).toEqual({attached:[A,B],over:[C],missing:[]});
-  expect(pickAttached(d,new Map([['diagram-'+H('9'),true]]),[],have)).toEqual({attached:[],over:[],missing:[]}); // not a diagram of this note
- });
- it('holds for one message only: with no switches left the choice is automatic again',()=>{
-  const have=new Set([A,B]),afterSend=new Map<string,boolean>();
-  expect(pickAttached(d,new Map([[A,false]]),[A],have).attached).toEqual([]);expect(pickAttached(d,afterSend,[A],have).attached).toEqual([A]);
- });
-});
-
-describe('the words of the diagram chips',()=>{
- const ref=(n:number,title:string):Pick<DiagramRef,'n'|'title'>=>({n,title});
- it('read "D1 <title> · about N tokens", and say when the picture is not attached, not made, or could not be made',()=>{
-  expect(diagramChipText(ref(1,'claude-design'),{width:800,height:420},'on')).toBe('D1 claude-design · about 448 tokens');
-  expect(diagramChipText(ref(2,'archify'),{width:1600,height:1000},'off')).toBe('D2 archify · about 2k tokens');
-  expect(diagramChipText(ref(3,'x'),{width:800,height:420},'over')).toBe('D3 x · not attached (limit 2)');
-  expect(diagramChipText(ref(1,'x'),undefined,'off')).toBe('D1 x · picture on its way');expect(diagramChipText(ref(1,'x'),undefined,'off',true)).toBe('D1 x · no picture');
- });
- it('say that at most two pictures go, which ones will not, and what the review shows',()=>{
-  expect(overLimitText([3])).toBe('At most 2 pictures go with a message: D3 will not be attached. Switch another off to attach it.');
-  expect(overLimitText([3,4])).toBe('At most 2 pictures go with a message: D3, D4 will not be attached. Switch another off to attach them.');
-  expect(reviewImageText({n:1,title:'claude-design',tokens:448})).toBe('D1 claude-design · about 448 tokens');
-  expect(notAttachedText({n:2,title:'archify',why:'its picture has not been made yet'})).toBe('D2 archify: not attached, its picture has not been made yet.');
+ it('shows a Read as "Opened D1 \'title\'", the turn cost, and a stopped turn with its cause',()=>{
+  expect(openedText({n:1,title:'claude-design'})).toBe("Opened D1 'claude-design'");
+  expect(turnCostText(0.0123)).toBe('This turn cost $0.012');expect(turnCostText(0.25)).toBe('This turn cost $0.25');
+  expect(stoppedText('budget',0.5,0.52)).toBe('The turn reached its cost cap of $0.50, so it was stopped. Nothing from it was kept.');
+  expect(stoppedText('outside_path',undefined,0.01)).toBe(`The turn was stopped: ${FENCE_WORDS.outside_path}. Nothing from it was kept. It had cost $0.010.`);
+  for(const c of FENCE_CODES)expect(stoppedText(c,0.5)).toMatch(/stopped/);
+  expect(TESTED_CLI_VERSION).toBe('2.1.205');
  });
 });

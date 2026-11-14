@@ -4,7 +4,7 @@ import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES,budgetText} from '../shared/chat.ts';
 import {validSessionId} from '../shared/harness.ts';
 import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
-import {DiagramImageError,DiagramImageStore} from './diagram-image-store.ts';import {DIAGRAM_PNG_MAX_BYTES,DIAGRAM_PNG_NAME} from '../shared/diagram-refs.ts';
+import {TESTED_CLI_VERSION} from '../shared/diagram-fence.ts';import {DiagramImageError,DiagramImageStore} from './diagram-image-store.ts';import {DIAGRAM_PNG_MAX_BYTES,DIAGRAM_PNG_NAME} from '../shared/diagram-refs.ts';
 import {InsertionStore} from './insertion-store.ts';
 import {SKILL_DIAGRAM_CSP_HEADER,SKILL_DIAGRAM_SVG_CSP_HEADER} from '../shared/skill-diagram.ts';
 import { UiStateStore } from './ui-state-store.ts';
@@ -177,8 +177,8 @@ export function createApp(opts: AppOptions) {
   const nodeSettings = new NodeSettingsService(uiStateStore, () => discoveredSkills(false));
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
   const chatStore=new ChatStore(store.rootReal),diagramImages=new DiagramImageStore(store.rootReal);
-  const harnessReady=opts.harness?SessionIndex.open(opts.harness.dir??harnessDirectory(store.rootReal)).then(async index=>{const h=opts.harness!;await sweepStaleTurnFolders(index.dir).catch(()=>{}); /* a turn that was cut off leaves its notes in a turn-* folder: clear the old ones when the project opens */return {index,
-    runner:new ClaudeSessionRunner({command:h.command,prefixArgs:h.prefixArgs,model:h.model,dir:index.dir}),questions:new QuestionStore(index.dir),
+  const harnessReady=opts.harness?SessionIndex.open(opts.harness.dir??harnessDirectory(store.rootReal)).then(async index=>{const h=opts.harness!;await sweepStaleTurnFolders(index.dir).catch(()=>{}); /* a turn that was cut off leaves its notes in a turn-* folder: clear the old ones when the project opens */const runner=new ClaudeSessionRunner({command:h.command,prefixArgs:h.prefixArgs,model:h.model,dir:index.dir});return {index,
+    runner,questions:new QuestionStore(index.dir),version:()=>runner.version(), // the CLI's version, for the ledger at a conversation's first turn and for Settings
     investigate:new InvestigateService({index,dir:index.dir,notebook:store.rootReal,command:h.command,prefixArgs:h.prefixArgs,model:h.model})};}):Promise.resolve(null);
   const chatReady=Promise.all([inkReady,harnessReady]).then(([ink,harness])=>new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages));
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
@@ -271,7 +271,7 @@ export function createApp(opts: AppOptions) {
       return json(res,200,skillLibrary(await discoveredSkills(url.searchParams.get('refresh')==='1'),{q:url.searchParams.get('q')??'',ids,limit:Number(url.searchParams.get('limit'))||undefined}));
     }
     if(url.pathname==='/api/usage'&&req.method==='GET'){
-      const chats=(await chatReady).usage(),h=await harnessReady,investigate=h?await h.investigate.usage():null;return json(res,200,{...(opts.usage?await opts.usage.summary():{since:new Date().toISOString(),hourlyCap:2,providers:[]}),...(chats.length?{chats}:{}),...(investigate&&investigate.turns>0?{investigate}:{})});
+      const chats=(await chatReady).usage(),h=await harnessReady,investigate=h?await h.investigate.usage():null;return json(res,200,{...(opts.usage?await opts.usage.summary():{since:new Date().toISOString(),hourlyCap:2,providers:[]}),...(chats.length?{chats}:{}),...(investigate&&investigate.turns>0?{investigate}:{}),...(h?{cli:{version:await h.runner.version(),tested:TESTED_CLI_VERSION}}:{})});
     }
     // Harness chat sessions: the app's own list for this project, a new one for a note, and a new label. Nothing here talks to the CLI.
     if(url.pathname==='/api/harness/sessions'&&req.method==='GET'){
@@ -402,10 +402,8 @@ export function createApp(opts: AppOptions) {
     if(url.pathname==='/api/skill-diagram'&&req.method==='GET'){
       try{const name=url.searchParams.get('name')??'',bytes=await (await assistance).skillDiagrams.read(name),svg=name.endsWith('.svg');res.writeHead(200,{'Content-Type':svg?'image/svg+xml':'text/html; charset=utf-8','Content-Security-Policy':svg?SKILL_DIAGRAM_SVG_CSP_HEADER:SKILL_DIAGRAM_CSP_HEADER,'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Cache-Control':'private, max-age=31536000, immutable'});return res.end(bytes);}catch{return json(res,404,{error:'not_found'});}
     }
-    // The picture of a diagram (a PNG the page made from the diagram's sanitised svg), for the chat to attach: served, listed and saved only under a strict name, and checked as untrusted bytes.
-    if(url.pathname==='/api/diagram-image'&&req.method==='GET'){
-      try{const bytes=await diagramImages.read(url.searchParams.get('name')??'');res.writeHead(200,{'Content-Type':'image/png','Content-Security-Policy':"default-src 'none'; sandbox",'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Cache-Control':'private, max-age=31536000, immutable'});return res.end(bytes);}catch{return json(res,404,{error:'not_found'});}
-    }
+    // The picture of a diagram (a PNG the page made from the diagram's sanitised svg), which a conversation turn may open as a copy: listed and saved only under a strict name, and checked as untrusted bytes.
+    // The page never reads it back (there are no thumbnails), so it is not served.
     if(url.pathname==='/api/diagram-images'&&req.method==='GET'){
       const names=(url.searchParams.get('names')??'').split(',').filter(Boolean);
       if(names.length>40||names.some(n=>!DIAGRAM_PNG_NAME.test(n)))return json(res,400,{error:'invalid_image',message:'Those are not diagram picture names.'});

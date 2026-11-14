@@ -1,14 +1,15 @@
 // Synthetic Claude Code CLI for harness session tests. Never contacts a provider. Usage (through the runner's prefix args):
 //   node harness-cli.mjs <scenario> <record file> ...cli arguments
 // It records what it was given (arguments, stdin, working folder, the instruction file's text) and answers in stream-json like the real CLI.
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 let [scenario, record, ...args] = process.argv.slice(2);
 if (scenario.startsWith('@')) scenario = readFileSync(scenario.slice(1), 'utf8').trim(); // browser checks switch scenario per turn through a file
+if (args.includes('--version')) { process.stdout.write((scenario.startsWith('ver=') ? scenario.slice(4) : '2.1.205') + ' (Claude Code)\n'); process.exit(0); } // the app asks the CLI's version: not a turn, not recorded
 let stdin = ''; process.stdin.setEncoding('utf8'); for await (const chunk of process.stdin) stdin += chunk;
 const at = args.indexOf('--append-system-prompt-file'), addendum = at >= 0 ? readFileSync(args[at + 1], 'utf8') : null;
 const id = args[args.indexOf(args.includes('--resume') ? '--resume' : '--session-id') + 1];
-appendFileSync(record, JSON.stringify({ args: args.map((a, i) => i === at + 1 ? '<file>' : a), stdin, cwd: process.cwd(), addendum, addendumOutsideCwd: at >= 0 && path.relative(process.cwd(), args[at + 1]).startsWith('..') }) + '\n');
+appendFileSync(record, JSON.stringify({ args: args.map((a, i) => i === at + 1 ? '<file>' : a), stdin, cwd: process.cwd(), addendum, addendumOutsideCwd: at >= 0 && path.relative(process.cwd(), args[at + 1]).startsWith('..'), cwdFiles: readdirSync(process.cwd()).map((name) => ({ name, size: statSync(path.join(process.cwd(), name)).size })) }) + '\n');
 const out = (e) => process.stdout.write(JSON.stringify(e) + '\n');
 if (args[args.indexOf('--tools') + 1] === 'Read,Grep,Glob') { // an investigation turn
   const [kind, extra] = scenario.split('|');
@@ -66,6 +67,49 @@ if (args[args.indexOf('--tools') + 1] === 'Read,Grep,Glob') { // an investigatio
   out({ type: 'rate_limit_event' });
   out({ type: 'result', subtype: 'success', is_error: false, result: text, num_turns: 2, total_cost_usd: 0.0123, usage: { input_tokens: 50, cache_creation_input_tokens: 400, cache_read_input_tokens: 3000, output_tokens: 90 }, permission_denials: kind === 'inv-denied' ? [{ tool_name: 'Read', tool_input: {} }] : [] });
   process.exit(0);
+}
+if (args[args.indexOf('--tools') + 1] === 'Read') { // a conversation turn that may open diagram pictures: Read only, dontAsk
+  const [kind, extra = ''] = scenario.split('|'), sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const cwd = process.cwd(), pic = (n) => path.join(cwd, 'd' + n + '.png'), where = (p) => p.replaceAll('{cwd}', cwd).replaceAll('{sibling}', cwd + '-evil');
+  out({ type: 'system', subtype: 'init', session_id: id, cwd, tools: kind === 'dg-tools-extra' ? ['Read', 'Grep'] : ['Read'], mcp_servers: [], plugins: [], permissionMode: 'dontAsk' });
+  if (kind === 'dg-hook') out({ type: 'system', subtype: 'hook_started', hook_name: 'x' });
+  const textBlock = (i, t) => { out({ type: 'stream_event', event: { type: 'content_block_start', index: i, content_block: { type: 'text', text: '' } } }); out({ type: 'stream_event', event: { type: 'content_block_delta', index: i, delta: { type: 'text_delta', text: t } } }); out({ type: 'stream_event', event: { type: 'content_block_stop', index: i } }); };
+  const call = (n, name, input, i = 1) => { // one tool call as the CLI 2.1.205 prints it with partial messages: the streamed block, then the whole assistant message
+    const toolId = 'toolu_' + n, json = JSON.stringify(input), msg = 'msg_' + n;
+    out({ type: 'stream_event', event: { type: 'message_start', message: { id: msg } } });
+    out({ type: 'stream_event', event: { type: 'content_block_start', index: i, content_block: { type: 'tool_use', id: toolId, name, input: {} } } });
+    for (const piece of json.match(/[\s\S]{1,16}/g)) out({ type: 'stream_event', event: { type: 'content_block_delta', index: i, delta: { type: 'input_json_delta', partial_json: piece } } });
+    out({ type: 'stream_event', event: { type: 'content_block_stop', index: i } });
+    out({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'tool_use' } } });
+    out({ type: 'stream_event', event: { type: 'message_stop' } });
+    out({ type: 'assistant', message: { id: msg, role: 'assistant', content: [{ type: 'tool_use', id: toolId, name, input, caller: { type: 'direct' } }] } });
+    return toolId;
+  };
+  const picResult = (toolId, file) => { let data = ''; try { data = readFileSync(file).toString('base64'); } catch { /* not there */ } out({ type: 'user', message: { role: 'user', content: [{ tool_use_id: toolId, type: 'tool_result', content: [{ type: 'image', source: { type: 'base64', data, media_type: 'image/png' } }] }] }, tool_use_result: { type: 'image', file: { base64: data } } }); };
+  const finish = (reply, cost = 0.0123, extraResult = {}) => {
+    textBlock(0, reply.slice(0, 24)); textBlock(0, reply.slice(24));
+    out({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'end_turn' } } });
+    out({ type: 'result', subtype: 'success', is_error: false, result: reply, num_turns: 2, session_id: id, total_cost_usd: cost, permission_denials: [], usage: { input_tokens: 60, cache_creation_input_tokens: 700, cache_read_input_tokens: 2500, output_tokens: 70 }, ...extraResult });
+    process.exit(0);
+  };
+  const seen = '<claims>[{"source":"D1","visual":true}]</claims>';
+  if (kind === 'dg-read' || kind === 'dg-read2') {
+    textBlock(0, 'I will open the diagram. ');
+    const a = call('a', 'Read', { file_path: pic(1) }); picResult(a, pic(1));
+    if (kind === 'dg-read2') { const b = call('b', 'Read', { file_path: pic(2) }, 2); picResult(b, pic(2)); }
+    finish('Quillfern feeds Mossgate.\n' + (kind === 'dg-read2' ? '<claims>[{"source":"D1","visual":true},{"source":"D2","visual":true}]</claims>' : seen));
+  }
+  if (kind === 'dg-echo') finish(stdin.split('\n')[0] + '\n\nThe note is about the plan.\n<claims>{"none":"opinion"}</claims>');
+  if (kind === 'dg-none') finish('The plan has two steps.\n<claims>{"none":"opinion"}</claims>');
+  if (kind === 'dg-claim-unread') finish('The first diagram shows a row of boxes.\n' + seen); // claims a picture it never opened
+  if (kind === 'dg-claim-d2-after-d1') { const a = call('a', 'Read', { file_path: pic(1) }); picResult(a, pic(1)); finish('The second one is a loop.\n<claims>[{"source":"D2","visual":true}]</claims>'); }
+  if (kind === 'dg-path') { call('a', 'Read', { file_path: where(extra) }); await sleep(20000); }
+  if (kind === 'dg-tool') { call('a', extra, { file_path: pic(1), command: 'type secret' }); await sleep(20000); }
+  if (kind === 'dg-many') { for (let i = 0; i < Number(extra); i++) { const x = call('m' + i, 'Read', { file_path: pic(1) }); picResult(x, pic(1)); } finish('Done.\n' + seen); }
+  if (kind === 'dg-stray') { const a = call('a', 'Read', { file_path: pic(1) }); picResult(a, pic(1)); writeFileSync(path.join(cwd, 'stray.txt'), 'x'); await sleep(300); finish('Done.\n' + seen); }
+  if (kind === 'dg-budget') { const a = call('a', 'Read', { file_path: pic(1) }); picResult(a, pic(1)); out({ type: 'result', subtype: 'error_max_budget_usd', is_error: true, result: '', num_turns: 2, total_cost_usd: 0.52, permission_denials: [] }); process.exit(0); }
+  if (kind === 'dg-denied') { const a = call('a', 'Read', { file_path: pic(1) }); out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: "Permission to use Read has been denied because Claude Code is running in don't ask mode.", is_error: true, tool_use_id: a }] } }); finish('Done.\n' + seen, 0.01, { permission_denials: [{ tool_name: 'Read', tool_input: {} }] }); }
+  finish('Started. The note says the store is local.\n<claims>[{"source":"N1","quote":"A unique sentence for the session."}]</claims>');
 }
 out({ type: 'system', subtype: 'init', session_id: id, tools: scenario === 'tools' ? ['Read'] : [], mcp_servers: [], plugins: [] });
 if (scenario === 'fail-after-init') process.exit(1);

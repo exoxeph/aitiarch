@@ -8,7 +8,7 @@ export type ClaudeEvent=
  |{kind:'text';text:string}
  |{kind:'thinking';size:number}
  |{kind:'structure';stopReason?:string|null}
- |{kind:'result';ok:boolean;text:string|null;model:string|null;usage:Record<string,unknown>|null}
+ |{kind:'result';ok:boolean;text:string|null;model:string|null;usage:Record<string,unknown>|null;/** What the CLI says the turn cost, in dollars. */cost:number|null}
  |{kind:'danger';what:'tool'|'hook'|'permission'|'too_deep'}
  |{kind:'unknown';name:string};
 
@@ -51,7 +51,7 @@ export function normalizeClaudeEvent(e:unknown):ClaudeEvent{
   case 'rate_limit_event':case 'assistant':return {kind:'progress'}; // the assistant snapshot repeats the deltas; the answer comes from deltas and the result
   case 'result':{
    const usage=x.usage&&typeof x.usage==='object'&&!Array.isArray(x.usage)?x.usage as Record<string,unknown>:null;
-   return {kind:'result',ok:x.subtype==='success'&&x.is_error!==true,text:typeof x.result==='string'?x.result:null,model:typeof x.model==='string'?x.model:null,usage};
+   return {kind:'result',ok:x.subtype==='success'&&x.is_error!==true,text:typeof x.result==='string'?x.result:null,model:typeof x.model==='string'?x.model:null,usage,cost:typeof x.total_cost_usd==='number'&&Number.isFinite(x.total_cost_usd)&&x.total_cost_usd>=0?x.total_cost_usd:null};
   }
   case 'stream_event':{
    const s=x.event;if(!s||typeof s!=='object')break;

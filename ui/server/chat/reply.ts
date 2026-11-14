@@ -88,9 +88,9 @@ export function finishReply(input:{text:string;legacy:boolean;claims?:unknown[]}
   if(claims.length>=32)break;
   const id=ALIAS[c.source.trim().toLowerCase()]??c.source.trim();
   if(c.visual){
-   // A claim about what a diagram's picture shows: nothing to check, so it is kept as such, and only for a diagram whose picture went with this message. Any other is "no valid source".
+   // A claim about what a diagram's picture shows: nothing to check, so it is kept as such, and only for a diagram the conversation's stream shows a Read of. Any other is "no valid source".
    if(/^D[1-9]$/.test(id)&&sources.diagrams?.includes(id)){claims.push({sourceId:id,source:'diagram',status:'visual',visual:true});continue;}
-   claims.push({sourceId:redact(c.source).replace(/[\u0000-\u001f\u007f]+/g,' ').trim().slice(0,40),quote:'(a diagram that was not attached)',status:'no_valid_source'});continue;
+   claims.push({sourceId:redact(c.source).replace(/[\u0000-\u001f\u007f]+/g,' ').trim().slice(0,40),quote:'(a diagram that was not opened)',status:'no_valid_source'});continue;
   }
   if(!/^[A-Z][0-9]{1,3}$/.test(id)||!KIND[id[0]]){
    // Not a source the request could have carried. Kept, with its quote, and shown as "no valid source": never dropped, never counted as evidence.

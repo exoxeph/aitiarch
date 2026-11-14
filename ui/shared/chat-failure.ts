@@ -1,7 +1,7 @@
 // Why a Claude call failed, in a small set of safe reasons the chat can say in plain words. A reason never carries the question, a note,
 // a credential or a path: details are short, sanitized, and capped. Pure, so the provider (which makes the reason) and the page (which
 // shows it) share one definition.
-export type FailureKind='not_configured'|'flag_rejected'|'timeout'|'login'|'exited'|'unparseable'|'output_limit'|'context_limit';
+export type FailureKind='not_configured'|'flag_rejected'|'timeout'|'login'|'exited'|'unparseable'|'output_limit'|'context_limit'|'cost_cap';
 export interface FailureReason {kind:FailureKind;/** For flag_rejected: the option the CLI refused, e.g. --include-partial-messages. */flag?:string;
  /** A short, sanitized description: what was unexpected, or the tail of the CLI's own error message. Never prompt text. */detail?:string;exitCode?:number}
 
@@ -54,5 +54,6 @@ export function failureText(r:FailureReason):string{
   case 'unparseable':return `Claude's reply did not have the shape Aitiarch expects${r.detail?` (${r.detail})`:''}.`;
   case 'output_limit':return "Claude's reply was longer than Aitiarch allows.";
   case 'context_limit':return 'The note and context are too large to send. Narrow the sources and try again.';
+  case 'cost_cap':return 'The turn reached its cost cap, so it was stopped and nothing from it was kept.';
  }
 }

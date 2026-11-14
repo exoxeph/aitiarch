@@ -149,7 +149,9 @@ try {
   assert(await page.locator('.cm-line.cm-flash').count() >= 1 || true, 'flash is best effort');
   await page.waitForFunction(() => window.__aitiarch['fixture.md'].session.status === 'saved');
   await page.waitForTimeout(400);  const after = await readFile(path.join(root, 'fixture.md')); assert(after.subarray(0, 3).equals(bytes.subarray(0, 3)), 'BOM kept');
-  const assets = await readdir(path.join(root, 'assets')); assert.equal(assets.length, 1);
+  // one diagram is saved (its svg); the page may also have made its picture (the same name, .png), which a conversation can open
+  const all = await readdir(path.join(root, 'assets')), assets = all.filter((n) => n.endsWith('.svg')); assert.equal(assets.length, 1);
+  assert(all.every((n) => n === assets[0] || n === assets[0].replace(/\.svg$/, '.png')), 'nothing else in assets: ' + all.join(', '));
   const svg = await readFile(path.join(root, 'assets', assets[0]), 'utf8'); assert(svg.includes('prefers-color-scheme'), 'exported SVG adapts to light and dark pages');
 
   // 6. The image draws in the editor; the raw text shows only when the caret is on its line; bytes never change.

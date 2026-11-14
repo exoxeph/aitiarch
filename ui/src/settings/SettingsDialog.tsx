@@ -4,7 +4,7 @@ import type {UsageSummary} from '../../shared/usage.ts';
 import {formatCount} from '../chat/chat-model.ts';
 import {unreportedText,usd} from '../chat/investigate-usage.ts';
 import {SkillsPane} from '../skills/SkillsPane.tsx';
-import {tokenMeter,type Meter} from './settings-model.ts';
+import {cliNotice,tokenMeter,type Meter} from './settings-model.ts';
 
 type Tab='usage'|'skills';
 const TABS:{id:Tab;label:string}[]=[{id:'usage',label:'Usage'},{id:'skills',label:'Skills'}];
@@ -18,6 +18,7 @@ function UsagePane(){
  const [usage,setUsage]=useState<UsageSummary|null>(null),[failed,setFailed]=useState(false);
  useEffect(()=>{let off=false;const load=async()=>{try{const u=await api.usage();if(!off){setUsage(u);setFailed(false);}}catch{if(!off)setFailed(true);}};void load();const timer=setInterval(()=>void load(),2000);return()=>{off=true;clearInterval(timer);};},[]);
  return <div className="settings-section">
+  {usage?.cli&&cliNotice(usage.cli)&&<p className="settings-warn" role="status" data-notice="cli-version">{cliNotice(usage.cli)}</p>}
   <h3>Chat tokens, live</h3>
   <p className="settings-lead">Each chat has its own budget. These bars update while this screen is open.</p>
   {failed&&<p className="settings-warn" role="status">The usage log is unavailable right now.</p>}
