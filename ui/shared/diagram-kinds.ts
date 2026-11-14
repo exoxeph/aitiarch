@@ -27,9 +27,9 @@ export function kindArt(d:Diagram,l:DiagramLayout,{p,focus,compact,xml}:KindCont
   n.detailLines.forEach((s,i)=>{out+=text(cx,start+n.labelLines.length*19+6+i*17,s,13,p.muted,align);});
   return out;
  };
- const frame=(n:NodeLayout,rx:number,fill:string)=>`<rect x="${n.x}" y="${n.y}" width="${n.width}" height="${n.height}" rx="${rx}" fill="${active(n)?p.focus:fill}" stroke="${active(n)?p.accent:p.border}" stroke-width="${active(n)?2:1}"/>`;
+ const frame=(n:NodeLayout,rx:number,fill:string)=>`<rect x="${n.x}" y="${n.y}" width="${n.width}" height="${n.height}" rx="${rx}" fill="${active(n)?p.focus:fill}" stroke="${active(n)?p.accent:p.border}" stroke-width="${active(n)?2.2:1.25}"/>`;
  const badge=(n:NodeLayout,i:number)=>`<circle cx="${n.x+14}" cy="${n.y}" r="11" fill="${p.accent}"/>`+text(n.x+14,n.y+4.5,String(i+1),13,p.paper,'middle',700);
- const arrow=(a:{x:number;y:number},b:{x:number;y:number},width=1.5,on=false)=>`<line x1="${r1(a.x)}" y1="${r1(a.y)}" x2="${r1(b.x)}" y2="${r1(b.y)}" stroke="${on?p.accent:p.border}" stroke-width="${width}" marker-end="url(#${on?'arrow-focus':'arrow'})"/>`;
+ const arrow=(a:{x:number;y:number},b:{x:number;y:number},width=2,on=false)=>`<line x1="${r1(a.x)}" y1="${r1(a.y)}" x2="${r1(b.x)}" y2="${r1(b.y)}" stroke="${on?p.accent:p.muted}" stroke-width="${width}" stroke-linecap="round" marker-end="url(#${on?'arrow-focus':'arrow'})"/>`;
  const N=l.nodes;let out='';
  switch(d.type){
   case 'cycle':{
@@ -39,7 +39,7 @@ export function kindArt(d:Diagram,l:DiagramLayout,{p,focus,compact,xml}:KindCont
     const a1=ang[i],a2=ang[(i+1)%N.length]+(i===N.length-1?2*Math.PI:0);
     const reach=Math.min(step/2-0.05,Math.max(0.16,(Math.min(n.width,n.height*1.8)/2*0.9+6)/R));
     const P=(a:number)=>({x:c.x+R*Math.cos(a),y:c.y+R*Math.sin(a)}),s=P(a1+reach),e=P(a2-reach),on=active(n);
-    out+=`<path d="M${r1(s.x)} ${r1(s.y)} A${r1(R)} ${r1(R)} 0 0 1 ${r1(e.x)} ${r1(e.y)}" fill="none" stroke="${on?p.accent:p.border}" stroke-width="${on?2.5:1.6}" marker-end="url(#${on?'arrow-focus':'arrow'})"/>`;
+    out+=`<path d="M${r1(s.x)} ${r1(s.y)} A${r1(R)} ${r1(R)} 0 0 1 ${r1(e.x)} ${r1(e.y)}" fill="none" stroke="${on?p.accent:p.muted}" stroke-width="${on?3:2.2}" stroke-linecap="round" marker-end="url(#${on?'arrow-focus':'arrow'})"/>`;
    });
    N.forEach((n,i)=>{out+=frame(n,16,p.surface)+words(n,n.x+n.width/2,'middle')+badge(n,i);});
    break;
@@ -66,7 +66,7 @@ export function kindArt(d:Diagram,l:DiagramLayout,{p,focus,compact,xml}:KindCont
   }
   case 'hub':{
    const [hub,...sats]=N,hc=mid(hub);
-   for(const s of sats){const a=edgePoint(hub,mid(s)),b=edgePoint(s,hc);out+=`<line x1="${r1(a.x)}" y1="${r1(a.y)}" x2="${r1(b.x)}" y2="${r1(b.y)}" stroke="${active(s)?p.accent:p.border}" stroke-width="${active(s)?2.5:1.5}"/>`;}
+   for(const s of sats){const a=edgePoint(hub,mid(s)),b=edgePoint(s,hc);out+=`<line x1="${r1(a.x)}" y1="${r1(a.y)}" x2="${r1(b.x)}" y2="${r1(b.y)}" stroke="${active(s)?p.accent:p.muted}" stroke-width="${active(s)?3:2}" stroke-linecap="round"/>`;}
    sats.forEach(s=>{out+=frame(s,Math.min(22,s.height/2),p.surface)+words(s,s.x+s.width/2,'middle');});
    out+=`<rect x="${hub.x}" y="${hub.y}" width="${hub.width}" height="${hub.height}" rx="22" fill="${p.focus}" stroke="${p.accent}" stroke-width="2.5"/>`+words(hub,hub.x+hub.width/2,'middle');
    break;

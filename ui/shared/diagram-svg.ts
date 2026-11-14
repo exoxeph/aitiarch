@@ -28,20 +28,23 @@ const xml=(v:string)=>v.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;
 export function diagramSvg(d:Diagram,l:DiagramLayout,theme:'light'|'dark',focus?:string,adaptive=false,compact=false):string {
  if(!validateLayout(d,l))throw new Error('Invalid diagram geometry.');
  const p=diagramPalettes[theme];if(!p)throw new Error('Invalid diagram theme.');
- const text=(x:number,y:number,value:string,size=14,color=p.ink)=>`<text x="${x}" y="${y}" font-size="${size}" fill="${color}" xml:space="preserve">${xml(value)}</text>`;
- let out=`<svg xmlns="http://www.w3.org/2000/svg" width="${l.width}" height="${l.height}" viewBox="0 0 ${l.width} ${l.height}" role="img" aria-label="AI diagram: ${xml(d.title)}" font-family="Segoe UI, Arial, sans-serif"><title>${xml(d.title)}</title><desc>${xml(d.caption)}</desc><defs><marker id="arrow" viewBox="0 0 10 8" refX="10" refY="4" markerWidth="8" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 4 L0 8 Z" fill="${p.border}"/></marker><marker id="arrow-focus" viewBox="0 0 10 8" refX="10" refY="4" markerWidth="8" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 4 L0 8 Z" fill="${p.accent}"/></marker></defs>`; // no background rect: the drawing is transparent and sits on whatever page or theme shows it
+ const text=(x:number,y:number,value:string,size=14,color=p.ink,anchor:'start'|'middle'='start',weight?:number)=>`<text x="${x}" y="${y}" font-size="${size}" fill="${color}"${anchor==='middle'?' text-anchor="middle"':''}${weight?` font-weight="${weight}"`:''} xml:space="preserve">${xml(value)}</text>`;
+ let out=`<svg xmlns="http://www.w3.org/2000/svg" width="${l.width}" height="${l.height}" viewBox="0 0 ${l.width} ${l.height}" role="img" aria-label="AI diagram: ${xml(d.title)}" font-family="Segoe UI, Arial, sans-serif"><title>${xml(d.title)}</title><desc>${xml(d.caption)}</desc><defs><marker id="arrow" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L12 5 L0 10 L3.2 5 Z" fill="${p.muted}"/></marker><marker id="arrow-focus" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L12 5 L0 10 L3.2 5 Z" fill="${p.accent}"/></marker></defs>`; // no background rect: the drawing is transparent and sits on whatever page or theme shows it
  // Title/caption remain readable without depending on page CSS in exports.
  if(!compact){out+=`<rect x="20" y="13" width="22" height="18" rx="2" fill="${p.ink}"/>`+text(23,26,'AI',13,p.paper);const titles=wrapText(d.title,l.width-70,s=>s.length*10);titles.forEach((line,i)=>{out+=text(48,27+i*22,line,18);});
  const cap=wrapText(d.caption,l.width-40,s=>s.length*7);cap.forEach((line,i)=>{out+=text(20,29+titles.length*22+i*17,line,13,p.muted);});}
  if(KIND_RULES[d.type])out+=kindArt(d,l,{p,focus,compact,xml});else{
- for(const g of l.groups){out+=`<rect x="${g.x}" y="${g.y}" width="${g.width}" height="${g.height}" rx="6" fill="${compact?'none':p.surface}" stroke="${p.border}" stroke-width="${compact?1:1}" stroke-dasharray="3 4"/>`;wrapText(d.groups!.find(v=>v.id===g.id)!.label,g.width-24,s=>s.length*8).forEach((line,i)=>{out+=text(g.x+12,g.y+20+i*17,line,13,p.muted);});}
+ for(const g of l.groups){out+=`<rect x="${g.x}" y="${g.y}" width="${g.width}" height="${g.height}" rx="12" fill="${p.surface}" fill-opacity="0.5" stroke="${p.border}" stroke-width="1" stroke-dasharray="4 5"/>`;wrapText(d.groups!.find(v=>v.id===g.id)!.label,g.width-24,s=>s.length*8).forEach((line,i)=>{out+=text(g.x+12,g.y+20+i*17,line,13,p.muted);});}
 
- for(const v of visualEdges(d)){const e=l.edges.find(e=>e.id===v.id)!;const active=v.ids.includes(focus??'');out+=`<path d="${e.points.map((v,i)=>(i?'L':'M')+v.x+' '+v.y).join(' ')}" fill="none" stroke="${active?p.accent:p.border}" stroke-width="${compact?(active?2:1):(active?2.5:1.5)}" ${v.both?'marker-start="url(#'+(active?'arrow-focus':'arrow')+')"':''} marker-end="url(#${active?'arrow-focus':'arrow'})"/>`;}
+ for(const v of visualEdges(d)){const e=l.edges.find(e=>e.id===v.id)!;const active=v.ids.includes(focus??'');out+=`<path d="${roundedPath(e.points,10)}" fill="none" stroke="${active?p.accent:p.muted}" stroke-width="${compact?(active?2.6:1.8):(active?2.8:2)}" stroke-linecap="round" stroke-linejoin="round" ${v.both?'marker-start="url(#'+(active?'arrow-focus':'arrow')+')"':''} marker-end="url(#${active?'arrow-focus':'arrow'})"/>`;}
  for(const n of l.nodes){const original=d.nodes.find(v=>v.id===n.id)!,active=n.id===focus;
-  out+=`<rect x="${n.x}" y="${n.y}" width="${n.width}" height="${n.height}" rx="${original.kind==='decision'?2:compact?4:6}" fill="${active?p.focus:'none'}" stroke="${active?p.accent:p.border}" stroke-width="${active?2:1}"/>`;
-  n.labelLines.forEach((line,i)=>{out+=text(n.x+14,n.y+23+i*19,line);});n.detailLines.forEach((line,i)=>{out+=text(n.x+14,n.y+27+n.labelLines.length*19+i*17,line,13,p.muted);});
+  const decision=original.kind==='decision',accented=active||decision;
+  out+=`<rect x="${n.x}" y="${n.y}" width="${n.width}" height="${n.height}" rx="${decision?Math.min(n.height/2,24):compact?9:11}" fill="${accented?p.focus:p.surface}" stroke="${accented?p.accent:p.border}" stroke-width="${active?2.2:decision?1.6:1.25}"/>`;
+  if(!decision)out+=`<rect x="${n.x+1.5}" y="${n.y+11}" width="3.5" height="${Math.max(8,n.height-22)}" rx="1.75" fill="${p.accent}"/>`;
+  const block=n.labelLines.length*19+(n.detailLines.length?6+n.detailLines.length*17:0),start=n.y+(n.height-block)/2+14,cx=n.x+n.width/2+(decision?0:2);
+  n.labelLines.forEach((line,i)=>{out+=text(cx,start+i*19,line,14,p.ink,'middle',600);});n.detailLines.forEach((line,i)=>{out+=text(cx,start+n.labelLines.length*19+6+i*17,line,13,p.muted,'middle');});
  }
- for(const v of visualEdges(d)){const e=l.edges.find(e=>e.id===v.id)!;if(!v.label||!e.label)continue;const b=e.label;out+=`<rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" rx="2" fill="${p.paper}"/>`;wrapText(v.label,b.width-12,s=>s.length*8).forEach((line,i)=>{out+=text(b.x+6,b.y+17+i*17,line,13,v.ids.includes(focus??'')?p.accent:p.ink);});}
+ for(const v of visualEdges(d)){const e=l.edges.find(e=>e.id===v.id)!;if(!v.label||!e.label)continue;const b=e.label;const on=v.ids.includes(focus??'');out+=`<rect x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}" rx="${Math.min(b.height/2,13)}" fill="${p.paper}" stroke="${on?p.accent:p.border}" stroke-width="1"/>`;wrapText(v.label,b.width-12,s=>s.length*8).forEach((line,i)=>{out+=text(b.x+b.width/2,b.y+17+i*17,line,13,on?p.accent:p.ink,'middle',600);});}
  }
  if(adaptive){
   const from=diagramPalettes[theme],to=diagramPalettes[theme==='light'?'dark':'light'],rules=new Set<string>();
@@ -49,6 +52,16 @@ export function diagramSvg(d:Diagram,l:DiagramLayout,theme:'light'|'dark',focus?
   out=out.replace('<defs>',`<style>@media (prefers-color-scheme: ${theme==='light'?'dark':'light'}){${[...rules].join('')}}</style><defs>`);
  }
  return out+'</svg>';
+}
+const r1=(n:number)=>Math.round(n*10)/10;
+/** An orthogonal route drawn with softly rounded corners, so bends read as flow instead of staircase steps. Geometry is unchanged: the same points. */
+export function roundedPath(pts:Point[],radius:number):string{
+ if(pts.length<3)return pts.map((v,i)=>(i?'L':'M')+r1(v.x)+' '+r1(v.y)).join(' ');
+ let d='M'+r1(pts[0].x)+' '+r1(pts[0].y);
+ for(let i=1;i<pts.length-1;i++){const a=pts[i-1],b=pts[i],c=pts[i+1],l1=Math.hypot(b.x-a.x,b.y-a.y),l2=Math.hypot(c.x-b.x,c.y-b.y),k=Math.min(radius,l1/2,l2/2);
+  if(!k||!l1||!l2){d+=' L'+r1(b.x)+' '+r1(b.y);continue;}
+  d+=` L${r1(b.x+(a.x-b.x)/l1*k)} ${r1(b.y+(a.y-b.y)/l1*k)} Q${r1(b.x)} ${r1(b.y)} ${r1(b.x+(c.x-b.x)/l2*k)} ${r1(b.y+(c.y-b.y)/l2*k)}`;}
+ const e=pts[pts.length-1];return d+` L${r1(e.x)} ${r1(e.y)}`;
 }
 /** Preserve all characters so geometry cannot substitute label content. */
 export function wrapText(text:string,width:number,measure:(s:string)=>number):string[]{
