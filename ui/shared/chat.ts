@@ -111,6 +111,8 @@ export type ChatEvent=
  |{type:'delta';id:string;text:string;provisional:true}
  /** The model opened a diagram's picture with Read (a conversation turn): a live row "Opened D1 'title'". */
  |{type:'diagram_read';id:string;n:number;title:string}
+ /** The model tried to open a diagram that is withheld (or not in the note): a live row with the reason. Nothing was read. */
+ |{type:'diagram_unavailable';id:string;n:number;title:string;why:string}
  |{type:'complete';id:string;message:ChatMessage;persistence:'private'|'memory';usage:ChatUsage}
  |{type:'error';id:string;code:ChatErrorCode;rule?:string;/** For internal errors: the kind of error (for example TypeError), never its message. */errorName?:string;/** For provider_failed: why, in a safe form the page can say in words. */reason?:import('./chat-failure.ts').FailureReason;
   /** For a turn that may open diagrams and was stopped by the fence: why (see shared/diagram-fence.ts), what the CLI said it had cost so far, and the cap it had. */fence?:import('./diagram-fence.ts').FenceCode;costUsd?:number;capUsd?:number;

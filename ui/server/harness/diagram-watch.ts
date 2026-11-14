@@ -9,6 +9,7 @@ import {ProviderError} from '../providers/index.ts';
 import {classifyFailure} from '../../shared/tool-errors.ts';
 import {FenceStop} from './diagram-fence.ts';
 import type {FolderCopy} from './diagram-folder.ts';
+import {diagramNumberOf} from '../../shared/diagram-refs.ts';
 import {pathInside} from './investigate.ts';
 
 /** Reply text and every other line the app reads for itself: the same cap a tool-less turn has. */
@@ -27,14 +28,16 @@ export interface WatchHooks {
  onRead:(copy:FolderCopy)=>void;
  /** The result of an accepted Read: whether it succeeded. */
  onReadResult?:(copy:FolderCopy,ok:boolean)=>void;
+ /** A Read of d<n>.png in the folder for a diagram that has no copy (withheld, or not in the note). The CLI finds no file there; the model is told the reason by the manifest. */
+ onUnavailable?:(n:number)=>void;
  /** Every accepted tool event: a moment to check the folder again. */
  onTool?:()=>void;
 }
-interface Call {copy:FolderCopy|null;result:boolean}
+interface Call {copy:FolderCopy|null;result:boolean;/** A Read of a diagram that has no copy: the number it named. */missing?:number}
 
 export class DiagramTurnWatcher {
  private o:WatchHooks;private decoder=new StringDecoder('utf8');private pending='';private inited=false;private max:number;
- private calls=new Map<string,Call>();private open=new Map<number,{id:string;json:string}>();
+ private calls=new Map<string,Call>();private open=new Map<number,{id:string;json:string}>();private missed=new Set<number>();
  private textBytes=0;private resultBytes=0;
  /** Distinct tool calls seen, accepted or not. */
  toolEvents=0;
@@ -125,25 +128,34 @@ export class DiagramTurnWatcher {
  }
  private toolUse(c:any){
   this.toolStart(c?.id,c?.name);
-  const call=this.calls.get(c.id)!,copy=this.readInput(c.input);
-  if(call.copy)return; // seen and accepted already (streamed, then whole)
-  call.copy=copy;this.reads.push(copy);this.o.onRead(copy);this.o.onTool?.();
+  const call=this.calls.get(c.id)!,named=this.readInput(c.input);
+  if(call.copy||call.missing!==undefined)return; // seen and accepted already (streamed, then whole)
+  if(typeof named==='number'){
+   // A diagram that is not in the folder: the CLI finds nothing, and the model has the reason in the manifest. Asking for the same one again is a loop: the turn is stopped.
+   if(this.missed.has(named))this.stop('unavailable_again');
+   this.missed.add(named);call.missing=named;this.o.onUnavailable?.(named);this.o.onTool?.();return;
+  }
+  call.copy=named;this.reads.push(named);this.o.onRead(named);this.o.onTool?.();
  }
- /** The copy a Read names, or a stop: the options are only the ones Read has, and the path must resolve inside the folder to exactly one of the copies. */
- private readInput(input:any):FolderCopy{
+ /** The copy a Read names, the number of a diagram that has no copy (d<n>.png directly in the folder, nothing there), or a stop: the options are only the ones Read has, and the path must resolve
+  *  inside the folder. */
+ private readInput(input:any):FolderCopy|number{
   if(!input||typeof input!=='object'||Array.isArray(input))this.stop('tool_refused');
   for(const k of Object.keys(input))if(!READ_OPTIONS.has(k))this.stop('tool_refused');
   const p=input.file_path;if(typeof p!=='string'||!pathInside(this.o.cwd,p))this.stop('outside_path');
   for(const k of ['offset','limit'])if(input[k]!==undefined&&!(typeof input[k]==='number'&&Number.isFinite(input[k])))this.stop('tool_refused');
   if(input.pages!==undefined&&typeof input.pages!=='string')this.stop('tool_refused');
   const abs=fold(path.resolve(this.o.cwd,p)),copy=this.o.copies.find(c=>fold(path.join(this.o.cwd,c.file))===abs);
-  if(!copy)this.stop('outside_path');
-  return copy!;
+  if(copy)return copy;
+  const n=path.dirname(abs)===fold(this.o.cwd)?diagramNumberOf(path.basename(abs)):null;
+  if(n===null)this.stop('outside_path');
+  return n!;
  }
  private toolResult(c:any){
   const call=typeof c?.tool_use_id==='string'?this.calls.get(c.tool_use_id):undefined;
-  if(!call||!call.copy||call.result)this.stop('isolation'); // a result for a call that was never accepted
+  if(!call||!(call.copy||call.missing!==undefined)||call.result)this.stop('isolation'); // a result for a call that was never accepted
   call!.result=true;const ok=c.is_error!==true;
+  if(call!.missing!==undefined){if(ok)this.stop('folder');return;} // there is no copy, so the CLI must have found nothing; finding something means the folder is not what the app made
   if(!ok){
    const t=typeof c.content==='string'?c.content:Array.isArray(c.content)?c.content.map((x:any)=>typeof x?.text==='string'?x.text:'').join(' '):'';
    if(classifyFailure(t.slice(0,2000))==='denied')this.stop('isolation'); // the CLI refused a Read the app had allowed: something is not as it was verified

@@ -16,7 +16,7 @@ import {QuestionStore} from '../server/harness/questions.ts';
 import {chatSessionArguments} from '../server/providers/claude-arguments.ts';
 import {spawnChatSession} from '../server/providers/launcher.ts';
 import {LedgerStore} from '../server/ledger-store.ts';
-import {DIAGRAM_MAX_TOOL_EVENTS,DIAGRAM_TURN_CAP_USD,FENCE_WORDS} from '../shared/diagram-fence.ts';
+import {DIAGRAM_MAX_TOOL_EVENTS,DIAGRAM_TURN_CAP_USD,FENCE_WORDS,WITHHELD_WORDS} from '../shared/diagram-fence.ts';
 import type {ChatEvent,ChatInput} from '../shared/chat.ts';
 import {makePng,svgFor} from './fixtures/png.ts';
 
@@ -57,7 +57,7 @@ async function turn(runtime:ChatRuntime,input:ChatInput){
 const ask=(session:string,id:string,question:string,path='plan.md'):ChatInput=>({id,path,question,context:[{moduleId:'this-note',ids:['note']}],session});
 const at=(a:string[],flag:string)=>a[a.indexOf(flag)+1];
 const chatCwdOf=(p:Project)=>path.join(p.harness,'chat-cwd');
-const MANIFEST_WITH=(p:Project)=>`Open note: Plan (${p.NOTE.length} chars). Diagrams: D1 'alpha-skill', D2 'bravo-skill'. Diagrams withheld: D3 'charlie-skill', D4 'secret-skill'.`;
+const MANIFEST_WITH=(p:Project)=>`Open note: Plan (${p.NOTE.length} chars). Diagrams: D1 'alpha-skill', D2 'bravo-skill'. D3 'charlie-skill' withheld: no picture yet. D4 'secret-skill' withheld: ${WITHHELD_WORDS.secret}.`;
 
 describe('a conversation turn that may open diagrams',()=>{
  it('gives the CLI exactly Read, allowed under the working folder only, with a dollar cap, and plain text on stdin',async()=>{
@@ -76,7 +76,7 @@ describe('a conversation turn that may open diagrams',()=>{
   const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'Review',note:'plan.md'});
   const review=await runtime.review(ask(s.id,'m-r1','Look at it'));
   expect(review.diagrams).toEqual([{n:1,title:'alpha-skill'},{n:2,title:'bravo-skill'}]);
-  expect(review.diagramsWithheld).toEqual([{n:3,title:'charlie-skill',why:'its picture has not been made yet'},{n:4,title:'secret-skill',why:'it holds text that looks like a secret'}]);
+  expect(review.diagramsWithheld).toEqual([{n:3,title:'charlie-skill',why:WITHHELD_WORDS.no_picture},{n:4,title:'secret-skill',why:WITHHELD_WORDS.secret}]);
   expect(review.diagramCapUsd).toBe(DIAGRAM_TURN_CAP_USD);expect(review.manifest).toBe(MANIFEST_WITH(p));expect(review).not.toHaveProperty('images');expect(review).not.toHaveProperty('notAttached');
   const t=await index.create({mode:'chat',label:'Plain',note:'plain.md'}),plain=await runtime.review(ask(t.id,'m-r2','Hi','plain.md'));expect(plain.diagrams).toBeUndefined();expect(plain.diagramsWithheld).toBeUndefined();expect(plain.diagramCapUsd).toBeUndefined();expect(plain.manifest).not.toContain('Diagrams');
  });
@@ -120,7 +120,7 @@ describe('a note without a diagram Claude can open',()=>{
   expect(a.addendum.startsWith(SESSION_INVARIANTS)).toBe(true);expect(a.addendum).not.toContain(DIAGRAM_RULES);expect(a.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);
   // every diagram of that note is withheld: the model is told so and told it has no tools, and the manifest says which
   const hiddenChars=(await readFile(path.join(p.root,'hidden.md'),'utf8')).length;
-  expect(b.addendum).toContain(DIAGRAM_RULES_UNAVAILABLE);expect(b.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);expect(b.stdin.split('\n\n')[0]).toBe(`Open note: Hidden (${hiddenChars} chars). Diagrams withheld: D1 'secret-only'.`);
+  expect(b.addendum).toContain(DIAGRAM_RULES_UNAVAILABLE);expect(b.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);expect(b.stdin.split('\n\n')[0]).toBe(`Open note: Hidden (${hiddenChars} chars). D1 'secret-only' withheld: ${WITHHELD_WORDS.secret}.`);
  });
  it('still rejects any tool event: a tool announced by a tool-less session stops the turn',async()=>{
   for(const scenario of ['tool-use','tools']){
@@ -138,7 +138,7 @@ describe('the fence around a turn that may open diagrams',()=>{
  const OUTSIDE:[string,string,string][]=[
   ['an absolute path outside the folder','{cwd}\\..\\..\\outside\\secret.txt','outside_path'],['a parent folder, relative','..\\x.png','outside_path'],['a parent folder with a copy name','..\\d1.png','outside_path'],
   ['a sibling folder that shares the prefix','{sibling}\\d1.png','outside_path'],['a junction-like path','link\\d1.png','outside_path'],['an extended path','\\\\?\\{cwd}\\d1.png','outside_path'],
-  ['a UNC path','\\\\localhost\\C$\\Windows\\win.ini','outside_path'],['a home path','~/d1.png','outside_path'],['a variable','%TEMP%\\d1.png','outside_path'],['a diagram that was not copied','{cwd}\\d3.png','outside_path'],
+  ['a UNC path','\\\\localhost\\C$\\Windows\\win.ini','outside_path'],['a home path','~/d1.png','outside_path'],['a variable','%TEMP%\\d1.png','outside_path'],['a diagram number in a sub-folder','{cwd}\\sub\\d3.png','outside_path'],
  ];
  for(const [label,target,cause] of OUTSIDE)it(`stops the turn for a Read of ${label}, as ${cause}, without reading or recording it`,async()=>{
   const {r,p}=await stopped('dg-path|'+target);
@@ -236,5 +236,54 @@ describe('the launch of a turn',()=>{
   expect(()=>go(['d1.png','d2.png'])).toThrow('Session launch rejected.');expect(()=>go(['d1.png'],{diagrams:{budgetUsd:9,files:['d1.png']}})).toThrow('Session launch rejected.');
   expect(()=>spawnChatSession(config,{...profile,addendumFile:file},{cwd:folder},folder)).toThrow('Session launch rejected.'); // no diagrams: the folder must be empty
   go(['d1.png']).kill();
+ });
+});
+
+describe('every diagram of the note is listed, available or withheld with its reason (the D3 bug)',()=>{
+ // A note with a diagram of each shape: named, unnamed, no picture, a picture over 500 KB, one over 1,600 px, a damaged file, secret-shaped text, an interactive page, and a name with brackets.
+ async function many(scenario='dg-read'){
+  const p=await project(),dir=path.join(p.root,'assets'),made:Record<string,{base:string;svg:string}>={};
+  for(const k of ['named','unnamed','nopng','large','wide','damaged','bracket'])made[k]=svgFor('Shape '+k);
+  for(const d of Object.values(made))await writeFile(path.join(dir,d.base+'.svg'),d.svg);
+  await p.images.save(made.named.base+'.png',PNG);await p.images.save(made.unnamed.base+'.png',PNG_B);await p.images.save(made.bracket.base+'.png',makePng(60,30));
+  await writeFile(path.join(dir,made.large.base+'.png'),makePng(450,450,{noise:true}));await writeFile(path.join(dir,made.wide.base+'.png'),makePng(1700,20));await writeFile(path.join(dir,made.damaged.base+'.png'),'not a png');
+  const pageBase='diagram-'+'e'.repeat(64);
+  const text=['# Shapes','',`> ![AI diagram: named](assets/${made.named.base}.svg)`,'','## Release',`![](assets/${made.unnamed.base}.svg)`,`> ![AI diagram: no-png](assets/${made.nopng.base}.svg)`,`![AI diagram: heavy](assets/${made.large.base}.svg)`,
+   `![AI diagram: wide](assets/${made.wide.base}.svg)`,`![AI diagram: broken](assets/${made.damaged.base}.svg)`,`![AI diagram: secret](assets/${p.made.secret.base}.svg)`,`> [AI diagram, interactive version: archify](assets/${pageBase}.html)`,
+   `![AI diagram: flow [v2]](assets/${made.bracket.base}.svg "Flow")`,''].join('\n');
+  await writeFile(path.join(p.root,'shapes.md'),text);
+  const o=await p.open(scenario),s=await o.index.create({mode:'chat',label:'Shapes',note:'shapes.md'});return {p,...o,s,made,text};
+ }
+ const EXPECTED=[[3,'no-png',WITHHELD_WORDS.no_picture],[4,'heavy',WITHHELD_WORDS.too_large],[5,'wide',WITHHELD_WORDS.too_many_pixels],[6,'broken',WITHHELD_WORDS.bad_file],[7,'secret',WITHHELD_WORDS.secret],[8,'archify',WITHHELD_WORDS.page]] as const;
+ it('names each one on the review card and in the manifest, gives the unnamed one a fallback label, and copies only the available ones',async()=>{
+  const m=await many(),r=await turn(m.runtime,ask(m.s.id,'m-all','Explain the diagrams','shapes.md'));expect(r.error).toBeUndefined();
+  expect(r.review.diagrams).toEqual([{n:1,title:'named'},{n:2,title:'Diagram 2 under Release'},{n:9,title:'flow [v2]'}]);
+  expect(r.review.diagramsWithheld).toEqual(EXPECTED.map(([n,title,why])=>({n,title,why})));
+  const shown=[...r.review.diagrams!.map(d=>d.n),...r.review.diagramsWithheld!.map(d=>d.n)].sort((a,b)=>a-b);expect(shown).toEqual([1,2,3,4,5,6,7,8,9]); // none vanished
+  for(const [n,title,why] of EXPECTED)expect(r.review.manifest,`D${n}`).toContain(`D${n} '${title}' withheld: ${why}.`);
+  expect(r.review.manifest).toContain("Diagrams: D1 'named', D2 'Diagram 2 under Release', D9 'flow [v2 '."); // the manifest drops ] from labels, as it always did
+  const [c]=await m.p.calls();expect(c.cwdFiles.map((f:{name:string})=>f.name)).toEqual(['d1.png','d2.png','d9.png']); // withheld diagrams are never copied
+  expect(c.stdin.split('\n\n')[0]).toBe(r.review.manifest);
+ });
+ it('lets the model say that a withheld diagram is unavailable, with the reason, when it asks for it: one row, no read, no ledger line',async()=>{
+  const m=await many('dg-unavailable|3'),r=await turn(m.runtime,ask(m.s.id,'m-u1','What does D3 show?','shapes.md'));
+  expect(r.error).toBeUndefined();expect(r.complete!.message.body).toBe(`D3 is unavailable: ${WITHHELD_WORDS.no_picture}.`);
+  expect(r.events.filter(e=>e.type==='diagram_unavailable')).toEqual([{type:'diagram_unavailable',id:'m-u1',n:3,title:'no-png',why:WITHHELD_WORDS.no_picture}]);
+  expect(r.reads).toEqual([]);expect(r.complete!.message.diagramReads).toBeUndefined();expect((await m.p.ledger()).filter(e=>e.event==='diagram_read')).toEqual([]);
+ });
+ it('answers a diagram number that is not in the note as "not in this note"',async()=>{
+  const p=await project(),{index,runtime}=await p.open('dg-unavailable|7'),s=await index.create({mode:'chat',label:'Seven',note:'plan.md'});
+  const r=await turn(runtime,ask(s.id,'m-u7','What does D7 show?'));expect(r.error).toBeUndefined();
+  expect(r.events.find(e=>e.type==='diagram_unavailable')).toMatchObject({n:7,title:'',why:'not in this note'});expect(r.complete!.message.body).toBe('D7 is unavailable: not in this note.');
+ });
+ it('does not loop: asking for the same withheld diagram again stops the turn and says so',async()=>{
+  const m=await many('dg-unavailable-again|5'),r=await turn(m.runtime,ask(m.s.id,'m-u2','What does D5 show?','shapes.md'));
+  expect(r.complete).toBeUndefined();expect(r.error).toMatchObject({code:'provider_failed',fence:'unavailable_again',reason:{kind:'unparseable',detail:FENCE_WORDS.unavailable_again}});
+ });
+ it('offers a diagram once its picture is repaired: a valid picture replaces the bad file, and the next review lists it as available',async()=>{
+  const m=await many(),bad=m.made.damaged.base+'.png';
+  expect((await m.runtime.review(ask(m.s.id,'m-f1','Look','shapes.md'))).diagramsWithheld!.map(w=>w.n)).toContain(6);
+  await m.p.images.save(bad,makePng(300,150));
+  const after=await m.runtime.review(ask(m.s.id,'m-f2','Look','shapes.md'));expect(after.diagrams!.map(d=>d.n)).toContain(6);expect(after.diagramsWithheld!.map(w=>w.n)).not.toContain(6);
  });
 });

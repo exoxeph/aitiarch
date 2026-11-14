@@ -9,8 +9,8 @@ import {ChatStore} from './store.ts';import {contextModules,hash,estimateTokens}
 import {prepareRequest,ProviderError,redact,type Provider,type Request,type Result} from '../providers/index.ts';
 import {chatSessionInstruction,editorManifest,turnMessage} from './request.ts';
 import {cleanLabel,parseEditorInfo} from '../../shared/editor-context.ts';
-import {diagramsIn,type DiagramRef} from '../../shared/diagram-refs.ts';
-import {DIAGRAM_TURN_CAP_USD} from '../../shared/diagram-fence.ts';
+import {MAX_DIAGRAMS_LISTED,diagramsIn,type DiagramRef} from '../../shared/diagram-refs.ts';
+import {DIAGRAM_TURN_CAP_USD,WITHHELD_WORDS,type WithheldReason} from '../../shared/diagram-fence.ts';
 import type {DiagramImageStore} from '../diagram-image-store.ts';
 import {FenceStop} from '../harness/diagram-fence.ts';
 import {titleOf} from '../../shared/headings.ts';
@@ -35,7 +35,9 @@ interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:
  /** A conversation about a note that shows diagrams. `open`: the diagrams the model may open with Read this turn (D<n>, the diagram's name in the assets folder, the note's title), as the review showed them; the server
   *  copies their pictures into the turn's folder at send and refuses to send if they are no longer the same. `note`: the note they are in. `all`: every diagram the note numbered at review.
   *  `earlier`: the diagrams earlier replies of this conversation opened (saved with those replies, so a claim about one is still believed after a restart). */
- diagrams?:{open:{n:number;asset:string;title:string}[];note:string;all:{n:number;asset:string}[];earlier:string[]}}
+ diagrams?:{open:{n:number;asset:string;title:string}[];note:string;all:{n:number;asset:string}[];earlier:string[];
+  /** The diagrams that are withheld, with the reason in words: a Read of one is answered with it. */
+  withheld:{n:number;title:string;why:string}[]}}
 /** What a conversation turn did that the reply itself does not say: what the CLI said it cost, and the diagrams the model opened (in order, once each). */
 interface TurnFacts {costUsd:number|null;reads:DiagramRead[]}
 /** Harness chat sessions: the app's index of sessions and the runner that talks to the Claude Code CLI. */
@@ -122,10 +124,12 @@ export class ChatRuntime {
    if(!session||session.mode!=='chat'||session.note!==undefined&&session.note!==input.path)throw new ChatError('invalid_chat');
   }
   // A conversation about a note that shows diagrams may open their pictures with Read. The note's own text numbers its diagrams D1, D2 ...; the page names none. The pictures are copies the server makes at send
-  // (see copiesFor): here it finds out which can be opened, and which are withheld and why (no picture yet, or text that looks like a secret: a picture cannot be redacted, so it is not copied at all).
+  // (see copiesFor): here it finds out which can be opened, and which are withheld and why (no picture yet, too large, too many pixels, a bad file, an interactive page, or text that looks like a secret: a picture cannot be redacted, so it is not copied at all).
+  // None is dropped: each diagram of the note is on the review card and in the manifest, available or withheld with its reason.
   const diagramRefs=session&&this.images?diagramsIn(openNote.text):[],prepared=await this.prepareDiagrams(diagramRefs),canOpen=prepared.open.length>0;
   const earlier=session&&diagramRefs.length?await this.earlierReads(session.note??input.path,session.id):new Set<string>();
-  const withheldAssets=new Set(prepared.withheld.map(w=>w.ref.asset));  // A one-off chat counts against its note; a conversation counts against itself (budget, hourly cap, calls), whichever note is open.
+  const withheldWhy=new Map(prepared.withheld.map(w=>[w.ref.asset,WITHHELD_WORDS[w.reason]]));
+  // A one-off chat counts against its note; a conversation counts against itself (budget, hourly cap, calls), whichever note is open.
   const s=this.state(input.path,session?.id);if(session)s.usage.label=session.label;
   // The chat node's persona always rides along; its skills only when something loaded. Fixed here, so the review shows what is sent.
   const extra=this.extras?await this.extras('chat'):null;
@@ -145,7 +149,7 @@ export class ChatRuntime {
   const manifest=editorManifest({title:redact(editor?.title??cleanLabel(titleOf(noteSource?.text??'',open))),noteChars:noteSource?noteSource.text.length:null,
    selection:request.selection?{chars:request.selection.length,...(editor?.lines?{lines:editor.lines}:{})}:null,...(editor?.section?{section:editor.section.map(x=>redact(x))}:{}),
    ...(request.selection&&editor?.spans?{span:{from:editor.spans.from.map(x=>redact(x)),to:editor.spans.to.map(x=>redact(x))}}:{}),
-   diagrams:diagramRefs.map(d=>({n:d.n,title:redact(d.title),...(withheldAssets.has(d.asset)?{withheld:true}:{})})),others:sessionSources.filter(x=>x.id!=='N1'&&x.id!=='S1'&&x.text.length>0).map(x=>({id:x.id,label:cleanLabel(x.label),chars:x.text.length}))});
+   diagrams:diagramRefs.map(d=>({n:d.n,title:redact(d.title),...(withheldWhy.has(d.asset)?{withheld:withheldWhy.get(d.asset)!}:{})})),others:sessionSources.filter(x=>x.id!=='N1'&&x.id!=='S1'&&x.text.length>0).map(x=>({id:x.id,label:cleanLabel(x.label),chars:x.text.length}))});
   if(!session)request.editor=manifest;
   const packet=prepareRequest(request);
   const sessionText=session?chatSessionInstruction(request,sessionSources,{diagrams:diagramRefs.length>0,canOpen}):null;
@@ -160,10 +164,10 @@ export class ChatRuntime {
   if(excluded.length)review.excluded=excluded;
   review.manifest=manifest;if(editor)review.editor=editor;
   if(canOpen){review.diagrams=prepared.open.map(o=>({n:o.ref.n,title:redact(o.ref.title)}));review.diagramCapUsd=DIAGRAM_TURN_CAP_USD;}
-  if(prepared.withheld.length)review.diagramsWithheld=prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title),why:w.why}));
+  if(prepared.withheld.length)review.diagramsWithheld=prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title),why:WITHHELD_WORDS[w.reason]}));
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');
-  this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(privateContext?{privateContext:true as const}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier]}}:{})});
+  this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(privateContext?{privateContext:true as const}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
   return review;
  }
  async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
@@ -240,16 +244,19 @@ export class ChatRuntime {
  }
  /** Which of a note's diagrams can be opened in a turn, and which are withheld with the reason in words. The picture must exist and be a valid PNG (the store checks signature, checksums, size and dimensions), and the
   *  diagram's text must not look like a secret. Nothing here is sent; the bytes are only held long enough to prove they are fine. */
- private async prepareDiagrams(refs:readonly DiagramRef[]):Promise<{open:{ref:DiagramRef;bytes:Buffer}[];withheld:{ref:DiagramRef;why:string}[]}>{
-  const open:{ref:DiagramRef;bytes:Buffer}[]=[],withheld:{ref:DiagramRef;why:string}[]=[];
+ private async prepareDiagrams(refs:readonly DiagramRef[]):Promise<{open:{ref:DiagramRef;bytes:Buffer}[];withheld:{ref:DiagramRef;reason:WithheldReason}[]}>{
+  const open:{ref:DiagramRef;bytes:Buffer}[]=[],withheld:{ref:DiagramRef;reason:WithheldReason}[]=[];
+  const PROBLEM={missing:'no_picture',too_large:'too_large',too_big_side:'too_many_pixels',bad_file:'bad_file',no_svg:'bad_file'} as const;
   for(const ref of refs){
-   const name=ref.asset+'.png',skip=(why:string)=>void withheld.push({ref,why});
+   const name=ref.asset+'.png',skip=(reason:WithheldReason)=>void withheld.push({ref,reason});
+   if(ref.kind==='page'){skip('page');continue;} // an interactive page has no picture to copy
+   if(ref.n>MAX_DIAGRAMS_LISTED){skip('too_many');continue;} // only d1.png to d9.png exist
    try{
-    if(!this.images){skip('pictures are not available');continue;}
-    const info=await this.images.info(name);if(!info){skip('its picture has not been made yet');continue;}
-    const text=await this.images.svgText(name);if(redact(text)!==text||secretKinds(text).length){skip('it holds text that looks like a secret');continue;}
+    if(!this.images){skip('no_picture');continue;}
+    const c=await this.images.check(name);if(!c.ok){skip(PROBLEM[c.problem]);continue;}
+    const text=await this.images.svgText(name);if(redact(text)!==text||secretKinds(text).length){skip('secret');continue;}
     open.push({ref,bytes:await this.images.read(name)});
-   }catch{skip('its picture could not be read');}
+   }catch{skip('bad_file');}
   }
   return {open,withheld};
  }
@@ -273,6 +280,7 @@ export class ChatRuntime {
    const copies=frozen.diagrams?await this.copiesFor(frozen.diagrams):undefined;
    if(session.turns===0&&h.version){const version=await h.version().catch(()=>null);if(version)audits.push(this.ledger.append({id:randomUUID(),inkId,requestId:request.id,note,event:'cli_version',at:at(),cli:{version,session:session.id}}).catch(()=>{}));}
    const r=await h.runner.chatTurn({id:session.id,resume:session.turns>0,addendum:frozen.addendum,question:turnMessage(frozen.manifest,request.question),...(copies?.length?{diagrams:{copies,budgetUsd:DIAGRAM_TURN_CAP_USD}}:{}),signal,onTextDelta,onStarted:()=>{started=true;},
+    onDiagramUnavailable:n=>{const w=frozen.diagrams?.withheld.find(x=>x.n===n);emit({type:'diagram_unavailable',id:request.id,n,title:w?.title??'',why:w?.why??'not in this note'});},
     onDiagramRead:copy=>{
      const ref=frozen.diagrams?.open.find(o=>o.n===copy.n);if(!ref)return;
      if(!facts.reads.some(x=>x.asset===ref.asset))facts.reads.push({n:ref.n,asset:ref.asset,title:redact(ref.title).slice(0,80)});

@@ -10,7 +10,7 @@ export type TurnStatus='review'|'streaming'|'complete'|'error';
 /** One question and its answer. `text` is provisional while streaming and the accepted message body once complete. */
 export interface Turn {id:string;question:string|null;status:TurnStatus;text:string;message?:ChatMessage;
  /** The diagrams Claude opened in this turn, as live rows (a conversation turn that may open diagrams); the saved reply's diagramReads replace them once it is in. */
- opened?:{n:number;title:string}[];
+ opened?:{n:number;title:string;/** Set when it could not be opened (withheld): the reason. */why?:string}[];
  error?:{code:ChatErrorCode;rule?:string;reason?:FailureReason;errorName?:string;cause?:AbortCause;budget?:BudgetDetail;fence?:FenceCode;costUsd?:number;capUsd?:number}}
 
 export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
@@ -21,7 +21,8 @@ export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
    case 'start':return {...t,status:'streaming'};
    case 'delta':return {...t,status:'streaming',text:t.text+event.text};
    case 'diagram_read':return {...t,opened:[...(t.opened??[]),{n:event.n,title:event.title}]};
-   case 'complete':return {...t,status:'complete',text:event.message.body,message:event.message,...(event.message.diagramReads?{opened:event.message.diagramReads.map(r=>({n:r.n,title:r.title}))}:{})};
+   case 'diagram_unavailable':return {...t,opened:[...(t.opened??[]),{n:event.n,title:event.title,why:event.why}]};
+   case 'complete':return {...t,status:'complete',text:event.message.body,message:event.message,...(event.message.diagramReads||t.opened?.some(o=>o.why)?{opened:[...(event.message.diagramReads??[]).map(r=>({n:r.n,title:r.title})),...(t.opened??[]).filter(o=>o.why)]}:{})}; // what it could not open stays on the trail too
    case 'error':{const {message:_dropped,...rest}=t;return {...rest,status:'error',text:'',error:{code:event.code,...(event.rule?{rule:event.rule}:{}),...(event.reason?{reason:event.reason}:{}),...(event.errorName?{errorName:event.errorName}:{}),...(event.cause?{cause:event.cause}:{}),...(event.budget?{budget:event.budget}:{}),...(isFenceCode(event.fence)?{fence:event.fence}:{}),...(typeof event.costUsd==='number'?{costUsd:event.costUsd}:{}),...(typeof event.capUsd==='number'?{capUsd:event.capUsd}:{})}};} // a partial reply is never kept; the rows of what it opened stay
   }
  });
@@ -30,7 +31,7 @@ export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
 export const fromStored=(messages:readonly ChatMessage[],questions:ReadonlyMap<string,string>):Turn[]=>
  messages.map(m=>({id:m.id,question:questions.get(m.id)??null,status:'complete' as const,text:m.body,message:m,...(m.diagramReads?{opened:m.diagramReads.map(r=>({n:r.n,title:r.title}))}:{})}));
 
-const EVENT_TYPES=new Set(['start','delta','diagram_read','complete','error']);
+const EVENT_TYPES=new Set(['start','delta','diagram_read','diagram_unavailable','complete','error']);
 /** Splits a server-sent-events buffer into whole chat events plus the unfinished tail. Malformed or unknown frames are dropped. */
 export function sseFrames(buffer:string):{events:ChatEvent[];rest:string}{
  const parts=buffer.split(/\r?\n\r?\n/),rest=parts.pop()??'',events:ChatEvent[]=[];

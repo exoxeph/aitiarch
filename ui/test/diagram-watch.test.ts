@@ -23,11 +23,11 @@ const streamedTool=(id:string,name:string,json:string,index=1)=>[
 const done=(extra:Record<string,unknown>={})=>({type:'result',subtype:'success',is_error:false,result:'ok',total_cost_usd:0.0321,usage:{input_tokens:1,output_tokens:2},permission_denials:[],...extra});
 
 function run(events:unknown[],options:{max?:number}={}){
- const forwarded:any[]=[],reads:FolderCopy[]=[],results:[FolderCopy,boolean][]=[];let tools=0;
- const w=new DiagramTurnWatcher({cwd,copies,...(options.max?{maxTools:options.max}:{}),forward:e=>forwarded.push(e),onRead:c=>reads.push(c),onReadResult:(c,ok)=>results.push([c,ok]),onTool:()=>{tools++;}});
+ const forwarded:any[]=[],reads:FolderCopy[]=[],results:[FolderCopy,boolean][]=[],missing:number[]=[];let tools=0;
+ const w=new DiagramTurnWatcher({cwd,copies,...(options.max?{maxTools:options.max}:{}),forward:e=>forwarded.push(e),onRead:c=>reads.push(c),onReadResult:(c,ok)=>results.push([c,ok]),onUnavailable:n=>missing.push(n),onTool:()=>{tools++;}});
  let stopped:FenceStop|Error|null=null;
  try{for(const e of events)w.push(Buffer.from(JSON.stringify(e)+'\n'));w.finish();}catch(e){stopped=e as Error;}
- return {w,forwarded,reads,results,stopped,tools:()=>tools};
+ return {w,forwarded,reads,results,missing,stopped,tools:()=>tools};
 }
 const cause=(r:{stopped:Error|null})=>r.stopped instanceof FenceStop?r.stopped.fence:r.stopped?'other:'+r.stopped.message:null;
 const read=(file:string,id='t1')=>[init(),assistantTool(id,'Read',{file_path:file})];
@@ -64,7 +64,7 @@ describe('a turn is stopped, with the cause, for',()=>{
   ['an absolute path outside the folder',path.resolve(cwd,'..','..','outside','secret.txt')],['the parent folder, relative',`..${path.sep}x.png`],['the parent folder, relative with a copy name','..\\d1.png'],
   ['a sibling folder that shares the prefix',cwd+'-evil'+path.sep+'d1.png'],['a copy in a sub-folder (a junction-like path)',path.join(cwd,'link','d1.png')],['a junction-like relative path','link\\d1.png'],
   ['an extended path','\\\\?\\'+path.join(cwd,'d1.png')],['a UNC path','\\\\localhost\\C$\\Users\\tester\\d1.png'],['a device path','\\\\.\\C:\\d1.png'],['a home path','~/d1.png'],['a variable','%TEMP%\\d1.png'],['a shell variable','$HOME/d1.png'],
-  ['a stream suffix',path.join(cwd,'d1.png')+':secret'],['a drive-relative path','C:d1.png'],['a diagram that was not copied',path.join(cwd,'d3.png')],['a name that only looks like a copy',path.join(cwd,'d1.png.txt')],
+  ['a stream suffix',path.join(cwd,'d1.png')+':secret'],['a drive-relative path','C:d1.png'],['a diagram number in a sub-folder',path.join(cwd,'sub','d3.png')],['a diagram number in the parent folder',path.join(cwd,'..','d3.png')],['a name that only looks like a copy',path.join(cwd,'d1.png.txt')],
   ['the folder itself',cwd],['a trailing dot',path.join(cwd,'d1.png.')],['an empty path',''],['a path through ..',path.join(cwd,'..','chat-cwd','d1.png')+'\\..\\..\\x'],
  ] as const;
  for(const [label,p] of outside)it(`${label} (outside_path)`,()=>{
@@ -124,5 +124,23 @@ describe('the one rule of "inside the folder" (shared with Investigate)',()=>{
  it('refuses each way out on its own, also when it would otherwise resolve inside',()=>{
   for(const p of ['~/d1.png','~','%TEMP%\\d1.png','$HOME/d1.png','a$b.png','a%b.png','\\\\?\\'+path.join(cwd,'d1.png'),'\\\\.\\C:\\d1.png','\\\\localhost\\C$\\d1.png','//server/share/d1.png','C:d1.png','d1.png:secret',path.join(cwd,'d1.png')+':x','','..','..\\d1.png','../d1.png',path.resolve(cwd,'..'),cwd+'-evil\\d1.png',path.parse(cwd).root])
    expect(pathInside(cwd,p),JSON.stringify(p)).toBe(false);
+ });
+});
+
+describe('a Read of a diagram that has no copy in the folder (withheld, or not in the note)',()=>{
+ const missingResult=(id:string)=>resultError(id,'File does not exist. Note: your current working directory is '+cwd+'.');
+ it('lets the turn go on: it is named, counted as a tool event, never as a read, and the CLI finds nothing',()=>{
+  for(const p of [path.join(cwd,'d3.png'),'d3.png','./d9.png',process.platform==='win32'?path.join(cwd,'D3.png'):'d3.png']){
+   const r=run([...read(p),missingResult('t1'),...text('D3 is unavailable: no picture yet.'),done()]);
+   expect(cause(r),p).toBeNull();expect(r.missing).toEqual([Number(/d(\d)/i.exec(path.basename(p))![1])]);expect(r.reads).toEqual([]);expect(r.results).toEqual([]);expect(r.w.toolEvents).toBe(1);expect(r.tools()).toBe(1);
+  }
+ });
+ it('stops the turn when the same one is asked for again (a loop), with its own cause',()=>{
+  const r=run([...read('d3.png','t1'),missingResult('t1'),assistantTool('t2','Read',{file_path:path.join(cwd,'d3.png')}),missingResult('t2'),done()]);
+  expect(cause(r)).toBe('unavailable_again');expect(r.missing).toEqual([3]);
+  const two=run([...read('d3.png','t1'),missingResult('t1'),assistantTool('t2','Read',{file_path:'d4.png'}),missingResult('t2'),done()]);expect(cause(two)).toBeNull();expect(two.missing).toEqual([3,4]); // two different ones: no loop
+ });
+ it('stops the turn when the CLI did find a file there: the folder is not what the app made',()=>{
+  expect(cause(run([...read('d3.png'),resultOk('t1'),done()]))).toBe('folder');
  });
 });

@@ -85,7 +85,9 @@ if (args[args.indexOf('--tools') + 1] === 'Read') { // a conversation turn that 
     out({ type: 'assistant', message: { id: msg, role: 'assistant', content: [{ type: 'tool_use', id: toolId, name, input, caller: { type: 'direct' } }] } });
     return toolId;
   };
-  const picResult = (toolId, file) => { let data = ''; try { data = readFileSync(file).toString('base64'); } catch { /* not there */ } out({ type: 'user', message: { role: 'user', content: [{ tool_use_id: toolId, type: 'tool_result', content: [{ type: 'image', source: { type: 'base64', data, media_type: 'image/png' } }] }] }, tool_use_result: { type: 'image', file: { base64: data } } }); };
+  const picResult = (toolId, file) => { let data = ''; try { data = readFileSync(file).toString('base64'); } catch { // not there: the real CLI answers with a tool error (not a permission denial)
+      out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'File does not exist. Note: your current working directory is ' + cwd + '.', is_error: true, tool_use_id: toolId }] } }); return; }
+    out({ type: 'user', message: { role: 'user', content: [{ tool_use_id: toolId, type: 'tool_result', content: [{ type: 'image', source: { type: 'base64', data, media_type: 'image/png' } }] }] }, tool_use_result: { type: 'image', file: { base64: data } } }); };
   const finish = (reply, cost = 0.0123, extraResult = {}) => {
     textBlock(0, reply.slice(0, 24)); textBlock(0, reply.slice(24));
     out({ type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'end_turn' } } });
@@ -101,6 +103,13 @@ if (args[args.indexOf('--tools') + 1] === 'Read') { // a conversation turn that 
   }
   if (kind === 'dg-echo') finish(stdin.split('\n')[0] + '\n\nThe note is about the plan.\n<claims>{"none":"opinion"}</claims>');
   if (kind === 'dg-none') finish('The plan has two steps.\n<claims>{"none":"opinion"}</claims>');
+  // dg-unavailable|<n>: opens d<n>.png although it is withheld (no copy), gets "File does not exist", and says so; dg-unavailable-again|<n> tries the same one twice (a loop).
+  if (kind === 'dg-unavailable' || kind === 'dg-unavailable-again') {
+    const n = Number(extra || 3), a = call('u1', 'Read', { file_path: pic(n) }); picResult(a, pic(n));
+    if (kind === 'dg-unavailable-again') { const b = call('u2', 'Read', { file_path: pic(n) }, 2); picResult(b, pic(n)); }
+    const reason = new RegExp(`D${n} '[^']*' withheld: ([^.]*)\\.`).exec(stdin)?.[1] ?? 'not in this note';
+    finish(`D${n} is unavailable: ${reason}.\n<claims>{"none":"no_context_used"}</claims>`);
+  }
   if (kind === 'dg-claim-unread') finish('The first diagram shows a row of boxes.\n' + seen); // claims a picture it never opened
   if (kind === 'dg-claim-d2-after-d1') { const a = call('a', 'Read', { file_path: pic(1) }); picResult(a, pic(1)); finish('The second one is a loop.\n<claims>[{"source":"D2","visual":true}]</claims>'); }
   if (kind === 'dg-path') { call('a', 'Read', { file_path: where(extra) }); await sleep(20000); }

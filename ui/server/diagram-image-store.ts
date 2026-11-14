@@ -1,9 +1,10 @@
 // The picture of a diagram: `<notes root>/assets/<diagram name>.png`, made by the page from the diagram's already-sanitised SVG and saved beside it. The chat attaches it to a message so the model can
 // see the diagram. Everything that comes from the page is checked here as untrusted data: the name (a strict pattern, so the path can only be a file in the assets folder), the bytes (a
 // well-formed PNG: signature, every chunk's length and checksum, the header's size, the end chunk), the size (500 KB) and the dimensions (1,600 px on the longest side). A picture is only
-// accepted for an svg that is really there and matches its own hash, and an existing picture is never overwritten.
+// accepted for an svg that is really there and matches its own hash. A valid picture is never overwritten; a saved file that is not one (too large, too many pixels,
+// damaged: an older or foreign file) is replaced by the next valid picture, so a diagram is never stuck without one.
 import {createHash} from 'node:crypto';
-import {lstat,mkdir,open,readFile} from 'node:fs/promises';
+import {lstat,mkdir,open,readFile,rename,rm} from 'node:fs/promises';
 import path from 'node:path';
 import {crc32} from 'node:zlib';
 import {DIAGRAM_PNG_MAX_BYTES,DIAGRAM_PNG_MAX_SIDE,DIAGRAM_PNG_NAME} from '../shared/diagram-refs.ts';
@@ -65,6 +66,15 @@ export class DiagramImageStore {
   const bytes=await this.svg(DiagramImageStore.base(name));
   return [...bytes.toString('utf8').matchAll(/>([^<]+)</g)].map(m=>m[1]).join('\n');
  }
+ /** What a conversation needs to know about a diagram's picture: it is there and valid (with its size), or why not, in a fixed word. The svg is checked too (it must be there and match its name). */
+ async check(name:string):Promise<{ok:true;info:DiagramImageInfo}|{ok:false;problem:'missing'|'too_large'|'too_big_side'|'bad_file'|'no_svg'}>{
+  const base=DiagramImageStore.base(name);
+  try{await this.svg(base);}catch{return {ok:false,problem:'no_svg'};}
+  let bytes:Buffer;
+  try{bytes=await readFile(await this.confined(base+'.png'));}catch(e){return {ok:false,problem:e instanceof DiagramImageError||(e as NodeJS.ErrnoException).code!=='ENOENT'?'bad_file':'missing'};}
+  try{return {ok:true,info:{name,...readPng(bytes),bytes:bytes.length}};}
+  catch(e){const p=e instanceof DiagramImageError?e.problem:'bad_chunk';return {ok:false,problem:p==='too_large'?'too_large':p==='too_big_side'?'too_big_side':'bad_file'};}
+ }
  async info(name:string):Promise<DiagramImageInfo|null>{
   const base=DiagramImageStore.base(name);let bytes:Buffer;
   try{const file=await this.confined(base+'.png');bytes=await readFile(file);}catch(e){if(e instanceof DiagramImageError)throw e;return null;}
@@ -77,7 +87,13 @@ export class DiagramImageStore {
   const size=readPng(bytes);await this.svg(base);
   const file=await this.confined(base+'.png',true);
   try{const f=await open(file,'wx',0o600);try{await f.writeFile(bytes);await f.sync();}finally{await f.close();}}
-  catch(e){if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;const kept=await this.info(name);if(kept)return kept;throw e;}
+  catch(e){
+   if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;const kept=await this.info(name);if(kept)return kept;
+   // The saved file is not a valid picture (too large, too many pixels, damaged): the new one replaces it. Written beside it first, then renamed over it; never through a link.
+   const temp=path.join(path.dirname(file),'.'+base+'.'+process.pid+'.'+Math.random().toString(36).slice(2)+'.tmp');
+   const t=await open(temp,'wx',0o600);try{await t.writeFile(bytes);await t.sync();}finally{await t.close();}
+   try{await this.confined(base+'.png');await rename(temp,file);}catch(err){await rm(temp,{force:true});throw err;}
+  }
   return {name,...size,bytes:bytes.length};
  }
  async read(name:string):Promise<Buffer>{

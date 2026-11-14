@@ -25,6 +25,8 @@ export interface ChatTurn {id:string;resume:boolean;addendum:string;question:str
  onStarted?:()=>void;
  /** A Read of one of the copies was accepted (it is about to run). */
  onDiagramRead?:(copy:FolderCopy)=>void;
+ /** A Read of d<n>.png for a diagram that has no copy (withheld): the CLI finds nothing there. */
+ onDiagramUnavailable?:(n:number)=>void;
  /** The Read's result came back: whether it worked. */
  onDiagramReadResult?:(copy:FolderCopy,ok:boolean)=>void}
 export interface TurnResult {answer:string;usage:{inputTokens:number;outputTokens:number;cachedTokens?:number}|null;unknownEvents:string[];
@@ -90,7 +92,7 @@ export class ClaudeSessionRunner {
      if(e instanceof ProviderError)return stopWith(e);
      const own=e instanceof Error&&e.message.startsWith('Invalid chat stream: ');stop('invalid_response',own?(e as Error).message.slice(21):'the output was not valid JSON lines');
     };
-    if(copies.length)watcher=new DiagramTurnWatcher({cwd,copies,forward:e=>stream.feed(e),onRead:c=>t.onDiagramRead?.(c),onReadResult:(c,ok)=>t.onDiagramReadResult?.(c,ok),
+    if(copies.length)watcher=new DiagramTurnWatcher({cwd,copies,forward:e=>stream.feed(e),onRead:c=>t.onDiagramRead?.(c),onUnavailable:n=>t.onDiagramUnavailable?.(n),onReadResult:(c,ok)=>t.onDiagramReadResult?.(c,ok),
      onTool:()=>{checks=checks.then(()=>verifyDiagramFolder(cwd,copies)).catch(broke);}}); // every tool event: is the folder still exactly what the app made?
     const timer=setTimeout(()=>stop('timeout'),this.cfg.timeoutMs??180000),abort=()=>stop('cancelled');
     t.signal?.addEventListener('abort',abort,{once:true});

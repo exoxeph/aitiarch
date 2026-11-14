@@ -16,7 +16,7 @@ import {editorInfo,sameEditorContext,type EditorContext} from '../../shared/edit
 import {linesText,noteChangedText,noteChipText,selectionChipText} from './editor-chips.ts';
 import {diagramsIn} from '../../shared/diagram-refs.ts';
 import {ensurePictures} from '../diagrams/diagram-images.ts';
-import {openedText,reviewDiagramsText,turnCostText,withheldText} from './diagram-words.ts';
+import {openedText,reviewDiagramsText,turnCostText,unavailableText,withheldText} from './diagram-words.ts';
 import {readConversationChoice,writeConversationChoice,type ConversationChoice} from './conversation-choice.ts';
 import {applyEvent,buildContext,chipEstimate,errorText,formatCount,fromStored,newTurnId,previewText,usageLine,ECHO_LABEL,UNSTRUCTURED_LABEL,type Turn} from './chat-model.ts';
 import {ReplyNotes} from './ReplyNotes.tsx';
@@ -47,9 +47,9 @@ export interface ChatPanelProps {
 }
 
 /** The diagrams Claude opened in a turn, as rows on the Investigate trail's look: a green dot and "Opened D1 'title'". Live while the reply streams; kept with the reply. */
-function OpenedRows({opened,running}:{opened:readonly {n:number;title:string}[];running:boolean}){
- return <ol className="inv-trail chat-opened" aria-label="Diagrams Claude opened" aria-live={running?'polite':undefined}>
-  {opened.map((d,i)=><li key={i} className="inv-row" data-state="ok"><span className="inv-dot" aria-hidden="true"/><span className="inv-row-main"><strong className="inv-tool">{openedText(d)}</strong></span></li>)}
+function OpenedRows({opened,running}:{opened:readonly {n:number;title:string;why?:string}[];running:boolean}){
+ return <ol className="inv-trail chat-opened" aria-label="Diagrams Claude opened or tried to open" aria-live={running?'polite':undefined}>
+  {opened.map((d,i)=><li key={i} className="inv-row" data-state={d.why?'error':'ok'}><span className="inv-dot" aria-hidden="true"/><span className="inv-row-main"><strong className="inv-tool">{d.why?unavailableText({...d,why:d.why}):openedText(d)}</strong></span></li>)}
  </ol>;
 }
 
@@ -63,7 +63,7 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
    <dt>Your question</dt><dd>{review.question}</dd>
    {review.selection&&<><dt>Selection{review.editor?.lines?` · ${linesText(review.editor.lines.from,review.editor.lines.to)}`:''}</dt><dd className="chat-review-quote">{previewText(review.selection,300)}</dd></>}
    {reviewDiagramsText(review)&&<><dt>Diagrams</dt><dd className="chat-review-diagrams">{reviewDiagramsText(review)}. It opens one only when your question needs it.</dd></>}
-   {review.diagramsWithheld&&review.diagramsWithheld.length>0&&<><dt>Withheld</dt><dd>{review.diagramsWithheld.map(i=><span key={i.n} className="chat-review-block">{withheldText(i)}</span>)}</dd></>}
+   {review.diagramsWithheld&&review.diagramsWithheld.length>0&&<><dt>Withheld</dt><dd>{review.diagramsWithheld.map(i=><span key={i.n} className="chat-review-block" data-diagram={i.n} data-status="withheld">{withheldText(i)}</span>)}</dd></>}
    <dt>Context</dt>
    <dd>{review.sources.length===0?<span className="chat-review-none">None. Only your question is sent.</span>:review.sources.map(s=>
     <details key={s.id} className="chat-review-source"><summary>{s.label} <span className="chat-review-est">about {formatCount(s.estimatedTokens)} tokens</span></summary><pre>{review.ephemeral?s.text:previewText(s.text,2000)}</pre></details>)}</dd>

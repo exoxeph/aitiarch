@@ -86,3 +86,23 @@ describe('the picture store',()=>{
   const text=await new DiagramImageStore(root).svgText(base+'.png');expect(text).toContain('Alpha');expect(text).toContain('Bravo &amp; Charlie');expect(text).toContain('Flow');expect(text).not.toContain('<');
  });
 });
+describe('what the store says about a saved picture, and repairing a bad one',()=>{
+ const withSvg=async(label:string)=>{const root=await project(),{svg,base}=svgFor(label);await writeFile(path.join(root,'assets',base+'.svg'),svg);return {root,base,store:new DiagramImageStore(root),png:path.join(root,'assets',base+'.png')};};
+ it('gives the exact problem: missing, too large, too many pixels, a bad file, or a missing or changed svg',async()=>{
+  const ok=await withSvg('ok');await ok.store.save(ok.base+'.png',makePng(80,40));expect(await ok.store.check(ok.base+'.png')).toEqual({ok:true,info:{name:ok.base+'.png',width:80,height:40,bytes:makePng(80,40).length}});
+  const missing=await withSvg('missing');expect(await missing.store.check(missing.base+'.png')).toEqual({ok:false,problem:'missing'});
+  const large=await withSvg('large');await writeFile(large.png,makePng(450,450,{noise:true}));expect(await large.store.check(large.base+'.png')).toEqual({ok:false,problem:'too_large'});
+  const wide=await withSvg('wide');await writeFile(wide.png,makePng(DIAGRAM_PNG_MAX_SIDE+1,10));expect(await wide.store.check(wide.base+'.png')).toEqual({ok:false,problem:'too_big_side'});
+  const bad=await withSvg('bad');await writeFile(bad.png,'not a png');expect(await bad.store.check(bad.base+'.png')).toEqual({ok:false,problem:'bad_file'});
+  const damaged=await withSvg('damaged');await writeFile(damaged.png,flip(makePng(60,40),20));expect(await damaged.store.check(damaged.base+'.png')).toEqual({ok:false,problem:'bad_file'});
+  const nosvg=await withSvg('nosvg');await nosvg.store.save(nosvg.base+'.png',makePng(20,20));await writeFile(path.join(nosvg.root,'assets',nosvg.base+'.svg'),'changed');expect(await nosvg.store.check(nosvg.base+'.png')).toEqual({ok:false,problem:'no_svg'});
+ });
+ it('replaces a saved file that is not a valid picture with the next valid one, and still never replaces a valid one',async()=>{
+  for(const broken of [makePng(450,450,{noise:true}),makePng(DIAGRAM_PNG_MAX_SIDE+1,10),Buffer.from('an older broken file')]){
+   const s=await withSvg('fix'+broken.length);await writeFile(s.png,broken);const good=makePng(300,150);
+   expect(await s.store.save(s.base+'.png',good)).toMatchObject({width:300,height:150});expect((await readFile(s.png)).equals(good)).toBe(true);
+   expect((await readdir(path.join(s.root,'assets'))).sort()).toEqual([s.base+'.png',s.base+'.svg'].sort()); // no temp file left behind
+   expect(await s.store.save(s.base+'.png',makePng(50,50))).toMatchObject({width:300,height:150}); // now valid: kept
+  }
+ });
+});

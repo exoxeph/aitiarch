@@ -4,7 +4,9 @@
 //  - the CLI gets exactly Read with the diagram copies (d1.png ...) as its working folder, and plain text on stdin;
 //  - each Read shows as a trail row "Opened D1 'title'" above the reply, the turn cost under it, and both are still there after a reload;
 //  - a claim about a picture reads "from the diagram image, not quote-checked"; a Read outside the folder and the cost cap stop the turn and say so; a turn that needs no diagram opens none;
-//  - a note without diagrams stays tool-less.
+//  - a note without diagrams stays tool-less;
+//  - the D3 bug: a note with an unnamed diagram, one saved without a picture and one whose saved picture is oversize, plus a secret-shaped one: the page makes or repairs the pictures, and the card
+//    and the manifest show all of them with the right status; a Read of the withheld one gets a row with the reason and a reply, not a dead turn.
 // Run after `vite build`: BATCH2A_OUTPUT=<folder outside the repo> node check/diagram-chat.mjs
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -40,7 +42,18 @@ const NOTE = ['# Plan', '', line(D1), '', 'Some text between.', '', line(D2), ''
 execFileSync('git', ['init', '-q'], { cwd: notebook }); await writeFile(path.join(notebook, '.gitignore'), '/chat/\n'); await mkdir(path.join(notebook, 'assets'));
 for (const d of diagrams) await writeFile(path.join(notebook, 'assets', d.base + '.svg'), d.svg);
 await writeFile(path.join(notebook, 'plan.md'), NOTE); await writeFile(path.join(notebook, 'plain.md'), '# Plain\n\nNo diagrams here.\n'); await writeFile(scenarioFile, 'dg-read');
-const provider = new FakeChatProvider();
+// The D3 bug: three diagrams (no name; saved without a picture; an oversize picture already on disk) and one with secret-shaped text.
+const three = [
+  { alt: '', svg: drawing('Unnamed flow', 640, 300, 'Nettle', 'Brook') },
+  { alt: 'AI diagram: no-picture', svg: drawing('Saved without a picture', 640, 300, 'Larch', 'Fen') },
+  { alt: 'AI diagram: oversize', svg: drawing('Oversize picture', 640, 300, 'Heron', 'Wold') },
+  { alt: 'AI diagram: keys', svg: drawing('password=hunter2-check-secret', 640, 300, 'Key', 'Lock') },
+].map((d) => ({ ...d, base: 'diagram-' + sha(d.svg) }));
+for (const d of three) await writeFile(path.join(notebook, 'assets', d.base + '.svg'), d.svg);
+const { makePng } = await import('../test/fixtures/png.ts');
+await writeFile(path.join(notebook, 'assets', three[2].base + '.png'), makePng(1700, 40)); // an older picture, over 1,600 px: the page must replace it
+const THREE = ['# Three', '', ...three.map((d) => `> ![${d.alt}](assets/${d.base}.svg)\n`), ''].join('\n');
+await writeFile(path.join(notebook, 'three.md'), THREE);const provider = new FakeChatProvider();
 const store = await Store.open(notebook), watcher = new NoteWatcher(store);
 const app = createApp({ store, watcher, distDir: path.join(here, '../dist'), provider, harness: { command: process.execPath, prefixArgs: [path.join(here, '..', 'test', 'fixtures', 'harness-cli.mjs'), '@' + scenarioFile, record], dir: harness } });
 const browser = await (async () => { for (const channel of ['msedge', 'chrome']) { try { return await chromium.launch({ channel, headless: true }); } catch { /* next */ } } throw new Error('Edge or Chrome is required.'); })();
@@ -68,7 +81,7 @@ try {
   const info = async (base) => (await page.evaluate((n) => fetch('/api/diagram-images?names=' + n + '.png').then((r) => r.json()), base)).images[0] ?? null;
 
   // 1. Lazy pictures: the diagrams were saved as svg only, so no picture exists until their note is opened; then the three drawable diagrams get a PNG, the broken one gets none and is not retried.
-  assert.deepEqual((await readdir(path.join(notebook, 'assets'))).filter((n) => n.endsWith('.png')), [], 'no picture before the note is opened');
+  assert.deepEqual((await readdir(path.join(notebook, 'assets'))).filter((n) => n.endsWith('.png')), [three[2].base + '.png'], 'no picture before the note is opened, apart from the oversize one placed for the D3 case');
   await page.goto(url); await page.waitForFunction(() => document.querySelector('.cm-editor') && window.__aitiarch);
   await page.getByRole('button', { name: /^Chat/ }).click(); await panel.waitFor();
   await openNote('plan.md');
@@ -90,9 +103,9 @@ try {
   // 3. The review card: which diagrams Claude may open, the cap, the one withheld and why, and the editor line.
   let review = await submit('Which box feeds which in the diagram?');
   assert.equal(await text(review.locator('.chat-review-diagrams')), "Claude may open these diagrams: D1 'alpha-skill', D2 'bravo-skill', D3 'charlie-skill' (up to $0.50). It opens one only when your question needs it.");
-  assert.equal(await text(review.locator('.chat-review-block')), "D4 'broken-skill': withheld, its picture has not been made yet.");
+  assert.equal(await text(review.locator('.chat-review-block')), "D4 'broken-skill' withheld: no picture yet.");
   assert.equal(await review.locator('img').count(), 0, 'no thumbnails');
-  assert.equal(await text(review.locator('.chat-review-manifest')), `Open note: Plan (${NOTE.length} chars). Cursor section: Plan. Diagrams: D1 'alpha-skill', D2 'bravo-skill', D3 'charlie-skill'. Diagrams withheld: D4 'broken-skill'.`);
+  assert.equal(await text(review.locator('.chat-review-manifest')), `Open note: Plan (${NOTE.length} chars). Cursor section: Plan. Diagrams: D1 'alpha-skill', D2 'bravo-skill', D3 'charlie-skill'. D4 'broken-skill' withheld: no picture yet.`);
   await panel.screenshot({ path: path.join(output, 'diagram-read-review.png') });
   let before = await done(); await review.getByRole('button', { name: 'Send', exact: true }).click(); await settled(before);
 
@@ -130,10 +143,26 @@ try {
   assert.equal(await text(kept.locator('.chat-turn-cost')), 'This turn cost $0.012');
   assert.equal((await kept.locator('.claim-chip .claim-state').first().textContent()).replace(/^\s*·\s*/, '').trim(), 'From the diagram image, not quote-checked');
 
+  // 8. The D3 bug. The page names the unnamed diagram, makes the missing picture and replaces the oversize one; the card and the manifest show every diagram with its status.
+  await openNote('three.md');
+  const ready = async () => { for (let i = 0; i < 100; i++) { const ok = await Promise.all(three.slice(0, 3).map((d) => info(d.base))); if (ok.every((m) => m && m.width <= 1600)) return ok; await page.waitForTimeout(200); } throw new Error('the pictures were not made'); };
+  const made3 = await ready(); assert.deepEqual(made3.map((m) => m.width), [1000, 1000, 1000], 'the missing picture was made and the oversize one replaced');
+  await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click(); await page.waitForFunction(() => /Conversation 2/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
+  review = await submit('Explain the diagrams');
+  assert.equal(await text(review.locator('.chat-review-diagrams')), "Claude may open these diagrams: D1 'Diagram 1 under Three', D2 'no-picture', D3 'oversize' (up to $0.50). It opens one only when your question needs it.");
+  assert.deepEqual(await review.locator('.chat-review-block[data-status="withheld"]').allInnerTexts(), ["D4 'keys' withheld: looks like a secret (it holds text that looks like a secret)."]);
+  assert.match(await text(review.locator('.chat-review-manifest')), /Diagrams: D1 'Diagram 1 under Three', D2 'no-picture', D3 'oversize'\. D4 'keys' withheld: looks like a secret/);
+  await panel.screenshot({ path: path.join(output, 'diagram-three-review.png') });
+  before = await done(); await writeFile(scenarioFile, 'dg-unavailable|4'); await review.getByRole('button', { name: 'Send', exact: true }).click(); await settled(before);
+  turn = panel.locator('.chat-turn').last();
+  assert.deepEqual(await turn.locator('.chat-opened .inv-row').allInnerTexts().then((l) => l.map((x) => x.trim())), ["Could not open D4 'keys': looks like a secret (it holds text that looks like a secret)"]);
+  assert.equal(await turn.locator('.chat-opened .inv-row').first().getAttribute('data-state'), 'error');
+  assert.match(await text(turn.locator('.chat-ai')), /D4 is unavailable: looks like a secret/);
+  assert.deepEqual((await calls()).at(-1).cwdFiles.map((f) => f.name), ['d1.png', 'd2.png', 'd3.png'], 'the withheld diagram was not copied');
   // 7. A note without diagrams stays tool-less; the broken diagram was not retried on this page (a reload starts a new page, which may look it up once more).
   await page.waitForTimeout(600);const listedNow = listings.filter((l) => l.includes(D4.base)).length, putsNow = puts.length;
   await openNote('plain.md'); await page.waitForTimeout(300);
-  await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click(); await page.waitForFunction(() => /Conversation 2/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
+  await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click(); await page.waitForFunction(() => /Conversation 3/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
   review = await submit('What is this note about?'); assert.equal(await review.locator('.chat-review-diagrams').count(), 0); assert.doesNotMatch(await text(review.locator('.chat-review-manifest')), /Diagrams/);
   before = await done(); await writeFile(scenarioFile, 'ok'); await review.getByRole('button', { name: 'Send', exact: true }).click(); await settled(before);
   const last = (await calls()).at(-1); assert.equal(last.args[last.args.indexOf('--tools') + 1], '', 'tool-less'); assert(!last.args.includes('--permission-mode')); assert.deepEqual(last.cwdFiles, [], 'an empty folder');
