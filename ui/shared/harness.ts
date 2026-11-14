@@ -1,6 +1,7 @@
 // Harness sessions: a Claude Code CLI session that the app owns and resumes by id. Pure and shared by the server and the page.
 // The app keeps its own index of sessions (never scanned from ~/.claude); the CLI keeps the conversation itself.
 import {isProfile,type CliSession,type Grant} from './profile.ts';
+import {validCouncilGrant,type CouncilGrant} from './council.ts';
 export type HarnessMode='chat'|'investigate';
 export interface HarnessSession {
  /** The CLI session id (a UUID the app chose with --session-id). */
@@ -20,6 +21,8 @@ export interface HarnessSession {
  budgetUsd?:number;
  /** What this conversation was approved for on its plan card (profile, files, repo, diagrams, cost cap), bound to this conversation and this project. None: notes only. */
  grant?:Grant;
+ /** Notes-only multi-provider approval; never interpreted as a tool/fence grant. */
+ councilGrant?:CouncilGrant;
  /** The CLI session the next turn would resume, and the profile and folder it runs at. None (a conversation older than grants): its own id, as notes. */
  cli?:CliSession&{cwd?:string};
  /** CLI sessions this conversation used before (a profile change starts a fresh one), so Delete can remove every transcript. */
@@ -35,7 +38,7 @@ export function validSession(v:unknown):v is HarnessSession{
   &&[s.created,s.lastUsed].every(t=>typeof t==='string'&&Number.isFinite(Date.parse(t)))&&Number.isSafeInteger(s.turns)&&s.turns>=0
   &&(s.repo===undefined||typeof s.repo==='string'&&s.repo.length<=1000)&&(s.confirmed===undefined||typeof s.confirmed==='string'&&/^[0-9a-f]{64}$/.test(s.confirmed))
   &&(s.budgetUsd===undefined||typeof s.budgetUsd==='number'&&Number.isFinite(s.budgetUsd)&&s.budgetUsd>0&&s.budgetUsd<=5)
-  &&(s.grant===undefined||validGrantShape(s.grant))&&(s.cli===undefined||validCliShape(s.cli))
+  &&(s.grant===undefined||validGrantShape(s.grant))&&(s.councilGrant===undefined||validCouncilGrant(s.councilGrant))&&(s.cli===undefined||validCliShape(s.cli))
   &&(s.past===undefined||Array.isArray(s.past)&&s.past.length<=50&&s.past.every(p=>p&&validSessionId(p.id)&&(p.cwd===undefined||typeof p.cwd==='string'&&p.cwd.length<=1000)));
 }
 /** Only the shape: whether a grant belongs to this conversation and project is decided when it is used (grantFor), so a mis-bound record is refused, not lost. */

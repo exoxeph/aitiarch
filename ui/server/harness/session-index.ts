@@ -5,6 +5,7 @@ import {mkdir,readFile,rename,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {cleanLabel,MAX_SESSIONS,validCliShape,validGrantShape,validSession,validSessionId,type HarnessMode,type HarnessSession} from '../../shared/harness.ts';
+import {validCouncilGrant,type CouncilGrant} from '../../shared/council.ts';
 import {resumePlan,type Grant,type Profile} from '../../shared/profile.ts';
 
 /** %LOCALAPPDATA%\Aitiarch\harness\<project hash> (or ~/.local/state/... elsewhere). Never inside the notebook. */
@@ -23,7 +24,7 @@ export class SessionIndex {
  private async load():Promise<HarnessSession[]>{
   try{const d=JSON.parse(await readFile(this.file,'utf8'));
    // A damaged grant or CLI record must not lose the conversation: it falls back to the lowest profile and a fresh CLI session.
-   const heal=(s:any)=>{if(s&&typeof s==='object'){if(s.grant!==undefined&&!validGrantShape(s.grant))delete s.grant;if(s.cli!==undefined&&!validCliShape(s.cli))delete s.cli;if(s.past!==undefined&&!(Array.isArray(s.past)&&s.past.every((p:any)=>p&&validSessionId(p.id))))delete s.past;}return s;};
+   const heal=(s:any)=>{if(s&&typeof s==='object'){if(s.councilGrant!==undefined&&!validCouncilGrant(s.councilGrant))delete s.councilGrant;if(s.grant!==undefined&&!validGrantShape(s.grant))delete s.grant;if(s.cli!==undefined&&!validCliShape(s.cli))delete s.cli;if(s.past!==undefined&&!(Array.isArray(s.past)&&s.past.every((p:any)=>p&&validSessionId(p.id))))delete s.past;}return s;};
    return d&&d.v===1&&Array.isArray(d.sessions)?d.sessions.map(heal).filter(validSession).slice(0,MAX_SESSIONS):[];}
   catch{return [];} // missing or damaged: start empty, never trust a bad row
  }
@@ -62,6 +63,10 @@ export class SessionIndex {
  setGrant(id:string,grant:Grant){
   if(!validGrantShape(grant))return Promise.reject(new SessionIndexError('Invalid grant.'));
   return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');s.grant={...grant,files:[...grant.files]};return {...s};});
+ }
+ setCouncilGrant(id:string,grant:CouncilGrant){
+  if(!validCouncilGrant(grant))return Promise.reject(new SessionIndexError('Invalid council grant.'));
+  return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');s.councilGrant=structuredClone(grant);return {...s};});
  }
  /** Back to the lowest profile (a run stopped on its cost cap or the safety backstop, or the grant was refused): the next turn that needs more shows the card again. */
  clearGrant(id:string){return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');delete s.grant;delete s.confirmed;return {...s};});}

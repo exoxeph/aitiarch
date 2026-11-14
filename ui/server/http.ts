@@ -35,8 +35,11 @@ import { skillLibrary } from "./skill-library.ts";
 import { NodeSettingsService } from "./node-settings.ts";
 import { validSavedNodes } from "../shared/node-settings.ts";
 import { homedir } from "node:os";
+import {CouncilService} from './council.ts';
+import type {TurnAdapter} from './providers/turn.ts';
 
 export interface AppOptions {
+  council?:{adapters:TurnAdapter[];index?:SessionIndex};
   sessionModules?:import('../shared/chat.ts').ContextModule[];
   store: Store;
   watcher: NoteWatcher;
@@ -187,6 +190,7 @@ export function createApp(opts: AppOptions) {
     return {index,runner,questions,version:()=>runner.version(), // the CLI's version, for the ledger at a conversation's first turn and for Settings
     investigate,gate,carried};}):Promise.resolve(null);
   const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady]).then(([ink,harness])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages);chatRef.resolve(runtime);return runtime;});
+  const councilReady=opts.council?Promise.all([inkReady,harnessReady]).then(async([ink,h])=>new CouncilService({store,ink,index:opts.council!.index??h?.index??await SessionIndex.open(harnessDirectory(store.rootReal)),ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters})):Promise.resolve(null);
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
@@ -240,6 +244,18 @@ export function createApp(opts: AppOptions) {
       }
     }
 
+    if(url.pathname.startsWith('/api/council/')&&(req.method==='PUT'||req.method==='POST')){
+      const council=await councilReady;if(!council)return json(res,409,{error:'disabled',message:'Council is not configured.'});
+      const controller=new AbortController(),abort=()=>controller.abort();res.once('close',abort);
+      try{const body=await readBody(req) as any;
+        if(url.pathname==='/api/council/plan'&&req.method==='PUT'){
+          const {approve,...input}=body??{};
+          return json(res,200,approve===true?await council.approve(input):await council.plan(input));
+        }
+        if(url.pathname==='/api/council/run'&&req.method==='POST')return json(res,200,await council.run(body,controller.signal));
+      }catch(e){const code=e instanceof Error&&['plan_required','plan_changed','invalid_conversation','notes_only','invalid_cap','already_running'].includes(e.message)?e.message:'council_error';return json(res,409,{error:code,message:'Council: '+code.replace(/_/g,' ')+'.'});}
+      finally{res.removeListener('close',abort);}
+    }
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await (await explorerReady).tree());
     if (url.pathname === "/api/citations" && req.method === "GET") return json(res, 200, await noteIndex(await explorerReady));
     // The Constellation: the graph and remembered star positions; the handoff preview and its explicit write.
@@ -686,6 +702,7 @@ export function createApp(opts: AppOptions) {
       clearInterval(ka);
       for (const c of clients) c.end();
       server.closeAllConnections();
+      (await councilReady)?.close();
       await new Promise<void>((r) => server.close(() => r()));
       await (await assistance).close();await (await runtimeReady).close();
     },
