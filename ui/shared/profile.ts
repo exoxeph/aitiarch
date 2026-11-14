@@ -63,9 +63,9 @@ export function covers(grant:Pick<Grant,'profile'|'files'|'repo'|'diagrams'>|nul
 
 /** A conversation's CLI session: the CLI keeps the conversation under its own id and working folder, so a different profile (up or down) needs a fresh one. */
 export interface CliSession {id:string;profile:Profile;turns:number}
-/** Resume only the session that already ran at exactly this profile. A conversation with no record (older than grants) counts as notes. */
-export function resumePlan(cli:CliSession|undefined,legacyTurns:number,need:Profile):{fresh:boolean;resume:boolean}{
- const had=cli??{profile:'notes' as Profile,turns:legacyTurns};
+/** Resume only the session that already ran at exactly this profile. A conversation with no record (older than grants) counts as notes, or as Investigate when it was an investigation. */
+export function resumePlan(cli:CliSession|undefined,legacyTurns:number,need:Profile,legacyProfile:Profile='notes'):{fresh:boolean;resume:boolean}{
+ const had=cli??{profile:legacyProfile,turns:legacyTurns};
  if(had.profile!==need)return {fresh:true,resume:false};
  return {fresh:false,resume:had.turns>0};
 }

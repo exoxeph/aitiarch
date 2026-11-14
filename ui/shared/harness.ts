@@ -1,5 +1,6 @@
 // Harness sessions: a Claude Code CLI session that the app owns and resumes by id. Pure and shared by the server and the page.
 // The app keeps its own index of sessions (never scanned from ~/.claude); the CLI keeps the conversation itself.
+import {isProfile,type CliSession,type Grant} from './profile.ts';
 export type HarnessMode='chat'|'investigate';
 export interface HarnessSession {
  /** The CLI session id (a UUID the app chose with --session-id). */
@@ -17,6 +18,12 @@ export interface HarnessSession {
  confirmed?:string;
  /** An investigation: the cost cap (dollars per question) the user confirmed. */
  budgetUsd?:number;
+ /** What this conversation was approved for on its plan card (profile, files, repo, diagrams, cost cap), bound to this conversation and this project. None: notes only. */
+ grant?:Grant;
+ /** The CLI session the next turn would resume, and the profile and folder it runs at. None (a conversation older than grants): its own id, as notes. */
+ cli?:CliSession&{cwd?:string};
+ /** CLI sessions this conversation used before (a profile change starts a fresh one), so Delete can remove every transcript. */
+ past?:{id:string;cwd?:string}[];
 }
 export const MAX_SESSIONS=200;
 export const validSessionId=(v:unknown):v is string=>typeof v==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v);
@@ -28,7 +35,18 @@ export function validSession(v:unknown):v is HarnessSession{
   &&[s.created,s.lastUsed].every(t=>typeof t==='string'&&Number.isFinite(Date.parse(t)))&&Number.isSafeInteger(s.turns)&&s.turns>=0
   &&(s.repo===undefined||typeof s.repo==='string'&&s.repo.length<=1000)&&(s.confirmed===undefined||typeof s.confirmed==='string'&&/^[0-9a-f]{64}$/.test(s.confirmed))
   &&(s.budgetUsd===undefined||typeof s.budgetUsd==='number'&&Number.isFinite(s.budgetUsd)&&s.budgetUsd>0&&s.budgetUsd<=5)
-  &&(s.budgetUsd===undefined||typeof s.budgetUsd==='number'&&Number.isFinite(s.budgetUsd)&&s.budgetUsd>0&&s.budgetUsd<=5);
+  &&(s.grant===undefined||validGrantShape(s.grant))&&(s.cli===undefined||validCliShape(s.cli))
+  &&(s.past===undefined||Array.isArray(s.past)&&s.past.length<=50&&s.past.every(p=>p&&validSessionId(p.id)&&(p.cwd===undefined||typeof p.cwd==='string'&&p.cwd.length<=1000)));
+}
+/** Only the shape: whether a grant belongs to this conversation and project is decided when it is used (grantFor), so a mis-bound record is refused, not lost. */
+export function validGrantShape(v:unknown):v is Grant{
+ if(!v||typeof v!=='object'||Array.isArray(v))return false;const g=v as Grant,strings=(l:unknown,max:number)=>Array.isArray(l)&&l.length<=max&&l.every(x=>typeof x==='string'&&x.length<=400);
+ return g.v===1&&typeof g.project==='string'&&g.project.length<=100&&validSessionId(g.session)&&isProfile(g.profile)&&strings(g.files,20)&&typeof g.repo==='boolean'&&typeof g.diagrams==='boolean'
+  &&typeof g.budgetUsd==='number'&&Number.isFinite(g.budgetUsd)&&g.budgetUsd>0&&g.budgetUsd<=5&&typeof g.confirmed==='string'&&/^[0-9a-f]{64}$/.test(g.confirmed);
+}
+export function validCliShape(v:unknown):v is CliSession&{cwd?:string}{
+ if(!v||typeof v!=='object'||Array.isArray(v))return false;const c=v as CliSession&{cwd?:string};
+ return validSessionId(c.id)&&isProfile(c.profile)&&Number.isSafeInteger(c.turns)&&c.turns>=0&&(c.cwd===undefined||typeof c.cwd==='string'&&c.cwd.length<=1000);
 }
 
 /**
