@@ -175,7 +175,7 @@ export class InvestigateService {
  usage():Promise<InvestigateUsage>{return this.totals??=this.loadUsage();}
  private async loadUsage():Promise<InvestigateUsage>{
   const sum:InvestigateUsage={turns:0,input:0,cached:0,output:0,costUsd:0,unreportedTurns:0};
-  try{for(const e of (await this.ledger.read()).events)if(e.event==='investigate_turn'&&e.turn)addTurn(sum,e.turn);}catch{/* an unreadable ledger shows nothing rather than failing the panel */}
+  try{for(const e of (await this.ledger.read()).events)if(e.event==='investigate_turn'&&e.turn)addTurn(sum,e.turn);}catch{sum.ledgerUnavailable=true;console.warn('Ledger usage history unavailable.',{kind:'ledger_usage_unavailable'});}
   return sum;
  }
  /** One turn that reached the CLI, in the ledger and in the totals: ids, counts and cost only, never the question or the answer. */
