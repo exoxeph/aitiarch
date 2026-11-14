@@ -13,7 +13,7 @@
 <br>
 
 <div align="center">
-<img src="docs/media/demo.gif" alt="Opening a thread, flying through the constellation, reviewing what will be sent" width="86%">
+<img src="docs/media/demo.gif" alt="A notebook of engineering notes: thinking on a sentence, opening another note, drawing a diagram, and flying through a constellation of twenty-nine linked notes" width="86%">
 </div>
 
 <br>
@@ -36,12 +36,10 @@
 ## &nbsp;01 &nbsp; Ink beside the text, never inside it
 
 <div align="center">
+<img src="docs/media/flow-ink.gif" alt="A selected sentence goes through Think on this to Aitiarch AI, becomes a thought in the margin, and the thought and its anchor are written to a file beside yours while your Markdown stays untouched" width="100%">
+<br>
 <img src="docs/media/motion-ink.gif" alt="Dragging across a sentence, pressing Think on this, reviewing what will be sent, and a thought typing itself into the margin beside the text" width="100%">
 </div>
-
-<br>
-
-<img src="docs/media/editor.png" alt="The editor: AI thoughts float in the margin, tied to the exact sentence they are about" width="100%">
 
 Select a sentence. A thought grows in the margin and stays tied to it, with a filled **AI** tag, so you always know whose words you are reading.
 Your note stays **byte-for-byte your Markdown**. The ink lives next to the file, so CRLF, BOM and every trailing newline round-trip untouched.
@@ -51,12 +49,10 @@ Your note stays **byte-for-byte your Markdown**. The ink lives next to the file,
 ## &nbsp;02 &nbsp; See exactly what leaves the machine
 
 <div align="center">
+<img src="docs/media/flow-review.gif" alt="The question, the note, the threads, the instructions and the budget are gathered into a review card, and nothing is sent until you press Send" width="100%">
+<br>
 <img src="docs/media/motion-review.gif" alt="Typing a question in the chat, the review card appearing with the note, threads, instructions and budget, and Send pressed only after reading it" width="100%">
 </div>
-
-<br>
-
-<img src="docs/media/review-card.png" alt="The review card lists the question, the note, the threads, the instructions and the token budget before anything is sent" width="100%">
 
 Every message gets a review card first: your question, the note, the threads, the instructions, the token budget. *Nothing has gone to Claude yet. It will see exactly this, and nothing else.*
 
@@ -65,12 +61,10 @@ Every message gets a review card first: your question, the note, the threads, th
 ## &nbsp;03 &nbsp; Bring in your Claude Code and Codex sessions
 
 <div align="center">
+<img src="docs/media/flow-sessions.gif" alt="Pick Claude Code and Codex sessions, secrets are redacted, you preview exactly what will be sent, and they join as context chips on the review card" width="100%">
+<br>
 <img src="docs/media/motion-sessions.gif" alt="Opening the session picker, ticking a Claude Code session and a Codex session, and opening the redacted preview of exactly what will be sent" width="100%">
 </div>
-
-<br>
-
-<img src="docs/media/session-preview.png" alt="The session picker lists Claude Code and Codex sessions for this project, with a redacted preview of exactly what will be sent" width="100%">
 
 Past **Claude Code** and **Codex** sessions for this project show up in one picker. Tick the ones that matter and read the redacted text, key-like tokens already blanked, before a word is sent.
 Chats that carry sessions stay in memory only, and *Add to note* is switched off for them.
@@ -80,12 +74,10 @@ Chats that carry sessions stay in memory only, and *Add to note* is switched off
 ## &nbsp;04 &nbsp; Every claim, checked against its source
 
 <div align="center">
+<img src="docs/media/flow-cites.gif" alt="Each quoted claim in an answer is searched for in its own source and comes back as Found or Quote not found" width="100%">
+<br>
 <img src="docs/media/motion-cites.gif" alt="An answer arrives with source chips, and clicking each one shows the quoted words and whether they were Found or Quote not found" width="100%">
 </div>
-
-<br>
-
-<img src="docs/media/citations.png" alt="Source chips under an answer: the note, a thread and two sessions found; one quote not found" width="100%">
 
 Each claim in an answer becomes a chip: the note, a thread, a session. The app looks for the quoted words in that exact source and says **Found** or **Quote not found**. Words, never colour alone.
 
@@ -94,6 +86,8 @@ Each claim in an answer becomes a chip: the note, a thread, a session. The app l
 ## &nbsp;05 &nbsp; Add to note, as plain Markdown
 
 <div align="center">
+<img src="docs/media/flow-addnote.gif" alt="Add to note inserts the reply as an AI-labelled Markdown callout under the sentence it is about, with one undo and your bytes untouched" width="100%">
+<br>
 <img src="docs/media/motion-addnote.gif" alt="Hovering an answer, pressing Add to note, and the reply landing in the note as an AI-labelled callout with an Undo" width="100%">
 </div>
 
@@ -104,12 +98,14 @@ One click puts the answer in the note as an AI-labelled callout. It is ordinary 
 ## &nbsp;06 &nbsp; Turn a sentence into a diagram
 
 <div align="center">
+<img src="docs/media/flow-diagram.gif" alt="Select a sentence and press Visualize, review, Aitiarch AI sketches the diagram, it is checked and repaired, appears in the margin, and can be added to the note as an image" width="100%">
+<br>
 <img src="docs/media/motion-diagram.gif" alt="Dragging across a sentence, pressing Visualize, sending, a flow diagram appearing in the margin, and Add to note placing it in the document as an image" width="100%">
 </div>
 
 <br>
 
-<img src="docs/media/diagram-blob.png" alt="Select a sentence, press Visualize, and the diagram appears in the margin, with See it larger and Export SVG" width="100%">
+<img src="docs/media/diagram-blob.png" alt="A cache-aside flow diagram in the margin beside the paragraph it explains, with See it larger and Export SVG" width="100%">
 
 <br>
 
@@ -119,15 +115,23 @@ Select a sentence, press **Visualize**, review, send. The diagram appears in the
 
 <br>
 
+<img src="docs/media/gallery.png" alt="Ten kinds of diagram drawn by the app: a flow, a cycle, a timeline, a matrix and a pyramid shown here" width="100%">
+
+The AI only supplies words and connections. The app lays out and draws every box, arrow and axis itself, in your theme's colours.
+
+<br>
+
 ## &nbsp;07 &nbsp; See the whole notebook at once
 
 <div align="center">
-<img src="docs/media/motion-constellation.gif" alt="Opening the constellation, switching to the whole notebook, and clicking through notes while their links and open threads light up" width="100%">
+<img src="docs/media/flow-constellation.gif" alt="Your notes are read for links and drawn as a constellation: links become lines, open threads glow, broken links are flagged" width="100%">
+<br>
+<img src="docs/media/motion-constellation.gif" alt="Opening the constellation, switching to the whole notebook of twenty-nine notes, and clicking through notes while their links and open threads light up" width="100%">
 </div>
 
 <br>
 
-<img src="docs/media/constellation-full.png" alt="Fourteen notes in three folders, linked, with open threads glowing and one broken link flagged" width="100%">
+<img src="docs/media/constellation-full.png" alt="Twenty-nine notes in six folders, linked, with open threads glowing and a note card showing its threads, citations and one broken link" width="100%">
 
 Notes become stars and links become lines. Open threads glow. Notes nothing cites and links that lead nowhere are one glance away. Filter by folder or state, or find a note by name.
 
@@ -173,4 +177,4 @@ The notebook opens in your browser. Details and the practice notebook: [ui/READM
 
 <br>
 
-<div align="center"><sub>Every screenshot and clip is the real app, or built from it, on a synthetic notebook with fake providers and fake sessions.</sub></div>
+<div align="center"><sub>Every screenshot and clip is the real app, or built from it, on a synthetic notebook of invented engineering notes, with fake providers and fake sessions.</sub></div>
