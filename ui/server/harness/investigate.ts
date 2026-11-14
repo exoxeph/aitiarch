@@ -18,7 +18,7 @@ import {sessionUsage} from './claude-session.ts';
 import {finishFileReply,readRepoFile} from './file-claims.ts';
 import {classifyFailure,cleanToolText} from '../../shared/tool-errors.ts';
 import type {SessionIndex} from './session-index.ts';
-import {buildCarriedHistory,type Authorized,type ConversationGate} from './conversation.ts';
+import {buildCarriedHistory,WITHHELD_WITH_REPO,type Authorized,type ConversationGate} from './conversation.ts';
 import {covers,needOf} from '../../shared/profile.ts';
 import {snapshotDrift,syncSnapshot,SNAPSHOT_LIMITS,type Drift} from './snapshot.ts';
 import {captureFolder,folderChanges,restoreFolder} from './tripwire.ts';
@@ -215,9 +215,11 @@ export class InvestigateService {
  }
  /** The turns of an investigation (question, answer or how it stopped), kept outside the repo so a reloaded panel shows them. */
  private turnsFile(id:string){if(!/^[0-9a-f-]{36}$/.test(id))throw new InvestigateError('not_investigation');return path.join(this.o.dir,'investigations',id+'.json');}
- async turns(id:string):Promise<InvestigateTurn[]>{await this.session(id);try{const d=JSON.parse(await readFile(this.turnsFile(id),'utf8'));return d?.v===1&&Array.isArray(d.turns)?d.turns:[];}catch{return [];}}
+ /** The turns this conversation ran with Investigate, as kept (read-only, the app's own record). Any conversation of the project may have some, also one whose grant was cleared since (a cap stop): its history stays. */
+ async turns(id:string):Promise<InvestigateTurn[]>{const s=await this.o.index.get(id);if(!s)throw new InvestigateError('not_investigation');return this.storedTurns(id);}
+ private async storedTurns(id:string):Promise<InvestigateTurn[]>{try{const d=JSON.parse(await readFile(this.turnsFile(id),'utf8'));return d?.v===1&&Array.isArray(d.turns)?d.turns:[];}catch{return [];}}
  private async saveTurn(id:string,turn:InvestigateTurn){
-  const all=await this.turns(id).catch(()=>[] as InvestigateTurn[]);all.push(turn);while(all.length>100)all.shift();
+  const all=await this.storedTurns(id);all.push(turn); // read the record itself: a grant cleared by this very turn (a cap stop) must never empty the historywhile(all.length>100)all.shift();
   const f=this.turnsFile(id);await mkdir(path.dirname(f),{recursive:true});await writeFile(f+'.tmp',JSON.stringify({v:1,turns:all}));await rename(f+'.tmp',f);
  }
  /** A read-only, redacted excerpt of the real repo file around a line (for a file claim). Same rules as claim checking. */
@@ -256,7 +258,8 @@ export class InvestigateService {
   if(auth.profile!=='investigate'||!auth.repo)throw new InvestigateError('not_investigation');
   const scoped=auth.attachments.repo?undefined:auth.files;
   const line=[auth.attachments.repo?'Attached this turn: the repo'+(auth.files.length?'; start with '+auth.files.join(', '):''):'Attached this turn: '+auth.files.join(', '),
-   ...(withheld?.length?['Diagrams withheld: not available together with repo access: '+withheld.map(d=>`D${d.n} ${redact(d.title).replace(/[\r\n]/g,' ').slice(0,60)}`).join('; ')]:[])].join('\n');
+   // every diagram of the note is named, each withheld with the reason, in the same words as the chat's editor line (D3 'title' withheld: <reason>.)
+   ...(withheld?.length?[withheld.map(d=>`D${d.n} '${redact(d.title).replace(/[\r\n\]]/g,' ').replace(/'/g,'\u2019').slice(0,60)}' withheld: ${WITHHELD_WITH_REPO}.`).join(' ')]:[])].join('\n');
   return this.run({id:auth.session.id,repo:auth.repo,...(scoped?{files:scoped}:{}),...(auth.files.length?{focus:auth.files}:{}),budgetUsd:auth.grant.budgetUsd,onCapStop:()=>this.o.index.clearGrant(auth.session.id),prefix:line},question,emit,signal);
  }
  private async run(p:RunSpec,question:string,emit:(e:InvestigateEvent)=>void,signal?:AbortSignal):Promise<void>{

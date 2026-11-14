@@ -339,7 +339,7 @@ export function createApp(opts: AppOptions) {
           const removed:any[]=[];for(const x of used)removed.push(...await removeTranscript(x.cwd==='chat'?chatCwd:x.cwd??dflt,x.id,opts.harness?.home));
           // The replies this conversation saved in its note's chat record go with it (found by the id they carry, and by the ids of its kept questions for older ones).
           const replies=s.mode==='chat'&&s.note?await (await chatReady).forgetConversation(s.note,s.id,new Set(Object.keys(await h.questions.read(s.id)))):0;
-          await h.questions.remove(s.id);await h.index.remove(s.id);if(s.mode==='investigate')await h.investigate.forget(s.id);
+          await h.questions.remove(s.id);await h.index.remove(s.id);await h.investigate.forget(s.id); // a conversation of either kind may have run Investigate turns: their stored turns and tripwire copy go too
           return json(res,200,{removed,replies});
         }
         if(url.pathname==='/api/harness/investigate/repo')return json(res,200,{repo:await h.investigate.chooseRepo(b?.repo)});
