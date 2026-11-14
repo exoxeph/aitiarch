@@ -6,6 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {Store} from '../server/store.ts';import {NoteWatcher} from '../server/watch.ts';import {createApp} from '../server/http.ts';
 import {FakeChatProvider} from '../server/chat/fake.ts';
+import {LedgerStore,appendLedger} from '../server/ledger-store.ts';
 import {DiagramImageStore} from '../server/diagram-image-store.ts';
 import {SessionIndex} from '../server/harness/session-index.ts';
 import {WITHHELD_WITH_REPO} from '../server/harness/conversation.ts';
@@ -42,6 +43,12 @@ async function server(scenarioFile?:string){
  return {nb,repo,harness,home,put,get,calls,conversation,turn,close:async()=>{watcher.stop();await app.close();}};
 }
 
+it('conversation turn audit failures are visible and queued while the complete reply survives',async()=>{
+ const s=await server(),c=await s.conversation(),write=vi.spyOn(LedgerStore.prototype,'append').mockRejectedValue(new Error('ledger unavailable')),log=vi.spyOn(console,'warn').mockImplementation(()=>{});
+ try{const events=await s.turn(c.id,{repo:true});expect(events).toContain('"type":"complete"');expect(log).toHaveBeenCalled();}
+ finally{write.mockRestore();log.mockRestore();await s.close();}
+ const ledger=new LedgerStore(s.nb);await appendLedger(ledger,{id:'flush',inkId:'flush',requestId:'flush',note:'plan.md',event:'shown',at:new Date().toISOString()});expect((await ledger.read()).events.some(e=>e.event==='conversation_turn')).toBe(true);
+});
 describe('an Investigate turn on a note that shows diagrams',()=>{
  it('lists every diagram in its message as "withheld: not available together with repo access", and the card says the same',async()=>{
   const s=await server();

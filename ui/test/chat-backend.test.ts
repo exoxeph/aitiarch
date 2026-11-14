@@ -28,6 +28,12 @@ async function fixture(ignore=true){
  const input:ChatInput={id:'chat-one',path:'fixture.md',question:'Explain the plan.',context:[{moduleId:'this-note',ids:['note']}]};
  return {root,store,ink,provider,chats,runtime,input};
 }
+it('ledger failure at chat start, completion and context reads never loses the reply; pending audit is visible and retried',async()=>{
+ const f=await fixture(),write=vi.spyOn(LedgerStore.prototype,'append').mockRejectedValue(new Error('The ledger lock was taken over; nothing was written.')),log=vi.spyOn(console,'warn').mockImplementation(()=>{});
+ try{const review=await f.runtime.review(f.input),events:ChatEvent[]=[];await f.runtime.send({reviewId:review.reviewId,confirmed:true},e=>events.push(e));
+  expect(events.at(-1)?.type).toBe('complete');expect((await f.chats.read(f.input.path)).messages).toHaveLength(1);expect(write.mock.calls.length).toBeGreaterThanOrEqual(8);expect(log).toHaveBeenCalled();
+ }finally{write.mockRestore();log.mockRestore();await f.runtime.close();}
+});
 it('session sources force preview on every send and keep replies, evidence and later history out of repository storage',async()=>{
  const f=await fixture(),sessions=path.join(f.root,'sessions-fixture');await mkdir(sessions);
  await writeFile(path.join(sessions,'synthetic.jsonl'),[{type:'user',cwd:f.root,message:{role:'user',content:'Synthetic session context'}},{type:'assistant',cwd:f.root,message:{role:'assistant',stop_reason:'end_turn',content:[{type:'text',text:'Synthetic final session reply'}]}}].map(x=>JSON.stringify(x)).join('\n')+'\n');

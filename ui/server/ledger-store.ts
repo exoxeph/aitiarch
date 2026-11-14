@@ -67,9 +67,10 @@ const LOCK_STALE_MS = 60_000;
 export type LockJudgement = 'held' | 'stale' | 'unreadable';
 /** Whether a process is running. Signal 0 only checks: it sends nothing, and it works on Windows. EPERM means it exists but is not ours to signal. */
 export function processAlive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; }
+  // Unsupported liveness checks degrade to "held", not permission to break a fresh lock.
+  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code !== 'ESRCH'; }
 }
-/** What a lock file's text says: 'stale' only when it records a holder that is not running or one that started more than 60 s ago; 'unreadable' when it cannot be parsed or lacks a usable pid and time (it is waited for, never broken); otherwise 'held'. */
+/** What the contents say, independently of mtime. Unreadable contents need the separate regular-file age check before recovery. */
 export function judgeLock(raw: string, now: number, alive: (pid: number) => boolean = processAlive): LockJudgement {
   let d: unknown; try { d = JSON.parse(raw); } catch { return 'unreadable'; }
   if (!d || typeof d !== 'object' || Array.isArray(d)) return 'unreadable';
@@ -82,6 +83,8 @@ export class LedgerStore {
   private tail: Promise<unknown> = Promise.resolve();
   private file: string;
   constructor(root: string) { this.file = path.join(root, 'ledger.json'); }
+  /** Recovery is shared by stores for this same file, not by a chat or provider. */
+  get auditKey(): string { const key=path.resolve(this.file);return process.platform==='win32'?key.toLowerCase():key; }
   private async safe() {
     try { const s = await lstat(this.file); if (!s.isFile() || s.isSymbolicLink()) throw new Error('Invalid ledger path.'); }
     catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
@@ -115,18 +118,35 @@ export class LedgerStore {
     }
   }
   /** Removes the lock when it is stale, and says whether it did. Safe against other waiters doing the same: the lock is read, judged, read again, and moved away by rename (which only one of them can win). What was moved is checked to be what was judged;
-   *  if another lock took its place in between, it is put back (a hard link, which does not replace a file) and left alone. A lock that cannot be read is never broken. */
+   *  if another lock took its place in between, it is put back (a hard link, which does not replace a file) and left alone. Unparseable regular files need an mtime more than 60 s old; unreadable files and directories are never broken. */
   private async breakIfStale(lockPath: string): Promise<boolean> {
-    let judged: string;
-    try { judged = await retried(() => readFile(lockPath, 'utf8')); } catch { return false; }
-    if (judgeLock(judged, Date.now()) !== 'stale') return false;
-    try { if (await retried(() => readFile(lockPath, 'utf8')) !== judged) return false; } catch { return false; }
+    const same=(a:Awaited<ReturnType<typeof lstat>>,b:Awaited<ReturnType<typeof lstat>>)=>a.dev===b.dev&&a.ino===b.ino&&a.size===b.size&&a.mtimeMs===b.mtimeMs;
+    const snapshot=async(p:string)=>{
+      const before=await lstat(p);if(!before.isFile()||before.isSymbolicLink())throw new Error('Not a regular lock.');
+      const raw=await retried(()=>readFile(p,'utf8')),after=await lstat(p);
+      if(!same(before,after)||before.ctimeMs!==after.ctimeMs)throw new Error('Lock changed during read.');
+      return {raw,stat:after};
+    };
+    let judged:Awaited<ReturnType<typeof snapshot>>;
+    try { judged=await snapshot(lockPath); } catch { return false; }
+    const judgement=judgeLock(judged.raw,Date.now());
+    if(judgement!=='stale'&&!(judgement==='unreadable'&&Date.now()-judged.stat.mtimeMs>LOCK_STALE_MS))return false;
+    try { const again=await snapshot(lockPath);if(again.raw!==judged.raw||!same(again.stat,judged.stat)||again.stat.ctimeMs!==judged.stat.ctimeMs)return false; } catch { return false; }
     const away = lockPath + '.broken.' + randomUUID();
     try { await retried(() => rename(lockPath, away)); } catch { return false; }
-    let moved: string | null = null;
-    try { moved = await readFile(away, 'utf8'); } catch { /* unreadable: treated as not what was judged */ }
-    if (moved === judged) { await unlink(away).catch(() => {}); return true; }
-    await link(away, lockPath).catch(() => {}); await unlink(away).catch(() => {}); return false;
+    let moved:Awaited<ReturnType<typeof snapshot>>|null=null;
+    try { moved=await snapshot(away); } catch { /* unreadable: preserve it */ }
+    // Rename can change ctime on some platforms, so compare identity, mtime, size and bytes here.
+    if(moved&&moved.raw===judged.raw&&same(moved.stat,judged.stat)){await unlink(away).catch(()=>{});return true;}
+    // Same-directory rename failures leave the original alone. If hard links are unsupported,
+    // restore the verified regular file with exclusive create instead (never overwrites).
+    // A failed write leaves a fresh empty lock as a fence, and preserves the .broken copy.
+    let restored=false;
+    try { await link(away,lockPath);restored=true; } catch {
+      if(moved){let f;try{f=await open(lockPath,'wx',0o600);await f.writeFile(moved.raw);await f.sync();restored=true;}catch{/* Keep the copy; never overwrite another holder. */}finally{await f?.close().catch(()=>{});}}
+    }
+    if(restored)await unlink(away).catch(()=>{});
+    return false;
   }
   /** Whether the lock file is still the one this append wrote (after 60 s, or a crashed holder's pid being judged dead, another may have broken and taken it). */
   private async owns(lockPath: string, mine: string): Promise<boolean> {
@@ -154,4 +174,25 @@ export class LedgerStore {
     });
     this.tail = job; return job;
   }
+}
+
+/** Best-effort audit delivery. The strict append API and on-disk schema stay unchanged.
+ * Failures are visible, contain no exception text or paths, and never turn a saved reply into a failed turn.
+ * Pending events live only in memory (64 per ledger); a restart loses them. Insertion's durable journal
+ * deliberately keeps its own pending state until this returns true. Every attempt still uses append's lock. */
+export const LEDGER_PENDING_LIMIT=64;
+interface PendingAudit {tail:Promise<unknown>;events:LedgerEvent[];users:number}
+const pendingAudits=new Map<string,PendingAudit>();
+export function appendLedger(store:LedgerStore,event:LedgerEvent):Promise<boolean>{
+ const key=store.auditKey;let state=pendingAudits.get(key);if(!state){state={tail:Promise.resolve(),events:[],users:0};pendingAudits.set(key,state);}const queue=state,copy=structuredClone(event);queue.users++;
+ const report=(error:unknown,attempt:number,event:LedgerEvent['event'])=>{const e=error as NodeJS.ErrnoException,code=e?.message==='The ledger lock was taken over; nothing was written.'?'lock_taken_over':typeof e?.code==='string'&&/^[A-Z_0-9]{1,30}$/.test(e.code)?e.code:'unknown';
+  console.warn('Ledger event could not be saved.',{kind:'ledger_append_failed',event,attempt,code,pending:queue.events.length});};
+ const save=async(e:LedgerEvent)=>{for(let attempt=1;attempt<=2;attempt++){try{await store.append(e);return true;}catch(error){report(error,attempt,e.event);}}return false;};
+ const job=queue.tail.catch(()=>{}).then(async()=>{
+  const saved=await save(copy);
+  // A second outage stops the flush; never multiply the wait by the queue size.
+  if(saved){for(const e of [...queue.events]){if(!await save(e))break;queue.events.splice(0,1);}}
+  else if(!queue.events.some(e=>e.id===copy.id)){queue.events.push(copy);if(queue.events.length>LEDGER_PENDING_LIMIT){queue.events.shift();console.warn('Ledger pending queue full; oldest event dropped.',{kind:'ledger_queue_dropped',dropped:1,pending:queue.events.length});}}
+  return saved;
+ }).finally(()=>{queue.users--;if(!queue.users&&!queue.events.length)pendingAudits.delete(key);});queue.tail=job;return job;
 }

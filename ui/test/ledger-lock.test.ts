@@ -9,12 +9,13 @@ import {LedgerStore,judgeLock,processAlive,type LedgerEvent} from '../server/led
 // The ledger's lock file, on the platform's own terms. Root cause of the flaky "two stores append at once" test (observed under load, on Windows): the lock was only waited for on EEXIST. A file operation on the
 // lock, the ledger or its temp file can fail for a moment with EPERM / EBUSY / EACCES (a scanner or another handle holds it; a file just removed is still "delete pending") and that threw straight out of
 // append(). The file system is made to fail on purpose here instead of waiting for load to do it.
-const hooks=vi.hoisted(()=>({lockOpens:0,failLockOpen:[] as string[],failLockUnlink:[] as string[],failRename:[] as string[],failRead:[] as string[],
+const hooks=vi.hoisted(()=>({lockOpens:0,failLockOpen:[] as string[],failLockUnlink:[] as string[],failRename:[] as string[],failRead:[] as string[],failLink:[] as string[],
  /** Stale-lock tests: runs before the nth read of a lock file (1-based), before a lock is moved away to be broken, and when the temp file is created. */
  lockReads:0,lockRenames:0,onLockRead:null as null|((n:number)=>Promise<void>),onLockRename:null as null|(()=>Promise<void>),onTempOpen:null as null|(()=>Promise<void>),inside:0,maxInside:0}));
 vi.mock('node:fs/promises',async(original)=>{
  const real=await original<typeof import('node:fs/promises')>(),boom=(code:string,syscall:string,p:string)=>Object.assign(new Error(`${code}: injected, ${syscall} '${p}'`),{code,syscall,path:p});
  return {...real,
+  link:async(a:string,b:string)=>{const c=hooks.failLink.shift();if(c)throw boom(c,'link',b);return real.link(a,b);},
   open:async(p:unknown,flags?:unknown,mode?:unknown)=>{if(typeof p==='string'&&p.endsWith('.lock')&&flags==='wx'){hooks.lockOpens++;const c=hooks.failLockOpen.shift();if(c)throw boom(c,'open',p);}
    if(typeof p==='string'&&p.endsWith('.tmp')&&flags==='wx'){hooks.inside++;hooks.maxInside=Math.max(hooks.maxInside,hooks.inside);await hooks.onTempOpen?.();}
    return (real.open as (...a:unknown[])=>Promise<unknown>)(p,flags,mode);},
@@ -26,7 +27,7 @@ vi.mock('node:fs/promises',async(original)=>{
    return real.rename(a as string,b as string);},
  };
 });
-beforeEach(()=>{hooks.lockOpens=hooks.lockReads=hooks.lockRenames=hooks.inside=hooks.maxInside=0;hooks.onLockRead=hooks.onLockRename=hooks.onTempOpen=null;hooks.failLockOpen.length=hooks.failLockUnlink.length=hooks.failRename.length=hooks.failRead.length=0;});
+beforeEach(()=>{hooks.lockOpens=hooks.lockReads=hooks.lockRenames=hooks.inside=hooks.maxInside=0;hooks.onLockRead=hooks.onLockRename=hooks.onTempOpen=null;hooks.failLink.length=hooks.failLockOpen.length=hooks.failLockUnlink.length=hooks.failRename.length=hooks.failRead.length=0;});
 const dirs:string[]=[];afterEach(async()=>{for(const d of dirs.splice(0))await rm(d,{recursive:true,force:true,maxRetries:5,retryDelay:100});});
 const temp=async()=>{const d=await mkdtemp(path.join(os.tmpdir(),'aitiarch-ll-'));dirs.push(d);return d;};
 const turn={session:'e50d1e40-4aaa-47b0-923c-3a17de41469d',mode:'investigate' as const,inputTokens:1,cachedTokens:0,outputTokens:1,costUsd:0.01,outcome:'completed'};
@@ -66,12 +67,10 @@ describe('the lock between processes',()=>{
   await writeFile(lockPath,'');const work=Promise.all(Array.from({length:6},(_,i)=>(i%2?a:b).append(event(i))));
   await new Promise(r=>setTimeout(r,300));await rm(lockPath);await work;expect(await ids(a)).toEqual(['e0','e1','e2','e3','e4','e5']);
  });
- it('never takes a lock that is held, however old it looks, and gives up with the lock\'s own error after its wait',async()=>{
+ it('an old empty lock is broken using its modification time',async()=>{
   const root=await temp(),store=new LedgerStore(root),lockPath=path.join(root,'ledger.json.lock');
   await writeFile(lockPath,'');const old=new Date(Date.now()-120_000);await utimes(lockPath,old,old);
-  const pending=store.append(event(1));let done=false;void pending.then(()=>{done=true;},()=>{done=true;});
-  await new Promise(r=>setTimeout(r,400));expect(done).toBe(false);expect((await stat(lockPath)).isFile()).toBe(true); // an old-looking lock is still somebody's: it is waited for, never broken
-  await rm(lockPath);await pending;expect(await ids(store)).toEqual(['e1']);await clean(root);
+  await store.append(event(1));expect(await ids(store)).toEqual(['e1']);await clean(root);
  });});
 
 describe('stores of one process',()=>{
@@ -103,6 +102,10 @@ describe('judging a lock file',()=>{
  it('a start time in the future is not old',()=>expect(judgeLock(lockText(7,now+600_000),now,alive([7]))).toBe('held'));
  it.each(['','not json','{}','[]','null','{"pid":"7","startedAt":1}','{"pid":-3,"startedAt":1}','{"pid":0,"startedAt":1}','{"pid":1.5,"startedAt":1}','{"pid":7}','{"pid":7,"startedAt":"x"}','{"pid":7,"startedAt":null}'])('cannot be parsed or has no usable pid and time (%j): unreadable, never stale',raw=>expect(judgeLock(raw,now,alive([]))).toBe('unreadable'));
  it('this process is running; a process that ended is not',async()=>{expect(processAlive(process.pid)).toBe(true);expect(processAlive(await deadPid())).toBe(false);});
+ it('an unsupported process liveness check conservatively treats the holder as alive',()=>{
+  const kill=vi.spyOn(process,'kill').mockImplementation(()=>{throw Object.assign(new Error('unsupported'),{code:'ENOSYS'});});
+  try{expect(processAlive(123)).toBe(true);}finally{kill.mockRestore();}
+ });
 });
 
 describe('breaking a stale lock',()=>{
@@ -120,14 +123,36 @@ describe('breaking a stale lock',()=>{
   expect(s.done).toBe(false);expect(readFileSync(lockPath(root),'utf8')).toBe(mine);expect(hooks.lockRenames).toBe(0);
   await rm(lockPath(root));await pending;expect(await ids(store)).toEqual(['e1']);await clean(root);
  });
- it.each(['','not json','{}','{"pid":"x"}','{"pid":-5,"startedAt":1}','{"pid":7,"startedAt":"yesterday"}','[1,2]'])('a lock that cannot be parsed (%j) is waited for, even with an old modification time',async raw=>{
+ it.each(['','not json','{}','{"pid":"x"}','{"pid":-5,"startedAt":1}','{"pid":7,"startedAt":"yesterday"}','[1,2]'])('old unparseable lock (%j) is broken only after 60 seconds',async raw=>{
   const root=await temp(),store=new LedgerStore(root);await writeFile(lockPath(root),raw);const old=new Date(Date.now()-600_000);await utimes(lockPath(root),old,old);
+  await store.append(event(1));expect(hooks.lockRenames).toBe(1);expect(await ids(store)).toEqual(['e1']);await clean(root);
+ });
+ it.each(['','not json','{}'])('fresh unparseable lock (%j) is respected',async raw=>{
+  const root=await temp(),store=new LedgerStore(root);await writeFile(lockPath(root),raw);
   const pending=store.append(event(1)),s=settle(pending);await wait(400);
   expect(s.done).toBe(false);expect(readFileSync(lockPath(root),'utf8')).toBe(raw);expect(hooks.lockRenames).toBe(0);
-  await rm(lockPath(root));await pending;expect(await ids(store)).toEqual(['e1']);await clean(root);
+  console.log('CLEANUP TARGET',lockPath(root));await rm(lockPath(root));await pending;
+ });
+ it('identical garbage refreshed before rename is put back and respected',async()=>{
+  const root=await temp(),store=new LedgerStore(root),raw='garbage';await writeFile(lockPath(root),raw);const old=new Date(Date.now()-120_000);await utimes(lockPath(root),old,old);
+  let swapped=false;hooks.onLockRename=async()=>{if(!swapped){swapped=true;await writeFile(lockPath(root),raw);}};
+  const pending=store.append(event(1)),s=settle(pending);await wait(400);
+  expect(swapped).toBe(true);expect(s.done).toBe(false);expect(readFileSync(lockPath(root),'utf8')).toBe(raw);
+  console.log('CLEANUP TARGET',lockPath(root));await rm(lockPath(root));await pending;
+ });
+ it('garbage exactly 60 seconds old is still respected',async()=>{
+  const root=await temp(),store=new LedgerStore(root),now=1_900_000_000_000;await writeFile(lockPath(root),'garbage');await utimes(lockPath(root),(now-60_000)/1000,(now-60_000)/1000);
+  const clock=vi.spyOn(Date,'now').mockReturnValue(now),pending=store.append(event(1)),s=settle(pending);
+  try{await wait(100);expect(s.done).toBe(false);expect(hooks.lockRenames).toBe(0);}finally{clock.mockRestore();console.log('CLEANUP TARGET',lockPath(root));await rm(lockPath(root));await pending;}
+ });
+ it('restores a replacement lock without overwriting when hard links are unsupported',async()=>{
+  const root=await temp(),store=new LedgerStore(root),fresh=lockText(process.pid,Date.now(),'fresh');await writeFile(lockPath(root),lockText(process.pid,Date.now()-120_000));
+  let swapped=false;hooks.onLockRename=async()=>{if(!swapped){swapped=true;await writeFile(lockPath(root),fresh);}};hooks.failLink.push('ENOSYS');
+  const pending=store.append(event(1)),s=settle(pending);
+  try{await wait(400);expect(s.done).toBe(false);expect(readFileSync(lockPath(root),'utf8')).toBe(fresh);}finally{console.log('CLEANUP TARGET',lockPath(root));await rm(lockPath(root),{force:true});await pending;}
  });
  it('a lock that cannot be read (a directory in its place) is waited for, not broken',async()=>{
-  const root=await temp(),store=new LedgerStore(root);await mkdir(lockPath(root));
+  const root=await temp(),store=new LedgerStore(root);await mkdir(lockPath(root));const old=new Date(Date.now()-600_000);await utimes(lockPath(root),old,old);
   const pending=store.append(event(1)),s=settle(pending);await wait(400);
   expect(s.done).toBe(false);expect(hooks.lockRenames).toBe(0);expect(existsSync(lockPath(root))).toBe(true);
   await rm(lockPath(root),{recursive:true});await pending;expect(await ids(store)).toEqual(['e1']);

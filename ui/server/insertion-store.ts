@@ -1,6 +1,7 @@
 import {randomUUID,createHash} from 'node:crypto';
 import {lstat,mkdir,open,readFile,rename,unlink} from 'node:fs/promises';
 import path from 'node:path';
+import {appendLedger} from './ledger-store.ts';
 import type {InkItem} from '../shared/ink.ts';
 import type {InkStore} from './ink-store.ts';import type {Store} from './store.ts';import type {LedgerStore} from './ledger-store.ts';
 import {normalizeRel} from './paths.ts';import {previewThoughtInsertion} from '../shared/thoughts.ts';
@@ -84,7 +85,7 @@ export class InsertionStore {
   for(const o of operations){if(o.note!==note||o.state!=='prepared')continue;
    const matches=current!==null&&hash(current)!==o.beforeHash&&(hash(current)===o.afterHash||hash(current.slice(o.from,o.from+o.length))===o.insertHash);
    if(!matches){pending++;unverified++;continue;}
-   try{await this.ledger.append({id:o.id,requestId:o.id,inkId:o.inkId,note:o.note,event:'inserted',at:o.at,authorship:'ai',insertedBy:'human'});o.state='recorded';changed=true;}catch{pending++;}
+   try{const recorded=await appendLedger(this.ledger,{id:o.id,requestId:o.id,inkId:o.inkId,note:o.note,event:'inserted',at:o.at,authorship:'ai',insertedBy:'human'});if(recorded){o.state='recorded';changed=true;}else pending++;}catch{pending++;}
   }
   if(changed){try{await this.save(operations);}catch{pending=Math.max(1,pending);}}return {pending,unverified};
  }
@@ -101,7 +102,7 @@ export class InsertionStore {
    let current:string|null=null;try{current=(await this.store.read(note)).text;}catch{/* fall back to position */}
    const exact=current===null?undefined:candidates.find(o=>hash(current!.slice(o.from,o.from+o.length))===o.insertHash);
    const pick=exact??[...candidates].sort((a,b)=>Math.abs(a.from-from)-Math.abs(b.from-from))[0];
-   await this.ledger.append({id:randomUUID(),inkId:pick.inkId,requestId:pick.id,note,event:'adopted',at:new Date().toISOString()});
+   await appendLedger(this.ledger,{id:randomUUID(),inkId:pick.inkId,requestId:pick.id,note,event:'adopted',at:new Date().toISOString()});
    return {recorded:true as const,operationId:pick.id};});
  }
  async cancel(note:string,id:string){return this.serial(async()=>{const operations=await this.journal(),o=operations.find(o=>o.note===note&&o.id===id);if(o?.state==='prepared'){o.state='cancelled';await this.save(operations);}return {};});}

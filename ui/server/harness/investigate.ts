@@ -23,7 +23,7 @@ import {covers,needOf} from '../../shared/profile.ts';
 import {snapshotDrift,syncSnapshot,SNAPSHOT_LIMITS,type Drift} from './snapshot.ts';
 import {captureFolder,folderChanges,restoreFolder} from './tripwire.ts';
 import {activeTurnDirs} from './sweep.ts';
-import {LedgerStore,type InvestigateTurnAudit} from '../ledger-store.ts';
+import {LedgerStore,appendLedger,type InvestigateTurnAudit} from '../ledger-store.ts';
 import type {InvestigateUsage} from '../../shared/usage.ts';
 const exec=promisify(execFile);
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
@@ -183,7 +183,7 @@ export class InvestigateService {
   const u=sessionUsage(reported?.usage??null);
   const turn:InvestigateTurnAudit={session,mode:'investigate',inputTokens:u?.inputTokens??null,cachedTokens:u?.cachedTokens??null,outputTokens:u?.outputTokens??null,costUsd:reported?.cost??null,outcome};
   addTurn(await this.usage(),turn);
-  await this.ledger.append({id:randomUUID(),inkId:'investigate-'+session,requestId,note:'',event:'investigate_turn',at:new Date().toISOString(),turn}).catch(()=>{}); // a ledger that cannot be written never fails the turn
+  await appendLedger(this.ledger,{id:randomUUID(),inkId:'investigate-'+session,requestId,note:'',event:'investigate_turn',at:new Date().toISOString(),turn}); // a ledger that cannot be written never fails the turn
  }
  /** The copy's folder for a repo: stable, so the CLI can find the session again. */
  snapshotFolder(repo:string,files?:readonly string[]){const base=path.join(this.o.dir,'snapshots',sha(repo.toLowerCase()+(files?'\n'+[...files].sort().join('\n'):'')).slice(0,16));return {base,files:path.join(base,'files'),manifest:path.join(base,'manifest.json')};}
@@ -282,7 +282,7 @@ export class InvestigateService {
    if(earlier)extra.push(earlier);
    const head=INVESTIGATE_INSTRUCTION.split('\n\n'),rules=head.pop()!;
    await writeFile(file,[...head,...extra,rules].join('\n\n'),{mode:0o600});
-   if(this.o.gate)await this.ledger.append({id:randomUUID(),inkId:'investigate-'+id,requestId:randomId(),note:'',event:'conversation_turn',at,conv:{session:id,profile:'investigate',files:p.files?.length??p.focus?.length??0,notes:0,repo:!p.files,diagrams:0,fresh:cli.fresh,budgetUsd}}).catch(()=>{});
+   if(this.o.gate)await appendLedger(this.ledger,{id:randomUUID(),inkId:'investigate-'+id,requestId:randomId(),note:'',event:'conversation_turn',at,conv:{session:id,profile:'investigate',files:p.files?.length??p.focus?.length??0,notes:0,repo:!p.files,diagrams:0,fresh:cli.fresh,budgetUsd}});
    const gate=new StreamGate({instruction:INVESTIGATE_INSTRUCTION}),thinking=new StreamGate({instruction:INVESTIGATE_INSTRUCTION});
    // Text goes through the gate (redaction, the echo guard) into the trail. Whatever the gate holds back is released when a tool call or a new
    // text block starts (a space or a blank line is pushed), so narration lands before the call it belongs to and paragraphs stay separate.

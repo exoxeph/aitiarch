@@ -4,7 +4,7 @@ import path from 'node:path';
 import {sessionModules} from './ide-sessions.ts';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
 import {CHAT_LIMITS,REPLY_ALLOWANCE,budgetTokens,isAbortCause,nextTurnEstimate,type AbortCause,type BudgetDetail} from '../../shared/chat.ts';
-import {Store} from '../store.ts';import {InkStore} from '../ink-store.ts';import {LedgerStore} from '../ledger-store.ts';
+import {Store} from '../store.ts';import {InkStore} from '../ink-store.ts';import {LedgerStore,appendLedger} from '../ledger-store.ts';
 import {ChatStore} from './store.ts';import {contextModules,hash,estimateTokens} from './context.ts';import {secretKinds} from './secrets.ts';
 import {prepareRequest,ProviderError,redact,type Provider,type Request,type Result} from '../providers/index.ts';
 import {CHAT_HARD_RULES,chatSessionInstruction,editorManifest,turnMessage} from './request.ts';
@@ -89,7 +89,7 @@ export class ChatRuntime {
  async sessionPreview(note:string,context:ContextChoice[]){
   await this.store.read(note);if(!Array.isArray(context)||context.length>2)throw new ChatError('invalid_chat');const seen=new Set<string>(),sources:ContextSource[]=[];
   for(const c of context){const module=this.sessions.find(m=>m.id===c?.moduleId);if(!module||seen.has(c.moduleId)||!Array.isArray(c.ids)||c.ids.length>CHAT_LIMITS.sources||c.ids.some(id=>typeof id!=='string')||new Set(c.ids).size!==c.ids.length)throw new ChatError('invalid_chat');seen.add(c.moduleId);
-   for(const id of c.ids)await this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(note),requestId:'session-preview',note,event:'context_read',moduleId:module.id,sourceHash:hash(id),at:new Date().toISOString()});
+   for(const id of c.ids)await appendLedger(this.ledger,{id:randomUUID(),inkId:'chat-'+hash(note),requestId:'session-preview',note,event:'context_read',moduleId:module.id,sourceHash:hash(id),at:new Date().toISOString()});
    try{sources.push(...await module.read(c.ids,{maxSources:CHAT_LIMITS.sources-sources.length,maxCharacters:CHAT_LIMITS.otherCharacters-sources.reduce((n,s)=>n+s.text.length,0)}));}catch(e){throw new ChatError(e instanceof Error&&e.message===SESSION_NOTICES.limit?'session_limit':e instanceof Error&&e.message===SESSION_NOTICES.selection?'session_selection':'session_format');}
   }
   return {sources:sources.map(s=>({id:s.id,label:s.label,text:s.text})),estimatedTokens:sources.reduce((n,s)=>n+estimateTokens(s.text),0),budget:this.state(note).usage.tokenBudget};
@@ -116,12 +116,12 @@ export class ChatRuntime {
    const ids=module.id==='other-notes'?c.ids.filter(id=>{if(!harnessDenied(id))return true;excluded.push(id);return false;}):c.ids;
    // Metadata audit precedes EVERY read, including failed attempts: which note is about to be read (its path), never any text. After a read, one more line per source says how many characters were sent.
    const noteOf=(id:string)=>{const p=module.id==='this-note'?open:module.id==='other-notes'?id:'';return p&&p.length<=400&&!/[\u0000-\u001f\u007f]/.test(p)?p:undefined;},at=()=>new Date().toISOString(),base={inkId:'chat-'+hash(input.path),requestId:input.id,note:input.path,event:'context_read' as const,moduleId:module.id};
-   for(const id of ids)await this.ledger.append({...base,id:randomUUID(),sourceHash:hash(id),...(noteOf(id)?{path:noteOf(id)}:{}),at:at()});
+   for(const id of ids)await appendLedger(this.ledger,{...base,id:randomUUID(),sourceHash:hash(id),...(noteOf(id)?{path:noteOf(id)}:{}),at:at()});
    let got:ContextSource[]=[];
    try{got=await module.read(ids,{maxSources:CHAT_LIMITS.sources-sources.length,maxCharacters:module.id==='this-note'?60000:CHAT_LIMITS.otherCharacters});}catch(e){if(module.id==='claude-sessions'||module.id==='codex-sessions')throw new ChatError(e instanceof Error&&e.message===SESSION_NOTICES.limit?'session_limit':e instanceof Error&&e.message===SESSION_NOTICES.selection?'session_selection':'session_format');throw e;}
    sources.push(...got);
    const asked=module.id==='this-note'?got.map(x=>x.id==='N1'?'note':'threads'):ids; // a module returns its sources in the order of the ids it was given
-   for(const [i,x] of got.entries())await this.ledger.append({...base,id:randomUUID(),sourceHash:hash(asked[i]??x.id),...(noteOf(asked[i]??'')?{path:noteOf(asked[i]??'')}:{}),chars:x.text.length,at:at()});
+   for(const [i,x] of got.entries())await appendLedger(this.ledger,{...base,id:randomUUID(),sourceHash:hash(asked[i]??x.id),...(noteOf(asked[i]??'')?{path:noteOf(asked[i]??'')}:{}),chars:x.text.length,at:at()});
   }
   if(sources.length>CHAT_LIMITS.sources||sources.reduce((n,x)=>n+Buffer.byteLength(x.text),0)>85000)throw new ProviderError('context_limit');
   // A harness session: it must be a chat session for this note.
@@ -154,7 +154,7 @@ export class ChatRuntime {
   const request:Request={id:input.id,action:'ask',chat:true,note:sources.find(x=>x.id==='N1')?.text??'',selection:redact(input.selection??''),decisions:sources.filter(x=>x.id!=='N1').map(x=>({id:x.id,text:x.text})),turns:history,question:redact(input.question)};
   if(extra){request.persona=extra.persona;if(extra.skills.loaded.length)request.skills=extra.skills;}
   // A selection that goes with the request is recorded by size and line range, with the note it was taken from; its text never enters the ledger.
-  if(request.selection)await this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(input.path),requestId:input.id,note:input.path,event:'context_read',moduleId:'this-note',sourceHash:hash('selection'),path:open,
+  if(request.selection)await appendLedger(this.ledger,{id:randomUUID(),inkId:'chat-'+hash(input.path),requestId:input.id,note:input.path,event:'context_read',moduleId:'this-note',sourceHash:hash('selection'),path:open,
    selection:{chars:request.selection.length,...(editor?.lines?{fromLine:editor.lines.from,toLine:editor.lines.to}:{})},at:new Date().toISOString()});
   // In a session the CLI gets the instruction with the sources pasted before the rules (rules last); the earlier conversation is in the session.
   const sessionSources=[...sources.map(x=>({id:x.id,label:x.label,text:redact(x.text)})),...(request.selection?[{id:'S1',label:'Selection',text:request.selection}]:[])];
@@ -261,7 +261,7 @@ export class ChatRuntime {
    if(called&&!charged){s.usage.spent+=frozen.reservation;s.usage.estimated=(s.usage.estimated??0)+frozen.reservation;s.usage.unreportedCalls++;}
    const cause=controller.signal.aborted?s.abortCause:undefined;
    const code:ChatErrorCode=cause==='budget_gate'?'budget_reached':e instanceof ChatError?e.code:e instanceof ProductValidationError?'validation':e instanceof ProviderError&&e.code==='cancelled'?'cancelled':e instanceof ProviderError?'provider_failed':stage==='save'?'persistence':'internal';
-   try{await this.audit(review.path,request.id,'chat_failed',cause);}catch{/* No text or exceptions are logged. */}
+   await this.audit(review.path,request.id,'chat_failed',cause);
    emit({type:'error',id:request.id,code,...(e instanceof FenceStop?{fence:e.fence,...(e.costUsd!==undefined?{costUsd:e.costUsd}:{}),...(e.fence==='budget'?{capUsd:DIAGRAM_TURN_CAP_USD}:{})}:{}),...(cause&&(code==='cancelled'||code==='budget_reached')?{cause}:{}),...(code==='budget_reached'?{budget:e instanceof ChatError&&e.budget?e.budget:budgetNow}:{}),...(e instanceof ProductValidationError?{rule:e.record.rule}:{}),...(code==='provider_failed'&&e instanceof ProviderError?{reason:describeFailure(e.code,e.reason)}:{}),...(code==='internal'&&e instanceof Error&&/^[A-Za-z]{1,40}$/.test(e.name)?{errorName:e.name}:{})});
   }finally{s.running=false;s.controller=undefined;s.usage.reserved=0;signal?.removeEventListener('abort',abort);resolve();this.jobs.delete(done);}
  }
@@ -309,22 +309,22 @@ export class ChatRuntime {
     const text=buildCarriedHistory(await h.carried(session).catch(()=>[]));
     if(text){const i=addendum.lastIndexOf(CHAT_HARD_RULES);addendum=i>=0?addendum.slice(0,i)+text+'\n\n'+addendum.slice(i):addendum+'\n\n'+text;} // the rules stay last
    }
-   if(h.gate)audits.push(this.ledger.append({id:randomUUID(),inkId,requestId:request.id,note,event:'conversation_turn',at:at(),conv:{session:session.id,profile,files:0,notes:frozen.review.sources.filter(x=>x.id.startsWith('O')).length,repo:false,diagrams:copies?.length??0,fresh:cli.fresh,budgetUsd:frozen.capUsd??DIAGRAM_TURN_CAP_USD}}).catch(()=>{}));
-   if(session.turns===0&&h.version){const version=await h.version().catch(()=>null);if(version)audits.push(this.ledger.append({id:randomUUID(),inkId,requestId:request.id,note,event:'cli_version',at:at(),cli:{version,session:session.id}}).catch(()=>{}));}
+   if(h.gate)audits.push(appendLedger(this.ledger,{id:randomUUID(),inkId,requestId:request.id,note,event:'conversation_turn',at:at(),conv:{session:session.id,profile,files:0,notes:frozen.review.sources.filter(x=>x.id.startsWith('O')).length,repo:false,diagrams:copies?.length??0,fresh:cli.fresh,budgetUsd:frozen.capUsd??DIAGRAM_TURN_CAP_USD}}));
+   if(session.turns===0&&h.version){const version=await h.version().catch(()=>null);if(version)audits.push(appendLedger(this.ledger,{id:randomUUID(),inkId,requestId:request.id,note,event:'cli_version',at:at(),cli:{version,session:session.id}}));}
    const r=await h.runner.chatTurn({id:cli.id,resume:cli.resume,addendum,question:turnMessage(frozen.manifest,request.question),...(copies?.length?{diagrams:{copies,budgetUsd:frozen.capUsd??DIAGRAM_TURN_CAP_USD}}:{}),signal,onTextDelta,onStarted:()=>{started=true;},
     onDiagramUnavailable:n=>{const w=frozen.diagrams?.withheld.find(x=>x.n===n),title=(w?.title??'').slice(0,80),why=w?.why??'not in this note';if(!facts.misses.some(x=>x.n===n))facts.misses.push({n,title,why});emit({type:'diagram_unavailable',id:request.id,n,title:w?.title??'',why});},
     onDiagramRead:copy=>{
      const ref=frozen.diagrams?.open.find(o=>o.n===copy.n);if(!ref)return;
      if(!facts.reads.some(x=>x.asset===ref.asset))facts.reads.push({n:ref.n,asset:ref.asset,title:redact(ref.title).slice(0,80)});
      emit({type:'diagram_read',id:request.id,n:ref.n,title:redact(ref.title).slice(0,80)});
-     audits.push(this.ledger.append({id:randomUUID(),inkId,requestId:request.id,note,event:'diagram_read',at:at(),diagram:{id:'D'+ref.n,asset:ref.asset,hash:copy.hash,bytes:copy.bytes,note:frozen.diagrams!.note}}).catch(()=>{}));
+     audits.push(appendLedger(this.ledger,{id:randomUUID(),inkId,requestId:request.id,note,event:'diagram_read',at:at(),diagram:{id:'D'+ref.n,asset:ref.asset,hash:copy.hash,bytes:copy.bytes,note:frozen.diagrams!.note}}));
     }});
    facts.costUsd=typeof r.costUsd==='number'&&Number.isFinite(r.costUsd)&&r.costUsd>=0?r.costUsd:null; // a runner that does not say leaves no cost on the reply
    await h.questions?.add(session.id,request.id,request.question).catch(()=>{}); // a failed save must not lose the answer
    return {id:request.id,provider:'claude',model:null,answer:dropManifestEcho(r.answer),claims:[],usage:r.usage,rawReply:true};
   }finally{await Promise.allSettled(audits);if(started)await h.index.touch(session.id).catch(()=>{});} // the CLI now knows this id: the next turn must resume it
  }
- private audit(note:string,id:string,event:'chat_started'|'chat_completed'|'chat_failed',cause?:AbortCause){return this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(note),requestId:id,note,event,at:new Date().toISOString(),...(cause?{cause}:{})});}
+ private audit(note:string,id:string,event:'chat_started'|'chat_completed'|'chat_failed',cause?:AbortCause){return appendLedger(this.ledger,{id:randomUUID(),inkId:'chat-'+hash(note),requestId:id,note,event,at:new Date().toISOString(),...(cause?{cause}:{})});}
  private rememberReplay(id:string,tokens:number){this.replay.delete(id);this.replay.set(id,tokens);while(this.replay.size>200)this.replay.delete(this.replay.keys().next().value as string);}
  /**
   * The diagrams of a note as a conversation turn about it would see them, decided here from the note, never taken from the page: `note` must be a real note of this project (a path the store accepts,

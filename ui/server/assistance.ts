@@ -10,7 +10,7 @@ import { normalizeRel, PathError } from './paths.ts';
 import { SkillDiagramStore } from './skill-diagram-store.ts';
 import { SKILL_DIAGRAM_FAILED_BODY, SKILL_DIAGRAM_MAX_BYTES, extractDocument, skillDiagramBody, skillDiagramFallbackBody, type SkillDiagramRef } from '../shared/skill-diagram.ts';
 import { sanitizeSvgDocument } from '../shared/svg-sanitize.ts';
-import { LedgerStore } from './ledger-store.ts';
+import { appendLedger, LedgerStore } from './ledger-store.ts';
 import { prepareRequest, ProviderError, redact, type Provider, type Request } from './providers/index.ts';
 import { ProductValidationError, validateProductResult, validationCounts, type ValidationLog, type ValidationRecord } from './product-validation.ts';
 import { privateValidationLog } from './providers/failure-metrics.ts';
@@ -175,6 +175,6 @@ export class Assistance {
       const current = await this.store.read(note).catch(() => null);
       await this.mutate(note, current?.text ?? '', items => items.map(i => i.id === id ? { ...i, generation: { ...i.generation!, dismissed: true } } : i));
     }
-    await this.ledger.append({ id: randomUUID(), inkId: id, requestId: item.generation.requestId, note, event, at: new Date().toISOString() });
+    await appendLedger(this.ledger,{ id: randomUUID(), inkId: id, requestId: item.generation.requestId, note, event, at: new Date().toISOString() });
   }
 }

@@ -7,6 +7,7 @@ import {afterEach,describe,expect,it,vi} from 'vitest';
 import {SessionIndex} from '../server/harness/session-index.ts';
 import {InvestigateService,type InvestigateEvent} from '../server/harness/investigate.ts';
 import {projectFolderName,removeTranscript} from '../server/harness/transcripts.ts';
+import {LedgerStore,appendLedger} from '../server/ledger-store.ts';
 
 // Investigation sessions against a synthetic CLI (no model): a confirmed plan before the first turn, the copy as the only folder it can read,
 // every event checked (tools, paths, turns), file claims checked against the real repo, a tripwire around each run, and Delete conversation.
@@ -28,6 +29,13 @@ async function setup(){
  return {repo,notebook,harness,index,service,run,calls};
 }
 async function confirmed(svc:InvestigateService,repo:string){const s=await svc.create('Login code',repo),p=await svc.plan(s.id);await svc.confirm(s.id,p.planHash);return {s,p};}
+
+it('Investigate reply survives a taken-over ledger lock with visible retry and later delivery',async()=>{
+ const t=await setup(),svc=t.service(),{s}=await confirmed(svc,t.repo),write=vi.spyOn(LedgerStore.prototype,'append').mockRejectedValue(new Error('The ledger lock was taken over; nothing was written.')),log=vi.spyOn(console,'warn').mockImplementation(()=>{});
+ try{const r=await t.run(svc,s.id);expect(r.error).toBeUndefined();expect(r.complete).toBeDefined();expect(write).toHaveBeenCalledTimes(2);expect(log).toHaveBeenCalledTimes(2);}
+ finally{write.mockRestore();log.mockRestore();}
+ const ledger=new LedgerStore(t.notebook);await appendLedger(ledger,{id:'flush',inkId:'flush',requestId:'flush',note:'',event:'shown',at:new Date().toISOString()});expect((await ledger.read()).events.some(e=>e.event==='investigate_turn')).toBe(true);
+});
 
 describe('investigation sessions',()=>{
  it('refuses a folder that is not a git repo or is reached through a link',async()=>{

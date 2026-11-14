@@ -15,7 +15,7 @@ import {ClaudeSessionRunner} from '../server/harness/claude-session.ts';
 import {QuestionStore} from '../server/harness/questions.ts';
 import {chatSessionArguments} from '../server/providers/claude-arguments.ts';
 import {spawnChatSession} from '../server/providers/launcher.ts';
-import {LedgerStore} from '../server/ledger-store.ts';
+import {LedgerStore,appendLedger} from '../server/ledger-store.ts';
 import {DIAGRAM_MAX_TOOL_EVENTS,DIAGRAM_TURN_CAP_USD,FENCE_WORDS,WITHHELD_WORDS} from '../shared/diagram-fence.ts';
 import type {ChatEvent,ChatInput} from '../shared/chat.ts';
 import {makePng,svgFor} from './fixtures/png.ts';
@@ -55,6 +55,12 @@ async function turn(runtime:ChatRuntime,input:ChatInput){
   reads:events.filter(e=>e.type==='diagram_read') as Extract<ChatEvent,{type:'diagram_read'}>[]};
 }
 const ask=(session:string,id:string,question:string,path='plan.md'):ChatInput=>({id,path,question,context:[{moduleId:'this-note',ids:['note']}],session});
+it('diagram Read and conversation CLI audit failures never discard a validated conversation reply',async()=>{
+ const p=await project(),{index,runtime}=await p.open('dg-read2',true),s=await index.create({mode:'chat',label:'Synthetic',note:'plan.md'}),write=vi.spyOn(LedgerStore.prototype,'append').mockRejectedValue(new Error('The ledger lock was taken over; nothing was written.')),log=vi.spyOn(console,'warn').mockImplementation(()=>{});
+ try{const r=await turn(runtime,ask(s.id,'audit-failure','Compare the first two diagrams'));expect(r.error).toBeUndefined();expect(r.complete).toBeDefined();expect(r.reads).toHaveLength(2);expect(log).toHaveBeenCalled();}
+ finally{write.mockRestore();log.mockRestore();await runtime.close();}
+ const ledger=new LedgerStore(p.root);await appendLedger(ledger,{id:'flush',inkId:'flush',requestId:'flush',note:'plan.md',event:'shown',at:new Date().toISOString()});expect((await ledger.read()).events.filter(e=>e.event==='diagram_read')).toHaveLength(2);expect((await ledger.read()).events.some(e=>e.event==='cli_version')).toBe(true);
+});
 const at=(a:string[],flag:string)=>a[a.indexOf(flag)+1];
 const chatCwdOf=(p:Project)=>path.join(p.harness,'chat-cwd');
 const MANIFEST_WITH=(p:Project)=>`Open note: Plan (${p.NOTE.length} chars). Diagrams: D1 'alpha-skill', D2 'bravo-skill'. D3 'charlie-skill' withheld: no picture yet. D4 'secret-skill' withheld: ${WITHHELD_WORDS.secret}.`;

@@ -1,4 +1,4 @@
-import {it,expect,afterEach} from 'vitest';
+import {it,expect,afterEach,vi} from 'vitest';
 import {mkdtemp,writeFile,readFile,rm,mkdir,symlink} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
 import {InsertionStore} from '../server/insertion-store.ts';import {Store} from '../server/store.ts';import {InkStore} from '../server/ink-store.ts';import {LedgerStore} from '../server/ledger-store.ts';import {captureAnchor} from '../shared/anchors.ts';import {decode,encode} from '../server/codec.ts';
 import {layoutDiagram} from '../src/diagrams/layout.ts';import {cicd} from './fixtures/diagrams.ts';import {spawn} from 'node:child_process';import {once} from 'node:events';import {EditorState} from '@codemirror/state';import {history,undo} from '@codemirror/commands';
@@ -17,8 +17,9 @@ it('previews an AI markdown image, saves only a local confined SVG after confirm
  expect(undo(v as any)).toBe(true);expect(encode(v.state.doc.toString(),f.note)).toEqual(f.bytes);
 });
 it('keeps a durable visible pending intent after ledger failure and repairs once on next load without reinserting',async()=>{
- const f=await fixture(),bad={append:async()=>{throw new Error('Synthetic disk failure');}} as unknown as LedgerStore,service=new InsertionStore(f.ink,f.store,bad),p=await service.preview(f.input),prepared=await service.prepare({...f.input,preview:p});const after=f.note.text.slice(0,p.changes.from)+p.changes.insert+f.note.text.slice(p.changes.to);await f.store.write('fixture.md',after,f.note.version);
- expect((await service.complete('fixture.md',prepared.operationId)).pending).toBe(1);const bytes=await readFile(path.join(f.root,'fixture.md'));
+ const f=await fixture(),service=f.insertions,p=await service.preview(f.input),prepared=await service.prepare({...f.input,preview:p});const after=f.note.text.slice(0,p.changes.from)+p.changes.insert+f.note.text.slice(p.changes.to);await f.store.write('fixture.md',after,f.note.version);
+ const write=vi.spyOn(f.ledger,'append').mockRejectedValue(new Error('Synthetic disk failure')),log=vi.spyOn(console,'warn').mockImplementation(()=>{});
+ try{expect((await service.complete('fixture.md',prepared.operationId)).pending).toBe(1);expect(write).toHaveBeenCalledTimes(2);expect(log).toHaveBeenCalledTimes(2);}finally{write.mockRestore();log.mockRestore();}const bytes=await readFile(path.join(f.root,'fixture.md'));
  expect((await new InsertionStore(f.ink,f.store,f.ledger).reconcile('fixture.md')).pending).toBe(0);expect(await readFile(path.join(f.root,'fixture.md'))).toEqual(bytes);expect((await f.ledger.read()).events).toHaveLength(1);
 });
 it('stale preview and untrusted geometry fail before asset or intent creation',async()=>{

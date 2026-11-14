@@ -1,6 +1,7 @@
 import {mkdtemp,writeFile,readFile,readdir,rm} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';import os from 'node:os';import path from 'node:path';
-import {afterEach,expect,it} from 'vitest';import {InkStore} from '../server/ink-store.ts';
+import {afterEach,expect,it,vi} from 'vitest';import {InkStore} from '../server/ink-store.ts';
+import {LedgerStore,appendLedger} from '../server/ledger-store.ts';
 import {ThreadStore} from '../server/thread-store.ts';import {UiStateStore} from '../server/ui-state-store.ts';
 import {captureAnchor} from '../shared/anchors.ts';import {serializeInk,validateDocument} from '../shared/ink.ts';
 import {threadStatus} from '../shared/threads.ts';import type {Result} from '../server/providers/index.ts';
@@ -18,6 +19,12 @@ async function fixture(ignored=true){
  return {root,ink,drafts,threads,get,version,act,begin};
 }
 const result=(id='r1',provider:'claude'|'chatgpt-plan'='claude'):Result=>({id,provider,model:null,answer:'Synthetic reply.',claims:[{sourceId:'N1',quote:text.trim()}],usage:null});
+it('thread reply and dismissal survive ledger failure, and delete never resurrects a reply when the audit queue flushes',async()=>{
+ const f=await fixture();await f.begin();const write=vi.spyOn(LedgerStore.prototype,'append').mockRejectedValue(new Error('ledger unavailable')),log=vi.spyOn(console,'warn').mockImplementation(()=>{});
+ try{await f.threads.completeReply('fixture.md','t1','r1',result(),sources);await f.act({type:'dismiss'});expect((await f.get()).document.items[0].thread?.dismissed).toBe(true);await f.act({type:'delete',confirmed:true});expect((await f.get()).document.items).toHaveLength(0);expect(log).toHaveBeenCalled();}
+ finally{write.mockRestore();log.mockRestore();}
+ await appendLedger(f.threads.ledger,{id:'flush',inkId:'flush',requestId:'flush',note:'fixture.md',event:'shown',at:new Date().toISOString()});expect((await f.get()).document.items).toHaveLength(0);expect((await f.threads.ledger.read()).events.some(e=>e.event==='dismissed')).toBe(true);
+});
 it('reads legacy v2 without rewriting and lazily migrates with a thread schema version',async()=>{
  const f=await fixture(),file=path.join(f.root,'ink/fixture.ink.json'),before=await readFile(file);
  expect((await f.threads.read('fixture.md')).document.items[0].thread?.schemaVersion).toBe(1);expect(await readFile(file)).toEqual(before);

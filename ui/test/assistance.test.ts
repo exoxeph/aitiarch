@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, writeFile, readdir, rm, unlink, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { Assistance } from '../server/assistance.ts';
 import { Store } from '../server/store.ts';
 import { InkStore } from '../server/ink-store.ts';
@@ -84,6 +84,14 @@ it('merges two out-of-order answers and deduplicates shown/dismissed ledger even
   expect(JSON.stringify(ledger)).not.toContain('Synthetic explanation');
   expect((await f.ink.read('fixture.md')).document.items[0].generation?.dismissed).toBe(true);
   expect(await readFile(path.join(f.root, 'fixture.md'))).toEqual(f.bytes);
+});
+it('shown and dismissed audit failure preserves the accepted answer and Markdown and flushes later',async()=>{
+ const f=await fixture();await f.service.start(f.input);f.complete();await f.service.wait(f.input.id);
+ const write=vi.spyOn(f.service.ledger,'append').mockRejectedValue(new Error('private disk error')),log=vi.spyOn(console,'warn').mockImplementation(()=>{});
+ try{await f.service.event('fixture.md',f.input.id,'shown');await f.service.event('fixture.md',f.input.id,'dismissed');expect(write).toHaveBeenCalledTimes(4);expect(log).toHaveBeenCalledTimes(4);
+  const item=(await f.ink.read('fixture.md')).document.items[0];expect(item.body).toBe('Synthetic explanation.');expect(item.generation?.dismissed).toBe(true);expect(await readFile(path.join(f.root,'fixture.md'))).toEqual(f.bytes);
+ }finally{write.mockRestore();log.mockRestore();}
+ await f.service.event('fixture.md',f.input.id,'shown');expect((await f.service.ledger.read()).events.map(e=>e.event)).toEqual(['shown','dismissed']);
 });
 it('rejects a disabled provider before persisting or invoking', async () => {
   const f = await fixture(); const service = new Assistance(f.store, f.ink, {
