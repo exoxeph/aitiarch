@@ -12,6 +12,27 @@
 
 <br>
 
+## &nbsp;Chat is a straight line. Thinking branches.
+
+Every AI chat is one column that scrolls away. You can't fork it, you can't park a failed attempt in it, and you can't see which idea led to which. The more the model does for you, the less you decide, until all that is left is pressing buttons. We call that **AI dumbification**, and a chat window is where it happens.
+
+Real work is a tree. You plan something, you try it, it works or it doesn't, and either way it branches: a win opens the next question, a failure opens three more. **Aitiarch is a notebook built for that shape.**
+
+<div align="center">
+<img src="docs/media/why-chat.gif" alt="A chat scrolls its failed attempt out of sight and the user asks why it was dropped, while a notebook shows the same work as a goal, a branch that worked with the user's takeaway, a branch that failed with the user's reason, and new threads, with Claude Code, Codex and a read-only repo copy as evidence" width="100%">
+</div>
+
+- **You write the thinking.** Plans, steps, what worked, what failed and why. The takeaway and the reasons are yours; the AI never writes them.
+- **Threads fork.** Any sentence can grow a thread. A failed attempt stays in the note, with its reason, instead of scrolling away.
+- **Claude Code and Codex are evidence, not authors.** Pull in the past sessions you choose, read exactly what will be sent, and have every claim checked against its source. *Investigate* works on a throwaway, read-only copy of your repo.
+- **The constellation shows what connects to what.** Notes become stars, links become lines, open threads glow.
+
+<div align="center">
+<img src="docs/media/why-branch.gif" alt="A thought is tried in code, then either worked or failed; the user writes the takeaway or the reason; each outcome branches into new threads; Aitiarch AI asks and checks but never writes those; over time the notes form a constellation map" width="100%">
+</div>
+
+<br>
+
 <div align="center">
 <img src="docs/media/demo.gif" alt="A notebook of engineering notes: thinking on a sentence, opening another note, drawing a diagram, and flying through a constellation of twenty-nine linked notes" width="86%">
 </div>
