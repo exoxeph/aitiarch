@@ -19,14 +19,17 @@
 <br>
 
 <div align="center">
-<img src="docs/media/wall.png" alt="Sessions, citations, diagrams and the constellation" width="100%">
+<img src="docs/media/wallA.png" alt="Bring in Claude Code and Codex sessions. Every claim checked against its source." width="100%">
+<img src="docs/media/wallB.png" alt="Turn a sentence into a diagram. See the whole notebook at once." width="100%">
 </div>
 
 <br>
 
 ## &nbsp;How a question travels
 
-<img src="docs/media/flow.png" alt="Note, threads, selection, Claude Code sessions and Codex sessions go into a review card you approve. An answer comes back with every claim checked. You keep it as a note, a diagram or a thread." width="100%">
+<div align="center">
+<img src="docs/media/pipeline.gif" alt="Claude Code and Codex sessions are redacted, join the note and the AI thoughts in a review card, go to Aitiarch AI, and come back as a cited answer and a new thought that keeps the thread going" width="100%">
+</div>
 
 <br>
 
