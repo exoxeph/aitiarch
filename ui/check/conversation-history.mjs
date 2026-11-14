@@ -65,7 +65,7 @@ try {
   await page.waitForTimeout(500);
   const afterReload = { picker: await picker(), turns: await turns(), asked: await asked() };
   console.log('after reload:', JSON.stringify(afterReload));
-  assert.match(afterReload.picker, /^Conversation 1/, 'the conversation is still the one chosen after a reload');
+  assert.match(afterReload.picker, /^First question on plan/, 'the conversation is still the one chosen after a reload, named after its first question');
   assert.deepEqual(afterReload.asked, ['First question on plan', 'Second question on plan'], 'both questions are shown after a reload, not "Question unavailable after reload"');
   assert.equal(await panel.locator('.chat-ai:not(.chat-streaming)').count(), 2, 'and both replies');
   assert.equal(await panel.getByText('Question unavailable after reload.').count(), 0);
@@ -75,7 +75,7 @@ try {
   await openNote('ideas.md'); await page.waitForTimeout(400);
   assert.deepEqual(await asked(), ['First question on plan', 'Second question on plan'], 'the same history on another note');
   assert.deepEqual(await chipLabels(), ['plan', 'plan'], 'the replies asked on plan are labelled plan');
-  assert.match(await picker(), /^Conversation 1/);
+  assert.match(await picker(), /^First question on plan/);
 
   // (c) Ask on ideas: the new turn is in the same conversation, labelled ideas.
   await ask('Question on ideas'); await waitTurns(3);
@@ -88,15 +88,15 @@ try {
   await newConversation(); await page.waitForFunction(() => /Conversation 2/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
   await waitTurns(0); assert.equal(await panel.locator('.chat-empty').count(), 1, 'the new conversation shows no messages');
   assert.deepEqual(await asked(), []);
-  await choose('Conversation 1'); await waitTurns(3);
+  await choose('First question on plan'); await waitTurns(3);
   assert.deepEqual(await asked(), ['First question on plan', 'Second question on plan', 'Question on ideas'], 'the first conversation\'s whole history returns, in order, from another note');
-  assert.match(await picker(), /^Conversation 1 · 3 messages/);
+  assert.match(await picker(), /^First question on plan · 3 messages/);
   await choose('Conversation 2'); await waitTurns(0);
   await ask('Only question in two'); assert.deepEqual(await asked(), ['Only question in two']);
   // A third conversation on the same note as the second: the panel changes to its empty history at once, and the second one's message returns when it is chosen again.
   await newConversation(); await page.waitForFunction(() => /Conversation 3/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? '')); await waitTurns(0); assert.deepEqual(await asked(), []);
-  await choose('Conversation 2'); await waitTurns(1); assert.deepEqual(await asked(), ['Only question in two']);
-  await choose('Conversation 1'); await waitTurns(3);
+  await choose('Only question in two'); await waitTurns(1); assert.deepEqual(await asked(), ['Only question in two']);
+  await choose('First question on plan'); await waitTurns(3);
 
   // (e) One-off chats stay per note: only that note's own history, never a conversation's replies.
   await choose('One-off'); await waitTurns(0); assert.equal(await panel.locator('.chat-empty').count(), 1, 'the one-off chat of ideas has no history yet');
@@ -107,7 +107,7 @@ try {
   await openNote('plan.md'); await waitTurns(1); assert.deepEqual(await asked(), ['One-off on plan']);
 
   // (f) Delete works from another note, and leaves each note's one-off history alone.
-  await openNote('ideas.md'); await choose('Conversation 1'); await waitTurns(3);
+  await openNote('ideas.md'); await choose('First question on plan'); await waitTurns(3);
   await panel.locator('.chat-pick-trigger').click(); await panel.locator('.chat-pick-actions').getByRole('button', { name: 'Delete' }).click();
   const confirm = panel.locator('.chat-sessions-delete'); await confirm.waitFor(); await page.waitForFunction(() => !document.querySelector('#chat-panel .chat-sessions-delete button')?.disabled);
   assert.match(await text(confirm), /started on plan\. 3 saved replies/);

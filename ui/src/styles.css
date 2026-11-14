@@ -749,7 +749,7 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .chat-pill { display: inline-flex; align-items: center; gap: 8px; align-self: center; margin-left: var(--space-2); padding: 6px 14px; border: 1px solid var(--rule); border-radius: 999px; background: var(--paper-2); color: var(--ink-text); font-size: var(--text-control); cursor: pointer; transition: border-color 160ms, background 160ms; }
 .chat-pill:hover, .chat-pill[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .chat-pill-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
-.chat-panel { grid-area: right; width: 380px; display: flex; flex-direction: column; min-height: 0; margin: var(--gutter) var(--gutter) var(--gutter) 0; overflow: hidden; background: var(--paper-2); border: 1px solid var(--rule); border-radius: var(--radius-page); box-shadow: var(--shadow-page); animation: chat-in 220ms cubic-bezier(.2, .8, .2, 1); }
+.chat-panel { grid-area: right; width: clamp(380px, 36vw, 620px); display: flex; flex-direction: column; min-height: 0; margin: var(--gutter) var(--gutter) var(--gutter) 0; overflow: hidden; background: var(--paper-2); border: 1px solid var(--rule); border-radius: var(--radius-page); box-shadow: var(--shadow-page); animation: chat-in 220ms cubic-bezier(.2, .8, .2, 1); }
 @keyframes chat-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
 .chat-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 16px 10px; }
 .chat-head h2 { margin: 0; font: 400 var(--text-panel-title)/1.3 var(--font-body); }
@@ -1383,4 +1383,27 @@ a.menu-row { text-decoration: none; }
 @media (prefers-reduced-motion: reduce) {
   .project-card { transition: border-color var(--motion-color); }
   .project-card:hover, .project-card:focus-within { transform: none; }
-}
+}/* The single box: replies keep a readable line length in the wider panel. */
+.chat-log > .chat-turn { max-width: 72ch; }
+.chat-wait { display: inline-block; margin-left: 8px; color: var(--muted); font: 400 var(--text-meta)/1.4 var(--font-ui); font-variant-numeric: tabular-nums; }
+p.chat-wait { margin: 4px 0 0; }
+/* Chips picked with "@": a note, a file (a refused one says why) or the repo. */
+.chat-attach { cursor: default; }
+.chat-attach button { padding: 0 2px; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.chat-attach button:hover { color: var(--ink-text); }
+.chat-attach[data-refused] { border-color: var(--danger); }
+.chat-attach-why { color: var(--muted); }
+.chat-attach[data-refused] .chat-attach-why { color: var(--danger); }
+/* The "@" picker: a list just above the composer. */
+.chat-composer { position: relative; }
+.chat-at { position: absolute; z-index: 60; left: 0; right: 0; bottom: calc(100% + 4px); max-height: 40vh; overflow: auto; padding: 4px; background: var(--paper-2); border: 1px solid var(--control-border); border-radius: var(--radius-card); box-shadow: var(--shadow-page); }
+.chat-at-opt { display: flex; gap: 8px; width: 100%; box-sizing: border-box; padding: 6px 8px; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--ink-text); font: 400 var(--text-control)/1.3 var(--font-ui); text-align: left; cursor: pointer; }
+.chat-at-opt[aria-selected="true"], .chat-at-opt:hover { background: var(--accent-soft); }
+.chat-at-kind { flex: none; min-width: 3.5em; color: var(--muted); }
+.chat-at-name { overflow-wrap: anywhere; }
+.chat-at-none { margin: 6px 8px; color: var(--muted); font: 400 var(--text-meta)/1.4 var(--font-ui); }
+/* The plan card inside the conversation, in the Investigate card's look. */
+.chat-plan { margin: 0; }
+.chat-plan-files, .chat-plan-withheld { margin: 0; padding-left: 16px; }
+.chat-plan-files li[data-status="refused"] { color: var(--danger); }
+.chat-repo-form { margin: 0 16px 6px; }

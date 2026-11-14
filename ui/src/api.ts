@@ -126,7 +126,34 @@ export async function streamInvestigate(body: { session: string; question: strin
   }
 }
 
+/** What every conversation call sends: the conversation, the note it is kept under, and the attachments. Never a profile or a cap: the server derives those. */
+export interface ConversationBody { conversationId: string; path: string; attachments: import("../shared/profile.ts").Attachments }
+/** PUT /api/conversation/turn as server-sent events, in either shape (chat or Investigate): the `start` event's `profile` says which. Unknown types are passed on. */
+export async function streamConversation(body: ConversationBody & { id: string; text: string; context?: unknown; selection?: string; editor?: unknown }, onEvent: (e: { type: string; [k: string]: unknown }) => void, signal?: AbortSignal): Promise<void> {
+  const res = await fetch(scoped("/api/conversation/turn"), { method: "PUT", credentials: "same-origin", signal, headers: { "Content-Type": "application/json", "X-Aitiarch": "1" }, body: JSON.stringify(body) });
+  if (!res.ok || !res.body) {
+    let data: any = null;
+    try { data = await res.json(); } catch { /* empty body */ }
+    throw new ApiError(res.status, data?.error ?? "error", data?.message ?? `Request failed (${res.status})`, data);
+  }
+  const reader = res.body.getReader(), decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    if (buffer.length > 2_000_000) throw new ApiError(0, "budget", "The turn sent too much at once and was stopped.");
+    const parsed = investigateFrames(buffer); buffer = parsed.rest;
+    for (const e of parsed.events) onEvent(e as { type: string });
+  }
+  for (const e of investigateFrames(buffer + decoder.decode() + "\n\n").events) onEvent(e as { type: string });
+}
+
 export const api = {
+  /** The one conversation API: "@" picker matches, the plan card for given attachments, and approving exactly that card. */
+  conversationFiles:(q:string)=>ok<{files:string[];notes:string[]}>('GET',`/api/conversation/files?q=${encodeURIComponent(q)}`),
+  conversationPlan:(body:ConversationBody&{budgetUsd?:number})=>ok<import('../server/harness/conversation.ts').ConversationPlan>('PUT','/api/conversation/plan',body),
+  conversationApprove:(body:ConversationBody&{budgetUsd?:number;hash:string})=>ok<{grant:unknown}>('PUT','/api/conversation/approve',body),
   /** A note's chat. With `session`, the same record but with that conversation's counters in `usage` (a conversation has its own budget). */
   chat:(path:string,session?:string)=>ok<ChatSnapshot>('GET',`/api/chat?path=${encodeURIComponent(path)}${session?'&session='+encodeURIComponent(session):''}`),
   chatCall:<T,>(action:string,body:unknown)=>ok<T>('PUT','/api/chat/'+action,body),

@@ -9,6 +9,10 @@ import type {ContextChip} from './chat-stub.ts';
 export type TurnStatus='review'|'streaming'|'complete'|'error';
 /** One question and its answer. `text` is provisional while streaming and the accepted message body once complete. */
 export interface Turn {id:string;question:string|null;status:TurnStatus;text:string;message?:ChatMessage;
+ /** What the turn may do, as its start event said (a conversation turn). 'investigate' turns are shown as a trail: inv holds that state, and the chat fields stay empty. */
+ profile?:import('../../shared/profile.ts').Profile;inv?:import('./investigate-model.ts').LiveTurn;
+ /** When the turn was sent (ms), for the wait line; and the stored time of a loaded one, for ordering the merged history. */
+ sentAt?:number;at?:string;
  /** The diagrams Claude opened in this turn, as live rows (a conversation turn that may open diagrams); the saved reply's diagramReads replace them once it is in. */
  opened?:{n:number;title:string;/** Set when it could not be opened (withheld): the reason. */why?:string}[];
  error?:{code:ChatErrorCode;rule?:string;reason?:FailureReason;errorName?:string;cause?:AbortCause;budget?:BudgetDetail;fence?:FenceCode;costUsd?:number;capUsd?:number}}
@@ -18,7 +22,7 @@ export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
  return turns.map(t=>{
   if(t.id!==event.id)return t;
   switch(event.type){
-   case 'start':return {...t,status:'streaming'};
+   case 'start':return {...t,status:'streaming',...(event.profile?{profile:event.profile}:{})};
    case 'delta':return {...t,status:'streaming',text:t.text+event.text};
    case 'diagram_read':return {...t,opened:[...(t.opened??[]),{n:event.n,title:event.title}]};
    case 'diagram_unavailable':return {...t,opened:[...(t.opened??[]),{n:event.n,title:event.title,why:event.why}]};

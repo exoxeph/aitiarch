@@ -138,7 +138,7 @@ try {
   assert.equal(await text(chip('switched')), 'Open note changed: Plan -> Ideas ×', 'the notice names both notes');
   assert.equal(await chip('switched').getAttribute('role'), 'status');
   assert.equal(await text(chip('note')), 'Open note · Ideas ×', 'the open note chip follows');
-  assert.match(await text(panel.locator('.chat-pick-trigger .chat-pick-value')), /^Conversation 1 · 2 messages$/, 'the conversation is still selected'); assert.equal(await text(panel.locator('.chat-pick-trigger .chat-pick-from')), 'started on plan', 'and says where it was started');
+  assert.match(await text(panel.locator('.chat-pick-trigger .chat-pick-value')), /^What does this paragraph mean\? · 2 messages$/, 'the conversation is still selected'); assert.equal(await text(panel.locator('.chat-pick-trigger .chat-pick-from')), 'started on plan', 'and says where it was started');
   assert.equal(await panel.locator('.chat-turn').count(), 2, 'its earlier messages are still there');
   assert.deepEqual(await chipWords(chipOf(1)), { label: 'plan', state: 'Found' }, 'the earlier reply\'s chip still names the note it was asked on, with the same state, now that another note is open');
   assert.match(await text(panel.locator('.chat-head h2')), /On ideas$/, 'the header names the open note');
@@ -204,14 +204,14 @@ try {
   assert.equal(provider.requests.length, 1); assert.equal(provider.requests[0].editor, line4, 'the provider request carries the line');
   assert.match(await footer(), /^1 call · /, 'a one-off chat counts against its note, not against the conversation');
   const usageNow = (await page.evaluate(() => fetch('/api/usage').then((r) => r.json()))).chats;
-  const owned = usageNow.filter((c) => c.session); assert.equal(owned.length, 1, 'one conversation has counters'); assert.deepEqual([owned[0].note, owned[0].label, owned[0].calls], ['plan.md', 'Conversation 1', 3], 'its own, under the note it started on');
+  const owned = usageNow.filter((c) => c.session); assert.equal(owned.length, 1, 'one conversation has counters'); assert.deepEqual([owned[0].note, owned[0].label, owned[0].calls], ['plan.md', 'What does this paragraph mean?', 3], 'its own, under the note it started on');
   assert.equal(usageNow.find((c) => !c.session && c.note === 'ideas.md').calls, 1, 'the note the conversation visited keeps its own one-off count'); assert.equal(usageNow.filter((c) => !c.session && c.note === 'plan.md').reduce((n, c) => n + c.calls, 0), 0, 'and the starting note\'s one-off chat did not pay for the conversation');
   assert.match(provider.requests[0].selection, /^One idea only\.$/);
   // Switching notes in a one-off chat is another chat on the other note, as before: no notice.
   await openNote('plan.md'); await page.waitForFunction(() => /On plan$/.test(document.querySelector('#chat-panel .chat-head h2')?.textContent ?? ''));
   assert.match(await footer(), /^No calls yet/, 'on Plan the one-off chat has made no calls, though the conversation started there made three');
   // Choosing the conversation again brings its own counters back from the server.
-  await panel.locator('.chat-pick-trigger').click(); await panel.locator('.chat-pick-opt', { hasText: /^Conversation 1/ }).click();
+  await panel.locator('.chat-pick-trigger').click(); await panel.locator('.chat-pick-opt', { hasText: /^What does this paragraph mean\?/ }).click();
   await page.waitForFunction(() => /^This conversation · 3 calls/.test(document.querySelector('#chat-panel .chat-usage')?.textContent ?? ''));
   assert.equal(await panel.locator('.chat-sends [data-chip="switched"]').count(), 0);
   assert.equal(await text(chip('note')), 'Open note · Plan ×');
@@ -223,12 +223,12 @@ try {
   const confirm = panel.locator('.chat-sessions-delete'); await confirm.waitFor();
   const said = () => confirm.evaluate((e) => [...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').replace(/\s+/g, ' ').trim());
   const del = confirm.getByRole('button', { name: 'Delete', exact: true });
-  assert.equal(await said(), 'Delete “Conversation 1”? Counting its saved replies…', 'while the server counts'); assert.equal(await del.isDisabled(), true, 'Delete waits for the count');
+  assert.equal(await said(), 'Delete “What does this paragraph mean?”? Counting its saved replies…', 'while the server counts'); assert.equal(await del.isDisabled(), true, 'Delete waits for the count');
   await page.waitForFunction(() => !document.querySelector('#chat-panel .chat-sessions-delete button')?.disabled);
-  assert.equal(await said(), 'Delete “Conversation 1”? It was started on plan. 3 saved replies in that note’s chat are removed. Claude’s own record of the conversation and its questions are removed too.', 'the confirmation names the note and the number of saved replies');
+  assert.equal(await said(), 'Delete “What does this paragraph mean?”? It was started on plan. 3 saved replies in that note’s chat are removed. Claude’s own record of the conversation and its questions are removed too.', 'the confirmation names the note and the number of saved replies');
   assert.equal(await del.isEnabled(), true);
   await confirm.getByRole('button', { name: 'Keep' }).click(); await confirm.waitFor({ state: 'detached' }); await page.unroute('**/api/harness/sessions/replies*');
-  assert.match(await text(panel.locator('.chat-pick-trigger .chat-pick-value')), /^Conversation 1 · 3 messages$/, 'Keep removed nothing'); assert.match(await footer(), /^This conversation · 3 calls · /);
+  assert.match(await text(panel.locator('.chat-pick-trigger .chat-pick-value')), /^What does this paragraph mean\? · 3 messages$/, 'Keep removed nothing'); assert.match(await footer(), /^This conversation · 3 calls · /);
   await openNote('plan.md'); await chip('switched').waitFor();
 
   // 9. Removing the note for a message: the line says it was not sent, and no note source goes.
@@ -243,7 +243,7 @@ try {
   // 10. A conversation started on a note with a very long name, then another note opened: the picker says "started on <name>", cut with an ellipsis and the full name in a tooltip; nothing overflows at 374 px.
   await openNote(LONG + '.md');
   await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('#chat-panel .chat-pick-trigger [data-x]') === null && /Conversation 2/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
+  await page.waitForFunction(() => document.querySelector('#chat-panel .chat-pick-trigger [data-x]') === null && /Conversation \d+ · 0 messages/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? '')); // a new, empty conversation
   await openNote('ideas.md'); await chip('switched').waitFor();
   const from = panel.locator('.chat-pick-trigger .chat-pick-from'); await from.waitFor();
   assert.match(await text(from), /^started on a-very-long-note-name/);

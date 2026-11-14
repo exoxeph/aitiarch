@@ -135,6 +135,7 @@ const reply = scenario === 'visual-claim' ? 'The boxes are in a row.\n<claims>[{
   : scenario === 'echo-manifest' ? `${firstLine}\n\nThe note is about the plan.\n<claims>{"none":"opinion"}</claims>`
   : scenario === 'slow-stream' ? Array.from({ length: 150 }, (_, i) => 'word' + i).join(' ') + '.\n<claims>{"none":"opinion"}</claims>' : scenario === 'quote-missing' ? 'It says something else.\n<claims>[{"source":"N1","quote":"Words that are not in the note."}]</claims>'
   : `${args.includes('--resume') ? 'Resumed.' : 'Started.'} The note says the store is local.\n<claims>[{"source":"N1","quote":"A unique sentence for the session."}]</claims>`;
+if (scenario === 'slow-start') await new Promise((r) => setTimeout(r, 2600)); // a pause before the first text, for the wait line
 out({ type: 'stream_event', event: { type: 'message_start', message: {} } });
 out({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } });
 if (scenario === 'tool-use') out({ type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', name: 'Read', input: {} } } });
