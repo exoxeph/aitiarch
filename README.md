@@ -35,6 +35,12 @@
 
 ## &nbsp;01 &nbsp; Ink beside the text, never inside it
 
+<div align="center">
+<img src="docs/media/pipe-ink.gif" alt="Select a sentence, press Think on this, and Aitiarch AI puts a thought in the margin. The thought and its anchor live in a file beside yours, and your Markdown stays untouched." width="100%">
+</div>
+
+<br>
+
 <img src="docs/media/editor.png" alt="The editor: AI thoughts float in the margin, tied to the exact sentence they are about" width="100%">
 
 Select a sentence. A thought grows in the margin and stays tied to it, with a filled **AI** tag, so you always know whose words you are reading.
@@ -43,6 +49,12 @@ Your note stays **byte-for-byte your Markdown**. The ink lives next to the file,
 <br>
 
 ## &nbsp;02 &nbsp; See exactly what leaves the machine
+
+<div align="center">
+<img src="docs/media/pipe-review.gif" alt="Your question, the note, the threads, the instructions and the budget are gathered into a review card. Nothing is sent until you press Send." width="100%">
+</div>
+
+<br>
 
 <img src="docs/media/review-card.png" alt="The review card lists the question, the note, the threads, the instructions and the token budget before anything is sent" width="100%">
 
@@ -53,7 +65,7 @@ Every message gets a review card first: your question, the note, the threads, th
 ## &nbsp;03 &nbsp; Bring in your Claude Code and Codex sessions
 
 <div align="center">
-<img src="docs/media/sessions.gif" alt="Picking a Claude Code session and a Codex session, previewing the redacted text, sending, and getting a cited answer" width="86%">
+<img src="docs/media/pipe-sessions.gif" alt="Pick Claude Code and Codex sessions, secrets are redacted, you preview exactly what will be sent, and they join as context chips on the review card" width="100%">
 </div>
 
 <br>
@@ -67,6 +79,12 @@ Chats that carry sessions stay in memory only, and *Add to note* is switched off
 
 ## &nbsp;04 &nbsp; Every claim, checked against its source
 
+<div align="center">
+<img src="docs/media/pipe-cites.gif" alt="Each quoted claim in an answer is searched for in its own source and comes back as Found or Quote not found" width="100%">
+</div>
+
+<br>
+
 <img src="docs/media/citations.png" alt="Source chips under an answer: the note, a thread and two sessions found; one quote not found" width="100%">
 
 Each claim in an answer becomes a chip: the note, a thread, a session. The app looks for the quoted words in that exact source and says **Found** or **Quote not found**. Words, never colour alone.
@@ -76,17 +94,17 @@ Each claim in an answer becomes a chip: the note, a thread, a session. The app l
 ## &nbsp;05 &nbsp; Add to note, as plain Markdown
 
 <div align="center">
-<img src="docs/media/addnote.gif" alt="Asking a question, then adding the answer to the note under the sentence it is about" width="86%">
+<img src="docs/media/pipe-addnote.gif" alt="Add to note inserts the reply as an AI-labelled Markdown callout under the sentence it is about, with one undo and your bytes untouched" width="100%">
 </div>
 
-One click puts the answer in the note as an AI-labelled callout. It is ordinary Markdown, one undo away.
+One click puts the answer in the note as an AI-labelled callout. It is ordinary Markdown, one undo away, and your BOM and line endings stay as they were.
 
 <br>
 
 ## &nbsp;06 &nbsp; Turn a sentence into a diagram
 
 <div align="center">
-<img src="docs/media/diagram.gif" alt="Selecting a sentence, choosing Visualize, reviewing, and getting a diagram that is then added to the note" width="86%">
+<img src="docs/media/pipe-diagram.gif" alt="Select a sentence and press Visualize, review, Aitiarch AI sketches the diagram, it is checked and repaired, appears in the margin, and can be added to the note as an image" width="100%">
 </div>
 
 <br>
@@ -100,7 +118,7 @@ Select a sentence, press **Visualize**, review, send. The diagram appears in the
 ## &nbsp;07 &nbsp; See the whole notebook at once
 
 <div align="center">
-<img src="docs/media/constellation.gif" alt="Flying through the constellation: notes as stars, links between them, open threads glowing" width="86%">
+<img src="docs/media/pipe-constellation.gif" alt="Your notes are read for links and drawn as a constellation: links become lines, open threads glow, broken links are flagged" width="100%">
 </div>
 
 <br>
@@ -151,4 +169,4 @@ The notebook opens in your browser. Details and the practice notebook: [ui/READM
 
 <br>
 
-<div align="center"><sub>Every screenshot and clip is the real app on a synthetic notebook, with fake providers and fake sessions.</sub></div>
+<div align="center"><sub>Every screenshot and clip is the real app, or built from it, on a synthetic notebook with fake providers and fake sessions.</sub></div>
