@@ -19,6 +19,7 @@ function UsagePane(){
  useEffect(()=>{let off=false;const load=async()=>{try{const u=await api.usage();if(!off){setUsage(u);setFailed(false);}}catch{if(!off)setFailed(true);}};void load();const timer=setInterval(()=>void load(),2000);return()=>{off=true;clearInterval(timer);};},[]);
  return <div className="settings-section">
   {usage?.cli&&cliNotice(usage.cli)&&<p className="settings-warn" role="status" data-notice="cli-version">{cliNotice(usage.cli)}</p>}
+  {usage?.councilCli?.message&&<p className="settings-warn" role="status" data-notice="codex-version">{usage.councilCli.message}</p>}
   <h3>Chat tokens, live</h3>
   <p className="settings-lead">Each chat has its own budget. These bars update while this screen is open.</p>
   {failed&&<p className="settings-warn" role="status">The usage log is unavailable right now.</p>}

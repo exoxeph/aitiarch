@@ -1,0 +1,6 @@
+import {readFileSync,writeFileSync} from 'node:fs';import {createHash} from 'node:crypto';import {spawnSync} from 'node:child_process';import path from 'node:path';import {fileURLToPath} from 'node:url';
+const root=fileURLToPath(new URL('../',import.meta.url)),hash=b=>createHash('sha256').update(b).digest('hex');let failed=false;
+for(const [name,file,from,to] of [
+ ['version','server/providers/tool-less.ts','if(found!==CODEX_VERSION)','if(false)'],
+ ['path','server/providers/codex-command.ts',"throw Error('Codex needs an existing absolute local executable file.');",'{}'],
+]){const target=path.join(root,file),original=readFileSync(target),text=original.toString();if(text.split(from).length!==2)throw Error('Missing unique mutation target');let killed=false,restored=false;try{writeFileSync(target,text.replace(from,to));const r=spawnSync(process.execPath,['node_modules/vitest/vitest.mjs','run','test/codex-command.test.ts','--maxWorkers=1'],{cwd:root,encoding:'utf8',timeout:30000,windowsHide:true});killed=r.status===1&&/AssertionError/.test(r.stdout+r.stderr);}finally{writeFileSync(target,original);restored=hash(readFileSync(target))===hash(original);}console.log(JSON.stringify({name,killed,restored}));failed ||=!killed||!restored;}process.exitCode=failed?1:0;

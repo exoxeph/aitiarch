@@ -1,4 +1,5 @@
 import path from 'node:path';import {existsSync} from 'node:fs';import {createProvider} from './index.ts';import {claudeTurn} from './claude-turn.ts';import {createCliAdapter} from './tool-less.ts';import type {TurnAdapter} from './turn.ts';
+import {validateCodexCommand} from './codex-command.ts';
 /** Native executables only: no shell, npm shim or credential/config discovery. */
 function nativeCommand(name:string){
  const candidates=(process.env.PATH??'').split(path.delimiter).map(p=>path.join(p,process.platform==='win32'?name+'.exe':name));
@@ -11,7 +12,7 @@ function nativeCommand(name:string){
  }
  return candidates.find(p=>path.isAbsolute(p)&&existsSync(p))??path.join(process.cwd(),'__unavailable_'+name+(process.platform==='win32'?'.exe':''));
 }
-export function councilAdapters(claudeCommand?:string):TurnAdapter[]{return [
+export function councilAdapters(claudeCommand?:string,codexCommand?:string):TurnAdapter[]{return [
  ...(claudeCommand?[claudeTurn(createProvider({provider:'claude',command:claudeCommand,contract:'claude-canary-2.1.205'}))]:[]),
- createCliAdapter({id:'codex',command:nativeCommand('codex')}),createCliAdapter({id:'kiro',command:nativeCommand('kiro-cli')})
+ createCliAdapter({id:'codex',command:codexCommand===undefined?nativeCommand('codex'):validateCodexCommand(codexCommand)}),createCliAdapter({id:'kiro',command:nativeCommand('kiro-cli')})
 ];}

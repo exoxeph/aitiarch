@@ -22,9 +22,9 @@ export function validDiagramReadAudit(v:unknown):v is DiagramReadAudit {if(!v||t
  return Object.keys(x).sort().join()==='asset,bytes,hash,id,note'&&/^D[1-9]$/.test(x.id)&&/^(?:ai-)?diagram-[a-f0-9]{64}$/.test(x.asset)&&/^[a-f0-9]{64}$/.test(x.hash)&&typeof x.bytes==='number'&&Number.isSafeInteger(x.bytes)&&x.bytes>=1&&x.bytes<=10_000_000
   &&typeof x.note==='string'&&x.note.length>=1&&x.note.length<=400&&!/[\u0000-\u001f\u007f]/.test(x.note);}
 /** The Claude Code CLI's version, written at the first turn of a conversation: the diagram fence was verified on one version. */
-export interface CliVersionAudit {version:string;session:string}
+export interface CliVersionAudit {version:string;session:string;provider?:'codex'}
 export function validCliVersionAudit(v:unknown):v is CliVersionAudit {if(!v||typeof v!=='object'||Array.isArray(v))return false;const x=v as CliVersionAudit;
- return Object.keys(x).sort().join()==='session,version'&&typeof x.version==='string'&&/^[0-9]{1,4}(?:\.[0-9]{1,4}){1,3}[0-9A-Za-z.+-]{0,30}$/.test(x.version)&&typeof x.session==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(x.session);}
+ return (Object.keys(x).sort().join()==='session,version'||Object.keys(x).sort().join()==='provider,session,version'&&x.provider==='codex')&&typeof x.version==='string'&&/^[0-9]{1,4}(?:\.[0-9]{1,4}){1,3}[0-9A-Za-z.+-]{0,30}$/.test(x.version)&&typeof x.session==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(x.session);}
 /** The selection that went with a request: its size and, when the editor said it, its line range. Never any text. */
 export interface ContextSelectionAudit {chars:number;fromLine?:number;toLine?:number}
 const whole=(v:unknown,min:number,max:number)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=min&&v<=max;

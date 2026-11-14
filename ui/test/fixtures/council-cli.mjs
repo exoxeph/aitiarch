@@ -1,10 +1,11 @@
 // Synthetic protocol data only. Never invokes a provider.
 import readline from 'node:readline';import fs from 'node:fs';import path from 'node:path';
 const mode=process.argv[2];const args=process.argv.slice(3);const out=e=>console.log(JSON.stringify(e));
+if(mode==='alpha'&&args.includes('--version')){console.log('codex-cli 0.169.0-alpha.11.1');process.exit();}
 const record=args[0]&&path.isAbsolute(args[0])?args.shift():null;
 if(record&&(args.includes('--version')||args.includes('--help')))fs.appendFileSync(record,JSON.stringify(args)+'\n');
 if(fs.readdirSync(process.cwd()).length)process.exit(91);
-if(args.includes('--version')){console.log(mode.startsWith('kiro')||['permission','no-inventory','refusal','replay'].includes(mode)?'kiro-cli 3.3.0':'codex-cli 0.145.0');process.exit();}
+if(args.includes('--version')){console.log(mode.startsWith('kiro')||['permission','no-inventory','refusal','replay'].includes(mode)?'kiro-cli 3.3.0':'codex-cli 0.167.0');process.exit();}
 if(args.includes('--help')){if(['metadata-hang','help-hang'].includes(mode)){setInterval(()=>{},1000);}else{console.log(args.includes('acp')?'--agent-engine --agent':'--json --ephemeral --ignore-user-config --ignore-rules --sandbox read-only --skip-git-repo-check --color --cd --config --disable');process.exit();}}
 if(!args.includes('acp')){
  if(mode==='runtime-error'){process.stdin.resume();process.stdin.on('end',()=>{out({type:'item.completed',item:{type:'error',message:'Code Mode is unavailable because code-mode host is disabled.'}});out({type:'turn.completed',usage:{input_tokens:20000,output_tokens:1}});});}else

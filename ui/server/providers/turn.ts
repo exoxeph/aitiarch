@@ -5,7 +5,7 @@ export type UsageUnit='usd'|'tokens'|'credits';
 export interface TurnUsage {unit:UsageUnit;amount:number;afterTurn:boolean}
 export interface TurnInput {question:string;notes:readonly {id:string;label:string;text:string}[];deadlineMs:number;maxOutputBytes:number;cap:{unit:UsageUnit;amount:number}}
 export type TurnEvent={type:'start'}|{type:'delta';text:string}|{type:'complete';answer:string}|{type:'refusal';code:string}|{type:'error';code:string}|{type:'usage';usage:TurnUsage};
-export interface TurnAdapter {id:string;label:string;safetyLabel:SafetyLabel;startTurn(input:TurnInput,signal:AbortSignal):AsyncIterable<TurnEvent>}
+export interface TurnAdapter {id:string;label:string;safetyLabel:SafetyLabel;status?:()=>{version?:string;message?:string};startTurn(input:TurnInput,signal:AbortSignal):AsyncIterable<TurnEvent>}
 export type TurnStatus='ok'|'refused'|'unavailable'|'timeout'|'error';
 export interface TurnResult {provider:string;safetyLabel:SafetyLabel;status:TurnStatus;answer:string;usage:TurnUsage[];durationMs:number;code?:string;message?:string}
 export class TurnFailure extends Error {code:string;status:TurnStatus;constructor(code:string,status:TurnStatus='error',message=code){super(message);this.code=code;this.status=status;}}

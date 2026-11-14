@@ -4,6 +4,7 @@ import http from "node:http";
 import { spawn } from "node:child_process";
 import { createSecurity } from "./security.ts";
 import {councilAdapters} from './providers/council-adapters.ts';
+import {validateCodexCommand} from './providers/codex-command.ts';
 import { createHost } from "./host.ts";
 import { Registry, RegistryError, resolveConfigFolder, type ProjectEntry } from "./registry.ts";
 import { DEFAULT_PORT, clearInstance, listenOrReuse, readInstance, writeInstance } from "./launch.ts";
@@ -17,18 +18,19 @@ import { ChatGPTPlan } from "./providers/chatgpt-plan.ts";
 import { sweepStaleProviderTemps } from "./providers/temp-cleanup.ts";
 
 function parseArgs(argv: string[]) {
-  const o = { root: undefined as string | undefined, port: undefined as number | undefined, open: true, origins: [] as string[], claude: undefined as string | undefined, chatgptPlan:false, devSession:false };
+  const o = { root: undefined as string | undefined, port: undefined as number | undefined, open: true, origins: [] as string[], claude: undefined as string | undefined, codex:undefined as string|undefined, chatgptPlan:false, devSession:false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--root") o.root = argv[++i] ?? "";
     else if (a === "--port") o.port = Number(argv[++i]);
     else if (a === "--allow-origin") o.origins.push(argv[++i] ?? "");
     else if (a === "--claude") o.claude = argv[++i] ?? "";
+    else if (a === '--codex') o.codex=validateCodexCommand(argv[++i]??'');
     else if (a === "--chatgpt-plan") o.chatgptPlan = true;
     else if (a === "--no-open") o.open = false;
     else if (a === "--dev-session") o.devSession = true; // contributors only: Vite on another port never sees the launch link
     else if (a === "--help" || a === "-h") {
-      console.log("usage: aitiarch [--root <folder>] [--port N] [--no-open] [--claude <absolute native executable> | --chatgpt-plan]\nDefault root: ./.aitiarch in the current directory. ChatGPT plan is disabled unless --chatgpt-plan is supplied. Each provider requires an explicit action per call.");
+      console.log("usage: aitiarch [--root <folder>] [--port N] [--no-open] [--codex <absolute native executable>] [--claude <absolute native executable> | --chatgpt-plan]\nDefault root: ./.aitiarch in the current directory. ChatGPT plan is disabled unless --chatgpt-plan is supplied. Each provider requires an explicit action per call.");
       process.exit(0);
     } else {
       console.error(`Unknown argument: ${a}`);
@@ -73,7 +75,7 @@ const openProject = async (entry: ProjectEntry) => {
   if (plan) plans.add(plan);
   const usage = new UsageLogs({ notebookRoot: store.rootReal });
   const provider = plan ?? (args.claude ? createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205", usageLog: usage }) : undefined);
-  const app = createApp({ store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, council:{adapters:councilAdapters(args.claude)}, harness: args.claude ? { command: args.claude } : undefined });
+  const app = createApp({ store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, council:{adapters:councilAdapters(args.claude,args.codex)}, harness: args.claude ? { command: args.claude } : undefined });
   return { handle: app.handle, close: async () => { watcher.stop(); await plan?.close(); await app.close(); } };
 };
 const host = createHost({ registry: registry!, security, distDir, openProject, defaultProject: () => defaultId });

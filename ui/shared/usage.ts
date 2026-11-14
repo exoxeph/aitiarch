@@ -6,4 +6,4 @@ export interface UsageTotals {
 export interface InvestigateUsage {turns:number;input:number;cached:number;output:number;costUsd:number;ledgerUnavailable?:true;/** Turns that gave no token counts or no cost (stopped before the CLI reported them). */unreportedTurns:number}
 export interface UsageSummary {since:string;hourlyCap:number;providers:UsageTotals[];privateUsageUnavailable?:true;chats?:import('./chat.ts').ChatUsage[];investigate?:InvestigateUsage;
  /** The Claude Code CLI the conversations use: its version (null when it could not be read) and the version the diagram fence was verified on. Absent without the CLI. */
- cli?:{version:string|null;tested:string}}
+ councilCli?:{version?:string;message?:string};cli?:{version:string|null;tested:string}}

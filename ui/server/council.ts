@@ -8,6 +8,7 @@ const sha=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('he
 const unsigned=(g:CouncilGrant)=>{const {confirmed,...rest}=g;return rest;};
 export interface CouncilOptions {store:Store;ink:InkStore;index:SessionIndex;ledger:LedgerStore;adapters:TurnAdapter[]}
 export class CouncilService {
+ private versionsLogged=new Set<string>();
  private o:CouncilOptions;private project:string;private running=new Set<string>();private aborters=new Set<AbortController>();
  constructor(o:CouncilOptions){this.o=o;this.project=projectId(o.store.rootReal);}
  private async clean(raw:unknown){
@@ -44,6 +45,8 @@ export class CouncilService {
     const invalid=block.block==='missing'||block.block==='malformed'||!reply.body.trim()||!!reply.citation||reply.claims.some(c=>c.status!=='found')||secretKinds(reply.body).length>0;
     if(invalid)result={...result,status:'error',answer:'',code:'answer_validation'};else result={...result,answer:redact(reply.body)};
    }
+   const version=adapter?.status?.().version,key=b.conversation+':'+id;
+   if(id==='codex'&&version&&version!=='unknown'&&!this.versionsLogged.has(key)){const saved=await appendLedger(this.o.ledger,{id:randomUUID(),inkId:b.conversation,requestId:randomUUID(),note:'',event:'cli_version',at:new Date().toISOString(),cli:{provider:'codex',session:b.conversation,version}});if(saved)this.versionsLogged.add(key);else ledgerUnavailable=true;}
    const saved=await appendLedger(this.o.ledger,{id:randomUUID(),inkId:b.conversation,requestId:randomUUID(),note:'',event:'council_turn',at:new Date().toISOString(),council:{provider:id,status:result.status,usage:result.usage,durationMs:Math.round(result.durationMs)}});if(!saved)ledgerUnavailable=true;
    return result;
   }));
