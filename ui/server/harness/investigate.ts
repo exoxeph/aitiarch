@@ -18,6 +18,8 @@ import {sessionUsage} from './claude-session.ts';
 import {finishFileReply,readRepoFile} from './file-claims.ts';
 import {classifyFailure,cleanToolText} from '../../shared/tool-errors.ts';
 import type {SessionIndex} from './session-index.ts';
+import {buildCarriedHistory,type Authorized,type ConversationGate} from './conversation.ts';
+import {covers,needOf} from '../../shared/profile.ts';
 import {snapshotDrift,syncSnapshot,SNAPSHOT_LIMITS,type Drift} from './snapshot.ts';
 import {captureFolder,folderChanges,restoreFolder} from './tripwire.ts';
 import {activeTurnDirs} from './sweep.ts';
@@ -53,7 +55,7 @@ export interface InvestigateTurn {id:string;question:string;at:string;message?:I
 export interface Tripwire {notebook:Drift;snapshot:Drift}
 export interface InvestigateMessage {id:string;body:string;/** Narration and tool calls in order; the answer is `body`. */trail:TrailItem[];claims:ChatClaim[];citation?:CitationIssue;usage:ReturnType<typeof sessionUsage>;costUsd:number|null;turns:number;steps:ToolStep[];permissionDenials:string[];tripwire:Tripwire;unknownEvents:number}
 export type InvestigateEvent=
- |{type:'start';id:string}
+ |{type:'start';id:string;profile?:'investigate'}
  |{type:'step';index:number;step:ToolStep}
  |{type:'step_result';index:number;ok:boolean;denial?:string;error?:string}
  |{type:'delta';text:string}
@@ -154,7 +156,16 @@ function addTurn(sum:InvestigateUsage,t:InvestigateTurnAudit){
 }
 const randomId=()=>'inv-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
 
-export interface InvestigateConfig {index:SessionIndex;dir:string;notebook:string;command:string;prefixArgs?:string[];model?:string;limits?:Partial<typeof INVESTIGATE_LIMITS>}
+export interface InvestigateConfig {index:SessionIndex;dir:string;notebook:string;command:string;prefixArgs?:string[];model?:string;limits?:Partial<typeof INVESTIGATE_LIMITS>;
+ /** The decision point for what a conversation may do. Absent: an investigation runs on its confirmed plan alone (the older behaviour). */
+ gate?:ConversationGate;
+ /** Earlier questions and final answers of a conversation, for a fresh CLI session after its profile changed. */
+ carried?:(session:HarnessSession)=>Promise<{question:string;answer:string}[]>}
+/** What one run needs, whichever way it was authorised: an older confirmed investigation (the whole repo) or a granted conversation (the repo, or just the attached files). */
+interface RunSpec {id:string;repo:string;/** Only these repo files are in the copy; absent: the whole repo. */files?:string[];budgetUsd:number;
+ /** Called when a run stops on its cost cap or the safety backstop: the next turn needs the card again. */onCapStop:()=>Promise<unknown>;
+ /** The attached files the run is told to start with (the whole copy when the repo is attached too). */focus?:string[];
+ /** The one line that starts the message: what was attached, and the diagrams withheld because the repo is. Never any file text. */prefix?:string}
 export class InvestigateService {
  private o:InvestigateConfig;private limits:typeof INVESTIGATE_LIMITS;private plans=new Map<string,Plan>();private running=new Map<string,AbortController>();
  private last=new Map<string,{changes:Drift;backup:string}>();
@@ -175,9 +186,15 @@ export class InvestigateService {
   await this.ledger.append({id:randomUUID(),inkId:'investigate-'+session,requestId,note:'',event:'investigate_turn',at:new Date().toISOString(),turn}).catch(()=>{}); // a ledger that cannot be written never fails the turn
  }
  /** The copy's folder for a repo: stable, so the CLI can find the session again. */
- snapshotFolder(repo:string){const base=path.join(this.o.dir,'snapshots',sha(repo.toLowerCase()).slice(0,16));return {base,files:path.join(base,'files'),manifest:path.join(base,'manifest.json')};}
- async snapshotCwd(repo:string){const d=this.snapshotFolder(repo);await mkdir(d.files,{recursive:true});return realpath(d.files);}
- private async session(id:string):Promise<HarnessSession&{repo:string}>{const s=await this.o.index.get(id);if(!s||s.mode!=='investigate'||!s.repo)throw new InvestigateError('not_investigation');return s as HarnessSession&{repo:string};}
+ snapshotFolder(repo:string,files?:readonly string[]){const base=path.join(this.o.dir,'snapshots',sha(repo.toLowerCase()+(files?'\n'+[...files].sort().join('\n'):'')).slice(0,16));return {base,files:path.join(base,'files'),manifest:path.join(base,'manifest.json')};}
+ async snapshotCwd(repo:string,files?:readonly string[]){const d=this.snapshotFolder(repo,files);await mkdir(d.files,{recursive:true});return realpath(d.files);}
+ /** An investigation, or a conversation that was granted Investigate (its repo is the project's chosen one). */
+ private async session(id:string):Promise<HarnessSession&{repo:string}>{
+  const s=await this.o.index.get(id);
+  if(s&&s.mode==='investigate'&&s.repo)return s as HarnessSession&{repo:string};
+  if(s&&s.mode==='chat'&&s.grant?.profile==='investigate'){const repo=await this.repo();if(repo)return {...s,repo};}
+  throw new InvestigateError('not_investigation');
+ }
  /** The repo folder chosen for this project (once; it can be changed). Kept next to the session index, outside the repo. */
  async repo():Promise<string|null>{try{const d=JSON.parse(await readFile(path.join(this.o.dir,'repo.json'),'utf8'));return d?.v===1&&typeof d.repo==='string'?d.repo:null;}catch{return null;}}
  async chooseRepo(repo:unknown){const real=await this.validRepo(repo);await mkdir(this.o.dir,{recursive:true});const f=path.join(this.o.dir,'repo.json');await writeFile(f+'.tmp',JSON.stringify({v:1,repo:real}));await rename(f+'.tmp',f);return real;}
@@ -225,19 +242,44 @@ export class InvestigateService {
   *  as soon as that session's turn starts. */
  private early=new Map<string,number>();
  cancel(id:string){const c=this.running.get(id);if(c)c.abort();else this.early.set(id,Date.now());}
+ /** An older investigation: it runs on the plan it confirmed. With the gate present its rights are read the same way as everything else's (a confirmed plan is repo access at its cap). */
  async send(id:string,question:unknown,emit:(e:InvestigateEvent)=>void,signal?:AbortSignal):Promise<void>{
   if(typeof question!=='string'||!question.trim()||question.length>4000)throw new InvestigateError('invalid');
-  const s=await this.session(id);if(!s.confirmed)throw new InvestigateError('plan_required');
+  const s=await this.session(id);
+  if(this.o.gate){const {grant}=this.o.gate.effective(s);if(!covers(grant,needOf({files:[],repo:true},false)))throw new InvestigateError('plan_required');}
+  else if(!s.confirmed)throw new InvestigateError('plan_required');
+  return this.run({id,repo:s.repo,budgetUsd:s.budgetUsd??this.limits.budgetUsd,onCapStop:()=>this.o.index.unconfirm(id)},question,emit,signal);
+ }
+ /** A turn of a conversation that carries files or the repo. The gate has already decided it is covered; it runs at exactly the grant's cap, and with files only it reads a copy of just those files. */
+ async sendGranted(auth:Authorized,question:unknown,emit:(e:InvestigateEvent)=>void,signal?:AbortSignal,withheld?:{n:number;title:string}[]):Promise<void>{
+  if(typeof question!=='string'||!question.trim()||question.length>4000)throw new InvestigateError('invalid');
+  if(auth.profile!=='investigate'||!auth.repo)throw new InvestigateError('not_investigation');
+  const scoped=auth.attachments.repo?undefined:auth.files;
+  const line=[auth.attachments.repo?'Attached this turn: the repo'+(auth.files.length?'; start with '+auth.files.join(', '):''):'Attached this turn: '+auth.files.join(', '),
+   ...(withheld?.length?['Diagrams withheld: not available together with repo access: '+withheld.map(d=>`D${d.n} ${redact(d.title).replace(/[\r\n]/g,' ').slice(0,60)}`).join('; ')]:[])].join('\n');
+  return this.run({id:auth.session.id,repo:auth.repo,...(scoped?{files:scoped}:{}),...(auth.files.length?{focus:auth.files}:{}),budgetUsd:auth.grant.budgetUsd,onCapStop:()=>this.o.index.clearGrant(auth.session.id),prefix:line},question,emit,signal);
+ }
+ private async run(p:RunSpec,question:string,emit:(e:InvestigateEvent)=>void,signal?:AbortSignal):Promise<void>{
+  const id=p.id;
   if(this.running.has(id))throw new InvestigateError('busy');
   const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});this.running.set(id,controller);
   const asked0=this.early.get(id);this.early.delete(id);if(asked0!==undefined&&Date.now()-asked0<5000)controller.abort();
-  const d=this.snapshotFolder(s.repo),backup=path.join(this.o.dir,'tripwire',id,'before');let before:Record<string,string>|null=null,started=false,turnDir:string|undefined;
-  let stream:InvestigateStream|undefined,trail:TrailItem[]=[];const asked=redact(question.trim()),at=new Date().toISOString(),budgetUsd=s.budgetUsd??this.limits.budgetUsd;
+  const d=this.snapshotFolder(p.repo,p.files),backup=path.join(this.o.dir,'tripwire',id,'before');let before:Record<string,string>|null=null,started=false,turnDir:string|undefined;
+  let stream:InvestigateStream|undefined,trail:TrailItem[]=[];const asked=redact(question.trim()),at=new Date().toISOString(),budgetUsd=p.budgetUsd,only=p.files?new Set(p.files):undefined;
   const tripwire=async():Promise<Tripwire|undefined>=>{if(!before)return undefined;const notebook=await folderChanges(this.o.notebook,before),snapshot=await snapshotDrift(d.files,d.manifest);this.last.set(id,{changes:notebook,backup});await this.savePending(id,notebook);return {notebook,snapshot};};
   try{
-   await syncSnapshot(s.repo,d.files,d.manifest,undefined,this.o.notebook); // re-sync by hash before every turn
+   await syncSnapshot(p.repo,d.files,d.manifest,undefined,this.o.notebook,only); // re-sync by hash before every turn
    before=await captureFolder(this.o.notebook,backup);
-   const cwd=await realpath(d.files);turnDir=await mkdtemp(path.join(this.o.dir,'turn-'));activeTurnDirs.add(path.resolve(turnDir));const file=path.join(turnDir,'system.md');await writeFile(file,INVESTIGATE_INSTRUCTION,{mode:0o600});
+   const cwd=await realpath(d.files);turnDir=await mkdtemp(path.join(this.o.dir,'turn-'));activeTurnDirs.add(path.resolve(turnDir));const file=path.join(turnDir,'system.md');
+   // Only a CLI session that already ran at this profile in this folder is resumed; otherwise a fresh one starts and the app's own questions and final answers are carried over. The rules stay last.
+   const cli=await this.o.index.ensureCli(id,'investigate',cwd),extra:string[]=[];
+   if(p.files)extra.push('This conversation attached these files, and the folder holds only them:\n'+p.files.map(f=>'- '+f).join('\n'));
+   else if(p.focus?.length)extra.push('The user attached these files; start with them:\n'+p.focus.map(f=>'- '+f).join('\n'));
+   const earlier=cli.fresh&&this.o.carried?buildCarriedHistory(await this.o.carried((await this.o.index.get(id))!).catch(()=>[])):'';
+   if(earlier)extra.push(earlier);
+   const head=INVESTIGATE_INSTRUCTION.split('\n\n'),rules=head.pop()!;
+   await writeFile(file,[...head,...extra,rules].join('\n\n'),{mode:0o600});
+   if(this.o.gate)await this.ledger.append({id:randomUUID(),inkId:'investigate-'+id,requestId:randomId(),note:'',event:'conversation_turn',at,conv:{session:id,profile:'investigate',files:p.files?.length??p.focus?.length??0,notes:0,repo:!p.files,diagrams:0,fresh:cli.fresh,budgetUsd}}).catch(()=>{});
    const gate=new StreamGate({instruction:INVESTIGATE_INSTRUCTION}),thinking=new StreamGate({instruction:INVESTIGATE_INSTRUCTION});
    // Text goes through the gate (redaction, the echo guard) into the trail. Whatever the gate holds back is released when a tool call or a new
    // text block starts (a space or a blank line is pushed), so narration lands before the call it belongs to and paragraphs stay separate.
@@ -246,10 +288,10 @@ export class InvestigateService {
     onText:say,onBlock:()=>{if(answerTail(trail))say('\n\n');},
     onStep:(index,step)=>{say('\n');trail=addStep(trail,index);emit({type:'step',index,step});},onStepResult:(index,ok,denial,error)=>emit({type:'step_result',index,ok,...(denial?{denial}:{}),...(error?{error}:{})}),
     onThinking:t=>{const delta=thinking.push(t);if(delta)emit({type:'thinking',text:delta});},onTurn:turns=>emit({type:'progress',turns})});
-   emit({type:'start',id});
+   emit({type:'start',id,profile:'investigate'});
    if(controller.signal.aborted)throw new InvestigateError('cancelled'); // cancelled before the CLI started: never start it
    await new Promise<void>((resolve,reject)=>{
-    const child=spawnInvestigateSession({provider:'claude',command:this.o.command,prefixArgs:this.o.prefixArgs},{id:s.id,resume:s.turns>0,addendumFile:file,budgetUsd,...(this.o.model?{model:this.o.model}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
+    const child=spawnInvestigateSession({provider:'claude',command:this.o.command,prefixArgs:this.o.prefixArgs},{id:cli.id,resume:cli.resume,addendumFile:file,budgetUsd,...(this.o.model?{model:this.o.model}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
     let failure:InvestigateError|undefined,killing:Promise<void>=Promise.resolve(),bytes=0;
     const stop=(code:InvestigateCode)=>{if(failure)return;failure=new InvestigateError(code);if(child.pid)killing=killTree(child.pid);};
     const timer=setTimeout(()=>stop('timeout'),this.limits.timeoutMs),onAbort=()=>stop('cancelled');controller.signal.addEventListener('abort',onAbort,{once:true});
@@ -261,9 +303,9 @@ export class InvestigateService {
      if(failure)return reject(failure);
      try{stream!.finish();}catch(e){return reject(e);}
      if(code!==0)return reject(new InvestigateError('provider_failed'));resolve();});
-    child.stdin.end(asked);
+    child.stdin.end(p.prefix?p.prefix+'\n\n'+asked:asked);
    });
-   const r=stream.result!,reply=await finishFileReply(r.text,s.repo,this.o.notebook);
+   const r=stream.result!,reply=await finishFileReply(r.text,p.repo,this.o.notebook);
    // The result field is the answer: the trail's last text (what streamed, minus the word the gate was still holding) is replaced by it.
    const finalTrail:TrailItem[]=trail.at(-1)&&'text' in trail.at(-1)!?[...trail.slice(0,-1),...(reply.body?[{text:reply.body}]:[])]:[...trail,...(reply.body?[{text:reply.body}]:[])];
    const message:InvestigateMessage={id:randomId(),body:reply.body,trail:finalTrail,claims:reply.claims,...(reply.citation?{citation:reply.citation}:{}),usage:sessionUsage(r.usage),costUsd:r.cost,turns:stream.turns,steps:stream.steps,permissionDenials:r.denials,tripwire:(await tripwire())!,unknownEvents:stream.unknown};
@@ -274,7 +316,7 @@ export class InvestigateService {
    const code:InvestigateCode=e instanceof InvestigateError?e.code:'provider_failed';
    const t=await tripwire().catch(()=>undefined),partial:PartialTurn={text:answerTail(trail),steps:stream?.steps??[],turns:stream?.turns??0,trail};
    // A stop on the cost cap or the safety backstop needs a fresh confirmed plan (a new cap) before the same session continues.
-   if(code==='budget'||code==='turn_limit')await this.o.index.unconfirm(id).catch(()=>{});
+   if(code==='budget'||code==='turn_limit')await p.onCapStop().catch(()=>{});
    const stoppedId=randomId();
    await this.saveTurn(id,{id:stoppedId,question:asked,at,stopped:{code,partial}}).catch(()=>{});
    if(started)await this.recordTurn(id,stoppedId,code,stream?.reported??null); // nothing is recorded for a turn that was stopped before the CLI started: it cost nothing

@@ -99,6 +99,16 @@ try {
   assert.equal(await panel.locator('[data-chip^="diagram-"]').count(), 0, 'a one-off chat has no diagram chips');
   await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click(); await page.waitForFunction(() => /Conversation 1/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
   assert.equal(await panel.locator('[data-chip^="diagram-"]').count(), 0, 'a conversation has no diagram chips either');
+  // A conversation opens diagrams only after its plan card is approved (the server refuses the turn otherwise). The page will show that card; here the approval is made through the one conversation API.
+  const approveAll = () => page.evaluate(async () => {
+    const headers = { 'Content-Type': 'application/json', 'X-Aitiarch': '1' }, out = [];
+    for (const s of (await (await fetch('/api/harness/sessions?mode=chat&all=1')).json()).sessions) {
+      const body = { conversationId: s.id, path: 'plan.md', attachments: {} }, plan = await (await fetch('/api/conversation/plan', { method: 'PUT', headers, body: JSON.stringify(body) })).json();
+      out.push({ status: (await fetch('/api/conversation/approve', { method: 'PUT', headers, body: JSON.stringify({ ...body, hash: plan.hash }) })).status, profile: plan.profile });
+    }
+    return out;
+  });
+  assert.deepEqual(await approveAll(), [{ status: 200, profile: 'diagrams' }], 'the card for a note with diagrams is approved through the one conversation API');
 
   // 3. The review card: which diagrams Claude may open, the cap, the one withheld and why, and the editor line.
   let review = await submit('Which box feeds which in the diagram?');
@@ -148,6 +158,7 @@ try {
   const ready = async () => { for (let i = 0; i < 100; i++) { const ok = await Promise.all(three.slice(0, 3).map((d) => info(d.base))); if (ok.every((m) => m && m.width <= 1600)) return ok; await page.waitForTimeout(200); } throw new Error('the pictures were not made'); };
   const made3 = await ready(); assert.deepEqual(made3.map((m) => m.width), [1000, 1000, 1000], 'the missing picture was made and the oversize one replaced');
   await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click(); await page.waitForFunction(() => /Conversation 2/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
+  await approveAll(); // another conversation, another card
   review = await submit('Explain the diagrams');
   assert.equal(await text(review.locator('.chat-review-diagrams')), "Claude may open these diagrams: D1 'Diagram 1 under Three', D2 'no-picture', D3 'oversize' (up to $0.50). It opens one only when your question needs it.");
   assert.deepEqual(await review.locator('.chat-review-block[data-status="withheld"]').allInnerTexts(), ["D4 'keys' withheld: looks like a secret (it holds text that looks like a secret)."]);

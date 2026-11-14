@@ -2,12 +2,12 @@
 // conversation was GRANTED on its plan card, and anything beyond the grant is refused until the card is approved again. The page never says which profile
 // it wants and never carries a cost cap: a turn gets exactly the grant's. Both engines (the tool-less / diagram chat and the Investigate service) sit behind this.
 import {createHash} from 'node:crypto';
-import {lstat,realpath} from 'node:fs/promises';
+import {lstat,readFile,realpath} from 'node:fs/promises';
 import path from 'node:path';
 import {repoFiles,SNAPSHOT_LIMITS} from './snapshot.ts';
 import {repoDeny,type Deny} from './deny.ts';
 import type {SessionIndex} from './session-index.ts';
-import type {HarnessSession} from '../../shared/harness.ts';
+import {harnessDenied,type HarnessSession} from '../../shared/harness.ts';
 import {cleanAttachments,covers,needOf,normalizeAttachedPath,resumePlan,type Attachments,type Grant,type Need,type Profile} from '../../shared/profile.ts';
 import {redact} from '../providers/index.ts';
 import {estimateTokens} from '../chat/context.ts';
@@ -44,7 +44,11 @@ export interface ConversationPlan {
 }
 export const WITHHELD_WITH_REPO='not available together with repo access';
 
-export interface GateConfig {index:SessionIndex;notebook:string;repo:()=>Promise<string|null>}
+/** The repo folder chosen for the project (repo.json beside the session index, outside the repo). */
+export async function projectRepo(dir:string):Promise<string|null>{
+ try{const d=JSON.parse(await readFile(path.join(dir,'repo.json'),'utf8'));return d?.v===1&&typeof d.repo==='string'?d.repo:null;}catch{return null;}
+}
+export interface GateConfig {index:SessionIndex;notebook:string;repo:()=>Promise<string|null>;/** The notes of the project (paths), for the "@" picker. */notes?:()=>Promise<string[]>}
 export interface TurnInput {conversation:string;attachments:unknown;/** Decided by the server from the note, never taken from the page. */hasDiagrams:boolean;diagrams?:DiagramLine[]}
 export interface Authorized {session:HarnessSession;profile:Profile;need:Need;attachments:Attachments;grant:Pick<Grant,'profile'|'files'|'repo'|'diagrams'|'budgetUsd'>;files:string[];repo:string|null}
 
@@ -95,6 +99,17 @@ export class ConversationGate {
   return out;
  }
 
+ /** Files and notes whose path (or file name) starts with what was typed, for the "@" picker. It reads the repo's git file list and the project's note list only, and the same deny rules apply:
+  *  a file the repo rules keep out, or a note the notebook rules keep out, is never offered. Whether an offered file can really be attached is still checked when it is. */
+ async suggest(typed:unknown,limit=30):Promise<{files:string[];notes:string[]}>{
+  const q=(typeof typed==='string'?typed:'').trim().slice(0,200).toLowerCase().replace(/\\/g,'/'),hit=(p:string)=>{const l=p.toLowerCase();return !q||l.startsWith(q)||(l.split('/').pop()??'').startsWith(q);};
+  let files:string[]=[];
+  const repo=await this.o.repo();
+  if(repo){try{const root=await realpath(repo),deny=repoDeny(root,await realpath(this.o.notebook).catch(()=>path.resolve(this.o.notebook)));files=(await repoFiles(root)).filter(f=>!deny(f)&&hit(f)).slice(0,limit);}catch{files=[];}}
+  const notes=this.o.notes?(await this.o.notes().catch(()=>[] as string[])).filter(n=>!harnessDenied(n)&&hit(n)).slice(0,limit):[];
+  return {files,notes};
+ }
+
  /** What the plan card shows for these attachments, and what approving it would grant. Reads only: nothing is stored. */
  async plan(input:TurnInput&{budgetUsd?:unknown}):Promise<ConversationPlan>{
   const s=await this.session(input.conversation),clean=cleanAttachments(input.attachments);
@@ -139,6 +154,20 @@ export class ConversationGate {
   const used=grant??{profile:'notes' as Profile,files:[],repo:false,diagrams:false,budgetUsd:DEFAULT_BUDGET_USD};
   return {session:s,profile:need.profile,need,attachments:att,grant:{profile:used.profile,files:used.files,repo:used.repo,diagrams:used.diagrams,budgetUsd:used.budgetUsd},files:files.map(f=>f.path),repo:need.profile==='investigate'?await this.o.repo():null};
  }
+}
+
+/**
+ * What the app kept of a conversation, as question and final answer pairs in time order: its saved replies in the chat record of the note it was started on (with the questions the app
+ * kept), and the questions and final answers of its Investigate turns. Never a trail, a tool step or thinking.
+ */
+export async function carriedPairs(s:HarnessSession,questions:{read(id:string):Promise<Record<string,string>>},chat:{conversationMessages(note:string,session:string,ids:ReadonlySet<string>):Promise<{id:string;body:string;at:string}[]>},
+ investigate:{turns(id:string):Promise<{question:string;at:string;message?:{body:string}}[]>}):Promise<{question:string;answer:string}[]>{
+ const rows:{at:string;question:string;answer:string}[]=[];
+ try{
+  if(s.note){const asked=await questions.read(s.id);for(const m of await chat.conversationMessages(s.note,s.id,new Set(Object.keys(asked))))if(asked[m.id]&&m.body)rows.push({at:m.at,question:asked[m.id],answer:m.body});}
+ }catch{/* an unreadable record carries nothing rather than failing the turn */}
+ try{for(const t of await investigate.turns(s.id))if(t.message?.body)rows.push({at:t.at,question:t.question,answer:t.message.body});}catch{/* not an investigation: nothing to add */}
+ return rows.sort((a,b)=>a.at.localeCompare(b.at)).map(({question,answer})=>({question,answer}));
 }
 
 /**

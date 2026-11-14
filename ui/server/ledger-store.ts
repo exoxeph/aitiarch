@@ -36,11 +36,19 @@ export function validContextFields(e:LedgerEvent):boolean{
 }
 /** A context_read as a whole: a known module, the hash of what was asked for, and the optional note, size and selection fields. */
 export const validContextRead=(e:LedgerEvent)=>['this-note','other-notes','claude-sessions','codex-sessions'].includes(e.moduleId??'')&&/^[a-f0-9]{64}$/.test(e.sourceHash??'')&&validContextFields(e);
-export interface LedgerEvent { id: string; inkId: string; requestId: string; note: string; event: 'shown' | 'dismissed' | 'inserted' | 'resolved' | 'reopened' | 'adopted' | 'context_read' | 'chat_started' | 'chat_completed' | 'chat_failed'|'investigation'|'investigate_turn'|'diagram_read'|'cli_version'; at: string; authorship?: 'ai'; insertedBy?: 'human'; moduleId?:'this-note'|'other-notes'|'claude-sessions'|'codex-sessions';sourceHash?:string;investigation?:InvestigationAudit;turn?:InvestigateTurnAudit;/** diagram_read only. */diagram?:DiagramReadAudit;/** cli_version only. */cli?:CliVersionAudit;
+export interface LedgerEvent { id: string; inkId: string; requestId: string; note: string; event: 'shown' | 'dismissed' | 'inserted' | 'resolved' | 'reopened' | 'adopted' | 'context_read' | 'chat_started' | 'chat_completed' | 'chat_failed'|'investigation'|'investigate_turn'|'diagram_read'|'cli_version'|'conversation_turn'; at: string; authorship?: 'ai'; insertedBy?: 'human'; moduleId?:'this-note'|'other-notes'|'claude-sessions'|'codex-sessions';sourceHash?:string;investigation?:InvestigationAudit;turn?:InvestigateTurnAudit;/** diagram_read only. */diagram?:DiagramReadAudit;/** cli_version only. */cli?:CliVersionAudit;/** conversation_turn only: what the turn was allowed to do and what it carried, by counts. Never a path or any text. */conv?:ConversationTurnAudit;
   /** context_read only, all optional (older lines have none). `path` is the note whose text was read, which in a conversation can differ from `note` (the chat's note); `chars` is the size of the source as sent;
    *  `selection` is the selection that went with the request. A context_read without `chars` is the attempt written before the read; the one with `chars` is written after it. */
   path?:string;chars?:number;selection?:ContextSelectionAudit;
   /** chat_failed only: why a running request was stopped (a person pressing Stop, the server closing, a stream limit, the budget gate, the page going away). Absent for other failures. */cause?:AbortCause }
+/** One conversation turn's profile and attachments, as counts: the conversation, the profile it ran at, how many files and notes it carried, whether the repo and how many diagrams, whether it started a fresh CLI session, and the cap it had. */
+export interface ConversationTurnAudit {session:string;profile:'notes'|'diagrams'|'investigate';files:number;notes:number;repo:boolean;diagrams:number;fresh:boolean;budgetUsd:number}
+const countOf=(v:unknown,max:number)=>typeof v==='number'&&Number.isSafeInteger(v)&&v>=0&&v<=max;
+export function validConversationTurn(c:unknown):c is ConversationTurnAudit{
+ if(!c||typeof c!=='object'||Array.isArray(c))return false;const t=c as ConversationTurnAudit;
+ return Object.keys(t).sort().join()==='budgetUsd,diagrams,files,fresh,notes,profile,repo,session'&&typeof t.session==='string'&&/^[0-9a-f-]{36}$/.test(t.session)&&['notes','diagrams','investigate'].includes(t.profile)
+  &&countOf(t.files,50)&&countOf(t.notes,50)&&countOf(t.diagrams,200)&&typeof t.repo==='boolean'&&typeof t.fresh==='boolean'&&typeof t.budgetUsd==='number'&&Number.isFinite(t.budgetUsd)&&t.budgetUsd>=0&&t.budgetUsd<=5;
+}
 interface Ledger { v: 1; events: LedgerEvent[] }
 export class LedgerStore {
   private tail: Promise<unknown> = Promise.resolve();
@@ -56,7 +64,7 @@ export class LedgerStore {
     catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { v: 1, events: [] }; throw e; }
     const d = JSON.parse(text);
     if (d.v !== 1 || !Array.isArray(d.events) || Object.keys(d).sort().join() !== 'events,v' || d.events.some((e: LedgerEvent) =>
-      Object.keys(e).sort().join() !== (e.event==='investigation'?'at,event,id,inkId,investigation,note,requestId':e.event==='investigate_turn'?'at,event,id,inkId,note,requestId,turn':e.event==='diagram_read'?'at,diagram,event,id,inkId,note,requestId':e.event==='cli_version'?'at,cli,event,id,inkId,note,requestId':e.event==='context_read'?contextReadKeys(e):e.event==='inserted'?'at,authorship,event,id,inkId,insertedBy,note,requestId':e.event==='chat_failed'&&Object.hasOwn(e,'cause')?'at,cause,event,id,inkId,note,requestId':'at,event,id,inkId,note,requestId') || !['shown', 'dismissed', 'inserted', 'resolved', 'reopened', 'adopted','context_read','chat_started','chat_completed','chat_failed','investigation','investigate_turn','diagram_read','cli_version'].includes(e.event) ||(e.event==='diagram_read'&&!validDiagramReadAudit(e.diagram))||(e.event==='cli_version'&&!validCliVersionAudit(e.cli))||(e.event==='investigation'&&!validInvestigation(e.investigation))||(e.event==='investigate_turn'&&!validInvestigateTurn(e.turn))||(Object.hasOwn(e,'cause')&&!isAbortCause(e.cause))|| (e.event==='inserted'&&(e.authorship!=='ai'||e.insertedBy!=='human')) || (e.event==='context_read'&&!validContextRead(e)) ||
+      Object.keys(e).sort().join() !== (e.event==='investigation'?'at,event,id,inkId,investigation,note,requestId':e.event==='investigate_turn'?'at,event,id,inkId,note,requestId,turn':e.event==='diagram_read'?'at,diagram,event,id,inkId,note,requestId':e.event==='cli_version'?'at,cli,event,id,inkId,note,requestId':e.event==='conversation_turn'?'at,conv,event,id,inkId,note,requestId':e.event==='context_read'?contextReadKeys(e):e.event==='inserted'?'at,authorship,event,id,inkId,insertedBy,note,requestId':e.event==='chat_failed'&&Object.hasOwn(e,'cause')?'at,cause,event,id,inkId,note,requestId':'at,event,id,inkId,note,requestId') || !['shown', 'dismissed', 'inserted', 'resolved', 'reopened', 'adopted','context_read','chat_started','chat_completed','chat_failed','investigation','investigate_turn','diagram_read','cli_version','conversation_turn'].includes(e.event) ||(e.event==='conversation_turn'&&!validConversationTurn(e.conv))||(e.event==='diagram_read'&&!validDiagramReadAudit(e.diagram))||(e.event==='cli_version'&&!validCliVersionAudit(e.cli))||(e.event==='investigation'&&!validInvestigation(e.investigation))||(e.event==='investigate_turn'&&!validInvestigateTurn(e.turn))||(Object.hasOwn(e,'cause')&&!isAbortCause(e.cause))|| (e.event==='inserted'&&(e.authorship!=='ai'||e.insertedBy!=='human')) || (e.event==='context_read'&&!validContextRead(e)) ||
       ![e.id, e.inkId, e.requestId, e.note, e.at].every(v => typeof v === 'string'))) throw new Error('Invalid ledger; original preserved.');
     return d;
   }
@@ -72,13 +80,14 @@ export class LedgerStore {
     if(event.event==='investigate_turn'&&!validInvestigateTurn(event.turn))return Promise.reject(new Error('Invalid Investigate turn metadata.'));
     if(event.event==='diagram_read'&&!validDiagramReadAudit(event.diagram))return Promise.reject(new Error('Invalid diagram read metadata.'));
     if(event.event==='cli_version'&&!validCliVersionAudit(event.cli))return Promise.reject(new Error('Invalid CLI version metadata.'));
+    if(event.event==='conversation_turn'&&!validConversationTurn(event.conv))return Promise.reject(new Error('Invalid conversation turn metadata.'));
     if(event.event==='context_read'&&(contextReadKeys(event)===''||!validContextRead(event)))return Promise.reject(new Error('Invalid context metadata.'));
     const job = this.tail.catch(() => {}).then(async () => {
       await this.safe(); const lockPath = this.file + '.lock';
       const lock = await this.lock(lockPath), temp = this.file + '.' + randomUUID() + '.tmp';
       try {
         const d = await this.read();
-        if (d.events.some(e => ['context_read','investigation','investigate_turn','diagram_read','cli_version'].includes(event.event)?e.id===event.id:e.inkId === event.inkId && e.requestId === event.requestId && e.event === event.event)) return;
+        if (d.events.some(e => ['context_read','investigation','investigate_turn','diagram_read','cli_version','conversation_turn'].includes(event.event)?e.id===event.id:e.inkId === event.inkId && e.requestId === event.requestId && e.event === event.event)) return;
         d.events.push(event);
         const f = await open(temp, 'wx', 0o600);
         try { await f.writeFile(JSON.stringify(d, null, 2) + '\n'); await f.sync(); } finally { await f.close(); }

@@ -32,7 +32,7 @@ async function pruneEmpty(root:string,rel=''):Promise<boolean>{
 
 /** 
 otebook is the notebook folder when it is the repo, inside it, or the repo is inside it: those paths are kept out by the notebook's own rules (deny.ts). */
-export async function syncSnapshot(repo:string,dest:string,manifestFile:string,limits=SNAPSHOT_LIMITS,notebook?:string):Promise<SnapshotResult>{
+export async function syncSnapshot(repo:string,dest:string,manifestFile:string,limits=SNAPSHOT_LIMITS,notebook?:string,only?:ReadonlySet<string>):Promise<SnapshotResult>{
  const root=await realpath(repo),denied=repoDeny(root,notebook?await realpath(notebook).catch(()=>path.resolve(notebook)):undefined),skipped={denied:0,links:0,tooLarge:0,overCap:0,notFile:0},files:Record<string,string>={},data=new Map<string,Buffer>();
  const linkedDir=new Map<string,boolean>();
  const throughLink=async(rel:string)=>{ // any folder on the way that is a link or junction: never followed
@@ -42,6 +42,7 @@ export async function syncSnapshot(repo:string,dest:string,manifestFile:string,l
  };
  let bytes=0;
  for(const rel of await repoFiles(root)){
+  if(only&&!only.has(rel))continue; // a copy of just the attached files: everything else is not in it, and not counted as skipped
   if(denied(rel)||rel.split('/').some(p=>p==='..'||p===''||/[<>:"|?*\u0000-\u001f]/.test(p))){skipped.denied++;continue;}
   if(await throughLink(rel)){skipped.links++;continue;}
   let s;try{s=await lstat(path.join(root,rel));}catch{skipped.notFile++;continue;}

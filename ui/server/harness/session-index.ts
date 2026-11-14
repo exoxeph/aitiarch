@@ -74,6 +74,8 @@ export class SessionIndex {
   return this.change(all=>{
    const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');
    const plan=resumePlan(s.cli,s.turns,profile,s.mode==='investigate'?'investigate':'notes');
+   // The CLI files a session under its working folder: a different folder (another set of attached files) cannot resume it either.
+   if(!plan.fresh&&s.cli?.cwd&&s.cli.cwd!==cwd)plan.fresh=true;
    if(!plan.fresh){s.cli??={id:s.id,profile,turns:s.turns};s.cli.cwd??=cwd;return {id:s.cli.id,resume:plan.resume,fresh:false};}
    const ran=!!s.cli||s.turns>0;
    if(s.cli)(s.past??=[]).push({id:s.cli.id,...(s.cli.cwd?{cwd:s.cli.cwd}:{})});else if(s.turns>0)(s.past??=[]).push({id:s.id});

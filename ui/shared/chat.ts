@@ -90,8 +90,9 @@ export interface ChatUsage {
  /** `spent` counts what the CLI reported (cache reads at CACHE_READ_WEIGHT) plus `estimated`: the estimate charged for calls that reported no counts. */
  tokenBudget:number;spent:number;reserved:number;rollingRequestCap:number;windowMinutes:number;estimated?:number;
 }
-export type ChatErrorCode='invalid_chat'|'review_required'|'stale_review'|'busy'|'budget_reached'|'hourly_cap'|'disabled'|'cancelled'|'validation'|'provider_failed'|'internal'|'persistence'|'secrets_blocked'|'session_format'|'session_limit'|'session_selection';
+export type ChatErrorCode='invalid_chat'|'review_required'|'stale_review'|'busy'|'budget_reached'|'hourly_cap'|'disabled'|'cancelled'|'validation'|'provider_failed'|'internal'|'persistence'|'secrets_blocked'|'session_format'|'session_limit'|'session_selection'|'plan_required'|'grant_mismatch';
 export const CHAT_MESSAGES:Record<ChatErrorCode,string>={
+ plan_required:'This message needs more than this conversation was approved for. Review the plan first. Nothing was sent.',grant_mismatch:'This conversation’s approval does not belong to it here. Review the plan again. Nothing was sent.',
  invalid_chat:'Invalid chat request. Nothing was sent.',review_required:'Review what will be sent before sending.',stale_review:'The chat changed. Review this message again.',
  busy:'A request is already running. Wait or cancel it.',budget_reached:'This chat has reached its token budget. Review the budget before sending more.',
  hourly_cap:'This chat has reached its rolling hourly request cap.',disabled:'Chat requires the verified isolated Claude CLI provider with partial-message streaming.',
@@ -107,7 +108,7 @@ export const isAbortCause=(v:unknown):v is AbortCause=>typeof v==='string'&&(ABO
 /** The numbers behind a budget refusal, so the banner can say them: what was used, what the next message is estimated to need, and the limit. */
 export interface BudgetDetail {spent:number;next:number;budget:number}
 export type ChatEvent=
- |{type:'start';id:string}
+ |{type:'start';id:string;/** What this turn may do: no tools, Read in the diagram folder, or Read/Grep/Glob over a read-only copy. Present for conversation turns. */profile?:import('./profile.ts').Profile}
  |{type:'delta';id:string;text:string;provisional:true}
  /** The model opened a diagram's picture with Read (a conversation turn): a live row "Opened D1 'title'". */
  |{type:'diagram_read';id:string;n:number;title:string}
@@ -120,6 +121,8 @@ export type ChatEvent=
 export interface ChatInput {id:string;path:string;question:string;selection?:string;context:ContextChoice[];
  /** A harness chat session (the app's id) to send this message in. Absent: the classic one-shot chat. */
  session?:string;
+ /** What this turn carries beyond the open note (other notes, repo files, the repo). The server derives the profile from it and checks it against what the conversation was approved for. */
+ attachments?:unknown;
 
  /** Where the person is in the editor: the open note, the section the cursor is in and the line range of the selection that is sent. `path` is the note the chat is kept under;
   *  in a conversation, `editor.path` is the note open now, which may be another note of the same project (the conversation followed the person there). */
@@ -142,6 +145,8 @@ export interface ChatReview {
  session?:{id:string;label:string;turns:number};
  /** Notes no chat gets unless it is the note the chat is open on (the notebook file, hidden files, sidecars, state, secrets): named here so the review says so. */
  excluded?:string[];
+ /** A conversation turn: what this turn may do, and whether the conversation still needs its plan card approved for it (the send is refused until then). */
+ profile?:import('./profile.ts').Profile;needsPlan?:boolean;
  /** The one line that tells the model where the person is: the open note and its size, the selection's line range and size, the cursor's section and any other sources
   *  (titles, headings, IDs and sizes, never any note text). A conversation message starts with it; a one-off message carries it in its "editor" field. */
  manifest?:string;

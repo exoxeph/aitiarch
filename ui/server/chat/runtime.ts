@@ -7,7 +7,9 @@ import {CHAT_LIMITS,REPLY_ALLOWANCE,budgetTokens,isAbortCause,nextTurnEstimate,t
 import {Store} from '../store.ts';import {InkStore} from '../ink-store.ts';import {LedgerStore} from '../ledger-store.ts';
 import {ChatStore} from './store.ts';import {contextModules,hash,estimateTokens} from './context.ts';import {secretKinds} from './secrets.ts';
 import {prepareRequest,ProviderError,redact,type Provider,type Request,type Result} from '../providers/index.ts';
-import {chatSessionInstruction,editorManifest,turnMessage} from './request.ts';
+import {CHAT_HARD_RULES,chatSessionInstruction,editorManifest,turnMessage} from './request.ts';
+import {GateRefusal,buildCarriedHistory,type Authorized,type ConversationGate} from '../harness/conversation.ts';
+import type {Profile} from '../../shared/profile.ts';
 import {cleanLabel,parseEditorInfo} from '../../shared/editor-context.ts';
 import {MAX_DIAGRAMS_LISTED,diagramsIn,type DiagramRef} from '../../shared/diagram-refs.ts';
 import {DIAGRAM_TURN_CAP_USD,WITHHELD_WORDS,type WithheldReason} from '../../shared/diagram-fence.ts';
@@ -30,6 +32,8 @@ export class ChatError extends Error {code:ChatErrorCode;/** For budget_reached:
 interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true;
  /** A harness session turn: the session id and the exact file text the CLI gets (instruction, sources, rules last). */
  session?:{id:string};addendum?:string;
+ /** What this turn may do (tool-less or Read in the diagram folder), as the gate saw it at review; and the cap the grant gives it, set at send. */
+ profile?:Profile;capUsd?:number;
  /** The one line that starts the session message: what this turn was given. */
  manifest?:string;
  /** A conversation about a note that shows diagrams. `open`: the diagrams the model may open with Read this turn (D<n>, the diagram's name in the assets folder, the note's title), as the review showed them; the server
@@ -45,7 +49,11 @@ export interface ChatHarness {index:SessionIndex;runner:Pick<ClaudeSessionRunner
  /** The CLI's version (claude --version), asked at the first turn of a conversation and written to the ledger. Absent: not recorded. */
  version?:()=>Promise<string|null>;
  /** Where the questions of session turns are kept (outside the repo). Absent: they are not kept. */
- questions?:QuestionStore}
+ questions?:QuestionStore;
+ /** The one decision point: what a turn may do, from what it carries and what the conversation was approved for. Absent: no grants (the older behaviour). */
+ gate?:ConversationGate;
+ /** A conversation's earlier questions and final answers, for a fresh CLI session after its profile changed. Never trails or tool output. */
+ carried?:(session:import('../../shared/harness.ts').HarnessSession)=>Promise<{question:string;answer:string}[]>}
 type Pair={id:string;user:string;assistant:string;persona?:PersonaMode};
 interface State {history:Pair[];omittedPairs:number;serial:number;usage:ChatUsage;calls:number[];running:boolean;privateContext?:true;controller?:AbortController;/** Why the running request was stopped; set once, by whoever stops it first. */abortCause?:AbortCause}
 
@@ -129,6 +137,13 @@ export class ChatRuntime {
   const diagramRefs=session&&this.images?diagramsIn(openNote.text):[],prepared=await this.prepareDiagrams(diagramRefs),canOpen=prepared.open.length>0;
   const earlier=session&&diagramRefs.length?await this.earlierReads(session.note??input.path,session.id):new Set<string>();
   const withheldWhy=new Map(prepared.withheld.map(w=>[w.ref.asset,WITHHELD_WORDS[w.reason]]));
+  // What this turn would be allowed to do, and whether the conversation was approved for it. The review says so (the page shows the plan card); the refusal itself happens at send.
+  let profile:Profile|undefined,needsPlan=false;
+  if(session&&this.harness?.gate){
+   profile=canOpen?'diagrams':'notes';
+   try{await this.harness.gate.authorize({conversation:session.id,attachments:{},hasDiagrams:canOpen});}
+   catch(e){if(e instanceof GateRefusal&&(e.code==='plan_required'||e.code==='grant_mismatch'))needsPlan=true;else throw e;}
+  }
   // A one-off chat counts against its note; a conversation counts against itself (budget, hourly cap, calls), whichever note is open.
   const s=this.state(input.path,session?.id);if(session)s.usage.label=session.label;
   // The chat node's persona always rides along; its skills only when something loaded. Fixed here, so the review shows what is sent.
@@ -161,13 +176,14 @@ export class ChatRuntime {
   if(extra?.review)review.skills=extra.review;
   if(privateContext)review.ephemeral=true;
   if(session)review.session={id:session.id,label:session.label,turns:session.turns};
+  if(profile){review.profile=profile;if(needsPlan)review.needsPlan=true;}
   if(excluded.length)review.excluded=excluded;
   review.manifest=manifest;if(editor)review.editor=editor;
   if(canOpen){review.diagrams=prepared.open.map(o=>({n:o.ref.n,title:redact(o.ref.title)}));review.diagramCapUsd=DIAGRAM_TURN_CAP_USD;}
   if(prepared.withheld.length)review.diagramsWithheld=prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title),why:WITHHELD_WORDS[w.reason]}));
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');
-  this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(privateContext?{privateContext:true as const}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
+  this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(profile?{profile}:{}),...(privateContext?{privateContext:true as const}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
   return review;
  }
  async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
@@ -178,6 +194,13 @@ export class ChatRuntime {
   if(s.serial!==frozen.serial)throw new ChatError('stale_review');
   if(s.running||[...this.states.values()].filter(x=>x.running).length>=2)throw new ChatError('busy');
   if(!this.provider||this.provider.name!=='claude')throw new ChatError('disabled');
+  // The server decides what this conversation may do, again at send: a turn that needs more than the conversation was approved for is refused here, whatever the page showed or claimed.
+  let authorized:Authorized|undefined;
+  if(frozen.session&&this.harness?.gate){
+   try{authorized=await this.harness.gate.authorize({conversation:frozen.session.id,attachments:{},hasDiagrams:!!frozen.diagrams?.open.length});}
+   catch(e){if(e instanceof GateRefusal)throw new ChatError(e.code==='grant_mismatch'?'grant_mismatch':'plan_required');throw e;}
+   frozen.capUsd=Math.min(authorized.grant.budgetUsd,DIAGRAM_TURN_CAP_USD); // a diagram turn never gets a larger cap than it always had
+  }
   s.calls=s.calls.filter(at=>Date.now()-at<3600000);
   if(s.calls.length>=s.usage.rollingRequestCap)throw new ChatError('hourly_cap');
   if(s.usage.spent+frozen.reservation>s.usage.tokenBudget)throw new ChatError('budget_reached',{spent:s.usage.spent,next:frozen.reservation,budget:s.usage.tokenBudget});
@@ -196,7 +219,7 @@ export class ChatRuntime {
    await this.audit(review.path,request.id,'chat_started');
    if(input.dontAskAgain===true&&!frozen.privateContext)this.dontAsk=true;
    if(frozen.privateContext)s.privateContext=true;
-   s.calls.push(Date.now());s.usage.calls++;called=true;emit({type:'start',id:request.id});
+   s.calls.push(Date.now());s.usage.calls++;called=true;emit({type:'start',id:request.id,...(frozen.profile?{profile:frozen.profile}:{})});
    let json='';const outputRoom=s.usage.tokenBudget-s.usage.spent-(frozen.reservation-REPLY_ALLOWANCE),gate=new StreamGate({instruction:review.instruction});
    const onTextDelta=(text:string)=>{
     if(controller.signal.aborted)return; // stopped: the CLI is being ended, nothing more is taken
@@ -278,8 +301,17 @@ export class ChatRuntime {
   let started=false;const audits:Promise<unknown>[]=[],note=frozen.review.path,inkId='chat-'+hash(note),at=()=>new Date().toISOString();
   try{
    const copies=frozen.diagrams?await this.copiesFor(frozen.diagrams):undefined;
+   // Which CLI session this turn runs in: only one that already ran at exactly this profile is resumed; any change starts a fresh one and the app's own questions and final answers are carried over.
+   const profile:Profile=copies?.length?'diagrams':'notes';
+   const cli=h.gate?await h.index.ensureCli(session.id,profile,'chat'):{id:session.id,resume:session.turns>0,fresh:false};
+   let addendum=frozen.addendum;
+   if(cli.fresh&&h.carried){
+    const text=buildCarriedHistory(await h.carried(session).catch(()=>[]));
+    if(text){const i=addendum.lastIndexOf(CHAT_HARD_RULES);addendum=i>=0?addendum.slice(0,i)+text+'\n\n'+addendum.slice(i):addendum+'\n\n'+text;} // the rules stay last
+   }
+   if(h.gate)audits.push(this.ledger.append({id:randomUUID(),inkId,requestId:request.id,note,event:'conversation_turn',at:at(),conv:{session:session.id,profile,files:0,notes:frozen.review.sources.filter(x=>x.id.startsWith('O')).length,repo:false,diagrams:copies?.length??0,fresh:cli.fresh,budgetUsd:frozen.capUsd??DIAGRAM_TURN_CAP_USD}}).catch(()=>{}));
    if(session.turns===0&&h.version){const version=await h.version().catch(()=>null);if(version)audits.push(this.ledger.append({id:randomUUID(),inkId,requestId:request.id,note,event:'cli_version',at:at(),cli:{version,session:session.id}}).catch(()=>{}));}
-   const r=await h.runner.chatTurn({id:session.id,resume:session.turns>0,addendum:frozen.addendum,question:turnMessage(frozen.manifest,request.question),...(copies?.length?{diagrams:{copies,budgetUsd:DIAGRAM_TURN_CAP_USD}}:{}),signal,onTextDelta,onStarted:()=>{started=true;},
+   const r=await h.runner.chatTurn({id:cli.id,resume:cli.resume,addendum,question:turnMessage(frozen.manifest,request.question),...(copies?.length?{diagrams:{copies,budgetUsd:frozen.capUsd??DIAGRAM_TURN_CAP_USD}}:{}),signal,onTextDelta,onStarted:()=>{started=true;},
     onDiagramUnavailable:n=>{const w=frozen.diagrams?.withheld.find(x=>x.n===n);emit({type:'diagram_unavailable',id:request.id,n,title:w?.title??'',why:w?.why??'not in this note'});},
     onDiagramRead:copy=>{
      const ref=frozen.diagrams?.open.find(o=>o.n===copy.n);if(!ref)return;
@@ -294,6 +326,11 @@ export class ChatRuntime {
  }
  private audit(note:string,id:string,event:'chat_started'|'chat_completed'|'chat_failed',cause?:AbortCause){return this.ledger.append({id:randomUUID(),inkId:'chat-'+hash(note),requestId:id,note,event,at:new Date().toISOString(),...(cause?{cause}:{})});}
  private rememberReplay(id:string,tokens:number){this.replay.delete(id);this.replay.set(id,tokens);while(this.replay.size>200)this.replay.delete(this.replay.keys().next().value as string);}
+ /** Whether a note's diagrams can be opened by a conversation right now (and the diagrams it lists), decided here from the note, never taken from the page. */
+ async openableDiagrams(note:string):Promise<{has:boolean;items:{n:number;title:string}[]}>{
+  const text=(await this.store.read(note)).text,refs=this.images?diagramsIn(text):[],prepared=await this.prepareDiagrams(refs);
+  return {has:prepared.open.length>0,items:refs.map(d=>({n:d.n,title:redact(d.title)}))};
+ }
  /** How many saved replies Delete conversation would remove, found the way it finds them (the session id they carry, and the ids of the conversation's kept questions for older
   *  ones), in the note's chat record on disk or in memory and in the private in-memory list. The confirmation says this number, so it must match what is removed. */
  async conversationReplies(note:string,session:string,messageIds:ReadonlySet<string>):Promise<number>{

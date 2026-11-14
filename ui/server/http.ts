@@ -1,5 +1,5 @@
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
-import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {removeTranscript} from './harness/transcripts.ts';import {sweepStaleTurnFolders} from './harness/sweep.ts';import {QuestionStore} from './harness/questions.ts';
+import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {randomUUID} from 'node:crypto';import {ConversationGate,GateRefusal,carriedPairs,projectRepo} from './harness/conversation.ts';import {cleanAttachments} from '../shared/profile.ts';import {removeTranscript} from './harness/transcripts.ts';import {sweepStaleTurnFolders} from './harness/sweep.ts';import {QuestionStore} from './harness/questions.ts';
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES,budgetText} from '../shared/chat.ts';
 import {validSessionId} from '../shared/harness.ts';
@@ -177,10 +177,16 @@ export function createApp(opts: AppOptions) {
   const nodeSettings = new NodeSettingsService(uiStateStore, () => discoveredSkills(false));
   const insertionsReady=Promise.all([inkReady,assistance]).then(([ink,service])=>new InsertionStore(ink,store,service.ledger));
   const chatStore=new ChatStore(store.rootReal),diagramImages=new DiagramImageStore(store.rootReal);
-  const harnessReady=opts.harness?SessionIndex.open(opts.harness.dir??harnessDirectory(store.rootReal)).then(async index=>{const h=opts.harness!;await sweepStaleTurnFolders(index.dir).catch(()=>{}); /* a turn that was cut off leaves its notes in a turn-* folder: clear the old ones when the project opens */const runner=new ClaudeSessionRunner({command:h.command,prefixArgs:h.prefixArgs,model:h.model,dir:index.dir});return {index,
-    runner,questions:new QuestionStore(index.dir),version:()=>runner.version(), // the CLI's version, for the ledger at a conversation's first turn and for Settings
-    investigate:new InvestigateService({index,dir:index.dir,notebook:store.rootReal,command:h.command,prefixArgs:h.prefixArgs,model:h.model})};}):Promise.resolve(null);
-  const chatReady=Promise.all([inkReady,harnessReady]).then(([ink,harness])=>new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages));
+  const investigateRef=(()=>{let resolve!:(i:InvestigateService)=>void;const promise=new Promise<InvestigateService>(r=>{resolve=r;});return {promise,resolve};})();
+  const chatRef=(()=>{let resolve!:(r:ChatRuntime)=>void;const promise=new Promise<ChatRuntime>(r=>{resolve=r;});return {promise,resolve};})();
+  const harnessReady=opts.harness?SessionIndex.open(opts.harness.dir??harnessDirectory(store.rootReal)).then(async index=>{const h=opts.harness!;await sweepStaleTurnFolders(index.dir).catch(()=>{}); /* a turn that was cut off leaves its notes in a turn-* folder: clear the old ones when the project opens */const runner=new ClaudeSessionRunner({command:h.command,prefixArgs:h.prefixArgs,model:h.model,dir:index.dir});
+    // The one decision point for what a conversation may do, and the app's own earlier questions and final answers (for a fresh CLI session after its profile changed).
+    const questions=new QuestionStore(index.dir),gate=new ConversationGate({index,notebook:store.rootReal,repo:()=>projectRepo(index.dir),notes:async()=>{const out:string[]=[],walk=(n:{path:string;type:string;children?:any[]})=>{if(n.type==='file'&&/\.md$/i.test(n.path))out.push(n.path);for(const c of n.children??[])walk(c);};walk(await store.tree());return out;}});
+    const carried=async(s:import('../shared/harness.ts').HarnessSession):Promise<{question:string;answer:string}[]>=>carriedPairs(s,questions,await chatRef.promise,await investigateRef.promise);
+    const investigate=new InvestigateService({index,dir:index.dir,notebook:store.rootReal,command:h.command,prefixArgs:h.prefixArgs,model:h.model,gate,carried});investigateRef.resolve(investigate);
+    return {index,runner,questions,version:()=>runner.version(), // the CLI's version, for the ledger at a conversation's first turn and for Settings
+    investigate,gate,carried};}):Promise.resolve(null);
+  const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady]).then(([ink,harness])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages);chatRef.resolve(runtime);return runtime;});
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
@@ -327,8 +333,10 @@ export function createApp(opts: AppOptions) {
         // Delete conversation: the CLI's transcript for this one id (under ~/.claude/projects/<its working folder>), then the app's own entry.
         if(url.pathname==='/api/harness/sessions/delete'){
           const s=await h.index.get(b?.id);if(!s)throw new SessionIndexError('No such session.');
-          const cwd=s.mode==='chat'?await h.runner.chatCwd():await h.investigate.snapshotCwd(s.repo!);
-          const removed=await removeTranscript(cwd,s.id,opts.harness?.home);
+          // Every CLI session this conversation used (a profile change starts a fresh one), each under the folder it ran in.
+          const chatCwd=await h.runner.chatCwd(),dflt=s.mode==='chat'?chatCwd:await h.investigate.snapshotCwd(s.repo!);
+          const used=[{id:s.id,cwd:s.cli?.id===s.id?s.cli.cwd:undefined},...(s.cli&&s.cli.id!==s.id?[{id:s.cli.id,cwd:s.cli.cwd}]:[]),...(s.past??[])];
+          const removed:any[]=[];for(const x of used)removed.push(...await removeTranscript(x.cwd==='chat'?chatCwd:x.cwd??dflt,x.id,opts.harness?.home));
           // The replies this conversation saved in its note's chat record go with it (found by the id they carry, and by the ids of its kept questions for older ones).
           const replies=s.mode==='chat'&&s.note?await (await chatReady).forgetConversation(s.note,s.id,new Set(Object.keys(await h.questions.read(s.id)))):0;
           await h.questions.remove(s.id);await h.index.remove(s.id);if(s.mode==='investigate')await h.investigate.forget(s.id);
@@ -352,6 +360,48 @@ export function createApp(opts: AppOptions) {
         if(e instanceof InvestigateError){if(res.headersSent)return res.end();return json(res,409,{error:e.code,message:'Investigation: '+e.code.replace(/_/g,' ')+'. Nothing was run.'});}
         throw e;
       }
+    }
+    // One conversation entry point. What a turn may do is decided here, from what it carries (attachments) and what the conversation was approved for (its plan card): the page sends attachments
+    // and never a profile or a cost cap. `files` lists matches for the "@" picker; `plan` is the card for given attachments; `approve` grants exactly what the server computes again; `turn` runs one turn.
+    if(url.pathname==='/api/conversation/files'&&req.method==='GET'){
+      const h=await harnessReady;if(!h)return json(res,409,{error:'disabled',message:'Conversations need the Claude Code CLI. Start Aitiarch with --claude.'});
+      return json(res,200,await h.gate.suggest(url.searchParams.get('q')??''));
+    }
+    if(url.pathname.startsWith('/api/conversation/')&&req.method==='PUT'){
+      const h=await harnessReady,b=await readBody(req) as any;
+      if(!h)return json(res,409,{error:'disabled',message:'Conversations need the Claude Code CLI. Start Aitiarch with --claude.'});
+      try{
+        const runtime=await chatReady;
+        // Whether the note has diagrams a conversation can open is decided from the note here, never taken from the page.
+        const base=async()=>{const note=typeof b?.path==='string'?b.path:'',d=note?await runtime.openableDiagrams(note).catch(()=>({has:false,items:[] as {n:number;title:string}[]})):{has:false,items:[] as {n:number;title:string}[]};
+          return {conversation:b?.conversationId,attachments:b?.attachments,hasDiagrams:d.has,diagrams:d.items};};
+        if(url.pathname==='/api/conversation/plan')return json(res,200,await h.gate.plan({...await base(),budgetUsd:b?.budgetUsd}));
+        if(url.pathname==='/api/conversation/approve')return json(res,200,{grant:await h.gate.approve({...await base(),budgetUsd:b?.budgetUsd,hash:b?.hash})});
+        if(url.pathname==='/api/conversation/turn'){
+          if(typeof b?.text!=='string'||!b.text.trim())return json(res,400,{error:'invalid',message:'Write a question first.'});
+          const input=await base(),auth=await h.gate.authorize(input); // refuses, with the card to show, anything the conversation was not approved for
+          const controller=new AbortController(),abort=()=>controller.abort('client_disconnect');res.on('close',abort);
+          const write=(event:{type:string})=>{if(res.destroyed){controller.abort('client_disconnect');return;}if(!res.headersSent)res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'});res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);};
+          try{
+            if(auth.profile==='investigate')await h.investigate.sendGranted(auth,b.text,write,controller.signal,input.hasDiagrams?input.diagrams:undefined);
+            else{
+              const notes=auth.attachments.notes,context=(Array.isArray(b.context)?b.context.filter((c:any)=>c?.moduleId!=='other-notes'):[{moduleId:'this-note',ids:['note']}]).concat(notes.length?[{moduleId:'other-notes',ids:notes}]:[]);
+              const review=await runtime.review({id:typeof b.id==='string'?b.id:randomUUID(),path:b.path,question:b.text,context,session:auth.session.id,...(typeof b.selection==='string'?{selection:b.selection}:{}),...(b.editor!==undefined?{editor:b.editor}:{})});
+              await runtime.send({reviewId:review.reviewId,confirmed:true},write,controller.signal);
+            }
+            res.end();
+          }finally{res.off('close',abort);}
+          return;
+        }
+      }catch(e){
+        if(res.headersSent)return res.end();
+        if(e instanceof GateRefusal)return json(res,409,{error:e.code,message:'This conversation can not do that yet ('+e.code.replace(/_/g,' ')+'). Nothing was sent.',...(e.plan?{plan:e.plan}:{}),...(e.files?{files:e.files}:{})});
+        if(e instanceof SessionIndexError)return json(res,400,{error:'invalid_session',message:e.message});
+        if(e instanceof InvestigateError)return json(res,409,{error:e.code,message:'Investigation: '+e.code.replace(/_/g,' ')+'. Nothing was run.'});
+        if(e instanceof ChatError)return json(res,409,{error:e.code,message:CHAT_MESSAGES[e.code]});
+        throw e;
+      }
+      throw new PathError(400,'bad_body','Unknown conversation action.');
     }
     if(url.pathname==='/api/chat'&&req.method==='GET'){
       const note=url.searchParams.get('path')??'',session=url.searchParams.get('session')??'';await store.read(note);
