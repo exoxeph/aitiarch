@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/media/hero.png" alt="Aitiarch. Your AI writes the code. You own the why." width="100%">
+<img src="docs/media/hero.png" alt="Aitiarch. Your AI writes the code. You own the why. The same screens in both themes, amber Ember on the left and green Moss on the right, split by a diagonal." width="100%">
 
 <br>
 
