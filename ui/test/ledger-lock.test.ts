@@ -1,23 +1,32 @@
-import {mkdtemp,readdir,rm,stat,utimes,writeFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,readdir,rm,stat,utimes,writeFile} from 'node:fs/promises';
+import {readFileSync,existsSync} from 'node:fs';
+import {spawn} from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
-import {LedgerStore,type LedgerEvent} from '../server/ledger-store.ts';
+import {LedgerStore,judgeLock,processAlive,type LedgerEvent} from '../server/ledger-store.ts';
 
 // The ledger's lock file, on the platform's own terms. Root cause of the flaky "two stores append at once" test (observed under load, on Windows): the lock was only waited for on EEXIST. A file operation on the
 // lock, the ledger or its temp file can fail for a moment with EPERM / EBUSY / EACCES (a scanner or another handle holds it; a file just removed is still "delete pending") and that threw straight out of
 // append(). The file system is made to fail on purpose here instead of waiting for load to do it.
-const hooks=vi.hoisted(()=>({lockOpens:0,failLockOpen:[] as string[],failLockUnlink:[] as string[],failRename:[] as string[],failRead:[] as string[]}));
+const hooks=vi.hoisted(()=>({lockOpens:0,failLockOpen:[] as string[],failLockUnlink:[] as string[],failRename:[] as string[],failRead:[] as string[],
+ /** Stale-lock tests: runs before the nth read of a lock file (1-based), before a lock is moved away to be broken, and when the temp file is created. */
+ lockReads:0,lockRenames:0,onLockRead:null as null|((n:number)=>Promise<void>),onLockRename:null as null|(()=>Promise<void>),onTempOpen:null as null|(()=>Promise<void>),inside:0,maxInside:0}));
 vi.mock('node:fs/promises',async(original)=>{
  const real=await original<typeof import('node:fs/promises')>(),boom=(code:string,syscall:string,p:string)=>Object.assign(new Error(`${code}: injected, ${syscall} '${p}'`),{code,syscall,path:p});
  return {...real,
-  open:async(p:unknown,flags?:unknown,mode?:unknown)=>{if(typeof p==='string'&&p.endsWith('.lock')&&flags==='wx'){hooks.lockOpens++;const c=hooks.failLockOpen.shift();if(c)throw boom(c,'open',p);}return (real.open as (...a:unknown[])=>Promise<unknown>)(p,flags,mode);},
+  open:async(p:unknown,flags?:unknown,mode?:unknown)=>{if(typeof p==='string'&&p.endsWith('.lock')&&flags==='wx'){hooks.lockOpens++;const c=hooks.failLockOpen.shift();if(c)throw boom(c,'open',p);}
+   if(typeof p==='string'&&p.endsWith('.tmp')&&flags==='wx'){hooks.inside++;hooks.maxInside=Math.max(hooks.maxInside,hooks.inside);await hooks.onTempOpen?.();}
+   return (real.open as (...a:unknown[])=>Promise<unknown>)(p,flags,mode);},
   unlink:async(p:unknown)=>{if(typeof p==='string'&&p.endsWith('.lock')){const c=hooks.failLockUnlink.shift();if(c)throw boom(c,'unlink',p);}return real.unlink(p as string);},
-  readFile:async(p:unknown,...rest:unknown[])=>{if(typeof p==='string'&&p.endsWith('ledger.json')){const c=hooks.failRead.shift();if(c)throw boom(c,'open',p);}return (real.readFile as (...a:unknown[])=>Promise<unknown>)(p,...rest);},
-  rename:async(a:unknown,b:unknown)=>{if(typeof b==='string'&&b.endsWith('ledger.json')){const c=hooks.failRename.shift();if(c)throw boom(c,'rename',b);}return real.rename(a as string,b as string);},
+  readFile:async(p:unknown,...rest:unknown[])=>{if(typeof p==='string'&&p.endsWith('.lock')){const n=++hooks.lockReads;await hooks.onLockRead?.(n);}
+   if(typeof p==='string'&&p.endsWith('ledger.json')){const c=hooks.failRead.shift();if(c)throw boom(c,'open',p);}return (real.readFile as (...a:unknown[])=>Promise<unknown>)(p,...rest);},
+  rename:async(a:unknown,b:unknown)=>{if(typeof a==='string'&&a.endsWith('.lock')){hooks.lockRenames++;await hooks.onLockRename?.();}
+   if(typeof b==='string'&&b.endsWith('ledger.json')){try{const c=hooks.failRename.shift();if(c)throw boom(c,'rename',b);const r=await real.rename(a as string,b as string);hooks.inside--;return r;}catch(e){throw e;}}
+   return real.rename(a as string,b as string);},
  };
 });
-beforeEach(()=>{hooks.lockOpens=0;hooks.failLockOpen.length=hooks.failLockUnlink.length=hooks.failRename.length=hooks.failRead.length=0;});
+beforeEach(()=>{hooks.lockOpens=hooks.lockReads=hooks.lockRenames=hooks.inside=hooks.maxInside=0;hooks.onLockRead=hooks.onLockRename=hooks.onTempOpen=null;hooks.failLockOpen.length=hooks.failLockUnlink.length=hooks.failRename.length=hooks.failRead.length=0;});
 const dirs:string[]=[];afterEach(async()=>{for(const d of dirs.splice(0))await rm(d,{recursive:true,force:true,maxRetries:5,retryDelay:100});});
 const temp=async()=>{const d=await mkdtemp(path.join(os.tmpdir(),'aitiarch-ll-'));dirs.push(d);return d;};
 const turn={session:'e50d1e40-4aaa-47b0-923c-3a17de41469d',mode:'investigate' as const,inputTokens:1,cachedTokens:0,outputTokens:1,costUsd:0.01,outcome:'completed'};
@@ -75,5 +84,87 @@ describe('stores of one process',()=>{
   const root=await temp(),a=new LedgerStore(root),b=new LedgerStore(root);
   const bad=a.append({...event(0),turn:{...turn,session:'nope'}} as LedgerEvent),good=[a.append(event(1)),b.append(event(2))];
   await expect(bad).rejects.toThrow();await Promise.all(good);expect(await ids(a)).toEqual(['e1','e2']);
+ });
+});
+
+// Stale-lock recovery. A lock file holds {pid, startedAt, id}. It may be broken only when its pid is not running or it is older than 60 s; a live fresh lock, or one that cannot be read or parsed, is waited for as before.
+const lockPath=(root:string)=>path.join(root,'ledger.json.lock');
+const lockText=(pid:number,startedAt:number,id='other')=>JSON.stringify({pid,startedAt,id});
+const deadPid=()=>new Promise<number>((res,rej)=>{const c=spawn(process.execPath,['-e','0'],{stdio:'ignore'}),pid=c.pid!;c.once('error',rej);c.once('exit',()=>res(pid));});
+const settle=(p:Promise<unknown>)=>{const s={done:false};void p.then(()=>{s.done=true;},()=>{s.done=true;});return s;};
+const wait=(ms:number)=>new Promise(r=>setTimeout(r,ms));
+
+describe('judging a lock file',()=>{
+ const now=1_000_000_000,alive=(live:number[])=>(pid:number)=>live.includes(pid);
+ it('a live holder, fresh: held',()=>expect(judgeLock(lockText(7,now-1000),now,alive([7]))).toBe('held'));
+ it('a pid that is not running: stale',()=>expect(judgeLock(lockText(7,now-1000),now,alive([]))).toBe('stale'));
+ it('older than 60 s: stale even when the pid is running (the pid may have been reused)',()=>expect(judgeLock(lockText(7,now-61_000),now,alive([7]))).toBe('stale'));
+ it('exactly 60 s old and live: still held',()=>expect(judgeLock(lockText(7,now-60_000),now,alive([7]))).toBe('held'));
+ it('a start time in the future is not old',()=>expect(judgeLock(lockText(7,now+600_000),now,alive([7]))).toBe('held'));
+ it.each(['','not json','{}','[]','null','{"pid":"7","startedAt":1}','{"pid":-3,"startedAt":1}','{"pid":0,"startedAt":1}','{"pid":1.5,"startedAt":1}','{"pid":7}','{"pid":7,"startedAt":"x"}','{"pid":7,"startedAt":null}'])('cannot be parsed or has no usable pid and time (%j): unreadable, never stale',raw=>expect(judgeLock(raw,now,alive([]))).toBe('unreadable'));
+ it('this process is running; a process that ended is not',async()=>{expect(processAlive(process.pid)).toBe(true);expect(processAlive(await deadPid())).toBe(false);});
+});
+
+describe('breaking a stale lock',()=>{
+ it('a lock whose pid is not running is broken at once and the event is saved',async()=>{
+  const root=await temp(),store=new LedgerStore(root);await writeFile(lockPath(root),lockText(await deadPid(),Date.now()));
+  const t=Date.now();await store.append(event(1));expect(Date.now()-t).toBeLessThan(2000);expect(await ids(store)).toEqual(['e1']);expect(hooks.lockRenames).toBe(1);await clean(root);
+ });
+ it('a lock older than 60 s is broken even when its pid is running',async()=>{
+  const root=await temp(),store=new LedgerStore(root);await writeFile(lockPath(root),lockText(process.pid,Date.now()-61_000));
+  const t=Date.now();await store.append(event(1));expect(Date.now()-t).toBeLessThan(2000);expect(await ids(store)).toEqual(['e1']);expect(hooks.lockRenames).toBe(1);await clean(root);
+ });
+ it.each([0,1000,30_000,59_000])('a live holder\'s lock, %i ms old, is respected until it is released',async age=>{
+  const root=await temp(),store=new LedgerStore(root),mine=lockText(process.pid,Date.now()-age,'live');await writeFile(lockPath(root),mine);
+  const pending=store.append(event(1)),s=settle(pending);await wait(400);
+  expect(s.done).toBe(false);expect(readFileSync(lockPath(root),'utf8')).toBe(mine);expect(hooks.lockRenames).toBe(0);
+  await rm(lockPath(root));await pending;expect(await ids(store)).toEqual(['e1']);await clean(root);
+ });
+ it.each(['','not json','{}','{"pid":"x"}','{"pid":-5,"startedAt":1}','{"pid":7,"startedAt":"yesterday"}','[1,2]'])('a lock that cannot be parsed (%j) is waited for, even with an old modification time',async raw=>{
+  const root=await temp(),store=new LedgerStore(root);await writeFile(lockPath(root),raw);const old=new Date(Date.now()-600_000);await utimes(lockPath(root),old,old);
+  const pending=store.append(event(1)),s=settle(pending);await wait(400);
+  expect(s.done).toBe(false);expect(readFileSync(lockPath(root),'utf8')).toBe(raw);expect(hooks.lockRenames).toBe(0);
+  await rm(lockPath(root));await pending;expect(await ids(store)).toEqual(['e1']);await clean(root);
+ });
+ it('a lock that cannot be read (a directory in its place) is waited for, not broken',async()=>{
+  const root=await temp(),store=new LedgerStore(root);await mkdir(lockPath(root));
+  const pending=store.append(event(1)),s=settle(pending);await wait(400);
+  expect(s.done).toBe(false);expect(hooks.lockRenames).toBe(0);expect(existsSync(lockPath(root))).toBe(true);
+  await rm(lockPath(root),{recursive:true});await pending;expect(await ids(store)).toEqual(['e1']);
+ });
+ it.each([2,3,4])('%i stores racing to break one dead lock: only one at a time is inside, and no event is lost',async n=>{
+  const root=await temp(),stores=Array.from({length:n},()=>new LedgerStore(root));await writeFile(lockPath(root),lockText(await deadPid(),Date.now()));
+  hooks.onTempOpen=async()=>{await wait(10);};
+  await Promise.all(Array.from({length:12},(_,i)=>stores[i%n].append(event(i))));
+  expect(hooks.maxInside).toBe(1);expect(hooks.lockRenames).toBeGreaterThanOrEqual(1);expect(await ids(stores[0])).toEqual(Array.from({length:12},(_,i)=>'e'+i).sort());await clean(root);
+ });
+ it('the lock is replaced by a live one after it was judged stale and before it is read again: it is not touched',async()=>{
+  const root=await temp(),store=new LedgerStore(root),fresh=lockText(process.pid,Date.now(),'fresh');await writeFile(lockPath(root),lockText(await deadPid(),Date.now()));
+  hooks.onLockRead=async n=>{if(n===2)await writeFile(lockPath(root),fresh);};
+  const pending=store.append(event(1)),s=settle(pending);await wait(400);
+  expect(s.done).toBe(false);expect(hooks.lockRenames).toBe(0);expect(readFileSync(lockPath(root),'utf8')).toBe(fresh);
+  await rm(lockPath(root));await pending;expect(await ids(store)).toEqual(['e1']);await clean(root);
+ });
+ it('the lock is replaced by a live one just before it is moved away: it is put back whole and respected',async()=>{
+  const root=await temp(),store=new LedgerStore(root),fresh=lockText(process.pid,Date.now(),'fresh');await writeFile(lockPath(root),lockText(await deadPid(),Date.now()));
+  let swapped=false;hooks.onLockRename=async()=>{if(!swapped){swapped=true;await writeFile(lockPath(root),fresh);}};
+  const pending=store.append(event(1)),s=settle(pending);await wait(500);
+  expect(swapped).toBe(true);expect(s.done).toBe(false);expect(readFileSync(lockPath(root),'utf8')).toBe(fresh);
+  expect((await readdir(root)).filter(f=>f.includes('.broken.'))).toEqual([]);
+  await rm(lockPath(root));await pending;expect(await ids(store)).toEqual(['e1']);await clean(root);
+ });
+ it('a holder whose lock was taken over (it ran past 60 s) writes nothing and does not remove the new holder\'s lock',async()=>{
+  const root=await temp(),store=new LedgerStore(root),theirs=lockText(process.pid,Date.now(),'theirs');
+  hooks.onTempOpen=async()=>{await writeFile(lockPath(root),theirs);};
+  await expect(store.append(event(1))).rejects.toThrow(/taken over/);
+  expect(readFileSync(lockPath(root),'utf8')).toBe(theirs);expect(existsSync(path.join(root,'ledger.json'))).toBe(false);
+  expect((await readdir(root)).filter(f=>f.endsWith('.tmp'))).toEqual([]);
+ });
+ it('while it holds the lock an append records its own pid and start time',async()=>{
+  const root=await temp(),store=new LedgerStore(root);let seen:unknown=null;
+  hooks.onTempOpen=async()=>{seen=JSON.parse(readFileSync(lockPath(root),'utf8'));};
+  const t=Date.now();await store.append(event(1));
+  expect(seen).toMatchObject({pid:process.pid});const s=seen as {pid:number;startedAt:number;id:string};
+  expect(Number.isSafeInteger(s.pid)).toBe(true);expect(s.startedAt).toBeGreaterThanOrEqual(t-50);expect(s.startedAt).toBeLessThanOrEqual(Date.now());expect(typeof s.id).toBe('string');await clean(root);
  });
 });

@@ -1,4 +1,4 @@
-import { lstat, open, readFile, rename, unlink } from 'node:fs/promises';
+import { link, lstat, open, readFile, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import {isAbortCause,type AbortCause} from '../shared/chat.ts';
@@ -62,6 +62,22 @@ async function retried<T>(op: () => Promise<T>, withinMs = 2000): Promise<T> {
 }
 /** How long an append waits for the lock file before it gives up (as it always did: about 5 s). */
 const LOCK_WAIT_MS = 5_000;
+/** A lock older than this is broken whatever its pid says (the pid may belong to another program by now). */
+const LOCK_STALE_MS = 60_000;
+export type LockJudgement = 'held' | 'stale' | 'unreadable';
+/** Whether a process is running. Signal 0 only checks: it sends nothing, and it works on Windows. EPERM means it exists but is not ours to signal. */
+export function processAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; }
+}
+/** What a lock file's text says: 'stale' only when it records a holder that is not running or one that started more than 60 s ago; 'unreadable' when it cannot be parsed or lacks a usable pid and time (it is waited for, never broken); otherwise 'held'. */
+export function judgeLock(raw: string, now: number, alive: (pid: number) => boolean = processAlive): LockJudgement {
+  let d: unknown; try { d = JSON.parse(raw); } catch { return 'unreadable'; }
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return 'unreadable';
+  const { pid, startedAt } = d as { pid?: unknown; startedAt?: unknown };
+  if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0 || typeof startedAt !== 'number' || !Number.isFinite(startedAt)) return 'unreadable';
+  if (now - startedAt > LOCK_STALE_MS) return 'stale';
+  return alive(pid) ? 'held' : 'stale';
+}
 export class LedgerStore {
   private tail: Promise<unknown> = Promise.resolve();
   private file: string;
@@ -80,17 +96,41 @@ export class LedgerStore {
       ![e.id, e.inkId, e.requestId, e.note, e.at].every(v => typeof v === 'string'))) throw new Error('Invalid ledger; original preserved.');
     return d;
   }
-  /** Several parts of the app keep their own LedgerStore on the same file. Their appends are serialised by this lock file; one that finds it taken, or finds the file system saying no for a moment, waits its turn (up to 5 s) instead of failing. */
-  private async lock(lockPath: string) {
+  /** Several parts of the app keep their own LedgerStore on the same file. Their appends are serialised by this lock file; one that finds it taken, or finds the file system saying no for a moment, waits its turn (up to 5 s) instead of failing.
+   *  The lock records who holds it. One that is stale (see judgeLock) is broken by the waiter that finds it; any other is waited for. Returns the text the lock was written with: the proof, later, that it is still this append's. */
+  private async lock(lockPath: string): Promise<string> {
     const end = Date.now() + LOCK_WAIT_MS;
     for (;;) {
-      try { return await open(lockPath, 'wx', 0o600); }
-      catch (e) {
+      try {
+        const handle = await open(lockPath, 'wx', 0o600), mine = JSON.stringify({ pid: process.pid, startedAt: Date.now(), id: randomUUID() });
+        try { await handle.writeFile(mine); }
+        catch (e) { await handle.close().catch(() => {}); await unlink(lockPath).catch(() => {}); throw e; } // a lock that could not be written would be an unreadable one that nobody breaks
+        await handle.close(); return mine;
+      } catch (e) {
         const code = (e as NodeJS.ErrnoException).code ?? '';
         if ((code !== 'EEXIST' && !PASSING.has(code)) || Date.now() >= end) throw e;
+        if (code === 'EEXIST' && await this.breakIfStale(lockPath)) continue;
         await pause(15 + Math.random() * 25);
       }
     }
+  }
+  /** Removes the lock when it is stale, and says whether it did. Safe against other waiters doing the same: the lock is read, judged, read again, and moved away by rename (which only one of them can win). What was moved is checked to be what was judged;
+   *  if another lock took its place in between, it is put back (a hard link, which does not replace a file) and left alone. A lock that cannot be read is never broken. */
+  private async breakIfStale(lockPath: string): Promise<boolean> {
+    let judged: string;
+    try { judged = await retried(() => readFile(lockPath, 'utf8')); } catch { return false; }
+    if (judgeLock(judged, Date.now()) !== 'stale') return false;
+    try { if (await retried(() => readFile(lockPath, 'utf8')) !== judged) return false; } catch { return false; }
+    const away = lockPath + '.broken.' + randomUUID();
+    try { await retried(() => rename(lockPath, away)); } catch { return false; }
+    let moved: string | null = null;
+    try { moved = await readFile(away, 'utf8'); } catch { /* unreadable: treated as not what was judged */ }
+    if (moved === judged) { await unlink(away).catch(() => {}); return true; }
+    await link(away, lockPath).catch(() => {}); await unlink(away).catch(() => {}); return false;
+  }
+  /** Whether the lock file is still the one this append wrote (after 60 s, or a crashed holder's pid being judged dead, another may have broken and taken it). */
+  private async owns(lockPath: string, mine: string): Promise<boolean> {
+    try { return await retried(() => readFile(lockPath, 'utf8')) === mine; } catch { return false; }
   }
   append(event: LedgerEvent): Promise<void> {
     if(event.event==='investigation'&&!validInvestigation(event.investigation))return Promise.reject(new Error('Invalid investigation metadata.'));
@@ -101,15 +141,16 @@ export class LedgerStore {
     if(event.event==='context_read'&&(contextReadKeys(event)===''||!validContextRead(event)))return Promise.reject(new Error('Invalid context metadata.'));
     const job = this.tail.catch(() => {}).then(async () => {
       await this.safe(); const lockPath = this.file + '.lock';
-      const lock = await this.lock(lockPath), temp = this.file + '.' + randomUUID() + '.tmp';
+      const mine = await this.lock(lockPath), temp = this.file + '.' + randomUUID() + '.tmp';
       try {
         const d = await this.read();
         if (d.events.some(e => ['context_read','investigation','investigate_turn','diagram_read','cli_version','conversation_turn'].includes(event.event)?e.id===event.id:e.inkId === event.inkId && e.requestId === event.requestId && e.event === event.event)) return;
         d.events.push(event);
         const f = await open(temp, 'wx', 0o600);
         try { await f.writeFile(JSON.stringify(d, null, 2) + '\n'); await f.sync(); } finally { await f.close(); }
+        if (!await this.owns(lockPath, mine)) throw new Error('The ledger lock was taken over; nothing was written.');
         await this.safe(); await retried(() => rename(temp, this.file));
-      } finally { await unlink(temp).catch(() => {}); await lock.close().catch(() => {}); await retried(() => unlink(lockPath)).catch(() => {}); } // the event is saved: a lock that cannot be removed now is only left behind (as a crash would leave it)
+      } finally { await unlink(temp).catch(() => {}); if (await this.owns(lockPath, mine)) await retried(() => unlink(lockPath)).catch(() => {}); } // the event is saved: a lock that cannot be removed now is only left behind (as a crash would leave it)
     });
     this.tail = job; return job;
   }
