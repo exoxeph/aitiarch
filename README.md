@@ -59,6 +59,8 @@ Real work is a tree. You plan something, you try it, it works or it doesn't, and
 <div align="center">
 <img src="docs/media/flow-ink.gif" alt="A selected sentence goes through Think on this to Aitiarch AI, becomes a thought in the margin, and the thought and its anchor are written to a file beside yours while your Markdown stays untouched" width="100%">
 <br>
+<img src="docs/media/use-ink.gif" alt="Why you need it: the doubt belongs next to the sentence. Three habits for using thoughts well. The payoff: the note stays byte-for-byte yours." width="100%">
+<br>
 <img src="docs/media/motion-ink.gif" alt="Dragging across a sentence, pressing Think on this, reviewing what will be sent, and a thought typing itself into the margin beside the text" width="100%">
 </div>
 
@@ -72,6 +74,8 @@ Your note stays **byte-for-byte your Markdown**. The ink lives next to the file,
 <div align="center">
 <img src="docs/media/flow-review.gif" alt="The question, the note, the threads, the instructions and the budget are gathered into a review card, and nothing is sent until you press Send" width="100%">
 <br>
+<img src="docs/media/use-review.gif" alt="Why you need it: you cannot trust what you cannot see. Three habits for reading a review card. The payoff: it will see exactly this, and nothing else." width="100%">
+<br>
 <img src="docs/media/motion-review.gif" alt="Typing a question in the chat, the review card appearing with the note, threads, instructions and budget, and Send pressed only after reading it" width="100%">
 </div>
 
@@ -83,6 +87,8 @@ Every message gets a review card first: your question, the note, the threads, th
 
 <div align="center">
 <img src="docs/media/flow-sessions.gif" alt="Pick Claude Code and Codex sessions, secrets are redacted, you preview exactly what will be sent, and they join as context chips on the review card" width="100%">
+<br>
+<img src="docs/media/use-sessions.gif" alt="Why you need it: yesterday’s debugging is evidence. Three habits for bringing in sessions. The payoff: secrets are blanked before a word leaves." width="100%">
 <br>
 <img src="docs/media/motion-sessions.gif" alt="Opening the session picker, ticking a Claude Code session and a Codex session, and opening the redacted preview of exactly what will be sent" width="100%">
 </div>
@@ -97,6 +103,8 @@ Chats that carry sessions stay in memory only, and *Add to note* is switched off
 <div align="center">
 <img src="docs/media/flow-cites.gif" alt="Each quoted claim in an answer is searched for in its own source and comes back as Found or Quote not found" width="100%">
 <br>
+<img src="docs/media/use-cites.gif" alt="Why you need it: confident is not the same as true. Three habits for checking claims. The payoff: Found, or Quote not found, in words." width="100%">
+<br>
 <img src="docs/media/motion-cites.gif" alt="An answer arrives with source chips, and clicking each one shows the quoted words and whether they were Found or Quote not found" width="100%">
 </div>
 
@@ -109,6 +117,8 @@ Each claim in an answer becomes a chip: the note, a thread, a session. The app l
 <div align="center">
 <img src="docs/media/flow-addnote.gif" alt="Add to note inserts the reply as an AI-labelled Markdown callout under the sentence it is about, with one undo and your bytes untouched" width="100%">
 <br>
+<img src="docs/media/use-addnote.gif" alt="Why you need it: keep the answer that earned its place. Three habits for adding to the note. The payoff: plain Markdown, labelled AI, one undo away." width="100%">
+<br>
 <img src="docs/media/motion-addnote.gif" alt="Hovering an answer, pressing Add to note, and the reply landing in the note as an AI-labelled callout with an Undo" width="100%">
 </div>
 
@@ -120,6 +130,8 @@ One click puts the answer in the note as an AI-labelled callout. It is ordinary 
 
 <div align="center">
 <img src="docs/media/flow-diagram.gif" alt="Select a sentence and press Visualize, review, Aitiarch AI sketches the diagram, it is checked and repaired, appears in the margin, and can be added to the note as an image" width="100%">
+<br>
+<img src="docs/media/use-diagram.gif" alt="Why you need it: some thoughts are pictures. Three habits for diagrams. The payoff: drawn by the app, never by the model." width="100%">
 <br>
 <img src="docs/media/motion-diagram.gif" alt="Dragging across a sentence, pressing Visualize, sending, a flow diagram appearing in the margin, and Add to note placing it in the document as an image" width="100%">
 </div>
@@ -146,6 +158,8 @@ The AI only supplies words and connections. The app lays out and draws every box
 
 <div align="center">
 <img src="docs/media/flow-constellation.gif" alt="Your notes are read for links and drawn as a constellation: links become lines, open threads glow, broken links are flagged" width="100%">
+<br>
+<img src="docs/media/use-constellation.gif" alt="Why you need it: you cannot see a tree from inside one note. Three habits for reading the map. The payoff: twenty-nine notes, one glance." width="100%">
 <br>
 <img src="docs/media/motion-constellation.gif" alt="Opening the constellation, switching to the whole notebook of twenty-nine notes, and clicking through notes while their links and open threads light up" width="100%">
 </div>
