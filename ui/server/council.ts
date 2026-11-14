@@ -31,7 +31,7 @@ export class CouncilService {
  async plan(raw:unknown){const {session,grant}=await this.clean(raw);const have=session.councilGrant;
   const verified=have&&validCouncilGrant(have)&&have.project===this.project&&have.session===session.id&&sha(unsigned(have))===have.confirmed;
   const covered=verified&&grant.providers.every(id=>have.providers.includes(id)&&have.caps[id]!.unit===grant.caps[id]!.unit&&have.caps[id]!.amount>=grant.caps[id]!.amount&&have.caps[id]!.deadlineMs>=grant.caps[id]!.deadlineMs);
-  return {profile:'council' as const,conversation:session.id,providers:grant.providers.map(id=>({id,safetyLabel:this.o.adapters.find(a=>a.id===id)?.safetyLabel??(id==='claude'?'fenced':id==='codex'?'contained':'host-gated'),cap:grant.caps[id],metering:'after-turn; deadline is hard'})),tools:[] as string[],notesOnly:true,needsApproval:!covered,hash:sha(unsigned(grant)),grant};
+  return {profile:'council' as const,conversation:session.id,providers:grant.providers.map(id=>({id,safetyLabel:this.o.adapters.find(a=>a.id===id)?.safetyLabel??(id==='claude'?'fenced':id==='codex'?'contained':'host-gated'),cap:grant.caps[id],metering:'after-turn; deadline is hard'})),tools:[] as string[],notesOnly:true,needsApproval:!covered,...(!covered?{reason:'Re-approve the Council plan. A provider grant may have been revoked after reported usage exceeded its cap.'}:{}),hash:sha(unsigned(grant)),grant};
  }
  async approve(raw:unknown){const b=raw as CouncilInput,p=await this.plan(raw);if(typeof b.hash!=='string'||b.hash!==p.hash)throw Error('plan_changed');await this.o.index.setCouncilGrant(p.conversation,{...p.grant,confirmed:p.hash});return {approved:true};}
  async run(raw:unknown,signal?:AbortSignal){
@@ -45,9 +45,11 @@ export class CouncilService {
     const invalid=block.block==='missing'||block.block==='malformed'||!reply.body.trim()||!!reply.citation||reply.claims.some(c=>c.status!=='found')||secretKinds(reply.body).length>0;
     if(invalid)result={...result,status:'error',answer:'',code:'answer_validation'};else result={...result,answer:redact(reply.body)};
    }
+   // Revoke before publishing; ledger availability never grants another turn.
+   if(result.overCap)await this.o.index.clearCouncilProvider(b.conversation,id);
    const version=adapter?.status?.().version,key=b.conversation+':'+id;
    if(id==='codex'&&version&&version!=='unknown'&&!this.versionsLogged.has(key)){const saved=await appendLedger(this.o.ledger,{id:randomUUID(),inkId:b.conversation,requestId:randomUUID(),note:'',event:'cli_version',at:new Date().toISOString(),cli:{provider:'codex',session:b.conversation,version}});if(saved)this.versionsLogged.add(key);else ledgerUnavailable=true;}
-   const saved=await appendLedger(this.o.ledger,{id:randomUUID(),inkId:b.conversation,requestId:randomUUID(),note:'',event:'council_turn',at:new Date().toISOString(),council:{provider:id,status:result.status,usage:result.usage,durationMs:Math.round(result.durationMs),...(result.blockedAttempts?{blockedAttempts:result.blockedAttempts}:{})}});if(!saved)ledgerUnavailable=true;
+   const saved=await appendLedger(this.o.ledger,{id:randomUUID(),inkId:b.conversation,requestId:randomUUID(),note:'',event:'council_turn',at:new Date().toISOString(),council:{provider:id,status:result.status,usage:result.usage,durationMs:Math.round(result.durationMs),...(result.overCap?{overCap:true}:{}),...(result.blockedAttempts?{blockedAttempts:result.blockedAttempts}:{})}});if(!saved)ledgerUnavailable=true;
    return result;
   }));
    // Single-response transport: publish only validated, redacted answers, never rejected partial output.

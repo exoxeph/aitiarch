@@ -64,6 +64,8 @@ export class SessionIndex {
   if(!validGrantShape(grant))return Promise.reject(new SessionIndexError('Invalid grant.'));
   return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');s.grant={...grant,files:[...grant.files]};return {...s};});
  }
+ /** Reduce an approved grant after after-turn usage exceeds its cap. Other providers retain only their already-approved rights. */
+ clearCouncilProvider(id:string,provider:string){return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');const g=s.councilGrant;if(g){g.providers=g.providers.filter(p=>p!==provider);delete g.caps[provider as keyof typeof g.caps];if(!g.providers.length)delete s.councilGrant;else{const {confirmed,...rest}=g;g.confirmed=createHash('sha256').update(JSON.stringify(rest)).digest('hex');}}return {...s};});}
  setCouncilGrant(id:string,grant:CouncilGrant){
   if(!validCouncilGrant(grant))return Promise.reject(new SessionIndexError('Invalid council grant.'));
   return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');s.councilGrant=structuredClone(grant);return {...s};});
