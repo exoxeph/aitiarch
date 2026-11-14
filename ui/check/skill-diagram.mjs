@@ -14,6 +14,7 @@ import { chromium } from 'playwright-core';
 import { Store } from '../server/store.ts';
 import { NoteWatcher } from '../server/watch.ts';
 import { createApp } from '../server/http.ts';
+import {DiagramImageStore} from '../server/diagram-image-store.ts';
 import { SKILL_DIAGRAM_CSP, SKILL_DIAGRAM_SVG_CSP_HEADER, SVG_ISSUE_TEXT } from '../shared/skill-diagram.ts';
 import { cicd } from '../test/fixtures/diagrams.ts';
 
@@ -210,7 +211,9 @@ try {
   await page.waitForTimeout(1500); assert.equal(responses.filter((r2) => r2.url.includes(c.item.skillDiagram.asset)).length, 0, 'the loop page was never requested');
   assert.equal(await page.evaluate(() => window.__skillMessages.filter((m) => m.data.loop).length), 0, 'and never ran'); assert((await responsive()) > 10); assert.equal(alive, 1);
 
-  const files = (await readdir(path.join(root, 'assets'))).sort(); assert.equal(files.length, 3, 'one svg and two html fallbacks: ' + files); assert.equal(files.filter((f) => f.endsWith('.svg')).length, 1);
+  const files = (await readdir(path.join(root, 'assets'))).sort();
+  assert.deepEqual(files,[a.skillDiagram.asset,a.skillDiagram.asset.replace(/\.svg$/,'.png'),b.item.skillDiagram.asset,c.item.skillDiagram.asset].sort(),'one sanitized svg, its cached PNG and exactly two HTML fallbacks');
+  const cached=await new DiagramImageStore(root).read(a.skillDiagram.asset.replace(/\.svg$/,'.png'));assert(cached.length>0,'the generated PNG is validated, not merely counted');
   assert.equal(await readFile(path.join(root, 'fixture.md'), 'utf8'), '\ufeff' + text.replace(/\n/g, '\r\n'), 'the note is untouched'); assert.deepEqual(errors, [], 'no page errors');
   console.log(JSON.stringify({ passed: true, ...report }, null, 1));
 } finally { await browser?.close(); evil.close(); watcher.stop(); await app.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); await rm(skills, { recursive: true, force: true }); }

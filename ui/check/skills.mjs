@@ -1,9 +1,8 @@
-// Phase 5 check: the Skills tab opens on the REAL discovered skill count and never renders the whole list; the chat persona switch works;
-// the quiet "Used:" line shows on an AI thought and on a chat reply. Synthetic note, no provider. Skills are read from your real home
-// folders (read-only, counted, never copied or sent anywhere).
+// Phase 5 check: a synthetic skill library exercises bounded discovery/search;
+// the quiet "Used:" line shows on an AI thought and on a chat reply. No owner data or provider calls.
 // Run: BATCH2A_OUTPUT=<dir outside the repo> node check/skills.mjs   (after `vite build`)
 import assert from "node:assert/strict";
-import { spawn, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -11,7 +10,10 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { InkStore } from "../server/ink-store.ts";
 import { ChatStore } from "../server/chat/store.ts";
-import { defaultRoots, discoverSkills } from "../server/skills.ts";
+import { discoverSkills } from "../server/skills.ts";
+import {Store} from '../server/store.ts';
+import {NoteWatcher} from '../server/watch.ts';
+import {createApp} from '../server/http.ts';
 import { captureAnchor } from "../shared/anchors.ts";
 
 const uiDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,11 +28,13 @@ writeFileSync(path.join(root, ".gitignore"), "/chat/\n/ui-state.json*\n");
 const alpha = "Alpha paragraph: the human wrote this sentence themselves.";
 const original = ["# Skills fixture", "", alpha, "", "End of the note.", ""].join("\n");
 writeFileSync(path.join(root, "notebook.md"), original);
-let browser, proc;
+const skillRoot=path.join(project,'synthetic-skills');
+for(let i=0;i<90;i++){const dir=path.join(skillRoot,i===0?'archify':'alpha-'+i);mkdirSync(dir,{recursive:true});writeFileSync(path.join(dir,'SKILL.md'),`---\nname: ${i===0?'archify':'alpha-'+i}\ndescription: Synthetic architecture fixture ${i}\n---\nSynthetic instructions only.\n`);}
+const skillRoots=[{kind:'user',dir:skillRoot,layout:'flat'}];
+let browser, app, watcher;
 try {
-  // What the app should find: the same discovery the server runs, over your real skill folders.
-  const expected = (await discoverSkills(defaultRoots(os.homedir(), project))).length;
-  assert(expected >= 25, `This check needs your real skill library (found ${expected}); it is not meant to run against a tiny fixture.`);
+  const expected = (await discoverSkills(skillRoots)).length;
+  assert.equal(expected,90,'the synthetic library is larger than the search page cap');
 
   const ink = await InkStore.open(root);
   const s = await ink.read("notebook.md");
@@ -42,13 +46,9 @@ try {
   await new ChatStore(root).append("notebook.md", { id: "m1", role: "assistant", body: "A fixture chat reply that used a skill.", at: new Date().toISOString(), provider: "claude", model: null,
     evidence: [], usage: null, insertionBlocked: false, skills: ["archify"] });
 
-  proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_CONFIG_DIR: path.join(project, "config") } });
-  const url = await new Promise((resolve, reject) => {
-    let out = "";
-    proc.stdout.on("data", (d) => { out += d; const m = /AITIARCH_READY (.*)/.exec(out); if (m) resolve(JSON.parse(m[1]).launch); });
-    proc.on("exit", (c) => reject(new Error(`Server exited early (${c}).`)));
-    setTimeout(() => reject(new Error("Server startup timeout.")), 10000);
-  });
+  const store=await Store.open(root);watcher=new NoteWatcher(store);
+  app=createApp({store,watcher,distDir:path.join(uiDir,'dist'),skillRoots});
+  const url='http://127.0.0.1:'+await app.listen(0)+'/?debug';
   browser = await chromium.launch({ channel: "msedge", headless: true });
   const page = await browser.newPage({ viewport: { width: 2200, height: 1000 } });
   await page.goto(url + "&debug");
@@ -116,6 +116,6 @@ try {
   console.log(JSON.stringify({ passed: true, discoveredSkills: expected, openingCards: opening, searchCards: searched }, null, 1));
 } finally {
   await browser?.close();
-  proc?.kill();
+  watcher?.stop();await app?.close();
   rmSync(project, { recursive: true, force: true });
 }
