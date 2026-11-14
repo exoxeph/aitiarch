@@ -7,6 +7,7 @@ if(fs.readdirSync(process.cwd()).length)process.exit(91);
 if(args.includes('--version')){console.log(mode.startsWith('kiro')||['permission','no-inventory','refusal','replay'].includes(mode)?'kiro-cli 3.3.0':'codex-cli 0.145.0');process.exit();}
 if(args.includes('--help')){if(['metadata-hang','help-hang'].includes(mode)){setInterval(()=>{},1000);}else{console.log(args.includes('acp')?'--agent-engine --agent':'--json --ephemeral --ignore-user-config --ignore-rules --sandbox read-only --skip-git-repo-check --color --cd --config --disable');process.exit();}}
 if(!args.includes('acp')){
+ if(mode==='runtime-error'){process.stdin.resume();process.stdin.on('end',()=>{out({type:'item.completed',item:{type:'error',message:'Code Mode is unavailable because code-mode host is disabled.'}});out({type:'turn.completed',usage:{input_tokens:20000,output_tokens:1}});});}else
  process.stdin.resume();process.stdin.on('end',()=>{if(mode==='hang')setInterval(()=>{},1000);else if(mode==='codex'){out({type:'item.completed',item:{type:'agent_message',text:'June.'}});out({type:'turn.completed',usage:{input_tokens:10,output_tokens:2}});}else{out({type:'item.started',item:{type:mode}});setInterval(()=>{},1000);}});
 }else{
  const rl=readline.createInterface({input:process.stdin});let requestId;

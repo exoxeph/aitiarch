@@ -7,6 +7,7 @@ import path from 'node:path';
 const ui=fileURLToPath(new URL('../',import.meta.url));
 const hash=b=>createHash('sha256').update(b).digest('hex');
 const cases=[
+ ['fresh home extra file','server/providers/tool-less.ts',"if((await readdir(env.KIRO_HOME)).some(n=>n!=='agents'))","if(false)",'rejects an extra file','test/council-preflight.test.ts'],
  ['refusal latch','server/providers/turn.ts',"if(e.type==='refusal')refused=true;","if(e.type==='refusal')refused=false;",'latches refusal even'],
  ['permission rejection','server/providers/tool-less.ts',"['reject_once','reject_always'].includes(o.kind)","['allow_once','allow_always'].includes(o.kind)",'permission denial never'],
  ['missing agent','server/providers/tool-less.ts',"if(!s?.modes||!Array.isArray(s.modes.availableModes))","if(false)",'fails closed: agent missing','test/council-preflight.test.ts'],
