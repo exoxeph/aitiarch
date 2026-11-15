@@ -1,3 +1,4 @@
+import {DEFAULT_PIPELINE_CONFIG as defaults} from '../../shared/pipeline-config.ts';
 import {randomUUID} from 'node:crypto';import type {Provider} from './index.ts';
 import {TurnFailure,type TurnAdapter,type TurnEvent} from './turn.ts';
 /** Inspect protocol identifiers only, never infer refusal from answer prose. Bounded like the isolated event inspector. */
@@ -10,7 +11,7 @@ export function protocolRefusal(event:unknown):boolean{
  };return visit(event,0);
 }
 /** Reuses the isolated no-tools runner, not the diagram or Investigate fence. */
-export function claudeTurn(provider:Provider):TurnAdapter{return {id:'claude',label:'Claude',safetyLabel:'fenced',async *startTurn(input,signal){
+export function claudeTurn(provider:Provider):TurnAdapter{return {id:'claude',label:'Claude',safetyLabel:defaults.safetyLabels.claude,async *startTurn(input,signal){
  const ready=await provider.checkAvailability();if(!ready.available)throw new TurnFailure('isolation_unavailable','unavailable');
  const queue:TurnEvent[]=[];let done=false,error:unknown,wake=()=>{};
  const job=provider.invoke({chat:true,id:randomUUID(),action:'ask',question:input.question,selection:'',note:input.notes[0]?.text??'',decisions:input.notes.slice(1).map(n=>({id:n.id,text:n.text})),turns:[]},{signal,timeoutMs:input.deadlineMs,onStreamEvent:e=>{if(protocolRefusal(e)){queue.push({type:'refusal',code:'refusal'});wake();}},onTextDelta:text=>{queue.push({type:'delta',text});wake();}}).then(r=>{

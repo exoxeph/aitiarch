@@ -1,3 +1,4 @@
+import {DEFAULT_PIPELINE_CONFIG as defaults} from '../../shared/pipeline-config.ts';
 import {mkdtemp,mkdir,lstat,stat,readFile,writeFile,readdir} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
 import {killTree,spawnToolless} from './launcher.ts';import {cleanupProviderTemp} from './temp-cleanup.ts';import {StringDecoder} from 'node:string_decoder';
 import {chatSessionInstruction,turnMessage} from '../chat/request.ts';
@@ -75,7 +76,7 @@ async function verifyCapabilities(config:CliTurnConfig,cwd:string,env:NodeJS.Pro
 }
 export function createCliAdapter(config:CliTurnConfig):TurnAdapter{
  const state:{version?:string;message?:string}={};
- return {id:config.id,label:config.id==='kiro'?'Kiro':'Codex',status:()=>({...state}),safetyLabel:config.id==='kiro'?'host-gated':'contained',async *startTurn(input,signal){
+ return {id:config.id,label:config.id==='kiro'?'Kiro':'Codex',status:()=>({...state}),safetyLabel:defaults.safetyLabels[config.id],async *startTurn(input,signal){
   if((config.prefixArgs?.length||config.startupTimeoutMs!==undefined)&&config.command!==process.execPath)throw new TurnFailure('invalid_command','unavailable');
   const cwd=await mkdtemp(path.join(os.tmpdir(),'aitiarch-headless-'));config.onScratch?.(cwd);
   let home:string|undefined;

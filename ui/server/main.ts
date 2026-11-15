@@ -1,3 +1,4 @@
+import {DEFAULT_PIPELINE_CONFIG as defaults} from '../shared/pipeline-config.ts';
 // CLI entry:  node server/main.ts [--root <project or .aitiarch folder>] [--port N] [--allow-origin URL] [--no-open]
 // One server on port 4317 serves every registered project. The browser gets its session only through the launch link this prints and opens.
 import http from "node:http";
@@ -75,7 +76,7 @@ const openProject = async (entry: ProjectEntry) => {
   const plan = args.chatgptPlan ? new ChatGPTPlan({ enabled: true, notebookRoot: store.rootReal }) : undefined;
   if (plan) plans.add(plan);
   const usage = new UsageLogs({ notebookRoot: store.rootReal });
-  const provider = plan ?? (args.claude ? createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205", usageLog: usage }) : undefined);
+  const provider = plan ?? (args.claude ? createProvider({ provider: defaults.roles.chat, command: args.claude, contract: "claude-canary-2.1.205", usageLog: usage }) : undefined);
   const app = createApp({ store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, council:{adapters:councilAdapters(args.claude,args.codex),availabilityChecks:councilLocalChecks(args.claude,args.codex)}, harness: args.claude ? { command: args.claude } : undefined });
   return { handle: app.handle, close: async () => { watcher.stop(); await plan?.close(); await app.close(); } };
 };

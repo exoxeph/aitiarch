@@ -1,3 +1,4 @@
+import {DEFAULT_PIPELINE_CONFIG as defaults} from '../../shared/pipeline-config.ts';
 import { createServer, type Server } from 'node:http';
 import { createHash, randomBytes, randomUUID, createPublicKey, verify } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -65,7 +66,7 @@ export class ChatGPTPlan implements Provider {
     this.ensureEnabled();const u=new URL(url);
     const permitted=this.config.testOrigin?u.origin===this.config.testOrigin:[issuer,'https://api.openai.com'].includes(u.origin);
     if(!permitted||u.username||u.password)throw new ProviderError('unsupported_cli','ChatGPT endpoint could not be verified.');
-    return fetch(url,{...init,redirect:'error',signal:signal??AbortSignal.timeout(this.config.timeoutMs??30000)});
+    return fetch(url,{...init,redirect:'error',signal:signal??AbortSignal.timeout(this.config.timeoutMs??defaults.transport.planHttpTimeoutMs)});
   }
   private async discovery(){
     if(this.metadata)return this.metadata;
@@ -198,18 +199,18 @@ export class ChatGPTPlan implements Provider {
   }
   setModel(model:string){if(!this.models.includes(model))throw new ProviderError('unsupported_cli','Select a model from the current account catalog.');this.selectedModel=model;}
   async status(){
-    if(!this.config.enabled)return {enabled:false,connected:false,model:null,hourlyCap:2,welcome:false};
+    if(!this.config.enabled)return {enabled:false,connected:false,model:null,hourlyCap:defaults.transport.planHourlyCap,welcome:false};
     await this.vault.check();const d=await this.vault.peek(),settings=await this.vault.peek('cap.json'),connected=!this.signInPending&&!this.signInRejected&&!!d.access_token&&hasDirectGrant(d.scopes);
-    return {enabled:true,connected,model:this.selectedModel,hourlyCap:settings.limit??this.config.hourlyCap??2,welcome:connected&&!d.welcomeSeen};
+    return {enabled:true,connected,model:this.selectedModel,hourlyCap:settings.limit??this.config.hourlyCap??defaults.transport.planHourlyCap,welcome:connected&&!d.welcomeSeen};
   }
   async acknowledge(){await this.vault.locked(async()=>{const d=await this.vault.read();await this.vault.write({...d,welcomeSeen:true});});}
   async setHourlyCap(cap:number){if(!Number.isInteger(cap)||cap<1||cap>100)throw new ProviderError('context_limit','Hourly cap must be between 1 and 100.');await this.vault.locked(async()=>{const d=await this.vault.read('cap.json');await this.vault.write({...d,limit:cap},'cap.json');});}
   private async reserve(){await this.vault.locked(async()=>{const d=await this.vault.read('cap.json'),now=Date.now();const times=(Array.isArray(d.times)?d.times:[]).filter((n:any)=>typeof n==='number'&&n>now-3600000);
-    if(times.length>=(d.limit??this.config.hourlyCap??2))throw new ProviderError('provider_error','Aitiarch’s hourly ChatGPT request cap was reached.');await this.vault.write({...d,times:[...times,now]},'cap.json');});}
+    if(times.length>=(d.limit??this.config.hourlyCap??defaults.transport.planHourlyCap))throw new ProviderError('provider_error','Aitiarch’s hourly ChatGPT request cap was reached.');await this.vault.write({...d,times:[...times,now]},'cap.json');});}
   async invoke(request:Request,options:InvokeOptions={}):Promise<Result>{
     const start=performance.now(),counts:Record<string,number>={},fields:unknown[]=[];let status=0,rule='request',code='unknown';
     const own=new AbortController();this.active.add(own);
-    const signal=AbortSignal.any([own.signal,AbortSignal.timeout(options.timeoutMs??this.config.timeoutMs??180000),...(options.signal?[options.signal]:[])]);
+    const signal=AbortSignal.any([own.signal,AbortSignal.timeout(options.timeoutMs??this.config.timeoutMs??defaults.transport.planTimeoutMs),...(options.signal?[options.signal]:[])]);
     try{
       this.ensureEnabled();const availability=await this.checkAvailability();if(!availability.available)throw new ProviderError(availability.code,availability.message);
       const packet=prepareRequest(request),token=await this.accessToken();

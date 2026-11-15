@@ -1,7 +1,8 @@
 // How a node's instruction is put together: the app's base instruction, then the persona, then (only if you attached skills) your
 // skills under their own heading, and last the app's hard rules, which always win over anything above them. Pure, shared by the
 // providers (which build the prompt) and the review (which shows what will be sent).
-export const SKILL_CAP_EACH=24000,SKILL_CAP_TOTAL=48000;
+import {DEFAULT_PIPELINE_CONFIG} from './pipeline-config.ts';
+export const SKILL_CAP_EACH=DEFAULT_PIPELINE_CONFIG.skills.eachCharacters,SKILL_CAP_TOTAL=DEFAULT_PIPELINE_CONFIG.skills.totalCharacters;
 export const SKILL_HEADING='User-chosen skill instructions';
 
 export interface LoadedSkill {id:string;name:string;chars:number;tokens:number;truncated:boolean;files:string[]}

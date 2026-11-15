@@ -165,15 +165,15 @@ export interface ChatReview {
 }
 /** How much a cache read counts against a chat's token budget, next to new input and output (1). Cache reads are cheap and fast, and counting them
  *  in full made a long conversation look about three quarters spent on tokens it barely paid for. */
-export const CACHE_READ_WEIGHT=0.1;
+export const CACHE_READ_WEIGHT=DEFAULT_PIPELINE_CONFIG.estimates.cacheReadWeight;
 /** Tokens that count against the budget: new input (with cache writes) and output in full, cache reads at CACHE_READ_WEIGHT, rounded. */
 export const budgetTokens=(usage:{inputTokens:number;outputTokens:number;cachedTokens?:number})=>usage.inputTokens+Math.round((usage.cachedTokens??0)*CACHE_READ_WEIGHT)+usage.outputTokens;
 /** The one token estimate the chat uses before a call (chips, review card, budget gate). The Claude CLI measured about 2.8 UTF-8 bytes per token on mixed
  *  notes (about 4 on plain prose), so 3 slightly overestimates. Bytes were shown as tokens before, which made a 19 KB context look like 19k tokens. */
-export const BYTES_PER_TOKEN=3;
+export const BYTES_PER_TOKEN=DEFAULT_PIPELINE_CONFIG.estimates.bytesPerToken;
 export const textTokens=(text:string)=>Math.ceil(new TextEncoder().encode(text).length/BYTES_PER_TOKEN);
 /** Room kept for the reply (and the CLI's own overhead) in the next-turn estimate. Charged in full, like output. */
-export const REPLY_ALLOWANCE=3000;
+export const REPLY_ALLOWANCE=DEFAULT_PIPELINE_CONFIG.estimates.replyAllowance;
 /** What the next message is expected to take from the budget. `sent` is what is being sent now (instruction, sources and the message), at full weight.
  *  `replay` is the conversation already in a resumed session, which the CLI re-reads from its cache: it counts at CACHE_READ_WEIGHT, never in full.
  *  The footer, the review card and the gate all use `total`. */
@@ -200,5 +200,5 @@ export const cancelText=(cause?:AbortCause):string=>{
   default:return 'This request was cancelled, but Aitiarch could not tell why.'+end;
  }
 };
-export const CHAT_LIMITS=Object.freeze({noteCharacters:40000,questionCharacters:2000,historyPairs:4,historyCharacters:4000,
- sources:8,otherCharacters:20000,tokenBudget:50000,requestReserve:16000,rollingRequestCap:12,windowMinutes:60});
+export const CHAT_LIMITS=DEFAULT_PIPELINE_CONFIG.chat;
+import {DEFAULT_PIPELINE_CONFIG} from './pipeline-config.ts';

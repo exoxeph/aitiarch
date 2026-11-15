@@ -1,3 +1,4 @@
+import {DEFAULT_PIPELINE_CONFIG as defaults} from '../../shared/pipeline-config.ts';
 import {stat,mkdir,lstat,mkdtemp} from 'node:fs/promises';import {metadataOutput,spawnToolless,killTree} from './launcher.ts';import {cleanupProviderTemp} from './temp-cleanup.ts';import path from 'node:path';
 import {existsSync} from 'node:fs';import os from 'node:os';
 import type {SafetyLabel} from './turn.ts';import {CODEX_VERSION,codexVersionNotice} from './codex-command.ts';
@@ -16,7 +17,7 @@ export class CouncilAvailability {
 }
 /** Fixed metadata argv only. Never starts a prompt, opens a login, or reads user configuration. */
 export function localCouncilCheck(id:'claude'|'codex'|'kiro',command:string|undefined,providerHome?:string,metadata?: (args:string[])=>Promise<string>):AvailabilityCheck{
- return {id,label:id==='claude'?'Claude':id==='codex'?'Codex':'Kiro',safetyLabel:id==='claude'?'fenced':id==='codex'?'contained':'host-gated',check:async()=>{
+ return {id,label:id==='claude'?'Claude':id==='codex'?'Codex':'Kiro',safetyLabel:defaults.safetyLabels[id],check:async()=>{
   if(!command||!path.isAbsolute(command)||!(await stat(command).catch(()=>null))?.isFile())return {available:false,reason:`${id} executable missing. Start with a valid ${id==='kiro'?'installed Kiro CLI':'--'+id+' <path>'}.`};
   const output=metadata??((args:string[])=>localMetadata(id,command,args));
   const version=(await output(['--version'])).trim(),found=/^(?:codex-cli|kiro-cli|Claude Code)?\s*([0-9A-Za-z.+-]{1,50})(?:\s+\(Claude Code\))?$/.exec(version)?.[1]??'unknown';

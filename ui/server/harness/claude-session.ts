@@ -4,6 +4,7 @@
 //
 // A turn for a note that shows diagrams may open their pictures: the working folder then holds ONLY the app's validated PNG copies (d1.png ...), the CLI has the Read tool and nothing else,
 // and every event is read by DiagramTurnWatcher before the chat stream sees it. A turn without diagrams has no tools and an empty folder, as it always had.
+import {DEFAULT_PIPELINE_CONFIG} from '../../shared/pipeline-config.ts';
 import {mkdir,mkdtemp,readdir,realpath,rm,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {validSessionId} from '../../shared/harness.ts';
@@ -83,7 +84,7 @@ export class ClaudeSessionRunner {
    await writeFile(file,t.addendum,{mode:0o600});
    const stream=new ClaudeChatStream(t.onTextDelta,t.onStarted);let watcher=null as DiagramTurnWatcher|null;
    await new Promise<void>((resolve,reject)=>{
-    const child=spawnChatSession({provider:'claude',command:this.cfg.command,prefixArgs:this.cfg.prefixArgs},{id:t.id,resume:t.resume,addendumFile:file,...(t.diagrams?{diagrams:{budgetUsd:t.diagrams.budgetUsd,files:copies.map(c=>c.file)}}:{}),...(this.cfg.model?{model:this.cfg.model}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
+    const child=spawnChatSession({provider:t.diagrams?DEFAULT_PIPELINE_CONFIG.roles.diagram:DEFAULT_PIPELINE_CONFIG.roles.chat,command:this.cfg.command,prefixArgs:this.cfg.prefixArgs},{id:t.id,resume:t.resume,addendumFile:file,...(t.diagrams?{diagrams:{budgetUsd:t.diagrams.budgetUsd,files:copies.map(c=>c.file)}}:{}),...(this.cfg.model?{model:this.cfg.model}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
     let failure:ProviderError|undefined,killing:Promise<void>=Promise.resolve(),bytes=0,checks:Promise<void>=Promise.resolve();const stderr:Buffer[]=[];
     const stopWith=(e:ProviderError)=>{if(failure)return;failure=e;if(child.pid)killing=killTree(child.pid);};
     const stop=(code:'timeout'|'cancelled'|'output_limit'|'invalid_response',detail?:string)=>{const e=new ProviderError(code);if(detail)e.reason={kind:'unparseable',detail};stopWith(e);};
@@ -94,7 +95,7 @@ export class ClaudeSessionRunner {
     };
     if(copies.length)watcher=new DiagramTurnWatcher({cwd,copies,forward:e=>stream.feed(e),onRead:c=>t.onDiagramRead?.(c),onUnavailable:n=>t.onDiagramUnavailable?.(n),onReadResult:(c,ok)=>t.onDiagramReadResult?.(c,ok),
      onTool:()=>{checks=checks.then(()=>verifyDiagramFolder(cwd,copies)).catch(broke);}}); // every tool event: is the folder still exactly what the app made?
-    const timer=setTimeout(()=>stop('timeout'),this.cfg.timeoutMs??180000),abort=()=>stop('cancelled');
+    const timer=setTimeout(()=>stop('timeout'),this.cfg.timeoutMs??DEFAULT_PIPELINE_CONFIG.transport.sessionTimeoutMs),abort=()=>stop('cancelled');
     t.signal?.addEventListener('abort',abort,{once:true});
     child.stdout.on('data',(b:Buffer)=>{
      if(failure)return;

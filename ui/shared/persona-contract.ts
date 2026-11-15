@@ -12,7 +12,8 @@ const ALLOWED:Record<PersonaMode,readonly ContractIssue[]>={
  plan:['several_questions','no_final_question'],
  explain:['too_long'],
 };
-export const GRILL_MAX_WORDS=60,GRILL_MAX_SENTENCES=2,ANSWER_WORD_CAP=120,EXPLAIN_MAX_WORDS=ANSWER_WORD_CAP*2;
+import {DEFAULT_PIPELINE_CONFIG} from './pipeline-config.ts';
+export const GRILL_MAX_WORDS=DEFAULT_PIPELINE_CONFIG.prompts.grillMaxWords,GRILL_MAX_SENTENCES=DEFAULT_PIPELINE_CONFIG.prompts.grillMaxSentences,ANSWER_WORD_CAP=DEFAULT_PIPELINE_CONFIG.prompts.answerWordCap,EXPLAIN_MAX_WORDS=DEFAULT_PIPELINE_CONFIG.prompts.explainMaxWords;
 
 const wordCount=(s:string)=>s.trim().split(/\s+/).filter(Boolean).length;
 const withoutCode=(s:string)=>s.replace(/```[\s\S]*?(```|$)/g,' ').replace(/`[^`\n]*`/g,' ');

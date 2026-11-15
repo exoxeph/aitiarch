@@ -4,7 +4,8 @@
 /** The Claude Code CLI version the diagram fence was verified on. */
 export const TESTED_CLI_VERSION='2.1.205';
 /** The most a conversation turn that may open diagrams can cost, passed to the CLI as --max-budget-usd. It is the Investigate plan's default cap. */
-export const DIAGRAM_TURN_CAP_USD=0.5;
+import {DEFAULT_PIPELINE_CONFIG} from './pipeline-config.ts';
+export const DIAGRAM_TURN_CAP_USD=DEFAULT_PIPELINE_CONFIG.diagram.turnCapUsd;
 /** The app kills the turn on the next tool event after this many. */
 export const DIAGRAM_MAX_TOOL_EVENTS=12;
 

@@ -1,3 +1,4 @@
+import {DEFAULT_PIPELINE_CONFIG as defaults} from '../shared/pipeline-config.ts';
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
 import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {randomUUID} from 'node:crypto';import {ConversationGate,GateRefusal,carriedPairs,projectRepo} from './harness/conversation.ts';import {cleanAttachments} from '../shared/profile.ts';import {removeTranscript} from './harness/transcripts.ts';import {sweepStaleTurnFolders} from './harness/sweep.ts';import {QuestionStore} from './harness/questions.ts';
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
@@ -306,7 +307,7 @@ export function createApp(opts: AppOptions) {
     }
     if(url.pathname==='/api/usage'&&req.method==='GET'){
       const chats=(await chatReady).usage(),h=await harnessReady,investigate=h?await h.investigate.usage():null;
-      let privateUsage:import('../shared/usage.ts').UsageSummary={since:new Date().toISOString(),hourlyCap:2,providers:[]};
+      let privateUsage:import('../shared/usage.ts').UsageSummary={since:new Date().toISOString(),hourlyCap:defaults.transport.planHourlyCap,providers:[]};
       if(opts.usage)try{privateUsage=await opts.usage.summary();}catch{privateUsage.privateUsageUnavailable=true;console.warn('Private usage log unavailable.',{kind:'private_usage_unavailable'});}
       return json(res,200,{...privateUsage,councilCli:opts.council?.adapters.find(a=>a.id==='codex')?.status?.(),...(chats.length?{chats}:{}),...(investigate&&(investigate.turns>0||investigate.ledgerUnavailable)?{investigate}:{}),...(h?{cli:{version:await h.runner.version(),tested:TESTED_CLI_VERSION}}:{})});
     }

@@ -12,8 +12,9 @@ import {cleanAttachments,covers,needOf,normalizeAttachedPath,resumePlan,type Att
 import {redact} from '../providers/index.ts';
 import {estimateTokens} from '../chat/context.ts';
 
-export const DEFAULT_BUDGET_USD=0.5,BUDGET_MIN_USD=0.05,BUDGET_MAX_USD=5;
-export const CARRY_TOKEN_CAP=6000;
+import {DEFAULT_PIPELINE_CONFIG} from '../../shared/pipeline-config.ts';
+export const DEFAULT_BUDGET_USD=DEFAULT_PIPELINE_CONFIG.conversation.budgetUsd,BUDGET_MIN_USD=0.05,BUDGET_MAX_USD=5;
+export const CARRY_TOKEN_CAP=DEFAULT_PIPELINE_CONFIG.conversation.carryTokenCap;
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
 /** Which project a grant belongs to: the notebook folder, hashed. A grant carried into another project is not a grant there. */
 export const projectId=(notebookRoot:string)=>sha(path.resolve(notebookRoot).toLowerCase()).slice(0,16);
