@@ -36,10 +36,12 @@ import { NodeSettingsService } from "./node-settings.ts";
 import { validSavedNodes } from "../shared/node-settings.ts";
 import { homedir } from "node:os";
 import {CouncilService} from './council.ts';
+import {CouncilHistory} from './council-history.ts';
+import type {AvailabilityCheck} from './providers/council-availability.ts';
 import type {TurnAdapter} from './providers/turn.ts';
 
 export interface AppOptions {
-  council?:{adapters:TurnAdapter[];index?:SessionIndex};
+  council?:{adapters:TurnAdapter[];index?:SessionIndex;availabilityChecks?:AvailabilityCheck[]};
   sessionModules?:import('../shared/chat.ts').ContextModule[];
   store: Store;
   watcher: NoteWatcher;
@@ -190,7 +192,7 @@ export function createApp(opts: AppOptions) {
     return {index,runner,questions,version:()=>runner.version(), // the CLI's version, for the ledger at a conversation's first turn and for Settings
     investigate,gate,carried};}):Promise.resolve(null);
   const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady]).then(([ink,harness])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages);chatRef.resolve(runtime);return runtime;});
-  const councilReady=opts.council?Promise.all([inkReady,harnessReady]).then(async([ink,h])=>new CouncilService({store,ink,index:opts.council!.index??h?.index??await SessionIndex.open(harnessDirectory(store.rootReal)),ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters})):Promise.resolve(null);
+  const councilReady=opts.council?Promise.all([inkReady,harnessReady]).then(async([ink,h])=>{const index=opts.council!.index??h?.index??await SessionIndex.open(harnessDirectory(store.rootReal));return new CouncilService({store,ink,index,history:new CouncilHistory(index),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters});}):Promise.resolve(null);
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
@@ -244,6 +246,7 @@ export function createApp(opts: AppOptions) {
       }
     }
 
+    if(url.pathname.startsWith('/api/council/')&&req.method==='GET'){const council=await councilReady;if(!council)return json(res,409,{error:'disabled'});try{if(url.pathname==='/api/council/availability')return json(res,200,{providers:await council.availability.get(url.searchParams.get('refresh')==='1')});if(url.pathname==='/api/council/history')return json(res,200,await council.history(url.searchParams.has('conversation')?url.searchParams.get('conversation')!:undefined));}catch{return json(res,409,{error:'invalid_conversation',message:'Council history could not be read for this conversation.'});}}
     if(url.pathname.startsWith('/api/council/')&&(req.method==='PUT'||req.method==='POST')){
       const council=await councilReady;if(!council)return json(res,409,{error:'disabled',message:'Council is not configured.'});
       const controller=new AbortController(),abort=()=>controller.abort();res.once('close',abort);

@@ -7,6 +7,7 @@ import path from 'node:path';
 import {cleanLabel,MAX_SESSIONS,validCliShape,validGrantShape,validSession,validSessionId,type HarnessMode,type HarnessSession} from '../../shared/harness.ts';
 import {validCouncilGrant,type CouncilGrant} from '../../shared/council.ts';
 import {resumePlan,type Grant,type Profile} from '../../shared/profile.ts';
+import {removeCouncilHistory} from '../council-history.ts';
 
 /** %LOCALAPPDATA%\Aitiarch\harness\<project hash> (or ~/.local/state/... elsewhere). Never inside the notebook. */
 export function harnessDirectory(notebookRoot:string,env:NodeJS.ProcessEnv=process.env):string{
@@ -56,7 +57,7 @@ export class SessionIndex {
  /** A run stopped on its cost cap or its safety backstop: the next turn needs a fresh confirmed plan. Persisted, so it also holds after a restart. */
  unconfirm(id:string){return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');delete s.confirmed;return {...s};});}
  /** Forgets a session. Its CLI transcript is removed separately (transcripts.ts). */
- remove(id:string){return this.change(all=>{const i=all.findIndex(x=>x.id===id);if(i<0)throw new SessionIndexError('No such session.');const [s]=all.splice(i,1);return s;});}
+ remove(id:string){return this.change(async all=>{const i=all.findIndex(x=>x.id===id);if(i<0)throw new SessionIndexError('No such session.');await removeCouncilHistory(this.dir,id);const [s]=all.splice(i,1);return s;});}
  /** A turn finished: the next one resumes. */
  touch(id:string){return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');s.turns++;if(s.cli)s.cli.turns++;s.lastUsed=new Date().toISOString();return {...s};});}
  /** The plan card was approved: this is what the conversation may do from now on (until a turn needs more). */

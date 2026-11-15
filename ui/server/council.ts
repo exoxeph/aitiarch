@@ -3,14 +3,18 @@ import type {Store} from './store.ts';import type {InkStore} from './ink-store.t
 import {LedgerStore,appendLedger} from './ledger-store.ts';import {contextModules} from './chat/context.ts';import {harnessDenied} from '../shared/harness.ts';import {normalizeAttachedPath} from '../shared/profile.ts';
 import {COUNCIL_DEFAULT_CAPS,validCouncilGrant,type CouncilGrant,type CouncilProvider,type CouncilCap} from '../shared/council.ts';
 import {runTurn,type TurnAdapter,type TurnEvent} from './providers/turn.ts';import {redact} from './providers/index.ts';import {parseClaimsBlock,finishReply} from './chat/reply.ts';import {secretKinds} from './chat/secrets.ts';
+import {CouncilHistory} from './council-history.ts';
+import {CouncilAvailability,type AvailabilityCheck} from './providers/council-availability.ts';
 interface CouncilInput {conversation:string;providers:CouncilProvider[];notes:string[];question:string;caps?:Partial<Record<CouncilProvider,CouncilCap>>;hash?:string}
 const sha=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const unsigned=(g:CouncilGrant)=>{const {confirmed,...rest}=g;return rest;};
-export interface CouncilOptions {store:Store;ink:InkStore;index:SessionIndex;ledger:LedgerStore;adapters:TurnAdapter[]}
+export interface CouncilOptions {store:Store;ink:InkStore;index:SessionIndex;ledger:LedgerStore;adapters:TurnAdapter[];availabilityChecks?:AvailabilityCheck[];history?:CouncilHistory}
 export class CouncilService {
  private versionsLogged=new Set<string>();
+ readonly availability:CouncilAvailability;
+ history(id?:string){if(!this.o.history)throw Error('history_unavailable');return id===undefined?this.o.history.list():this.o.history.get(id);}
  private o:CouncilOptions;private project:string;private running=new Set<string>();private aborters=new Set<AbortController>();
- constructor(o:CouncilOptions){this.o=o;this.project=projectId(o.store.rootReal);}
+ constructor(o:CouncilOptions){this.o=o;this.project=projectId(o.store.rootReal);this.availability=new CouncilAvailability(o.availabilityChecks??[]);}
  private async clean(raw:unknown){
   if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('notes_only');const b=raw as CouncilInput;
   if(Object.keys(b).some(k=>!['conversation','providers','notes','question','caps','hash'].includes(k)))throw Error('notes_only');
@@ -55,7 +59,8 @@ export class CouncilService {
    // Single-response transport: publish only validated, redacted answers, never rejected partial output.
    const events:{provider:string;event:TurnEvent}[]=[];
    for(const result of results){const push=(event:TurnEvent)=>events.push({provider:result.provider,event});push({type:'start'});for(const usage of result.usage)push({type:'usage',usage});if(result.status==='ok'){push({type:'delta',text:result.answer});push({type:'complete',answer:result.answer});}else if(result.status==='refused')push({type:'refusal',code:result.code??'refusal'});else push({type:'error',code:result.code??'provider_error'});}
-   return {results,events,buffered:true,ledgerUnavailable};}
+   let historyUnavailable=false,pruned=0;try{if(this.o.history){const saved=await this.o.history.add(b.conversation,{question,notes:b.notes,startedAt:new Date(Date.now()-Math.max(...results.map(r=>r.durationMs))).toISOString(),results});pruned=saved.pruned;}}catch{historyUnavailable=true;}
+   return {results,events,buffered:true,ledgerUnavailable,historyUnavailable,pruned};}
   finally{signal?.removeEventListener('abort',abort);this.running.delete(b.conversation);this.aborters.delete(controller);}
  }
  close(){for(const c of this.aborters)c.abort();}

@@ -11,6 +11,9 @@ it('Council HTTP requires auth and explicit plan approval; POST returns independ
   const plan=await(await call('/api/council/plan',b)).json();expect(plan.needsApproval).toBe(true);
   expect((await call('/api/council/plan',{...b,hash:plan.hash,approve:true})).status).toBe(200);
   const result=await(await call('/api/council/run',b,'POST')).json();expect(result.results[0].status).toBe('ok');
+  const history=await(await fetch(base+'/api/council/history?conversation='+s.id,{headers})).json();expect(history.runs[0].results[0].answer).toBe('June.');expect(history.runs[0].question).toBe(b.question);
+  expect((await fetch(base+'/api/council/history?conversation=..%2Fx',{headers})).status).toBe(409);
+  expect((await fetch(base+'/api/council/availability',{headers})).status).toBe(200);
   expect(result.buffered).toBe(true);expect(result.events).toContainEqual({provider:'codex',event:{type:'complete',answer:'June.'}});
   expect((await call('/api/council/run',{...b,providers:['codex','kiro']},'POST')).status).toBe(409);
  }finally{await app.close();watcher.stop();console.info('CLEANUP TARGET:',root);await rm(root,{recursive:true,force:true});}
