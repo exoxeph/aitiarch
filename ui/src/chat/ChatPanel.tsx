@@ -50,7 +50,7 @@ export interface ChatPanelProps {
  path:string|null;noteText:string;threadsText:string;editor:EditorSource;
  /** Adds one accepted reply to the note through the same journaled insertion as AI thoughts. The caller shows the toast with Undo. `chat` is the note whose chat holds the reply, when it is not the open note. */
 
- onAdd:(messageId:string,chat?:string,council?:{conversation:string;runId:string;provider:string})=>Promise<void>;onClose:()=>void;
+ onAdd:(messageId:string,chat?:string,council?:{conversation:string;runId:string;provider:string},investigate?:{session:string;turn:string})=>Promise<void>;onClose:()=>void;
  /** Notes chosen in the Constellation ("Use as chat context"): sent as the Other notes module, shown in the review first. */
  extraNotes?:string[];onClearExtraNotes?:()=>void;
  /** Source chips: scroll the editor to a claim's quote and mark it for a moment (false when the quote is not in the current note), and cite the note at the cursor. */
@@ -344,6 +344,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  const asked=(message:ChatMessage|undefined)=>{const on=message?.askedOn??path,here=on===openPath;return {path:on,noteText:here?noteText:'',elsewhere:!here,onShow:onShowQuote,onCite:onCiteClaim};};
  const add=async(id:string)=>{setAdding(id);try{await onAdd(id,path??undefined);}finally{if(alive.current)setAdding(null);}};
  const addCouncil=async(runId:string,provider:string)=>{if(!conversation)return;setAdding(runId+':'+provider);try{await onAdd('',path??undefined,{conversation,runId,provider});}finally{if(alive.current)setAdding(null);}};
+ const addInvestigate=async(turnId:string,key:string)=>{if(!conversation)return;setAdding(key);try{await onAdd('',path??undefined,undefined,{session:conversation,turn:turnId});}finally{if(alive.current)setAdding(null);}};
  const keep=async()=>{try{await api.chatCall('enable',{action:'add-ignore-line'});setPersistence('private');}catch(e){setNotice(e instanceof ApiError?e.message:'Could not keep this chat on disk.');}};
  const openExcerpt=async(p:string,line=1)=>{if(!conversation)return;try{setExcerpt(await api.investigateExcerpt(conversation,p,line));}catch(e){setNotice(e instanceof ApiError?e.message:'That file cannot be shown.');}};
  const restore=async()=>{if(!conversation)return;setRestoring(true);setNotice('');try{await api.investigateCall('restore',{session:conversation});setTurns(list=>list.map(t=>t.inv?.tripwire?{...t,inv:{...t.inv,tripwire:{...t.inv.tripwire,notebook:{changed:[],added:[],removed:[]}}}}:t));setNotice('The notebook is back as it was before the run.');}
@@ -402,6 +403,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
       <InvestigateTurnView turn={t.inv} onOpen={(p,l)=>void openExcerpt(p,l)} onRestore={()=>void restore()} restoring={restoring} onContinue={()=>void continueTurn(t)}/>
       {t.status==='streaming'&&!t.inv.text&&!t.inv.trail.length&&!t.inv.thinking&&<p className="chat-wait" role="status" data-wait>{waitText(now-(t.sentAt??now))}</p>}
       {t.inv.running&&<div className="chat-message-tools"><button type="button" className="chat-stop" onClick={()=>stop(t)}>Stop</button></div>}
+      {!t.inv.running&&t.inv.message&&<div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title="Add to note" disabled={adding===t.id} onClick={()=>void addInvestigate(t.inv!.message!.id,t.id)}><i className="add-icon" aria-hidden="true"/></button></div>}
       {!t.inv.running&&t.inv.message&&<p className="chat-turn-cost">{t.inv.message.steps.length} tool {t.inv.message.steps.length===1?'call':'calls'} · {t.inv.message.costUsd!==null?'This turn cost '+money(t.inv.message.costUsd):'cost not reported'}</p>}
      </>:<>
      {t.opened&&t.opened.length>0&&<OpenedRows opened={t.opened} running={t.status==='streaming'}/>}

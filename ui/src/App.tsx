@@ -506,7 +506,7 @@ export default function App() {
   // What the chat chips offer: the same validated AI replies the server's "Threads" module reads (never questions, drafts or summaries).
   const chatThreadsText = activeItems.flatMap(i => [...(i.generation?.status === "complete" ? [i.body] : []), ...(i.thread?.followups ?? []).filter(r => r.generation.status === "complete").map(r => r.body)]).join("\n\n");
   // Add to note for a chat reply: the same journaled steps as an AI thought (preview, prepare, one editor dispatch, complete), then the same toast with Undo.
-  const addChatMessage = async (id: string, chat?: string, council?: { conversation: string; runId: string; provider: string }) => {
+  const addChatMessage = async (id: string, chat?: string, council?: { conversation: string; runId: string; provider: string }, investigate?: { session: string; turn: string }) => {
     if (!active) return;
     let inserted = false, operationId: string | undefined;
     try {
@@ -514,9 +514,9 @@ export default function App() {
       await h.session.flush(); if (h.session.status !== "saved") throw new Error("Save or resolve the note before insertion.");
       const disk = await api.file(active), unchanged = () => h.session.status === "saved" && h.session.base.version === disk.version && h.view.state.doc.toString() === disk.text;
       if (!unchanged()) throw new Error("The note changed. Review a new preview.");
-      const head = h.view.state.selection.main.head, after = head > 0 ? Math.min(head, disk.text.length) : disk.text.length, body = council ? { path: active, ...council, noteVersion: disk.version, after } : { path: active, id, noteVersion: disk.version, after, ...(chat && chat !== active ? { chat } : {}) };
-      const preview = await (council ? api.councilBring<BringPreview>("bring-preview", body) : api.chatCall<BringPreview>("bring-preview", body));
-      const prepared = await (council ? api.councilBring<{ operationId: string }>("bring-prepare", { ...body, preview }) : api.chatCall<{ operationId: string }>("bring-prepare", { ...body, preview })); operationId = prepared.operationId;
+      const head = h.view.state.selection.main.head, after = head > 0 ? Math.min(head, disk.text.length) : disk.text.length, body = council ? { path: active, ...council, noteVersion: disk.version, after } : investigate ? { path: active, ...investigate, noteVersion: disk.version, after } : { path: active, id, noteVersion: disk.version, after, ...(chat && chat !== active ? { chat } : {}) };
+      const preview = await (council ? api.councilBring<BringPreview>("bring-preview", body) : investigate ? api.investigateBring<BringPreview>("bring-preview", body) : api.chatCall<BringPreview>("bring-preview", body));
+      const prepared = await (council ? api.councilBring<{ operationId: string }>("bring-prepare", { ...body, preview }) : investigate ? api.investigateBring<{ operationId: string }>("bring-prepare", { ...body, preview }) : api.chatCall<{ operationId: string }>("bring-prepare", { ...body, preview })); operationId = prepared.operationId;
       if (!unchanged()) throw new Error("The note changed. Review a new preview.");
       h.view.dispatch({ changes: preview.changes, annotations: isolateHistory.of("full") }); inserted = true; setInsertionRepair({ pending: 1, unverified: 0 });
       flashInserted(h.view, preview.changes.from, preview.changes.insert.length);

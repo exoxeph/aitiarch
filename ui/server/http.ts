@@ -3,7 +3,7 @@ import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES,budgetText} from '../shared/chat.ts';
 import {validSessionId} from '../shared/harness.ts';
-import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';import {CouncilInsertion} from './council-insertion.ts';
+import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';import {CouncilInsertion} from './council-insertion.ts';import {InvestigateInsertion} from './investigate-insertion.ts';
 import {TESTED_CLI_VERSION} from '../shared/diagram-fence.ts';import {DiagramImageError,DiagramImageStore} from './diagram-image-store.ts';import {DIAGRAM_PNG_MAX_BYTES,DIAGRAM_PNG_NAME} from '../shared/diagram-refs.ts';
 import {InsertionStore} from './insertion-store.ts';
 import {SKILL_DIAGRAM_CSP_HEADER,SKILL_DIAGRAM_SVG_CSP_HEADER} from '../shared/skill-diagram.ts';
@@ -197,6 +197,7 @@ export function createApp(opts: AppOptions) {
   const councilReady=opts.council?Promise.all([inkReady,councilIndexReady]).then(async([ink,index])=>new CouncilService({store,ink,index:index!,history:new CouncilHistory(index!,1024*1024,store.rootReal),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters})):Promise.resolve(null);
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const councilInsertion=insertionsReady.then(insertions=>new CouncilInsertion(store,insertions));
+  const investigateInsertion=insertionsReady.then(insertions=>new InvestigateInsertion(store,insertions));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
     name:'claude',checkAvailability:async()=>({available:false,code:'unsupported_cli',message:'Provider disabled. Enable it explicitly at server startup.'}),invoke:async()=>{throw new ProviderError('unsupported_cli');}
@@ -364,6 +365,10 @@ export function createApp(opts: AppOptions) {
         }catch(e){if(e instanceof SessionIndexError)return json(res,400,{error:'invalid_session',message:e.message});throw e;}
       }
       if(!h)return json(res,409,{error:'disabled',message:'Sessions need the Claude Code CLI. Start Aitiarch with --claude.'});
+      if(url.pathname==='/api/harness/investigate/bring-preview'||url.pathname==='/api/harness/investigate/bring-prepare'){
+        try{const ins=await investigateInsertion,turns=(id:string)=>h.investigate.turns(id) as any;return json(res,200,url.pathname.endsWith('preview')?await ins.preview(b,turns):await ins.prepare(b,turns));}
+        catch(e){const code=e instanceof Error&&['invalid_bring','stale_review','no_answer','secrets_blocked'].includes(e.message)?e.message:'investigate_bring_failed';return json(res,409,{error:code,message:'Add to note: '+code.replace(/_/g,' ')+'.'});}
+      }
       try{
         if(url.pathname==='/api/harness/sessions/new'){
           if(b?.mode==='investigate')return json(res,200,await h.investigate.create(b.label,b.repo));

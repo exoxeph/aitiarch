@@ -154,6 +154,7 @@ export const api = {
   councilHistory:(id:string)=>ok<import('../server/council-history.ts').CouncilRecord>('GET','/api/council/history?conversation='+encodeURIComponent(id)),
   councilPlan:(body:unknown)=>ok<Awaited<ReturnType<import('../server/council.ts').CouncilService['plan']>>>('PUT','/api/council/plan',body),
   councilApprove:(body:unknown)=>ok<unknown>('PUT','/api/council/plan',{...body as object,approve:true}),
+  investigateBring:<T,>(action:'bring-preview'|'bring-prepare',body:unknown)=>ok<T>('PUT','/api/harness/investigate/'+action,body),
   councilBring:<T,>(action:'bring-preview'|'bring-prepare',body:unknown)=>ok<T>('POST','/api/council/'+action,body),
   councilCancel:(conversation:string,runId:string)=>ok<{cancelled:boolean}>('POST','/api/council/cancel',{conversation,runId}),
   councilRun:async(body:unknown,signal:AbortSignal,onEvent:(event:import('../shared/council-stream.ts').CouncilStreamEvent)=>void)=>{

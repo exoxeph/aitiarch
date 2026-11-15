@@ -1546,3 +1546,5 @@ p.chat-wait { margin: 4px 0 0; }
 
 .council-col .chat-add { opacity: .7; }
 .council-col .chat-add:hover:not(:disabled), .council-col .chat-add:focus-visible { opacity: 1; }
+.chat-add { opacity: .7; }
+

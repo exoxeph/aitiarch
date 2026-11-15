@@ -110,10 +110,10 @@ try{
  assert.match(await panel.locator('.chat-usage').innerText(),/^1 call · 120 in · 20 cached · 60 out · 182 of 50k tokens/);
  assert.match(await panel.locator('.chat-persist').innerText(),/Kept in memory only/);
 
- // ---- Add to note: quiet at rest, visible on hover and keyboard focus
+ // ---- Add to note: quiet but visible at rest (0.7), fully visible on hover and keyboard focus
  const add=panel.getByRole('button',{name:'Add to note',exact:true}).first();
  await page.mouse.move(700,700);await page.waitForTimeout(250);
- assert.equal(await add.evaluate(e=>getComputedStyle(e).opacity),'0','Add to note is invisible at rest');
+ assert.equal(await add.evaluate(e=>getComputedStyle(e).opacity),'0.7','Add to note is quiet but visible at rest');
  await panel.locator('.chat-ai').first().hover();await page.waitForFunction(()=>Number(getComputedStyle(document.querySelector('.chat-add')).opacity)>0.95);
  await page.mouse.move(700,700);await page.waitForTimeout(250);
  await page.keyboard.press('Shift');await add.focus();await page.waitForTimeout(250); // a key press first, so the focus counts as keyboard focus

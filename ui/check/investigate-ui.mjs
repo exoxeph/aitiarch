@@ -209,6 +209,11 @@ try {
   assert.equal(await invTurns().last().locator('.chat-ai a').count(), 0, 'links are not clickable, while streaming or after');
   await invTurns().last().screenshot({ path: path.join(output, 'investigate-markdown.png') });
 
+  // Add to note: a finished answer is added to the note as an AI callout; the original text stays at the start of the file.
+  await invTurns().last().getByRole('button', { name: 'Add to note', exact: true }).click(); await page.waitForTimeout(900);
+  const planAfter = await readFile(path.join(notebook, 'plan.md'), 'utf8');
+  assert(planAfter.startsWith('# Plan\n\nKeep this.\n') && planAfter.length > '# Plan\n\nKeep this.\n'.length, 'the answer was added after the original text: ' + JSON.stringify(planAfter.slice(0, 200)));
+
   // Delete removes it from the list and removes its stored turns.
   await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'Delete', exact: true }).click();
   await panel.getByRole('group', { name: 'Delete this conversation' }).getByRole('button', { name: 'Delete', exact: true }).click();
