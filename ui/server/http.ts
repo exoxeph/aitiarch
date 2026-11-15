@@ -3,7 +3,7 @@ import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
 import {CHAT_MESSAGES,budgetText} from '../shared/chat.ts';
 import {validSessionId} from '../shared/harness.ts';
-import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';
+import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';import {CouncilInsertion} from './council-insertion.ts';
 import {TESTED_CLI_VERSION} from '../shared/diagram-fence.ts';import {DiagramImageError,DiagramImageStore} from './diagram-image-store.ts';import {DIAGRAM_PNG_MAX_BYTES,DIAGRAM_PNG_NAME} from '../shared/diagram-refs.ts';
 import {InsertionStore} from './insertion-store.ts';
 import {SKILL_DIAGRAM_CSP_HEADER,SKILL_DIAGRAM_SVG_CSP_HEADER} from '../shared/skill-diagram.ts';
@@ -196,6 +196,7 @@ export function createApp(opts: AppOptions) {
   const councilIndexReady=opts.council?harnessReady.then(async h=>opts.council!.index??h?.index??await SessionIndex.open(harnessDirectory(store.rootReal))):Promise.resolve(null);
   const councilReady=opts.council?Promise.all([inkReady,councilIndexReady]).then(async([ink,index])=>new CouncilService({store,ink,index:index!,history:new CouncilHistory(index!,1024*1024,store.rootReal),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters})):Promise.resolve(null);
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
+  const councilInsertion=insertionsReady.then(insertions=>new CouncilInsertion(store,insertions));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
     name:'claude',checkAvailability:async()=>({available:false,code:'unsupported_cli',message:'Provider disabled. Enable it explicitly at server startup.'}),invoke:async()=>{throw new ProviderError('unsupported_cli');}
@@ -257,11 +258,13 @@ export function createApp(opts: AppOptions) {
           const {approve,...input}=body??{};
           return json(res,200,approve===true?await council.approve(input):await council.plan(input));
         }
+        if(url.pathname==='/api/council/bring-preview'&&req.method==='POST')return json(res,200,await (await councilInsertion).preview(body,id=>council.history(id) as any));
+        if(url.pathname==='/api/council/bring-prepare'&&req.method==='POST')return json(res,200,await (await councilInsertion).prepare(body,id=>council.history(id) as any));
         if(url.pathname==='/api/council/cancel'&&req.method==='POST'){council.cancel(body?.conversation,body?.runId);return json(res,200,{cancelled:true});}
         if(url.pathname==='/api/council/run'&&req.method==='POST'){
           await council.run(body,controller.signal,event=>{if(res.destroyed){controller.abort();return;}if(!res.headersSent)res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'});res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);});return res.end();
         }
-      }catch(e){const code=e instanceof Error&&['plan_required','plan_changed','invalid_conversation','invalid_run','notes_only','invalid_cap','already_running'].includes(e.message)?e.message:'council_error';if(res.headersSent){if(!res.destroyed)res.write(`event: error\ndata: ${JSON.stringify({type:'error',code})}\n\n`);return res.end();}return json(res,409,{error:code,message:'Council: '+code.replace(/_/g,' ')+'.'});}
+      }catch(e){const code=e instanceof Error&&['plan_required','plan_changed','invalid_conversation','invalid_run','notes_only','invalid_cap','already_running','invalid_bring','stale_review','no_answer','secrets_blocked'].includes(e.message)?e.message:'council_error';if(res.headersSent){if(!res.destroyed)res.write(`event: error\ndata: ${JSON.stringify({type:'error',code})}\n\n`);return res.end();}return json(res,409,{error:code,message:'Council: '+code.replace(/_/g,' ')+'.'});}
       finally{res.removeListener('close',abort);}
     }
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await (await explorerReady).tree());

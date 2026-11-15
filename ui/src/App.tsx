@@ -506,7 +506,7 @@ export default function App() {
   // What the chat chips offer: the same validated AI replies the server's "Threads" module reads (never questions, drafts or summaries).
   const chatThreadsText = activeItems.flatMap(i => [...(i.generation?.status === "complete" ? [i.body] : []), ...(i.thread?.followups ?? []).filter(r => r.generation.status === "complete").map(r => r.body)]).join("\n\n");
   // Add to note for a chat reply: the same journaled steps as an AI thought (preview, prepare, one editor dispatch, complete), then the same toast with Undo.
-  const addChatMessage = async (id: string, chat?: string) => {
+  const addChatMessage = async (id: string, chat?: string, council?: { conversation: string; runId: string; provider: string }) => {
     if (!active) return;
     let inserted = false, operationId: string | undefined;
     try {
@@ -514,13 +514,13 @@ export default function App() {
       await h.session.flush(); if (h.session.status !== "saved") throw new Error("Save or resolve the note before insertion.");
       const disk = await api.file(active), unchanged = () => h.session.status === "saved" && h.session.base.version === disk.version && h.view.state.doc.toString() === disk.text;
       if (!unchanged()) throw new Error("The note changed. Review a new preview.");
-      const head = h.view.state.selection.main.head, body = { path: active, id, noteVersion: disk.version, after: head > 0 ? Math.min(head, disk.text.length) : disk.text.length, ...(chat && chat !== active ? { chat } : {}) };
-      const preview = await api.chatCall<BringPreview>("bring-preview", body);
-      const prepared = await api.chatCall<{ operationId: string }>("bring-prepare", { ...body, preview }); operationId = prepared.operationId;
+      const head = h.view.state.selection.main.head, after = head > 0 ? Math.min(head, disk.text.length) : disk.text.length, body = council ? { path: active, ...council, noteVersion: disk.version, after } : { path: active, id, noteVersion: disk.version, after, ...(chat && chat !== active ? { chat } : {}) };
+      const preview = await (council ? api.councilBring<BringPreview>("bring-preview", body) : api.chatCall<BringPreview>("bring-preview", body));
+      const prepared = await (council ? api.councilBring<{ operationId: string }>("bring-prepare", { ...body, preview }) : api.chatCall<{ operationId: string }>("bring-prepare", { ...body, preview })); operationId = prepared.operationId;
       if (!unchanged()) throw new Error("The note changed. Review a new preview.");
       h.view.dispatch({ changes: preview.changes, annotations: isolateHistory.of("full") }); inserted = true; setInsertionRepair({ pending: 1, unverified: 0 });
       flashInserted(h.view, preview.changes.from, preview.changes.insert.length);
-      setAdded({ text: "Added from chat", detail: preview.changes.insert.trim() });
+      setAdded({ text: council ? "Added from Council" : "Added from chat", detail: preview.changes.insert.trim() });
       await h.session.flush(); if (h.session.status !== "saved") throw new Error("Insertion has a save conflict. Resolve it in the editor.");
       setInsertionRepair(await api.chatCall<RepairStatus>("bring-complete", { path: active, operationId }));
     } catch (e) {
@@ -611,7 +611,7 @@ export default function App() {
           onOpen={p => { setMapOpen(false); void openNote(p); }}
           onUseAsContext={ps => { setMapNotes(ps); setMapOpen(false); setChatOpen(true); }} />
       </Suspense>}
-      {chatOpen && <ChatPanel extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} editor={chatEditor} onAdd={addChatMessage} onDecision={async text=>{if(!active)throw Error('Open a note first.');const h=panes.current.get(active);if(!h)throw Error('Open a note first.');await h.session.flush();if(h.session.status!=='saved')throw Error('Resolve the note before insertion.');const disk=await api.file(active);if(disk.version!==h.session.base.version||disk.text!==h.view.state.doc.toString())throw Error('The note changed. Review before inserting.');const doc=h.view.state.doc.toString();h.view.dispatch({changes:{from:doc.length,insert:(doc.endsWith('\n\n')?'':'\n\n')+text+'\n'}});await h.session.flush();if(h.session.status!=='saved')throw Error('Resolve the save conflict in the editor.');}} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onCiteClaim={(heading) => { const h = active ? panes.current.get(active) : undefined; return !!h && !!active && citeAtCursor(h.view, active, { path: active, title: titleOf(h.view.state.doc.toString(), active), ...(heading ? { heading } : {}) }); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
+      {chatOpen && <ChatPanel extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} editor={chatEditor} onAdd={addChatMessage} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onCiteClaim={(heading) => { const h = active ? panes.current.get(active) : undefined; return !!h && !!active && citeAtCursor(h.view, active, { path: active, title: titleOf(h.view.state.doc.toString(), active), ...(heading ? { heading } : {}) }); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
       {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); burgerRef.current?.focus(); }} />}
       {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,toast.undo)}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
       {added&&<div className="thought-toast" role="status"><span>{added.text}<span className="toast-hint"> · Undo (Ctrl+Z)</span></span><details className="added-detail"><summary>What was added</summary><pre>{added.detail}</pre></details><button onClick={()=>{const h=active?panes.current.get(active):undefined;if(h){undo(h.view);h.view.focus();}setAdded(null);}}>Undo</button><button aria-label="Close notice" onClick={()=>setAdded(null)}>Close</button></div>}

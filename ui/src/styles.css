@@ -1411,6 +1411,21 @@ p.chat-wait { margin: 4px 0 0; }
 /* Council: part of the one box. A compact bar above the composer (chips, one action, a hint where to type), results as cards in the log.
    The bar scrolls inside itself rather than squeezing the log, so results are never pushed out of sight. */
 .chat-panel .chat-log { min-height: min(220px, 30vh); }
+.chat-composer { flex-wrap: wrap; }
+.chat-composer textarea { flex: 1 1 100%; }
+.chat-composer-bar { flex: 1 1 100%; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding-bottom: var(--space-2); }
+.compose-mode { position: relative; }
+.compose-mode-btn { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 28px; padding: 0 var(--space-3); border: 1px solid var(--control-border); border-radius: 999px; background: transparent; color: var(--ink-text); font: 500 var(--text-control) var(--font-ui); cursor: pointer; }
+.compose-mode-btn:hover:not(:disabled) { background: var(--accent-soft); }
+.compose-mode-btn:focus-visible, .compose-mode-item:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.compose-mode-btn:disabled { opacity: .55; cursor: not-allowed; }
+.compose-mode-btn[aria-expanded="true"] svg { transform: rotate(180deg); }
+.compose-mode-menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 5; display: grid; gap: 2px; min-width: min(18rem, 80vw); padding: var(--space-1); border: 1px solid var(--rule); border-radius: var(--radius-card); background: var(--paper-2); box-shadow: var(--shadow-page); }
+.compose-mode-item { display: grid; gap: 2px; padding: var(--space-2) var(--space-3); border: 1px solid transparent; border-radius: var(--radius-small); background: transparent; color: var(--ink-text); text-align: left; font: inherit; cursor: pointer; }
+.compose-mode-item:hover { background: var(--accent-soft); }
+.compose-mode-item[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.compose-mode-name { font: 600 var(--text-control) var(--font-ui); }
+.compose-mode-help { color: var(--muted); font: var(--text-meta)/1.4 var(--font-ui); }
 .chat-dock { flex: 0 1 auto; min-height: 0; max-height: 52%; overflow-y: auto; display: flex; flex-direction: column; padding-top: var(--space-3); border-top: 1px solid var(--rule); overscroll-behavior: contain; }
 .chat-dock > * { flex-shrink: 0; }
 .chat-dock .persona-switch { margin: 0 16px var(--space-2); }

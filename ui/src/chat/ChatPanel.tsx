@@ -1,5 +1,6 @@
 import type {CouncilViewRun as CouncilRun} from './council-model.ts';
 import {CouncilPanel,CouncilResults} from './CouncilPanel.tsx';
+import {ChatModeMenu,type ChatMode} from './ChatMode.tsx';
 import {useEffect,useMemo,useRef,useState,type FormEvent} from 'react';
 import {api,ApiError,streamChat,streamConversation,type ConversationBody} from '../api.ts';
 import type {InvestigateUsage} from '../../shared/usage.ts';
@@ -47,8 +48,8 @@ export interface ChatPanelProps {
  /** The note open in the editor. */
  path:string|null;noteText:string;threadsText:string;editor:EditorSource;
  /** Adds one accepted reply to the note through the same journaled insertion as AI thoughts. The caller shows the toast with Undo. `chat` is the note whose chat holds the reply, when it is not the open note. */
- onDecision?:(text:string)=>Promise<void>;
- onAdd:(messageId:string,chat?:string)=>Promise<void>;onClose:()=>void;
+
+ onAdd:(messageId:string,chat?:string,council?:{conversation:string;runId:string;provider:string})=>Promise<void>;onClose:()=>void;
  /** Notes chosen in the Constellation ("Use as chat context"): sent as the Other notes module, shown in the review first. */
  extraNotes?:string[];onClearExtraNotes?:()=>void;
  /** Source chips: scroll the editor to a claim's quote and mark it for a moment (false when the quote is not in the current note), and cite the note at the cursor. */
@@ -115,7 +116,7 @@ interface PendingPlan {plan:ConversationPlan;id:string;question:string;route:Rou
 type AtItem={kind:'repo';label:string;ready:boolean}|{kind:'note';path:string}|{kind:'file';path:string};
 const atItemKey=(i:AtItem)=>i.kind==='repo'?'repo':i.kind+':'+i.path;
 
-function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onDecision,onClose,extraNotes=[],onClearExtraNotes,onShowQuote=()=>false,onCiteClaim=()=>false,conversation,onConversation}:BodyProps){
+function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,extraNotes=[],onClearExtraNotes,onShowQuote=()=>false,onCiteClaim=()=>false,conversation,onConversation}:BodyProps){
  const otherNotes=extraNotes.filter(p=>p!==openPath);
  const setConversation=(id:string,session?:HarnessSession)=>onConversation(id,session?.note??path??'');
  const [chips,setChips]=useState<ContextChip[]>(()=>DEFAULT_CONTEXT.map(c=>({...c}))),[turns,setTurns]=useState<Turn[]>([]),[draft,setDraft]=useState('');
@@ -283,7 +284,9 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onDecisi
  const replanCard=async(budgetUsd:number)=>{const p=planCard;if(!p)return;setBusy(true);const {plan:_old,...rest}=p;await showPlan({...rest,notice:''},budgetUsd);};
  const cancelPlan=()=>{const p=planCard;if(!p)return;setPlanCard(null);setTurns(t=>t.filter(x=>x.id!==p.id));if(!p.resume){questions.delete(p.id);setDraft(p.question);}setBusy(false);input.current?.focus();};
  /** `again` re-asks an earlier question through the same path, without touching the draft. */
+ const [mode,setMode]=useState<ChatMode>('chat'),councilReview=useRef<(()=>void)|null>(null);
  const submit=async(again?:string)=>{
+  if(mode==='council'&&again===undefined){councilReview.current?.();return;}
   const question=(again??draft).trim();if(!question||!path||busy||pending||planCard)return;
   if(blockedByRefusals(attach)){setNotice(refusalText('file_refused'));return;}
   const a=attachmentsOf(attach),id=newTurnId();setNotice('');setBusy(true);stickLog.follow();
@@ -324,6 +327,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onDecisi
  // A reply's source chips name the note its question was asked on, not the note that is open now: in a conversation that followed the person to another note, that can differ.
  const asked=(message:ChatMessage|undefined)=>{const on=message?.askedOn??path,here=on===openPath;return {path:on,noteText:here?noteText:'',elsewhere:!here,onShow:onShowQuote,onCite:onCiteClaim};};
  const add=async(id:string)=>{setAdding(id);try{await onAdd(id,path??undefined);}finally{if(alive.current)setAdding(null);}};
+ const addCouncil=async(runId:string,provider:string)=>{if(!conversation)return;setAdding(runId+':'+provider);try{await onAdd('',path??undefined,{conversation,runId,provider});}finally{if(alive.current)setAdding(null);}};
  const keep=async()=>{try{await api.chatCall('enable',{action:'add-ignore-line'});setPersistence('private');}catch(e){setNotice(e instanceof ApiError?e.message:'Could not keep this chat on disk.');}};
  const openExcerpt=async(p:string,line=1)=>{if(!conversation)return;try{setExcerpt(await api.investigateExcerpt(conversation,p,line));}catch(e){setNotice(e instanceof ApiError?e.message:'That file cannot be shown.');}};
  const restore=async()=>{if(!conversation)return;setRestoring(true);setNotice('');try{await api.investigateCall('restore',{session:conversation});setTurns(list=>list.map(t=>t.inv?.tripwire?{...t,inv:{...t.inv,tripwire:{...t.inv.tripwire,notebook:{changed:[],added:[],removed:[]}}}}:t));setNotice('The notebook is back as it was before the run.');}
@@ -372,7 +376,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onDecisi
    {turns.length===0&&!councilRuns.length&&!pending
     ?<div className="chat-empty"><p>Ask about this note. Type @ to add another note, a repo file or the repo. Nothing is sent until you have seen exactly what goes.</p>
       <ul>{SUGGESTED_PROMPTS.map(p=><li key={p}><button type="button" className="chat-suggestion" onClick={()=>{setDraft(p);input.current?.focus();}}>{p}</button></li>)}</ul></div>
-    :([...turns.map(t=>({...t,council:null as CouncilRun|null})),...councilRuns.map(run=>({id:run.id,question:run.question,text:'',status:'complete' as const,at:run.startedAt,council:run} as Turn&{council:CouncilRun|null}))].sort((a,b)=>(Date.parse(a.at??'')||a.sentAt||0)-(Date.parse(b.at??'')||b.sentAt||0))).map(t=>t.council?<CouncilResults key={t.id} run={t.council}/>:<div key={t.id} className="chat-turn" data-status={t.status} data-profile={t.profile}>
+    :([...turns.map(t=>({...t,council:null as CouncilRun|null})),...councilRuns.map(run=>({id:run.id,question:run.question,text:'',status:'complete' as const,at:run.startedAt,council:run} as Turn&{council:CouncilRun|null}))].sort((a,b)=>(Date.parse(a.at??'')||a.sentAt||0)-(Date.parse(b.at??'')||b.sentAt||0))).map(t=>t.council?<CouncilResults key={t.id} run={t.council} adding={adding} onAdd={(runId,provider)=>void addCouncil(runId,provider)}/>:<div key={t.id} className="chat-turn" data-status={t.status} data-profile={t.profile}>
      <div className="chat-message chat-you" data-from="you"><span className="chat-who">You</span>{t.question?<p>{t.question}</p>:<p className="chat-gone">Question unavailable after reload.</p>}</div>
      {t.status==='review'&&planCard&&planCard.id===t.id&&<>{planCard.notice&&<p className="chat-notice chat-plan-notice" role="alert">{planCard.notice}</p>}
       <PlanCard plan={planCard.plan} resume={planCard.resume} busy={busy} onApprove={()=>void approvePlan()} onReplan={b=>void replanCard(b)} onCancel={cancelPlan}/></>}
@@ -402,7 +406,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onDecisi
   </aside>}
   {notice&&<p className="chat-notice" role="alert">{notice} <button type="button" className="ghost" onClick={()=>setNotice('')}>Dismiss</button></p>}
   <div className="chat-dock">
-  <PersonaSwitch id="chat" label="How this chat works with you" value={persona.persona} kept={persona.kept} disabled={composing} hint="Change it before you review a message." onChange={p=>void persona.choose(p)}/>
+  {mode==='chat'&&<PersonaSwitch id="chat" label="How this chat works with you" value={persona.persona} kept={persona.kept} disabled={composing} hint="Change it before you review a message." onChange={p=>void persona.choose(p)}/>}
   {persona.failed&&<p className="chat-notice" role="alert">That choice could not be saved. Nothing was changed.</p>}
   {repoDraft!==null&&<form className="chat-sessions-name chat-repo-form" onSubmit={e=>void chooseRepo(e)} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();setRepoDraft(null);}}}>
    <input ref={repoField} className="chat-ctl" aria-label="Repo folder (absolute path)" placeholder="C:\path\to\repo" value={repoDraft} onChange={e=>setRepoDraft(e.target.value)}/>
@@ -418,14 +422,14 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onDecisi
      {!(c.kind==='repo'&&c.fixed)&&<button type="button" aria-label={`Remove ${label} from the next message`} onClick={()=>setAttach(a=>a.filter(x=>chipKey(x)!==chipKey(c)))}>×</button>}</span>;})}
    {switched&&<span className="chat-send-chip chat-switched" data-chip="switched" role="status"><span>{noteChangedText(switched.from,openTitle)}</span><button type="button" aria-label="Dismiss this notice" onClick={()=>setSwitched(null)}>×</button></span>}
   </div>}
-  <CouncilPanel conversation={conversation} note={openPath} notes={[...otherNotes,...attach.filter(c=>c.kind==='note').map(c=>(c as {path:string}).path)]} question={draft} disabled={composing||busy} onConversation={(id,home)=>{onConversation(id,home);setListRefresh(n=>n+1);}} onSent={asked=>{setDraft(current=>current.trim()===asked?'':current);setListRefresh(n=>n+1);}} onDecision={onDecision} onHistory={setCouncilRuns} onBusy={setBusy}/>
+  <CouncilPanel open={mode==='council'} reviewRef={councilReview} conversation={conversation} note={openPath} notes={[...otherNotes,...attach.filter(c=>c.kind==='note').map(c=>(c as {path:string}).path)]} question={draft} disabled={composing||busy} onConversation={(id,home)=>{onConversation(id,home);setListRefresh(n=>n+1);}} onSent={asked=>{setDraft(current=>current.trim()===asked?'':current);setListRefresh(n=>n+1);}} onHistory={setCouncilRuns} onBusy={setBusy}/>
   </div>
   <form className="chat-composer" onSubmit={e=>{e.preventDefault();if(at&&atItems.length){pickAt(atItems[Math.min(at.index,atItems.length-1)]);return;}void submit();}}>
    {at&&<div className="chat-at" role="listbox" aria-label="Attach a note, a file or the repo" id="chat-at-list">
     {atItems.length===0?<p className="chat-at-none">Nothing matches “{at.query}”.</p>:atItems.map((it,i)=><button key={atItemKey(it)} type="button" role="option" aria-selected={i===at.index} tabIndex={-1} className="chat-at-opt" data-at={atItemKey(it)}
      onMouseDown={e=>e.preventDefault()} onClick={()=>pickAt(it)}><span className="chat-at-kind">{it.kind==='repo'?'Repo':it.kind==='note'?'Note':'File'}</span><span className="chat-at-name">{it.kind==='repo'?it.label:it.path}</span></button>)}
    </div>}
-   <textarea ref={input} aria-label="Message Aitiarch AI" rows={1} placeholder={pending||planCard?'Review above, then send…':'Ask about this note… (@ to attach)'} value={draft} disabled={composing} onChange={e=>onDraft(e.target.value)}
+   <textarea ref={input} aria-label="Message Aitiarch AI" rows={1} placeholder={pending||planCard?'Review above, then send…':mode==='council'?'Ask the Council… (Enter reviews it first)':'Ask about this note… (@ to attach)'} value={draft} disabled={composing} onChange={e=>onDraft(e.target.value)}
     aria-controls={at?'chat-at-list':undefined} aria-expanded={at?true:undefined}
     onKeyDown={e=>{
      if(at){
@@ -435,9 +439,12 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onDecisi
       if((e.key==='Enter'||e.key==='Tab')&&atItems.length){e.preventDefault();pickAt(atItems[Math.min(at.index,atItems.length-1)]);return;}
      }
      if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void submit();}}}/>
-   <button type="submit" className="chat-send" aria-label="Send message" disabled={!draft.trim()||composing}>
-    <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 16V4M5 9l5-5 5 5"/></svg>
-   </button>
+   <div className="chat-composer-bar">
+    <ChatModeMenu value={mode} onChange={setMode} disabled={composing||busy}/>
+    <button type="submit" className="chat-send" aria-label="Send message" title={mode==='council'?'Review the Council question':undefined} disabled={!draft.trim()||composing}>
+     <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 16V4M5 9l5-5 5 5"/></svg>
+    </button>
+   </div>
   </form>
   <footer className="chat-foot">
    <p className="chat-usage">{usage?(usage.session?'This conversation · ':'')+usageLine(usage):'No calls yet'}</p>
