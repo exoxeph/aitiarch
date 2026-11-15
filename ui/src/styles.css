@@ -1548,4 +1548,5 @@ p.chat-wait { margin: 4px 0 0; }
 .council-col .chat-add { opacity: .7; }
 .council-col .chat-add:hover:not(:disabled), .council-col .chat-add:focus-visible { opacity: 1; }
 .chat-add { opacity: .7; }
-
+/* The AI thoughts fade out where the note's window ends, instead of being cut off hard: a long thought or diagram reaches the edge and dissolves. */
+.ink-surface .margin-rail.thought-rails { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 84px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 84px), transparent 100%); }
