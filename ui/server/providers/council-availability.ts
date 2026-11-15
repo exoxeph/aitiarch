@@ -1,7 +1,12 @@
-import {execFile} from 'node:child_process';import {promisify} from 'node:util';import {stat,mkdir,lstat} from 'node:fs/promises';import path from 'node:path';
+import {stat,mkdir,lstat,mkdtemp} from 'node:fs/promises';import {metadataOutput,spawnToolless,killTree} from './launcher.ts';import {cleanupProviderTemp} from './temp-cleanup.ts';import path from 'node:path';
 import {existsSync} from 'node:fs';import os from 'node:os';
 import type {SafetyLabel} from './turn.ts';import {CODEX_VERSION,codexVersionNotice} from './codex-command.ts';
-const exec=promisify(execFile);
+async function localMetadata(id:'claude'|'codex'|'kiro',command:string,args:string[]){
+ const cwd=await mkdtemp(path.join(os.tmpdir(),'aitiarch-headless-'));const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>/^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP)$/i.test(k)));
+ try{if(id==='claude')return await metadataOutput({provider:'claude',command},args,cwd,env);
+ return await new Promise<string>((resolve,reject)=>{const child=spawnToolless({id,command},args[0]==='--version'?'version':'metadata',{cwd,env});let output='',failed=false,killing=Promise.resolve();const stop=()=>{failed=true;if(child.pid)killing=killTree(child.pid);};const timer=setTimeout(stop,30000);child.stdin.end();child.stdout.on('data',b=>{output+=b;if(output.length>131072)stop();});child.stderr.resume();child.on('error',()=>{failed=true;});child.once('close',async code=>{clearTimeout(timer);await killing;if(failed||code!==0)reject(Error('Metadata check failed'));else resolve(output);});});
+ }finally{console.info('Council metadata cleanup target:',cwd);await cleanupProviderTemp(cwd);}
+}
 export interface Availability {id:string;label:string;safetyLabel:SafetyLabel;available:boolean;reason:string|null}
 export interface AvailabilityCheck {id:string;label:string;safetyLabel:SafetyLabel;check:()=>Promise<{available:boolean;reason:string|null}>}
 export class CouncilAvailability {
@@ -13,7 +18,7 @@ export class CouncilAvailability {
 export function localCouncilCheck(id:'claude'|'codex'|'kiro',command:string|undefined,providerHome?:string,metadata?: (args:string[])=>Promise<string>):AvailabilityCheck{
  return {id,label:id==='claude'?'Claude':id==='codex'?'Codex':'Kiro',safetyLabel:id==='claude'?'fenced':id==='codex'?'contained':'host-gated',check:async()=>{
   if(!command||!path.isAbsolute(command)||!(await stat(command).catch(()=>null))?.isFile())return {available:false,reason:`${id} executable missing. Start with a valid ${id==='kiro'?'installed Kiro CLI':'--'+id+' <path>'}.`};
-  const output=metadata??(async(args:string[])=>{const r=await exec(command,args,{windowsHide:true,timeout:30000,maxBuffer:131072,env:Object.fromEntries(Object.entries(process.env).filter(([k])=>/^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP)$/i.test(k)))});return r.stdout;});
+  const output=metadata??((args:string[])=>localMetadata(id,command,args));
   const version=(await output(['--version'])).trim(),found=/^(?:codex-cli|kiro-cli|Claude Code)?\s*([0-9A-Za-z.+-]{1,50})(?:\s+\(Claude Code\))?$/.exec(version)?.[1]??'unknown';
   if(id==='codex'&&found!==CODEX_VERSION)return {available:false,reason:codexVersionNotice(found)};
   if(id==='kiro'&&found!=='3.3.0')return {available:false,reason:`Kiro version ${found}; expected 3.3.0. Install the verified version.`};

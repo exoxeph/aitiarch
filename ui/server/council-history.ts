@@ -7,7 +7,7 @@ async function safe(dir:string,id:string){if(!validSessionId(id))throw Error('in
 export async function removeCouncilHistory(dir:string,id:string){const {file}=await safe(dir,id);console.info('Council history delete target:',file);await unlink(file).catch(e=>{if(e.code!=='ENOENT')throw e;});}
 export class CouncilHistory {
  private index:SessionIndex;private maxBytes:number;private tail:Promise<unknown>=Promise.resolve();
- constructor(index:SessionIndex,maxBytes=1024*1024){this.index=index;this.maxBytes=maxBytes;}
+ constructor(index:SessionIndex,maxBytes=1024*1024,notebookRoot?:string){this.index=index;this.maxBytes=maxBytes;for(const root of [path.resolve(import.meta.dirname,'../..'),...(notebookRoot?[notebookRoot]:[])]){const rel=path.relative(path.resolve(root),path.resolve(index.dir));if(!rel||!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel))throw Error('Council history must be outside the repo and notebook.');}}
  private async file(id:string){if(!validSessionId(id)||!await this.index.get(id))throw Error('invalid_conversation');return safe(this.index.dir,id);}
  async get(id:string):Promise<CouncilRecord>{const {file}=await this.file(id);try{const s=await lstat(file);if(s.size>this.maxBytes)throw Error('history_too_large');const d=JSON.parse(await readFile(file,'utf8'));if(d?.v!==1||!Array.isArray(d.runs)||!Number.isInteger(d.pruned))throw Error('invalid_history');return d;}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return {v:1,runs:[],pruned:0};throw e;}}
  async list(){return Promise.all((await this.index.list()).map(async s=>({conversation:s.id,...await this.get(s.id)})));}
