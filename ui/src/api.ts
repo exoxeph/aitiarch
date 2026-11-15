@@ -154,7 +154,14 @@ export const api = {
   councilHistory:(id:string)=>ok<import('../server/council-history.ts').CouncilRecord>('GET','/api/council/history?conversation='+encodeURIComponent(id)),
   councilPlan:(body:unknown)=>ok<Awaited<ReturnType<import('../server/council.ts').CouncilService['plan']>>>('PUT','/api/council/plan',body),
   councilApprove:(body:unknown)=>ok<unknown>('PUT','/api/council/plan',{...body as object,approve:true}),
-  councilRun:async(body:unknown,signal:AbortSignal)=>{const res=await fetch(scoped('/api/council/run'),{method:'POST',credentials:'same-origin',signal,headers:{'Content-Type':'application/json','X-Aitiarch':'1'},body:JSON.stringify(body)});const d=await res.json();if(!res.ok)throw new ApiError(res.status,d.error,d.message);return d as Awaited<ReturnType<import('../server/council.ts').CouncilService['run']>>;},
+  councilCancel:(conversation:string,runId:string)=>ok<{cancelled:boolean}>('POST','/api/council/cancel',{conversation,runId}),
+  councilRun:async(body:unknown,signal:AbortSignal,onEvent:(event:import('../shared/council-stream.ts').CouncilStreamEvent)=>void)=>{
+    const res=await fetch(scoped('/api/council/run'),{method:'POST',credentials:'same-origin',signal,headers:{'Content-Type':'application/json','X-Aitiarch':'1'},body:JSON.stringify(body)});
+    if(!res.ok||!res.body){const d=await res.json();throw new ApiError(res.status,d.error,d.message);}
+    const reader=res.body.getReader(),decoder=new TextDecoder();let buffer='',final:Extract<import('../shared/council-stream.ts').CouncilStreamEvent,{type:'done'}>|undefined;
+    const consume=(text:string)=>{const parsed=investigateFrames(text);buffer=parsed.rest;for(const raw of parsed.events){const e=raw as import('../shared/council-stream.ts').CouncilStreamEvent;if(final||!['provider_start','provider_result','done'].includes(e.type))throw new ApiError(0,'council_stream','Council stream changed or was interrupted. Finished answers are kept.');onEvent(e);if(e.type==='done')final=e;}};
+    try{for(;;){const {done,value}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});if(buffer.length>1000000)throw new ApiError(0,'council_stream','Council stream exceeded its size limit.');consume(buffer);}consume(buffer+decoder.decode()+'\n\n');if(!final)throw new ApiError(0,'council_stream','Council stream ended early. Finished answers are kept.');return final;}finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
+  },
   /** The one conversation API: "@" picker matches, the plan card for given attachments, and approving exactly that card. */
   /** What a conversation was approved for, as the server would honour it now; null when nothing (or a grant it would refuse). For the chips only: the server decides every turn. */
   conversationGrant:(id:string)=>ok<{grant:{profile:import('../shared/profile.ts').Profile;files:string[];repo:boolean;diagrams:boolean;diagramNote?:string;budgetUsd:number}|null}>('GET','/api/conversation/grant?id='+encodeURIComponent(id)),

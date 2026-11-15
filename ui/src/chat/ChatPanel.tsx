@@ -1,4 +1,4 @@
-import type {CouncilRun} from '../../server/council-history.ts';
+import type {CouncilViewRun as CouncilRun} from './council-model.ts';
 import {CouncilPanel,CouncilResults} from './CouncilPanel.tsx';
 import {useEffect,useMemo,useRef,useState,type FormEvent} from 'react';
 import {api,ApiError,streamChat,streamConversation,type ConversationBody} from '../api.ts';
