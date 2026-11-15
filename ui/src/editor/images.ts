@@ -59,6 +59,9 @@ export class SkillPageWidget extends WidgetType {
 }
 
 const observers = new WeakMap<HTMLElement, ResizeObserver>();
+// CodeMirror recreates off-screen widgets. Reserve the previously loaded image's geometry immediately,
+// before its asynchronous decode/measurement, so scrolling it back into view cannot collapse a line.
+const imageGeometry = new Map<string, { naturalWidth: number; naturalHeight: number; width: number; left: number }>();
 
 /**
  * The picture to show for a diagram asset: the same drawing cropped to what is actually drawn, with the opaque full-size
@@ -124,6 +127,12 @@ export class ImageWidget extends WidgetType {
     if (this.src) {
       const img = document.createElement("img");
       const original = this.src;
+      const known = imageGeometry.get(original);
+      if (known) {
+        img.style.aspectRatio = `${known.naturalWidth} / ${known.naturalHeight}`;
+        fig.style.width = `${known.width}px`;
+        fig.style.marginLeft = `${known.left}px`;
+      }
       void tightSvg(original).then((url) => { img.src = url ?? original; });
       img.alt = this.alt;
       img.draggable = false;
@@ -145,10 +154,18 @@ export class ImageWidget extends WidgetType {
           const sc = view.scrollDOM, cs = getComputedStyle(view.contentDOM), c = view.contentDOM.getBoundingClientRect();
           const column = c.width - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
           const marginEach = Math.max(0, (sc.clientWidth - column) / 2), limit = column + marginEach; // half of each margin
-          const natural = img.naturalWidth || limit;
+          const natural = img.naturalWidth || known?.naturalWidth || limit;
           return { width: Math.max(240, Math.min(natural, limit)), column };
         },
-        write: (m) => { const w = Math.round(m.width), left = Math.round((m.column - w) / 2); if (fig.dataset.fit === `${w}:${left}`) return; fig.dataset.fit = `${w}:${left}`; fig.style.width = `${w}px`; fig.style.marginLeft = `${left}px`; },
+        write: (m) => {
+          const w = Math.round(m.width), left = Math.round((m.column - w) / 2);
+          if (img.naturalWidth && img.naturalHeight) {
+            img.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+            imageGeometry.set(original, { naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, width: w, left });
+          }
+          if (fig.dataset.fit === `${w}:${left}`) return;
+          fig.dataset.fit = `${w}:${left}`; fig.style.width = `${w}px`; fig.style.marginLeft = `${left}px`;
+        },
       });
       fitNow = fit;
       const observer = new ResizeObserver(fit);
