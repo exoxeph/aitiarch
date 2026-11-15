@@ -1550,3 +1550,15 @@ p.chat-wait { margin: 4px 0 0; }
 .chat-add { opacity: .7; }
 /* The AI thoughts fade out where the note's window ends, instead of being cut off hard: a long thought or diagram reaches the edge and dissolves. */
 .ink-surface .margin-rail.thought-rails { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 84px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 84px), transparent 100%); }
+/* A thought (or its diagram) taller than its box dissolves at the bottom instead of being cut off hard, and at the top once you have scrolled into it.
+   It is a scroll-driven mask, so it exists only while the card can actually scroll: a card that fits is untouched (nothing around it is clipped),
+   and the fade shrinks to nothing as you reach the end. */
+@property --fade-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --fade-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@keyframes thought-edge-fade {
+  from { --fade-b: 64px; --fade-t: 0px; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-t), #000 calc(100% - var(--fade-b)), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-t), #000 calc(100% - var(--fade-b)), transparent 100%); }
+  to { --fade-b: 0px; --fade-t: 44px; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-t), #000 calc(100% - var(--fade-b)), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-t), #000 calc(100% - var(--fade-b)), transparent 100%); }
+}
+@supports (animation-timeline: scroll()) {
+  .thought-rails .margin-card.thought-blob { animation: thought-edge-fade linear both; animation-timeline: scroll(self); }
+}
