@@ -237,7 +237,7 @@ export class ChatRuntime {
     if(frozen.session)this.rememberReplay(frozen.session.id,result.usage.inputTokens+(result.usage.cachedTokens??0)+result.usage.outputTokens);
    }else{s.usage.spent+=frozen.reservation;s.usage.estimated=(s.usage.estimated??0)+frozen.reservation;s.usage.unreportedCalls++;}charged=true;
    // Enforce exact keys for fake/adapted providers too; never accept owned fields or aliases.
-   if(!Array.isArray(result.claims)||result.claims.some(c=>!c||typeof c!=='object'||Object.keys(c).sort().join()!=='quote,sourceId')||Object.keys(result).some(k=>!['id','provider','model','answer','claims','usage','rawReply'].includes(k)))throw new ChatError('validation');
+   if(!Array.isArray(result.claims)||result.claims.some(c=>!c||typeof c!=='object'||Object.keys(c).sort().join()!=='quote,sourceId')||Object.keys(result).some(k=>!['id','provider','model','answer','claims','usage','rawReply','costUsd'].includes(k))||(Object.hasOwn(result,'costUsd')&&!(typeof result.costUsd==='number'&&Number.isFinite(result.costUsd)&&result.costUsd>=0)))throw new ChatError('validation'); // costUsd is the CLI's own dollar figure (optional): a finite number of 0 or more, nothing else
    // The output gate's final part: the body, each claim checked on its own, and whether the citations need attention.
    // A claim about a diagram's picture is accepted only for a diagram this conversation's stream shows a Read of: one opened in this turn, or in an earlier reply of the conversation (saved with it).
    const opened=new Set([...(frozen.diagrams?.earlier??[]),...facts.reads.map(r=>r.asset)]),claimable=(frozen.diagrams?.all??[]).filter(d=>opened.has(d.asset)).map(d=>'D'+d.n);
