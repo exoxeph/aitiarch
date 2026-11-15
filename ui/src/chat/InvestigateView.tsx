@@ -2,7 +2,7 @@
 import {InlineCode,LiveMarkdown} from '../ink/LiveMarkdown.tsx';
 import {ClaimChips} from './ClaimChips.tsx';
 import {stepFailure} from '../../shared/tool-errors.ts';
-import {canContinue,deniedSteps,stepSummary,stopSummary,tripwireChanged,type LiveTurn,type ToolStep} from './investigate-model.ts';
+import {canContinue,denialLabel,deniedSteps,stepSummary,stopSummary,tripwireChanged,type LiveTurn,type ToolStep} from './investigate-model.ts';
 
 /** What Continue sends after a stop on the cap, once a new plan is approved. */
 export const CONTINUE_QUESTION='Please continue where you stopped.';
@@ -15,7 +15,7 @@ function StepRow({step,onOpen,ended}:{step:ToolStep;onOpen:(path:string)=>void;e
   <span className="inv-dot" aria-hidden="true"/>
   <span className="inv-row-main"><strong className="inv-tool">{step.tool}</strong>{' '}
    {openable?<button type="button" className="inv-target inv-target-link" onClick={()=>onOpen(step.target)} title="Show a read-only excerpt">{step.target}</button>:<code className="inv-target">{step.target}</code>}</span>
-  <span className="inv-result">{failure?<><span className="inv-denied-word">{failure.word}</span>{failure.detail?': '+failure.detail:''}</>:state==='unfinished'?'stopped before it finished':stepSummary(step)}</span>
+  <span className="inv-result">{failure?.kind==='denied'?<span className="inv-denied-word">{denialLabel(step)}</span>:failure?<><span className="inv-denied-word">{failure.word}</span>{failure.detail?': '+failure.detail:''}</>:state==='unfinished'?'stopped before it finished':stepSummary(step)}</span>
  </li>;
 }
 
@@ -29,7 +29,7 @@ function NarrationRow({text}:{text:string}){
 
 /** One Investigate-style turn in the single chat box: the trail (thinking, narration, tool rows), the answer with file-checked claims, and the end-state banners. */
 export function InvestigateTurnView({turn,snapshotFiles,onOpen,onRestore,restoring,onContinue}:{turn:LiveTurn;snapshotFiles?:number;onOpen:(path:string,line?:number)=>void;onRestore:()=>void;restoring:boolean;onContinue:()=>void}){
- const stop=turn.stopped?stopSummary(turn,snapshotFiles):null,denied=deniedSteps(turn);
+ const stop=turn.stopped?stopSummary(turn,snapshotFiles):null,denied=deniedSteps(turn),outsideBlocked=turn.stopped?.code==='outside_path',blockedCount=denied.length+(outsideBlocked?1:0);
  // The trail in order: narration rows and tool rows. The last text (after the last tool call) is the answer and is shown below, not in the trail.
  const lastIsText=!!turn.trail.at(-1)&&'text' in turn.trail.at(-1)!,items=lastIsText?turn.trail.slice(0,-1):turn.trail;
  return <div className="inv-turn" data-running={turn.running||undefined}>
@@ -38,6 +38,7 @@ export function InvestigateTurnView({turn,snapshotFiles,onOpen,onRestore,restori
     <details><summary>Thinking <span className="inv-tag">{turn.thinking.replace(/\s+/g,' ').slice(0,60)}{turn.thinking.length>60?'…':''}</span></summary><p className="inv-thinking-text">{turn.thinking}</p></details></li>}
    {turn.trail.length?items.map((it,i)=>'text' in it?<NarrationRow key={i} text={it.text}/>:<StepRow key={i} step={turn.steps[it.step]??{tool:'?',target:'',ok:null}} onOpen={p=>onOpen(p)} ended={!turn.running}/>)
     :turn.steps.map((s,i)=><StepRow key={i} step={s} onOpen={p=>onOpen(p)} ended={!turn.running}/>)}
+   {outsideBlocked&&<li className="inv-row" data-state="denied"><span className="inv-dot" aria-hidden="true"/><span className="inv-row-main">Attempted path not supplied by this event</span><span className="inv-result inv-denied-word">Denied: outside the approved folder</span></li>}
    {turn.running&&!turn.steps.length&&!turn.thinking&&!turn.text&&<li className="inv-row" data-state="note"><span className="inv-dot" aria-hidden="true"/><span className="inv-result">Starting…</span></li>}
   </ol>
   {stop&&<div className="inv-banner" data-kind="stopped" role="note">
@@ -49,7 +50,7 @@ export function InvestigateTurnView({turn,snapshotFiles,onOpen,onRestore,restori
    <LiveMarkdown text={turn.text} live={turn.running}/>
    {turn.message&&<ClaimChips claims={turn.message.claims} path={null} noteText="" onShow={()=>false} onCite={()=>false} onFile={(p,l)=>onOpen(p,l)}/>}
   </div>}
-  {denied.length>0&&!turn.running&&<div className="inv-banner" data-kind="denied" role="note"><p><strong>Denied reads:</strong> {denied.map(s=>`${s.tool} ${s.target}`).join('; ')}.</p></div>}
+  {blockedCount>0&&!turn.running&&<div className="inv-banner" data-kind="denied" role="note"><p>{`${blockedCount} ${blockedCount===1?'attempt':'attempts'} blocked, nothing left the approved scope`}</p></div>}
   {tripwireChanged(turn.tripwire)&&<div className="inv-banner" data-kind="tripwire" role="alert">
    <p><strong>Your notebook changed during this run.</strong> Changed: {turn.tripwire!.notebook.changed.join(', ')||'none'}; added: {turn.tripwire!.notebook.added.join(', ')||'none'}; removed: {turn.tripwire!.notebook.removed.join(', ')||'none'}.</p>
    <button type="button" className="chat-ctl" disabled={restoring} onClick={onRestore}>Restore the notebook as it was before the run</button>

@@ -9,6 +9,8 @@ import {InvestigateService,type InvestigateEvent} from '../server/harness/invest
 import {projectFolderName,removeTranscript} from '../server/harness/transcripts.ts';
 import {LedgerStore,appendLedger} from '../server/ledger-store.ts';
 import {createElement} from 'react';import {renderToStaticMarkup} from 'react-dom/server';import {UsageView} from '../src/UsagePanel.tsx';
+import {InvestigateTurnView} from '../src/chat/InvestigateView.tsx';
+import {fromStoredTurn} from '../src/chat/investigate-model.ts';
 
 // Investigation sessions against a synthetic CLI (no model): a confirmed plan before the first turn, the copy as the only folder it can read,
 // every event checked (tools, paths, turns), file claims checked against the real repo, a tripwire around each run, and Delete conversation.
@@ -30,6 +32,34 @@ async function setup(){
  return {repo,notebook,harness,index,service,run,calls};
 }
 async function confirmed(svc:InvestigateService,repo:string){const s=await svc.create('Login code',repo),p=await svc.plan(s.id);await svc.confirm(s.id,p.planHash);return {s,p};}
+
+const trailHtml=(message:any,running=false)=>renderToStaticMarkup(createElement(InvestigateTurnView,{turn:{...fromStoredTurn({id:'demo',question:'Synthetic question',at:new Date().toISOString(),message}),running},onOpen:()=>{},onRestore:()=>{},restoring:false,onContinue:()=>{}}));
+it('fake CLI denials show plain reasons and count only real blocked attempts at the end',async()=>{
+ const t=await setup(),svc=t.service('inv-denial-reasons'),{s}=await confirmed(svc,t.repo),r=await t.run(svc,s.id),html=trailHtml(r.complete!.message);
+ expect(html).toContain('Denied: outside the approved folder');expect(html).toContain('Denied: secret file excluded');
+ expect(html).toContain('2 attempts blocked, nothing left the approved scope');
+ expect(trailHtml(r.complete!.message,true)).not.toContain('attempts blocked');
+});
+it('fake CLI trail counts a single denial but not a missing-file error',async()=>{
+ const t=await setup(),svc=t.service('inv-trail'),{s}=await confirmed(svc,t.repo),r=await t.run(svc,s.id),html=trailHtml(r.complete!.message);
+ expect(html).toContain('Denied: secret file excluded');expect(html).toContain('1 attempt blocked, nothing left the approved scope');expect(html).not.toContain('2 attempts blocked');
+});
+it('fake CLI turn without denials has no blocked-attempt summary',async()=>{
+ const t=await setup(),svc=t.service(),{s}=await confirmed(svc,t.repo),r=await t.run(svc,s.id);
+ expect(trailHtml(r.complete!.message)).not.toContain('blocked, nothing left the approved scope');
+});
+it('fake CLI outside_path stop is visible as a denial without inventing an attempted path',async()=>{
+ const t=await setup(),svc=t.service('inv-outside'),{s}=await confirmed(svc,t.repo),r=await t.run(svc,s.id);
+ expect(r.error?.code).toBe('outside_path');
+ const turn=fromStoredTurn({id:'outside',question:'Synthetic question',at:new Date().toISOString(),stopped:{code:r.error!.code,partial:r.error!.partial!}});
+ const html=renderToStaticMarkup(createElement(InvestigateTurnView,{turn,onOpen:()=>{},onRestore:()=>{},restoring:false,onContinue:()=>{}}));
+ expect(html).toContain('Denied: outside the approved folder');expect(html).toContain('Attempted path not supplied by this event');
+ expect(html).toContain('1 attempt blocked, nothing left the approved scope');expect(html).not.toContain('outside.txt');
+});
+it('denied path chips render hostile markup only as escaped text; generic denials stay honest',()=>{
+ const target='<img src=x onerror=alert(1)>',html=trailHtml({id:'m',body:'',trail:[],claims:[],steps:[{tool:'Read',target,ok:false,denial:'Permission to read has been denied.'}],turns:1});
+ expect(html).toContain('<code class="inv-target">&lt;img');expect(html).not.toContain('<img');expect(html).toContain('Denied: read not approved');
+});
 
 it('Investigate cost cap stops, clears approval and reports cost despite an always-failing ledger',async()=>{
  const t=await setup(),svc=t.service('inv-budget'),s=await svc.create('Synthetic',t.repo),plan=await svc.plan(s.id,0.25);await svc.confirm(s.id,plan.planHash);

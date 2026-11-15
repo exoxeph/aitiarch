@@ -66,5 +66,14 @@ export const canContinue=(t:LiveTurn)=>!t.running&&(t.stopped?.code==='budget'||
 export const toolCalls=(t:LiveTurn)=>t.steps.length;
 /** Only real permission denials, not tool errors. */
 export const deniedSteps=(t:LiveTurn)=>t.steps.filter(s=>stepFailure(s)?.kind==='denied');
+/** Presentation only: never infer a denial from a path or a generic tool error. */
+export function denialLabel(s:ToolStep):string|null{
+ const failure=stepFailure(s);if(failure?.kind!=='denied')return null;
+ if(/outside (?:the )?approved folder/i.test(failure.detail))return 'Denied: outside the approved folder';
+ // Recognisable secret-file names already excluded from snapshots; other excluded
+ // paths (for example tooling folders) must not be described as secret files.
+ if(/secret file excluded/i.test(failure.detail)||s.target.split(/[\\/]/).some(p=>/^\.env|\.private\.|\.(?:pem|key|p12|pfx|jks|keystore)$|^id_|^\.?credentials(?:\.|$)|^\.?secrets?(?:\.|$)/i.test(p)))return 'Denied: secret file excluded';
+ return 'Denied: read not approved';
+}
 export const tripwireChanged=(w?:Tripwire)=>!!w&&w.notebook.changed.length+w.notebook.added.length+w.notebook.removed.length>0;
 export const formatElapsed=(ms:number)=>{const s=Math.max(0,Math.round(ms/1000));return s<60?`${s}s`:`${Math.floor(s/60)}m ${String(s%60).padStart(2,'0')}s`;};

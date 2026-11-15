@@ -42,6 +42,12 @@ if (args[args.indexOf('--tools') + 1] === 'Read,Grep,Glob') { // an investigatio
   if (kind === 'inv-budget') { textBlock('Reading the code. '); tool('b1', 'tb1', 'Read', { file_path: path.join(process.cwd(), 'src', 'login.js') }); done('tb1', '3 const sessions = new Map();');
     out({ type: 'result', subtype: 'error_max_budget_usd', is_error: true, result: '', num_turns: 2, total_cost_usd: 0.5, permission_denials: [] }); process.exit(0); }
   if (kind === 'inv-slow') await new Promise((r) => setTimeout(r, 20000)); // long enough to cancel
+  if (kind === 'inv-denial-reasons') {
+    for (const [i, target, reason] of [[0, 'outside-example.txt', 'outside the approved folder'], [1, '.env', 'secret file excluded']]) {
+      tool('deny'+i, 'deny'+i, 'Read', {file_path:path.join(process.cwd(),target)});
+      out({type:'user',message:{content:[{type:'tool_result',tool_use_id:'deny'+i,is_error:true,content:'Permission to read '+target+' has been denied: '+reason+'.'}]}});
+    }
+  }
   if (kind === 'inv-trail') {
     out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'I should find where login is defined, then read it.' } } });
     out({ type: 'brand_new_event', note: 'unknown to this version' });

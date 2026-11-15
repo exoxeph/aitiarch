@@ -77,14 +77,15 @@ try {
   const rows = await panel.locator('.inv-trail .inv-row:not(.inv-thinking)').evaluateAll((els) => els.map((e) => ({ state: e.dataset.state, text: e.innerText.replace(/\s+/g, ' ').trim() })));
   report.rows = rows;
   assert.deepEqual(rows.map((r) => [r.text.split(' ')[0], r.state]), [['Glob', 'ok'], ['Grep', 'ok'], ['Read', 'denied'], ['Read', 'error'], ['Read', 'ok']]);
-  // Only a real permission denial reads "Denied by policy". A tool error (a path that is not there) reads "Error: path not found" with the repo-relative path, never a user path.
-  assert.match(rows[2].text, /Denied by policy: Permission to read notes\.private\.md has been denied\./);
+  // Only a real permission denial gets the calm denial label. A missing path stays an error.
+  assert.match(rows[2].text, /Denied: secret file excluded/);
+  assert.equal(await panel.locator('.inv-row[data-state="denied"] code.inv-target').innerText(), 'notes.private.md');
   assert.match(rows[3].text, /^Read src\/missing\.ts Error: path not found: src\/missing\.ts$/, 'a missing path is an error, with the repo-relative path');
   assert.doesNotMatch(rows[3].text, /Denied by policy|USER_PATH|AppData|Temp|aitiarch-inv/i, 'and is not called a denial or shown as a user path');
   assert.match(rows[0].text, /2 lines of output/);
   assert.equal(await panel.locator('.inv-thinking details').evaluate((d) => d.open), false, 'thinking is collapsed by default');
   const banner = await panel.locator('.inv-banner[data-kind="denied"]').innerText();
-  assert.match(banner, /Denied reads: Read notes\.private\.md/); assert.doesNotMatch(banner, /missing\.ts/, 'the denied list holds real denials only, not tool errors');
+  assert.equal(banner, '1 attempt blocked, nothing left the approved scope'); assert.doesNotMatch(banner, /missing\.ts/, 'the summary holds real denials only, not tool errors');
   const chips = panel.locator('button.claim-chip'); assert.equal(await chips.count(), 2);
   assert.match(await chips.nth(0).innerText(), /src\/login\.js:3.*Found/s); assert.match(await chips.nth(1).innerText(), /Quote not found/);
   assert.equal(errors.length, 0, 'no page error (the unknown event was tolerated): ' + errors.join('; '));
