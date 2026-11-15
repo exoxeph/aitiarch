@@ -69,6 +69,7 @@ class AdoptButton extends WidgetType {
 let mermaidLib: Promise<typeof import("mermaid").default> | null = null;
 let mermaidSeq = 0;
 const goodRenders = new Map<string, string>();
+const warming = new Set<string>(); // diagrams being rendered ahead of time, so each is queued once
 
 let mermaidTail: Promise<unknown> = Promise.resolve();
 async function renderMermaid(code: string, dark: boolean): Promise<string> {
@@ -97,6 +98,9 @@ const mermaidCleanup = new WeakMap<HTMLElement, () => void>();
 class MermaidWidget extends WidgetType {
   constructor(readonly code: string) {
     super();
+    // Render every diagram in the note in the background as soon as it is known, so by the time it scrolls into view it can be drawn at once.
+    const k = "d:" + code;
+    if (code && !goodRenders.has(k) && !warming.has(k)) { warming.add(k); void renderMermaid(code, true).catch(() => {}).finally(() => warming.delete(k)); }
   }
   eq(o: MermaidWidget) {
     return o.code === this.code;
@@ -106,6 +110,13 @@ class MermaidWidget extends WidgetType {
     el.className = "cm-mermaid cm-mermaid-pending";
     el.textContent = "Rendering diagramâ€¦";
     el.title = "Click to edit the diagram source";
+    // Already rendered: draw it right now, in this very call, so the editor measures its real height. Showing the one-line placeholder first and swapping
+    // the picture in a moment later makes the text below jump by the difference, which is what showed as a glitch when scrolling up past a diagram.
+    const ready = goodRenders.get("d:" + this.code);
+    if (ready) {
+      el.className = "cm-mermaid cm-mermaid-ok"; el.dataset.theme = "dark";
+      el.innerHTML = DOMPurify.sanitize(ready, { USE_PROFILES: { svg: true, svgFilters: true, html: true }, ADD_TAGS: ["foreignObject"], HTML_INTEGRATION_POINTS: { foreignobject: true } });
+    }
     let revision = 0;
     const draw = () => {
       const current = ++revision;
@@ -133,18 +144,23 @@ class MermaidWidget extends WidgetType {
     const observer = new MutationObserver(draw);
     observer.observe(document.documentElement, {attributes:true,attributeFilter:['data-theme']});
     mermaidCleanup.set(el, () => {revision++;observer.disconnect();});
-    draw();
+    if (!ready) draw();
     el.addEventListener("mousedown", (e) => {
       e.preventDefault();
       view.dispatch({ selection: { anchor: view.posAtDOM(el) } });
       view.focus();
     });
-    return el;
+    // The spacing around a diagram lives on this wrapper as padding, not as margin on the diagram: the editor measures a block widget without its margins,
+    // so a margin made every diagram 16 px taller than the editor believed and the text below jumped by that when scrolling.
+    const wrap = document.createElement("div");
+    wrap.className = "cm-mermaid-wrap";
+    wrap.append(el);
+    return wrap;
   }
   ignoreEvent() {
     return true;
   }
-  destroy(dom: HTMLElement) { mermaidCleanup.get(dom)?.(); mermaidCleanup.delete(dom); }
+  destroy(dom: HTMLElement) { const el = dom.firstElementChild as HTMLElement | null; if (el) { mermaidCleanup.get(el)?.(); mermaidCleanup.delete(el); } }
 }
 
 // ---- Selection facts shared by both layers ----
