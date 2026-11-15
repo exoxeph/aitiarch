@@ -7,6 +7,14 @@ const clean={changed:[],added:[],removed:[]};
 const run=(events:any[])=>events.reduce((t,e)=>applyInvestigate(t,e,2000),startTurn('i1','How does login work?',0));
 
 describe('applyInvestigate',()=>{
+ it('keeps optional denial display paths through live and stored turns without changing legacy events',()=>{
+  const denied=run([{type:'step',index:0,step:{tool:'Read',target:'.env',ok:null}},{type:'step_result',index:0,ok:false,denial:'Permission to read .env has been denied.',attemptedPath:'.env requested'}]);
+  expect(denied.steps[0]).toMatchObject({attemptedPath:'.env requested'});
+  const stopped=run([{type:'error',code:'outside_path',attemptedPath:'../requested'}]);
+  expect(stopped.stopped).toMatchObject({attemptedPath:'../requested'});
+  expect(fromStoredTurn({id:'s',question:'q',at:'2026-01-01',stopped:stopped.stopped!}).stopped).toEqual(stopped.stopped);
+  expect(run([{type:'error',code:'outside_path'}]).stopped).not.toHaveProperty('attemptedPath');
+ });
  it('builds rows for Read, Grep and Glob, marks a denied one in words, collects thinking, text and turns, and counts unknown events',()=>{
   const t=run([{type:'start',id:'s'},{type:'progress',turns:1},{type:'thinking',text:'Look for login. '},
    {type:'step',index:0,step:{tool:'Glob',target:'**/*.js',ok:null}},{type:'step_result',index:0,ok:true},

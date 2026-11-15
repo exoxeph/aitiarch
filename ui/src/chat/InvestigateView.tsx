@@ -14,7 +14,7 @@ function StepRow({step,onOpen,ended}:{step:ToolStep;onOpen:(path:string)=>void;e
  return <li className="inv-row" data-state={state}>
   <span className="inv-dot" aria-hidden="true"/>
   <span className="inv-row-main"><strong className="inv-tool">{step.tool}</strong>{' '}
-   {openable?<button type="button" className="inv-target inv-target-link" onClick={()=>onOpen(step.target)} title="Show a read-only excerpt">{step.target}</button>:<code className="inv-target">{step.target}</code>}</span>
+   {openable?<button type="button" className="inv-target inv-target-link" onClick={()=>onOpen(step.target)} title="Show a read-only excerpt">{step.target}</button>:<code className="inv-target">{failure?.kind==='denied'?(step.attemptedPath??step.target):step.target}</code>}</span>
   <span className="inv-result">{failure?.kind==='denied'?<span className="inv-denied-word">{denialLabel(step)}</span>:failure?<><span className="inv-denied-word">{failure.word}</span>{failure.detail?': '+failure.detail:''}</>:state==='unfinished'?'stopped before it finished':stepSummary(step)}</span>
  </li>;
 }
@@ -38,7 +38,7 @@ export function InvestigateTurnView({turn,snapshotFiles,onOpen,onRestore,restori
     <details><summary>Thinking <span className="inv-tag">{turn.thinking.replace(/\s+/g,' ').slice(0,60)}{turn.thinking.length>60?'…':''}</span></summary><p className="inv-thinking-text">{turn.thinking}</p></details></li>}
    {turn.trail.length?items.map((it,i)=>'text' in it?<NarrationRow key={i} text={it.text}/>:<StepRow key={i} step={turn.steps[it.step]??{tool:'?',target:'',ok:null}} onOpen={p=>onOpen(p)} ended={!turn.running}/>)
     :turn.steps.map((s,i)=><StepRow key={i} step={s} onOpen={p=>onOpen(p)} ended={!turn.running}/>)}
-   {outsideBlocked&&<li className="inv-row" data-state="denied"><span className="inv-dot" aria-hidden="true"/><span className="inv-row-main">Attempted path not supplied by this event</span><span className="inv-result inv-denied-word">Denied: outside the approved folder</span></li>}
+   {outsideBlocked&&<li className="inv-row" data-state="denied"><span className="inv-dot" aria-hidden="true"/><span className="inv-row-main">{turn.stopped?.attemptedPath!==undefined?<code className="inv-target">{turn.stopped.attemptedPath}</code>:'Attempted path not supplied by this event'}</span><span className="inv-result inv-denied-word">Denied: outside the approved folder</span></li>}
    {turn.running&&!turn.steps.length&&!turn.thinking&&!turn.text&&<li className="inv-row" data-state="note"><span className="inv-dot" aria-hidden="true"/><span className="inv-result">Starting…</span></li>}
   </ol>
   {stop&&<div className="inv-banner" data-kind="stopped" role="note">

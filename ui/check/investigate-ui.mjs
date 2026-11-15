@@ -79,7 +79,8 @@ try {
   assert.deepEqual(rows.map((r) => [r.text.split(' ')[0], r.state]), [['Glob', 'ok'], ['Grep', 'ok'], ['Read', 'denied'], ['Read', 'error'], ['Read', 'ok']]);
   // Only a real permission denial gets the calm denial label. A missing path stays an error.
   assert.match(rows[2].text, /Denied: secret file excluded/);
-  assert.equal(await panel.locator('.inv-row[data-state="denied"] code.inv-target').innerText(), 'notes.private.md');
+  const requestedPath = path.join(JSON.parse((await readFile(record, 'utf8')).trim().split('\n')[0]).cwd, 'notes.private.md');
+  assert.equal(await panel.locator('.inv-row[data-state="denied"] code.inv-target').innerText(), requestedPath, 'the denied chip shows the requested path as plain text');
   assert.match(rows[3].text, /^Read src\/missing\.ts Error: path not found: src\/missing\.ts$/, 'a missing path is an error, with the repo-relative path');
   assert.doesNotMatch(rows[3].text, /Denied by policy|USER_PATH|AppData|Temp|aitiarch-inv/i, 'and is not called a denial or shown as a user path');
   assert.match(rows[0].text, /2 lines of output/);

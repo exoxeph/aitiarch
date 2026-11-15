@@ -10,7 +10,7 @@ export interface LiveTurn {
  /** Narration and tool calls in order; `text` is the answer (only the text after the last tool call, or the final reply once it is in). */
  trail:TrailItem[];
  steps:ToolStep[];thinking:string;text:string;turns:number;unknown:number;
- message?:InvestigateMessage;stopped?:{code:InvestigateCode;partial:PartialTurn};tripwire?:Tripwire;
+ message?:InvestigateMessage;stopped?:{code:InvestigateCode;partial:PartialTurn;attemptedPath?:string};tripwire?:Tripwire;
 }
 export const startTurn=(id:string,question:string,now=Date.now()):LiveTurn=>({id,question,running:true,startedAt:now,trail:[],steps:[],thinking:'',text:'',turns:0,unknown:0});
 
@@ -19,12 +19,12 @@ export function applyInvestigate(t:LiveTurn,e:InvestigateEvent|{type:string},now
  switch(x.type){
   case 'start':return t;
   case 'step':{const trail=addStep(t.trail,x.index);return {...t,trail,text:answerTail(trail),steps:[...t.steps.slice(0,x.index),{...x.step},...t.steps.slice(x.index+1)]};}
-  case 'step_result':return {...t,steps:t.steps.map((s,i)=>i===x.index?{...s,ok:x.ok,...(x.denial?{denial:x.denial}:{}),...(x.error?{error:x.error}:{})}:s)};
+  case 'step_result':return {...t,steps:t.steps.map((s,i)=>i===x.index?{...s,ok:x.ok,...(x.denial?{denial:x.denial}:{}),...(x.error?{error:x.error}:{}),...(x.attemptedPath!==undefined?{attemptedPath:x.attemptedPath}:{})}:s)};
   case 'delta':{const trail=addText(t.trail,x.text);return {...t,trail,text:answerTail(trail)};}
   case 'thinking':return {...t,thinking:t.thinking+x.text};
   case 'progress':return {...t,turns:Math.max(t.turns,x.turns)};
   case 'complete':return {...t,running:false,endedAt:now,message:x.message,trail:x.message.trail,steps:x.message.steps,turns:x.message.turns,text:x.message.body,tripwire:x.message.tripwire,unknown:t.unknown+x.message.unknownEvents};
-  case 'error':{const partial=x.partial??{text:answerTail(t.trail),steps:t.steps,turns:t.turns,trail:t.trail};return {...t,running:false,endedAt:now,trail:partial.trail,text:partial.text,stopped:{code:x.code,partial},...(x.tripwire?{tripwire:x.tripwire}:{})};}
+  case 'error':{const partial=x.partial??{text:answerTail(t.trail),steps:t.steps,turns:t.turns,trail:t.trail};return {...t,running:false,endedAt:now,trail:partial.trail,text:partial.text,stopped:{code:x.code,partial,...(x.attemptedPath!==undefined?{attemptedPath:x.attemptedPath}:{})},...(x.tripwire?{tripwire:x.tripwire}:{})};}
   default:return {...t,unknown:t.unknown+1};
  }
 }

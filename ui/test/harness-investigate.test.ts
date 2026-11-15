@@ -34,6 +34,21 @@ async function setup(){
 async function confirmed(svc:InvestigateService,repo:string){const s=await svc.create('Login code',repo),p=await svc.plan(s.id);await svc.confirm(s.id,p.planHash);return {s,p};}
 
 const trailHtml=(message:any,running=false)=>renderToStaticMarkup(createElement(InvestigateTurnView,{turn:{...fromStoredTurn({id:'demo',question:'Synthetic question',at:new Date().toISOString(),message}),running},onOpen:()=>{},onRestore:()=>{},restoring:false,onContinue:()=>{}}));
+it.each(['outside','secret'])('fake CLI %s denial carries a bounded display-only requested path, never in the ledger',async kind=>{
+ const t=await setup(),svc=t.service('inv-attempted-'+kind),{s}=await confirmed(svc,t.repo),r=await t.run(svc,s.id);
+ const expected=(kind==='outside'?'../OUTSIDE_DISPLAY_<img src=x>':'.env_SECRET_DISPLAY_<img src=x>')+'x'.repeat(320);
+ const display=expected.slice(0,300),event:any=kind==='outside'?r.error:r.events.find(e=>e.type==='step_result'&&e.ok===false);
+ expect(event.attemptedPath).toBe(display);expect(event.attemptedPath).toHaveLength(300);
+ expect(event.attemptedPath).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+ if(kind==='outside')expect(r.error?.code).toBe('outside_path');
+ else expect(r.complete!.message.steps.find(s=>s.ok===false)).toMatchObject({attemptedPath:display});
+ const stored=(await svc.turns(s.id))[0],turn=fromStoredTurn(stored);
+ const html=renderToStaticMarkup(createElement(InvestigateTurnView,{turn,onOpen:()=>{},onRestore:()=>{},restoring:false,onContinue:()=>{}}));
+ expect(html).toContain('<code class="inv-target">'+display.replace('<','&lt;').replace('>','&gt;'));
+ expect(html).not.toContain('<img');expect(html).not.toContain('Attempted path not supplied');
+ const ledger=JSON.stringify((await new LedgerStore(t.notebook).read()).events);
+ expect(ledger).toContain('investigate_turn');expect(ledger).not.toMatch(/attemptedPath|OUTSIDE_DISPLAY|SECRET_DISPLAY/);
+});
 it('fake CLI denials show plain reasons and count only real blocked attempts at the end',async()=>{
  const t=await setup(),svc=t.service('inv-denial-reasons'),{s}=await confirmed(svc,t.repo),r=await t.run(svc,s.id),html=trailHtml(r.complete!.message);
  expect(html).toContain('Denied: outside the approved folder');expect(html).toContain('Denied: secret file excluded');

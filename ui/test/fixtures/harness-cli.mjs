@@ -59,6 +59,11 @@ if (args[args.indexOf('--tools') + 1] === 'Read,Grep,Glob') { // an investigatio
   }
   if (kind === 'inv-turns') { out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Partial so far: login lives in src. ' } } }); for (let i = 0; i < 45; i++) tool('m' + i, 't' + i, 'Grep', { pattern: 'login' }); }
   if (kind === 'inv-outside') tool('m1', 't1', 'Read', { file_path: path.resolve(process.cwd(), '..', '..', 'outside.txt') });
+  if (kind === 'inv-attempted-outside') tool('ap1', 'ap1', 'Read', {file_path:'../OUTSIDE_DISPLAY_<img src=x>\u0001\n\u0085'+ 'x'.repeat(320)});
+  if (kind === 'inv-attempted-secret') {
+    tool('ap2', 'ap2', 'Read', {file_path:'.env_SECRET_DISPLAY_<img src=x>\u0001\n\u0085'+ 'x'.repeat(320)});
+    out({type:'user',message:{content:[{type:'tool_result',tool_use_id:'ap2',is_error:true,content:'Permission to read .env has been denied.'}]}});
+  }
   if (kind === 'inv-path') tool('m1', 't1', extra.startsWith('glob:') ? 'Glob' : 'Read', extra.startsWith('glob:') ? { pattern: extra.slice(5) } : { file_path: extra });
   if (kind === 'inv-bash') out({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', name: 'Bash', input: {} } } });
   tool('m1', 't1', 'Read', { file_path: path.join(process.cwd(), 'src', kind === 'inv-missing' ? 'missing.ts' : 'login.js') });

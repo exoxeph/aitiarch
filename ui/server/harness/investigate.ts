@@ -45,26 +45,28 @@ export const INVESTIGATE_INSTRUCTION=[
 ].join('\n\n');
 
 export type InvestigateCode='not_investigation'|'invalid'|'repo'|'plan_required'|'plan_changed'|'busy'|'turn_limit'|'outside_path'|'tool_refused'|'isolation'|'budget'|'cancelled'|'timeout'|'provider_failed'|'nothing_to_restore';
-export class InvestigateError extends Error {code:InvestigateCode;constructor(code:InvestigateCode){super(code);this.code=code;}}
+// Display metadata only: never resolve this string or use it to decide permission.
+const displayPath=(raw:string)=>raw.replace(/[\u0000-\u001f\u007f-\u009f]/g,'').slice(0,300);
+export class InvestigateError extends Error {code:InvestigateCode;attemptedPath?:string;constructor(code:InvestigateCode,attemptedPath?:string){super(code);this.code=code;if(attemptedPath!==undefined)this.attemptedPath=displayPath(attemptedPath);}}
 export interface Plan {session:string;repo:string;files:number;bytes:number;skipped:Record<string,number>;excluded:string[];budgetUsd:number;turnLimit:number;snapshotHash:string;planHash:string}
-export interface ToolStep {tool:string;target:string;ok:boolean|null;/** Only a real permission denial by the CLI's rules. */denial?:string;/** Any other tool error (a path that does not exist, a directory read as a file...), cleaned of the copy's folder and redacted. */error?:string;/** The repo-relative path the call named, when it named one. */path?:string;/** Lines in the tool's result (the result itself never leaves the server). */lines?:number}
+export interface ToolStep {tool:string;target:string;ok:boolean|null;/** Sanitised requested string, display only; never a read target. */attemptedPath?:string;/** Only a real permission denial by the CLI's rules. */denial?:string;/** Any other tool error (a path that does not exist, a directory read as a file...), cleaned of the copy's folder and redacted. */error?:string;/** The repo-relative path the call named, when it named one. */path?:string;/** Lines in the tool's result (the result itself never leaves the server). */lines?:number}
 /** What a turn had done when it was stopped. `text` is only what was written after the last tool call (the answer so far, often empty); the
  *  narration before the calls is in `trail`, in order. */
 export interface PartialTurn {text:string;steps:ToolStep[];turns:number;trail:TrailItem[]}
-export interface InvestigateTurn {id:string;question:string;at:string;message?:InvestigateMessage;stopped?:{code:InvestigateCode;partial:PartialTurn}}
+export interface InvestigateTurn {id:string;question:string;at:string;message?:InvestigateMessage;stopped?:{code:InvestigateCode;partial:PartialTurn;attemptedPath?:string}}
 export interface Tripwire {notebook:Drift;snapshot:Drift}
 export interface InvestigateMessage {id:string;body:string;/** Narration and tool calls in order; the answer is `body`. */trail:TrailItem[];claims:ChatClaim[];citation?:CitationIssue;usage:ReturnType<typeof sessionUsage>;costUsd:number|null;turns:number;steps:ToolStep[];permissionDenials:string[];tripwire:Tripwire;unknownEvents:number}
 export type InvestigateEvent=
  |{type:'start';id:string;profile?:'investigate'}
  |{type:'step';index:number;step:ToolStep}
- |{type:'step_result';index:number;ok:boolean;denial?:string;error?:string}
+ |{type:'step_result';index:number;ok:boolean;denial?:string;error?:string;attemptedPath?:string}
  |{type:'delta';text:string}
  /** The model's thinking as the CLI streams it, through the same gate as the answer (redacted, stops at a recital of the instruction). */
  |{type:'thinking';text:string}
  /** Model turns used so far. */
  |{type:'progress';turns:number}
  |{type:'complete';message:InvestigateMessage}
- |{type:'error';code:InvestigateCode;tripwire?:Tripwire;partial?:PartialTurn};
+ |{type:'error';code:InvestigateCode;tripwire?:Tripwire;partial?:PartialTurn;attemptedPath?:string};
 
 /** A path a tool may use inside the folder `cwd`: no home (~) or variable ($, %) expansion, no UNC or device path (\\?\, \\.\, \\host), no stream suffix or drive-relative form (C:x, file:stream),
  *  and it resolves inside `cwd`. Shared by Investigate's watcher and the diagram watcher of a conversation turn: one definition of "inside". */
@@ -74,11 +76,12 @@ export function pathInside(cwd:string,p:string):boolean{
  const r=path.relative(cwd,path.resolve(cwd,p));return !r.startsWith('..')&&!path.isAbsolute(r);
 }
 const TOOLS=new Set(['Read','Grep','Glob']);
-interface StreamHooks {cwd:string;turnLimit:number;onText:(t:string)=>void;onBlock?:()=>void;onStep:(i:number,s:ToolStep)=>void;onStepResult:(i:number,ok:boolean,denial?:string,error?:string)=>void;onStarted:()=>void;
+interface StreamHooks {cwd:string;turnLimit:number;onText:(t:string)=>void;onBlock?:()=>void;onStep:(i:number,s:ToolStep)=>void;onStepResult:(i:number,ok:boolean,denial?:string,error?:string,attemptedPath?:string)=>void;onStarted:()=>void;
  onThinking?:(t:string)=>void;onTurn?:(turns:number)=>void}
 /** The CLI's stream for one investigation turn, read event by event. Anything outside the allowed shape stops the run. */
 export class InvestigateStream {
  private decoder=new StringDecoder('utf8');private pending='';private inited=false;private ids=new Set<string>();private byId=new Map<string,number>();private o:StreamHooks;
+ private requestedPaths=new Map<number,string>();
  /** What the CLI reported at the end of the run (tokens and cost), also when the run stopped on the cost cap. Null when it never got that far. */
  reported:{usage:Record<string,unknown>|null;cost:number|null}|null=null;
  readonly steps:ToolStep[]=[];unknown=0;result:{text:string;usage:Record<string,unknown>|null;cost:number|null;turns:number;denials:string[]}|null=null;
@@ -92,13 +95,13 @@ export class InvestigateStream {
  private tool(c:any){
   if(!TOOLS.has(c?.name))throw new InvestigateError('tool_refused');
   const input=c.input&&typeof c.input==='object'?c.input:{};
-  for(const k of ['file_path','path'])if(input[k]!==undefined&&(typeof input[k]!=='string'||!this.inside(input[k])))throw new InvestigateError('outside_path');
+  for(const k of ['file_path','path'])if(input[k]!==undefined&&(typeof input[k]!=='string'||!this.inside(input[k])))throw new InvestigateError('outside_path',typeof input[k]==='string'?input[k]:undefined);
   const globs=c.name==='Glob'?[input.pattern]:[input.glob];
-  for(const g of globs)if(typeof g==='string'&&(path.isAbsolute(g)||/^[A-Za-z]:/.test(g)||/^~|[$%]|^[\\/]{2}/.test(g)||g.split(/[\\/]/).includes('..')))throw new InvestigateError('outside_path');
+  for(const g of globs)if(typeof g==='string'&&(path.isAbsolute(g)||/^[A-Za-z]:/.test(g)||/^~|[$%]|^[\\/]{2}/.test(g)||g.split(/[\\/]/).includes('..')))throw new InvestigateError('outside_path',g);
   const where=String(input.file_path??input.path??'');
   const rel=where&&path.isAbsolute(where)?path.relative(this.o.cwd,where).split(path.sep).join('/'):where;
   const target=redact(c.name==='Grep'?`${String(input.pattern??'')}${rel?' in '+rel:''}`:c.name==='Glob'?String(input.pattern??''):rel).slice(0,200);
-  const step:ToolStep={tool:c.name,target,ok:null,...(rel&&!path.isAbsolute(rel)?{path:redact(rel).slice(0,200)}:{})};const i=this.steps.push(step)-1;if(typeof c.id==='string')this.byId.set(c.id,i);this.o.onStep(i,step);
+  const step:ToolStep={tool:c.name,target,ok:null,...(rel&&!path.isAbsolute(rel)?{path:redact(rel).slice(0,200)}:{})};const i=this.steps.push(step)-1;this.requestedPaths.set(i,displayPath(where));if(typeof c.id==='string')this.byId.set(c.id,i);this.o.onStep(i,step);
  }
  private event(line:string){
   let e:any;try{e=JSON.parse(line);}catch{throw new InvestigateError('isolation');}
@@ -121,9 +124,9 @@ export class InvestigateStream {
     const i=this.byId.get(c.tool_use_id);if(i===undefined)continue;const ok=c.is_error!==true,text=typeof c.content==='string'?c.content:JSON.stringify(c.content??'');
     this.steps[i].ok=ok;this.steps[i].lines=text?text.split('\n').length:0;
     if(!ok){ // a tool error is not a policy denial: only the CLI's own permission wording is called one. The copy's folder comes off the message before redaction, so a path inside the repo stays a repo path.
-     const clean=redact(cleanToolText(text,this.o.cwd)).slice(0,200);if(classifyFailure(clean)==='denied')this.steps[i].denial=clean;else this.steps[i].error=clean;
+     const clean=redact(cleanToolText(text,this.o.cwd)).slice(0,200);if(classifyFailure(clean)==='denied'){this.steps[i].denial=clean;this.steps[i].attemptedPath=this.requestedPaths.get(i);}else this.steps[i].error=clean;
     }
-    this.o.onStepResult(i,ok,this.steps[i].denial,this.steps[i].error);
+    this.o.onStepResult(i,ok,this.steps[i].denial,this.steps[i].error,this.steps[i].attemptedPath);
    }
    return;
   }
@@ -289,17 +292,17 @@ export class InvestigateService {
    const say=(raw:string)=>{const delta=gate.push(raw);if(delta){trail=addText(trail,delta);emit({type:'delta',text:delta});}};
    stream=new InvestigateStream({cwd,turnLimit:this.limits.turns,onStarted:()=>{started=true;},
     onText:say,onBlock:()=>{if(answerTail(trail))say('\n\n');},
-    onStep:(index,step)=>{say('\n');trail=addStep(trail,index);emit({type:'step',index,step});},onStepResult:(index,ok,denial,error)=>emit({type:'step_result',index,ok,...(denial?{denial}:{}),...(error?{error}:{})}),
+    onStep:(index,step)=>{say('\n');trail=addStep(trail,index);emit({type:'step',index,step});},onStepResult:(index,ok,denial,error,attemptedPath)=>emit({type:'step_result',index,ok,...(denial?{denial}:{}),...(error?{error}:{}),...(attemptedPath!==undefined?{attemptedPath}:{})}),
     onThinking:t=>{const delta=thinking.push(t);if(delta)emit({type:'thinking',text:delta});},onTurn:turns=>emit({type:'progress',turns})});
    emit({type:'start',id,profile:'investigate'});
    if(controller.signal.aborted)throw new InvestigateError('cancelled'); // cancelled before the CLI started: never start it
    await new Promise<void>((resolve,reject)=>{
     const child=spawnInvestigateSession({provider:'claude',command:this.o.command,prefixArgs:this.o.prefixArgs},{id:cli.id,resume:cli.resume,addendumFile:file,budgetUsd,...(this.o.model?{model:this.o.model}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
     let failure:InvestigateError|undefined,killing:Promise<void>=Promise.resolve(),bytes=0;
-    const stop=(code:InvestigateCode)=>{if(failure)return;failure=new InvestigateError(code);if(child.pid)killing=killTree(child.pid);};
+    const stop=(code:InvestigateCode,attemptedPath?:string)=>{if(failure)return;failure=new InvestigateError(code,attemptedPath);if(child.pid)killing=killTree(child.pid);};
     const timer=setTimeout(()=>stop('timeout'),this.limits.timeoutMs),onAbort=()=>stop('cancelled');controller.signal.addEventListener('abort',onAbort,{once:true});
     if(controller.signal.aborted)onAbort(); // cancelled while the copy was syncing: an abort that already happened fires no event
-    child.stdout.on('data',(b:Buffer)=>{if(failure)return;bytes+=b.length;if(bytes>4*1024*1024)return stop('budget');try{stream!.push(b);}catch(e){stop(e instanceof InvestigateError?e.code:'isolation');}});
+    child.stdout.on('data',(b:Buffer)=>{if(failure)return;bytes+=b.length;if(bytes>4*1024*1024)return stop('budget');try{stream!.push(b);}catch(e){stop(e instanceof InvestigateError?e.code:'isolation',e instanceof InvestigateError?e.attemptedPath:undefined);}});
     child.stderr.on('data',()=>{});child.stdin.on('error',()=>{});
     child.on('error',()=>{failure??=new InvestigateError('provider_failed');});
     child.once('close',async code=>{clearTimeout(timer);controller.signal.removeEventListener('abort',onAbort);await killing;
@@ -316,14 +319,14 @@ export class InvestigateService {
    await this.recordTurn(id,message.id,'completed',stream.reported);
    emit({type:'complete',message});
   }catch(e){
-   const code:InvestigateCode=e instanceof InvestigateError?e.code:'provider_failed';
+   const code:InvestigateCode=e instanceof InvestigateError?e.code:'provider_failed',display=e instanceof InvestigateError&&e.attemptedPath!==undefined?{attemptedPath:e.attemptedPath}:{};
    const t=await tripwire().catch(()=>undefined),partial:PartialTurn={text:answerTail(trail),steps:stream?.steps??[],turns:stream?.turns??0,trail};
    // A stop on the cost cap or the safety backstop needs a fresh confirmed plan (a new cap) before the same session continues.
    if(code==='budget'||code==='turn_limit')await p.onCapStop().catch(()=>{});
    const stoppedId=randomId();
-   await this.saveTurn(id,{id:stoppedId,question:asked,at,stopped:{code,partial}}).catch(()=>{});
+   await this.saveTurn(id,{id:stoppedId,question:asked,at,stopped:{code,partial,...display}}).catch(()=>{});
    if(started)await this.recordTurn(id,stoppedId,code,stream?.reported??null); // nothing is recorded for a turn that was stopped before the CLI started: it cost nothing
-   emit({type:'error',code,partial,...(t?{tripwire:t}:{})});
+   emit({type:'error',code,partial,...display,...(t?{tripwire:t}:{})});
   }finally{
    if(started)await this.o.index.touch(id).catch(()=>{}); // the CLI knows this id now: the next turn resumes
    if(turnDir){await rm(turnDir,{recursive:true,force:true});activeTurnDirs.delete(path.resolve(turnDir));}
