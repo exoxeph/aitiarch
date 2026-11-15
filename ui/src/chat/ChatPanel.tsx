@@ -401,6 +401,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onDecisi
    <pre>{excerpt.lines.map((l,i)=><span key={i} className="inv-line" data-here={excerpt.from+i===excerpt.line||undefined}><span className="inv-line-no">{excerpt.from+i}</span>{l}{'\n'}</span>)}</pre>
   </aside>}
   {notice&&<p className="chat-notice" role="alert">{notice} <button type="button" className="ghost" onClick={()=>setNotice('')}>Dismiss</button></p>}
+  <div className="chat-dock">
   <PersonaSwitch id="chat" label="How this chat works with you" value={persona.persona} kept={persona.kept} disabled={composing} hint="Change it before you review a message." onChange={p=>void persona.choose(p)}/>
   {persona.failed&&<p className="chat-notice" role="alert">That choice could not be saved. Nothing was changed.</p>}
   {repoDraft!==null&&<form className="chat-sessions-name chat-repo-form" onSubmit={e=>void chooseRepo(e)} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();setRepoDraft(null);}}}>
@@ -418,6 +419,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onDecisi
    {switched&&<span className="chat-send-chip chat-switched" data-chip="switched" role="status"><span>{noteChangedText(switched.from,openTitle)}</span><button type="button" aria-label="Dismiss this notice" onClick={()=>setSwitched(null)}>×</button></span>}
   </div>}
   <CouncilPanel conversation={conversation} note={openPath} notes={[...otherNotes,...attach.filter(c=>c.kind==='note').map(c=>(c as {path:string}).path)]} question={draft} disabled={composing||busy} onConversation={(id,home)=>{onConversation(id,home);setListRefresh(n=>n+1);}} onSent={asked=>{setDraft(current=>current.trim()===asked?'':current);setListRefresh(n=>n+1);}} onDecision={onDecision} onHistory={setCouncilRuns} onBusy={setBusy}/>
+  </div>
   <form className="chat-composer" onSubmit={e=>{e.preventDefault();if(at&&atItems.length){pickAt(atItems[Math.min(at.index,atItems.length-1)]);return;}void submit();}}>
    {at&&<div className="chat-at" role="listbox" aria-label="Attach a note, a file or the repo" id="chat-at-list">
     {atItems.length===0?<p className="chat-at-none">Nothing matches “{at.query}”.</p>:atItems.map((it,i)=><button key={atItemKey(it)} type="button" role="option" aria-selected={i===at.index} tabIndex={-1} className="chat-at-opt" data-at={atItemKey(it)}

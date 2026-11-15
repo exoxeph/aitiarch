@@ -1411,18 +1411,37 @@ p.chat-wait { margin: 4px 0 0; }
 /* Council: part of the one box. A compact bar above the composer (chips, one action, a hint where to type), results as cards in the log.
    The bar scrolls inside itself rather than squeezing the log, so results are never pushed out of sight. */
 .chat-panel .chat-log { min-height: min(220px, 30vh); }
-.council { flex: 0 1 auto; min-height: 0; max-height: 40%; overflow: auto; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--rule); font-size: var(--text-control); }
+.chat-dock { flex: 0 1 auto; min-height: 0; max-height: 52%; overflow-y: auto; display: flex; flex-direction: column; padding-top: var(--space-3); border-top: 1px solid var(--rule); overscroll-behavior: contain; }
+.chat-dock > * { flex-shrink: 0; }
+.chat-dock .persona-switch { margin: 0 16px var(--space-2); }
+.chat-dock .persona-legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.chat-dock .persona-switch .persona-options { padding: 2px; border-radius: 9px; }
+.chat-dock .persona-seg { min-height: 26px; }
+.chat-dock .persona-line { margin: 4px 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-sessions-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-dock > .council { flex: 0 0 auto; margin: 0 16px var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--rule); border-radius: var(--radius-card); background: var(--paper); overflow: visible; }
+.council-sub { flex-wrap: wrap; }
+.council-sub .council-lede { flex: 1 1 12ch; min-width: 0; }
+.council-sub .council-legend { flex: 0 0 auto; }
+.council-sub .council-legend[open] { flex-basis: 100%; }
+.council-legend summary { min-height: 28px; display: inline-flex; align-items: center; padding: 0 var(--space-2); }
+.council { min-height: 0; font-size: var(--text-control); }
 .council button, .council input, .council textarea { font: inherit; }
 .council input[type=number], .council textarea { color: var(--ink-text); background: var(--paper); border: 1px solid var(--control-border); border-radius: var(--radius-small); padding: var(--space-2); }
 .council-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
 .council-toggle[aria-expanded="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .council-hint { margin: 0; color: var(--muted); font-size: var(--text-meta); line-height: 1.45; }
-.council-bar { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-3); }
+.council-bar { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-2); }
+.council-head .council-hint { flex: 1 1 12ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .council-lede { margin: 0; color: var(--muted); font-size: var(--text-meta); line-height: 1.45; }
 .council-main { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); }
 .council-sub { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-3); }
-.council-providers { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.council-chip { position: relative; display: inline-flex; align-items: center; gap: var(--space-2); min-height: 32px; padding: 0 var(--space-3) 0 var(--space-2); border: 1px solid var(--control-border); border-radius: 999px; color: var(--ink-text); cursor: pointer; }
+.council-providers { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.75rem, 1fr)); gap: var(--space-2); flex: 1 1 100%; }
+.council-chip input { grid-area: box; }
+.council-chip-name { grid-area: name; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.council-chip .council-badge { grid-area: badge; justify-self: start; padding: 0 6px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.council-main { justify-content: flex-start; }
+.council-chip { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "box name" "box badge"; align-items: center; column-gap: var(--space-2); row-gap: 2px; padding: var(--space-2); border: 1px solid var(--control-border); border-radius: var(--radius-card); color: var(--ink-text); cursor: pointer; }
 .council-chip input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 .council-chip:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); }
 .council-chip:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -1454,11 +1473,11 @@ p.chat-wait { margin: 4px 0 0; }
 .council-notice details, .council-why details { margin-top: var(--space-1); color: var(--muted); font-size: var(--text-meta); }
 .council-notice code, .council-why code { display: block; margin-top: var(--space-1); overflow-wrap: anywhere; color: var(--muted); font: var(--text-meta)/1.5 var(--font-mono); }
 /* The human's own box: quiet until you use it. */
-.council-decision { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-3); padding: var(--space-3); border: 1px solid var(--rule); border-radius: var(--radius-human); background: var(--human-surface); }
+.council-decision { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--rule); border-radius: var(--radius-human); background: var(--human-surface); }
 .council-decision:focus-within { border-color: var(--accent); }
 .council-decision-title { display: block; margin-bottom: var(--space-1); color: var(--muted); font-size: var(--text-meta); font-weight: 600; letter-spacing: .02em; }
-.council-decision textarea { display: block; width: 100%; min-height: 2.4em; resize: vertical; }
-.council-decision:focus-within textarea, .council-decision textarea:not(:placeholder-shown) { min-height: 6em; }
+.council-decision textarea { display: block; width: 100%; height: 2.6em; min-height: 2.6em; resize: vertical; }
+.council-decision:focus-within textarea, .council-decision textarea:not(:placeholder-shown) { height: 6em; }
 .council-decision button { align-self: flex-start; }
 .council-decision pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .council-decision p { margin: 0; color: var(--muted); font-size: var(--text-meta); line-height: 1.45; }

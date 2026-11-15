@@ -93,7 +93,7 @@ export function ChatSessions({path,value,onChange,disabled,refresh,onCurrent}:{p
    <button type="button" className="chat-ctl" disabled={current.mode==='chat'&&impact===null} onClick={async()=>{setNotice('');try{await api.harnessSessionDelete(current.id);setList(l=>l.filter(x=>x.id!==current.id));setDeleting(false);onChange('');}catch(e){fail(e);}}}>Delete</button>
    <button type="button" className="chat-ctl chat-ctl-quiet" ref={keepButton} onClick={()=>setDeleting(false)}>Keep</button>
   </span>}
-  {current&&<p className="chat-sessions-note">Claude remembers this conversation, also after Aitiarch is reopened. Your notes are sent fresh with every message.</p>}
+  {current&&<p className="chat-sessions-note" title="Claude remembers this conversation, also after Aitiarch is reopened. Your notes are sent fresh with every message.">Claude remembers this conversation, also after Aitiarch is reopened. Your notes are sent fresh with every message.</p>}
   {notice&&<p className="chat-sessions-note" role="alert">{notice}</p>}
  </div>;
 }
