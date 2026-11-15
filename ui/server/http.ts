@@ -192,7 +192,9 @@ export function createApp(opts: AppOptions) {
     return {index,runner,questions,version:()=>runner.version(), // the CLI's version, for the ledger at a conversation's first turn and for Settings
     investigate,gate,carried};}):Promise.resolve(null);
   const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady]).then(([ink,harness])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages);chatRef.resolve(runtime);return runtime;});
-  const councilReady=opts.council?Promise.all([inkReady,harnessReady]).then(async([ink,h])=>{const index=opts.council!.index??h?.index??await SessionIndex.open(harnessDirectory(store.rootReal));return new CouncilService({store,ink,index,history:new CouncilHistory(index,1024*1024,store.rootReal),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters});}):Promise.resolve(null);
+  // Council's app-owned conversation index needs no CLI or transcript access.
+  const councilIndexReady=opts.council?harnessReady.then(async h=>opts.council!.index??h?.index??await SessionIndex.open(harnessDirectory(store.rootReal))):Promise.resolve(null);
+  const councilReady=opts.council?Promise.all([inkReady,councilIndexReady]).then(async([ink,index])=>new CouncilService({store,ink,index:index!,history:new CouncilHistory(index!,1024*1024,store.rootReal),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters})):Promise.resolve(null);
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
@@ -305,10 +307,12 @@ export function createApp(opts: AppOptions) {
     if(url.pathname==='/api/harness/sessions'&&req.method==='GET'){
       // `all=1`: every chat conversation of the project, whichever note it was started on (a conversation follows the person from note to note, so the picker lists them all).
       const h=await harnessReady,mode=url.searchParams.get('mode')==='investigate'?'investigate' as const:'chat' as const,note=mode==='chat'&&url.searchParams.get('all')!=='1'?url.searchParams.get('path')||undefined:undefined;if(note)await store.read(note);
-      return json(res,200,{enabled:!!h,sessions:h?await h.index.list({mode,...(note?{note}:{})}):[]});
+      const index=h?.index??await councilIndexReady;
+      return json(res,200,{enabled:!!index,sessions:index?await index.list({mode,...(note?{note}:{})}):[]});
     }
     // What Delete conversation would remove from the chat record of the note a conversation was started on: that note and how many saved replies. The confirmation says it.
     if(url.pathname==='/api/harness/sessions/replies'&&req.method==='GET'){
+      if(!await harnessReady){const index=await councilIndexReady,s=await index?.get(url.searchParams.get('id')??'');return s?json(res,200,{note:s.note??null,replies:0}):json(res,409,{error:'invalid_session',message:'No such conversation.'});}
       const h=await harnessReady;if(!h)return json(res,409,{error:'disabled',message:'Sessions need the Claude Code CLI. Start Aitiarch with --claude.'});
       const s=await h.index.get(url.searchParams.get('id')??'');if(!s)return json(res,409,{error:'invalid_session',message:'No such session.'});
       const replies=s.mode==='chat'&&s.note?await (await chatReady).conversationReplies(s.note,s.id,new Set(Object.keys(await h.questions.read(s.id)))):0;
@@ -330,6 +334,7 @@ export function createApp(opts: AppOptions) {
     // A named conversation's whole history by its id: its saved replies (from the chat record of the note it was started on, in order), its questions, its counters and the label. It does
     // not depend on which note is open.
     if(url.pathname==='/api/harness/sessions/history'&&req.method==='GET'){
+      if(!await harnessReady){const index=await councilIndexReady,s=await index?.get(url.searchParams.get('id')??'');return s?.mode==='chat'?json(res,200,{session:s,messages:[],questions:{},persistence:{enabled:true},usage:null}):json(res,409,{error:'invalid_session',message:'No such conversation.'});}
       const h=await harnessReady;if(!h)return json(res,409,{error:'disabled',message:'Sessions need the Claude Code CLI. Start Aitiarch with --claude.'});
       const s=await h.index.get(url.searchParams.get('id')??'');if(!s||s.mode!=='chat'||!s.note)return json(res,409,{error:'invalid_session',message:'No such conversation.'});
       const questions=await h.questions.read(s.id),runtime=await chatReady;
@@ -345,6 +350,13 @@ export function createApp(opts: AppOptions) {
     }
     if((url.pathname.startsWith('/api/harness/sessions/')||url.pathname.startsWith('/api/harness/investigate/'))&&req.method==='PUT'){
       const h=await harnessReady,b=await readBody(req) as any;
+      if(!h&&url.pathname.startsWith('/api/harness/sessions/')){
+        const index=await councilIndexReady;if(index)try{
+          if(url.pathname==='/api/harness/sessions/new'){if(b?.mode!=='chat'||typeof b.path!=='string')throw new SessionIndexError('Invalid session.');await store.read(b.path);return json(res,200,await index.create({mode:'chat',label:b.label,note:b.path}));}
+          if(url.pathname==='/api/harness/sessions/rename')return json(res,200,await index.rename(b?.id,b?.label));
+          if(url.pathname==='/api/harness/sessions/delete'){if(!await index.get(b?.id))throw new SessionIndexError('No such session.');await index.remove(b.id);return json(res,200,{removed:[],replies:0});}
+        }catch(e){if(e instanceof SessionIndexError)return json(res,400,{error:'invalid_session',message:e.message});throw e;}
+      }
       if(!h)return json(res,409,{error:'disabled',message:'Sessions need the Claude Code CLI. Start Aitiarch with --claude.'});
       try{
         if(url.pathname==='/api/harness/sessions/new'){

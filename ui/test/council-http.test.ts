@@ -7,6 +7,11 @@ it('Council HTTP requires auth and explicit plan approval; POST returns independ
   expect((await fetch(base+'/api/council/plan',{method:'PUT',body:JSON.stringify(b)})).status).toBe(401);
   const login=await fetch(base+'/api/session'),cookie=login.headers.get('set-cookie')!.split(';')[0],headers={cookie,origin:base,'content-type':'application/json','x-aitiarch':'1'};
   const call=(route:string,body:any,method='PUT')=>fetch(base+route,{method,headers,body:JSON.stringify(body)});
+  const created=await call('/api/harness/sessions/new',{mode:'chat',path:'plan.md',label:'Council without Claude'});expect(created.status).toBe(200);const own=await created.json();
+  const listed=await(await fetch(base+'/api/harness/sessions?all=1',{headers})).json();expect(listed.enabled).toBe(true);expect(listed.sessions.some((x:any)=>x.id===own.id)).toBe(true);
+  expect((await fetch(base+'/api/harness/sessions/history?id='+own.id,{headers})).status).toBe(200);
+  expect((await fetch(base+'/api/harness/sessions/replies?id='+own.id,{headers})).status).toBe(200);
+  expect((await call('/api/harness/sessions/delete',{id:own.id})).status).toBe(200);expect(await index.get(own.id)).toBeNull();expect(await index.get(s.id)).not.toBeNull();
   expect((await call('/api/council/run',b,'POST')).status).toBe(409);
   const plan=await(await call('/api/council/plan',b)).json();expect(plan.needsApproval).toBe(true);
   expect((await call('/api/council/plan',{...b,hash:plan.hash,approve:true})).status).toBe(200);
