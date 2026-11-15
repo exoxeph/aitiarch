@@ -10,7 +10,7 @@
 //  - the "Added from chat" toast sits below the panel, not over the composer, in a narrow window;
 //  - a selection that crosses sections says where it starts and ends;
 //  - a reply's source chip names the note its question was asked on, with the same Found / Not found state, whichever note is open now;
-//  - a conversation started on a note with a very long name: the picker still says "started on", the name is cut with an ellipsis (full name in a tooltip), and nothing overflows in a 374 px panel.
+//  - a conversation started on a note with a very long name: the picker still says "started on", the name is cut with an ellipsis (full name in a tooltip), and nothing overflows in the narrow full-width sheet.
 // Run after `vite build`: BATCH2A_OUTPUT=<folder outside the repo> node check/editor-context.mjs
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -167,9 +167,9 @@ try {
 
   // 7. A reply written while Ideas was open is added to Ideas, from the chat it is kept in (the conversation started on Plan).
   await openNote('ideas.md'); await chip('switched').waitFor();
-  // The window is narrow here: the panel is 374 px wide and covers the editor. The toast that says "Added from chat" must not land on the composer, or on anything else in the panel.
+  // The narrow full-width sheet covers the editor. The toast that says "Added from chat" must not land on the composer, or on anything else in the panel.
   await page.setViewportSize({ width: 390, height: 860 });
-  await page.waitForFunction(() => Math.round(document.querySelector('#chat-panel').getBoundingClientRect().width) === 374);
+  await page.waitForFunction(() => { const p=document.querySelector('#chat-panel'),r=p.getBoundingClientRect();return p.dataset.layout==='sheet'&&Math.round(r.width)===innerWidth&&Math.round(r.x)===0; });
   await panel.locator('.chat-turn').nth(2).locator('.chat-add').click();
   const toast = page.locator('.thought-toast'); await toast.waitFor();
   const at = await page.evaluate(() => {
@@ -240,7 +240,7 @@ try {
   assert.equal(await review.locator('.chat-review-source summary', { hasText: /^This note/ }).count(), 0, 'and no note source is in the review');
   await review.getByRole('button', { name: 'Cancel' }).click();
 
-  // 10. A conversation started on a note with a very long name, then another note opened: the picker says "started on <name>", cut with an ellipsis and the full name in a tooltip; nothing overflows at 374 px.
+  // 10. A conversation started on a note with a very long name, then another note opened: the picker says "started on <name>", cut with an ellipsis and the full name in a tooltip; nothing overflows in the narrow sheet.
   await openNote(LONG + '.md');
   await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('#chat-panel .chat-pick-trigger [data-x]') === null && /Conversation \d+ · 0 messages/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? '')); // a new, empty conversation
@@ -249,14 +249,14 @@ try {
   assert.match(await text(from), /^started on a-very-long-note-name/);
   assert.equal(await from.locator('.chat-pick-from-name').getAttribute('title'), LONG, 'the full name is in a tooltip');
   await page.setViewportSize({ width: 390, height: 860 });
-  await page.waitForFunction(() => Math.round(document.querySelector('#chat-panel').getBoundingClientRect().width) === 374);
+  await page.waitForFunction(() => { const p=document.querySelector('#chat-panel'),r=p.getBoundingClientRect();return p.dataset.layout==='sheet'&&Math.round(r.width)===innerWidth&&Math.round(r.x)===0; });
   const narrow = await page.evaluate(() => {
     const panel = document.querySelector('#chat-panel'), trigger = panel.querySelector('.chat-pick-trigger'), from = trigger.querySelector('.chat-pick-from'), name = from.querySelector('.chat-pick-from-name');
     const t = trigger.getBoundingClientRect(), f = from.getBoundingClientRect(), n = name.getBoundingClientRect(), p = panel.getBoundingClientRect();
     return { panelWidth: Math.round(p.width), panelOverflow: panel.scrollWidth - panel.clientWidth, triggerOverflow: trigger.scrollWidth - trigger.clientWidth, pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       nameCut: name.scrollWidth > name.clientWidth, nameInside: n.right <= t.right + 0.5 && n.left >= t.left, prefixRoom: n.left - f.left, prefixText: from.firstChild.textContent, ellipsis: getComputedStyle(name).textOverflow };
   });
-  assert.equal(narrow.panelWidth, 374); assert(narrow.panelOverflow <= 1, 'no sideways overflow in the panel at 374px: ' + narrow.panelOverflow); assert(narrow.triggerOverflow <= 1, 'the picker does not overflow: ' + narrow.triggerOverflow); assert(narrow.pageOverflow <= 1, 'nor does the page');
+  assert.equal(narrow.panelWidth, 390, 'the narrow sheet spans the viewport'); assert(narrow.panelOverflow <= 1, 'no sideways overflow in the narrow sheet: ' + narrow.panelOverflow); assert(narrow.triggerOverflow <= 1, 'the picker does not overflow: ' + narrow.triggerOverflow); assert(narrow.pageOverflow <= 1, 'nor does the page');
   assert(narrow.nameCut && narrow.ellipsis === 'ellipsis', 'the long name is cut with an ellipsis'); assert(narrow.nameInside, 'and stays inside the picker');
   assert.equal(narrow.prefixText.trim(), 'started on', '"started on" is whole'); assert(narrow.prefixRoom > 40, 'and has room: ' + narrow.prefixRoom);
   await panel.screenshot({ path: path.join(output, 'editor-context-narrow.png') });

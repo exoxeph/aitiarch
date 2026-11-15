@@ -34,7 +34,7 @@ try {
   const fresh = async (width, height) => { const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 }), page = await ctx.newPage(); page.setDefaultTimeout(9000); const errors = []; page.on('pageerror', (e) => errors.push(e.message)); await page.goto(url + '&debug'); await page.locator('.cm-editor').waitFor(); await page.waitForTimeout(700); return { ctx, page, errors }; };
   const results = [];
   // 1. The layout underneath is identical open and closed, at every size, and the composer and the Council bar stay on screen.
-  for (const [width, height] of [[1440, 900], [1024, 800], [1440, 700], [1280, 650], [600, 800]]) {
+  for (const [width, height] of [[1440, 900], [1024, 800], [1440, 700], [1280, 650], [600, 800], [390, 860]]) {
     const { ctx, page, errors } = await fresh(width, height);
     const before = await snap(page); assert(before['.cm-content'].length === 1 && (before['.margin-card'].length + before['.cm-ink-block'].length) >= 2, `the long thoughts are on the page at ${width}`);
     await open(page);
