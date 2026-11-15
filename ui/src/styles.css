@@ -1532,3 +1532,17 @@ p.chat-wait { margin: 4px 0 0; }
 .chat-pin[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
 /* Short windows: the log gives up room so the Council bar (providers, Review) and the composer stay fully on screen. */
 @media (max-height: 760px) { .chat-panel .chat-log { min-height: 96px; } .chat-dock { max-height: 70%; } }
+
+/* Every AI output in the chat looks like an AI thought card: a raised card, the AI tag with its dot at the top right, and a small + that adds it to the note. */
+.chat-message.chat-ai { position: relative; padding: 34px 14px 10px; border: 1px solid var(--rule); box-shadow: var(--shadow-small); }
+.chat-ai > .chat-who { position: absolute; top: 10px; right: 12px; margin: 0; padding: 1px 6px; border-radius: 4px; background: var(--ai-ink); color: var(--ai-surface); font: 700 10.5px/1.4 var(--font-ui); letter-spacing: .09em; }
+.chat-ai > .chat-who::before { content: ""; position: absolute; right: calc(100% + 6px); top: 50%; width: 5px; height: 5px; border-radius: 50%; background: var(--ai-ink); transform: translateY(-50%); }
+.council-col { box-shadow: var(--shadow-small); }
+.council-col-head { position: relative; }
+.council-ai { order: 3; margin-left: auto; padding: 1px 6px; border-radius: 4px; background: var(--ai-ink); color: var(--ai-surface); font: 700 10.5px/1.4 var(--font-ui); letter-spacing: .09em; }
+.council-ai::before { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 6px 1px -14px; border-radius: 50%; background: var(--ai-ink); vertical-align: middle; }
+.council-col:hover .chat-add, .council-col:focus-within .chat-add { opacity: 1; }
+.chat-add:has(.add-icon) { display: inline-flex; align-items: center; padding: 3px 8px; }
+
+.council-col .chat-add { opacity: .7; }
+.council-col .chat-add:hover:not(:disabled), .council-col .chat-add:focus-visible { opacity: 1; }
