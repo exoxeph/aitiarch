@@ -1,3 +1,5 @@
+import type {CouncilRun} from '../../server/council-history.ts';
+import {CouncilPanel,CouncilResults} from './CouncilPanel.tsx';
 import {useEffect,useMemo,useRef,useState,type FormEvent} from 'react';
 import {api,ApiError,streamChat,streamConversation,type ConversationBody} from '../api.ts';
 import type {InvestigateUsage} from '../../shared/usage.ts';
@@ -45,6 +47,7 @@ export interface ChatPanelProps {
  /** The note open in the editor. */
  path:string|null;noteText:string;threadsText:string;editor:EditorSource;
  /** Adds one accepted reply to the note through the same journaled insertion as AI thoughts. The caller shows the toast with Undo. `chat` is the note whose chat holds the reply, when it is not the open note. */
+ onDecision?:(text:string)=>Promise<void>;
  onAdd:(messageId:string,chat?:string)=>Promise<void>;onClose:()=>void;
  /** Notes chosen in the Constellation ("Use as chat context"): sent as the Other notes module, shown in the review first. */
  extraNotes?:string[];onClearExtraNotes?:()=>void;
@@ -112,11 +115,12 @@ interface PendingPlan {plan:ConversationPlan;id:string;question:string;route:Rou
 type AtItem={kind:'repo';label:string;ready:boolean}|{kind:'note';path:string}|{kind:'file';path:string};
 const atItemKey=(i:AtItem)=>i.kind==='repo'?'repo':i.kind+':'+i.path;
 
-function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,extraNotes=[],onClearExtraNotes,onShowQuote=()=>false,onCiteClaim=()=>false,conversation,onConversation}:BodyProps){
+function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onDecision,onClose,extraNotes=[],onClearExtraNotes,onShowQuote=()=>false,onCiteClaim=()=>false,conversation,onConversation}:BodyProps){
  const otherNotes=extraNotes.filter(p=>p!==openPath);
  const setConversation=(id:string,session?:HarnessSession)=>onConversation(id,session?.note??path??'');
  const [chips,setChips]=useState<ContextChip[]>(()=>DEFAULT_CONTEXT.map(c=>({...c}))),[turns,setTurns]=useState<Turn[]>([]),[draft,setDraft]=useState('');
  const [pending,setPending]=useState<ChatReview|null>(null),[stopAsking,setStopAsking]=useState(false),[busy,setBusy]=useState(false),[peek,setPeek]=useState<ContextChip['id']|null>(null);
+ const [councilRuns,setCouncilRuns]=useState<CouncilRun[]>([]);
  const persona=useNodeSettings('chat');
  const [usage,setUsage]=useState<ChatUsage|null>(null),[persistence,setPersistence]=useState<'private'|'memory'>('memory'),[notice,setNotice]=useState(''),[adding,setAdding]=useState<string|null>(null);
  const sentAt=useRef(0),input=useRef<HTMLTextAreaElement>(null),log=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),alive=useRef(true);
@@ -365,10 +369,10 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
    </div>}
   </div>
   <div className="chat-log" role="log" aria-label="Conversation" ref={log} onScroll={stickLog.onScroll}>
-   {turns.length===0&&!pending
+   {turns.length===0&&!councilRuns.length&&!pending
     ?<div className="chat-empty"><p>Ask about this note. Type @ to add another note, a repo file or the repo. Nothing is sent until you have seen exactly what goes.</p>
       <ul>{SUGGESTED_PROMPTS.map(p=><li key={p}><button type="button" className="chat-suggestion" onClick={()=>{setDraft(p);input.current?.focus();}}>{p}</button></li>)}</ul></div>
-    :turns.map(t=><div key={t.id} className="chat-turn" data-status={t.status} data-profile={t.profile}>
+    :([...turns.map(t=>({...t,council:null as CouncilRun|null})),...councilRuns.map(run=>({id:run.id,question:run.question,text:'',status:'complete' as const,at:run.startedAt,council:run} as Turn&{council:CouncilRun|null}))].sort((a,b)=>(Date.parse(a.at??'')||a.sentAt||0)-(Date.parse(b.at??'')||b.sentAt||0))).map(t=>t.council?<CouncilResults key={t.id} run={t.council}/>:<div key={t.id} className="chat-turn" data-status={t.status} data-profile={t.profile}>
      <div className="chat-message chat-you" data-from="you"><span className="chat-who">You</span>{t.question?<p>{t.question}</p>:<p className="chat-gone">Question unavailable after reload.</p>}</div>
      {t.status==='review'&&planCard&&planCard.id===t.id&&<>{planCard.notice&&<p className="chat-notice chat-plan-notice" role="alert">{planCard.notice}</p>}
       <PlanCard plan={planCard.plan} resume={planCard.resume} busy={busy} onApprove={()=>void approvePlan()} onReplan={b=>void replanCard(b)} onCancel={cancelPlan}/></>}
@@ -413,6 +417,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
      {!(c.kind==='repo'&&c.fixed)&&<button type="button" aria-label={`Remove ${label} from the next message`} onClick={()=>setAttach(a=>a.filter(x=>chipKey(x)!==chipKey(c)))}>×</button>}</span>;})}
    {switched&&<span className="chat-send-chip chat-switched" data-chip="switched" role="status"><span>{noteChangedText(switched.from,openTitle)}</span><button type="button" aria-label="Dismiss this notice" onClick={()=>setSwitched(null)}>×</button></span>}
   </div>}
+  <CouncilPanel conversation={conversation} note={openPath} notes={[...otherNotes,...attach.filter(c=>c.kind==='note').map(c=>(c as {path:string}).path)]} question={draft} disabled={composing||busy} onConversation={(id,home)=>{onConversation(id,home);setListRefresh(n=>n+1);}} onSent={asked=>{setDraft(current=>current.trim()===asked?'':current);setListRefresh(n=>n+1);}} onDecision={onDecision} onHistory={setCouncilRuns} onBusy={setBusy}/>
   <form className="chat-composer" onSubmit={e=>{e.preventDefault();if(at&&atItems.length){pickAt(atItems[Math.min(at.index,atItems.length-1)]);return;}void submit();}}>
    {at&&<div className="chat-at" role="listbox" aria-label="Attach a note, a file or the repo" id="chat-at-list">
     {atItems.length===0?<p className="chat-at-none">Nothing matches “{at.query}”.</p>:atItems.map((it,i)=><button key={atItemKey(it)} type="button" role="option" aria-selected={i===at.index} tabIndex={-1} className="chat-at-opt" data-at={atItemKey(it)}

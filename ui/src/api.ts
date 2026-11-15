@@ -61,7 +61,7 @@ export class ApiError extends Error {
   }
 }
 
-async function call(method: "GET" | "PUT", url: string, body?: unknown, keepalive = false): Promise<{ status: number; data: any }> {
+async function call(method: "GET" | "PUT" | "POST", url: string, body?: unknown, keepalive = false): Promise<{ status: number; data: any }> {
   const res = await fetch(scoped(url), {
     method,
     credentials: "same-origin",
@@ -78,7 +78,7 @@ async function call(method: "GET" | "PUT", url: string, body?: unknown, keepaliv
   return { status: res.status, data };
 }
 
-async function ok<T>(method: "GET" | "PUT", url: string, body?: unknown): Promise<T> {
+async function ok<T>(method: "GET" | "PUT" | "POST", url: string, body?: unknown): Promise<T> {
   const { status, data } = await call(method, url, body);
   if (status >= 200 && status < 300) return data as T;
   throw new ApiError(status, data?.error ?? "error", data?.message ?? `Request failed (${status})`, data);
@@ -150,6 +150,11 @@ export async function streamConversation(body: ConversationBody & { id: string; 
 }
 
 export const api = {
+  councilAvailability:(refresh=false)=>ok<{providers:import('../server/providers/council-availability.ts').Availability[]}>('GET','/api/council/availability'+(refresh?'?refresh=1':'')),
+  councilHistory:(id:string)=>ok<import('../server/council-history.ts').CouncilRecord>('GET','/api/council/history?conversation='+encodeURIComponent(id)),
+  councilPlan:(body:unknown)=>ok<Awaited<ReturnType<import('../server/council.ts').CouncilService['plan']>>>('PUT','/api/council/plan',body),
+  councilApprove:(body:unknown)=>ok<unknown>('PUT','/api/council/plan',{...body as object,approve:true}),
+  councilRun:async(body:unknown,signal:AbortSignal)=>{const res=await fetch(scoped('/api/council/run'),{method:'POST',credentials:'same-origin',signal,headers:{'Content-Type':'application/json','X-Aitiarch':'1'},body:JSON.stringify(body)});const d=await res.json();if(!res.ok)throw new ApiError(res.status,d.error,d.message);return d as Awaited<ReturnType<import('../server/council.ts').CouncilService['run']>>;},
   /** The one conversation API: "@" picker matches, the plan card for given attachments, and approving exactly that card. */
   /** What a conversation was approved for, as the server would honour it now; null when nothing (or a grant it would refuse). For the chips only: the server decides every turn. */
   conversationGrant:(id:string)=>ok<{grant:{profile:import('../shared/profile.ts').Profile;files:string[];repo:boolean;diagrams:boolean;diagramNote?:string;budgetUsd:number}|null}>('GET','/api/conversation/grant?id='+encodeURIComponent(id)),

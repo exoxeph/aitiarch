@@ -1407,3 +1407,19 @@ p.chat-wait { margin: 4px 0 0; }
 .chat-plan-files, .chat-plan-withheld { margin: 0; padding-left: 16px; }
 .chat-plan-files li[data-status="refused"] { color: var(--danger); }
 .chat-repo-form { margin: 0 16px 6px; }
+
+.council { padding: var(--space-4, 16px); border-block: 1px solid var(--rule); }
+.council-providers,.council-results { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:var(--space-4,16px); }
+.council-providers small { display:block; }
+.council-results article { min-width:0;overflow-wrap:anywhere; }
+.council textarea { display:block;width:100%;min-height:6em; }
+
+.council { font-size:var(--text-control); }
+.council button,.council input { font:inherit; }
+.council input[type=number],.council textarea { color:var(--ink-text);background:var(--paper);border:1px solid var(--control-border);border-radius:var(--radius-small);padding:var(--space-2); }
+.council-providers label { padding:var(--space-2);border:1px solid var(--rule);border-radius:var(--radius-small); }
+.council-providers small { color:var(--muted);margin-top:var(--space-2); }
+.council-results { padding:var(--space-3) 0; }
+.council-results h4 { margin-top:0; }
+.council-ai { display:inline-block;background:var(--ink-text);color:var(--paper);padding:0 var(--space-1);border-radius:var(--radius-small);font:bold var(--text-meta)/1.5 var(--font-ui); }
+.council [aria-label="Save as decision"] { border:2px solid var(--accent);padding:var(--space-3);border-radius:var(--radius-human);margin-top:var(--space-4); }
