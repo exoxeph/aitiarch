@@ -257,8 +257,11 @@ export function createApp(opts: AppOptions) {
           const {approve,...input}=body??{};
           return json(res,200,approve===true?await council.approve(input):await council.plan(input));
         }
-        if(url.pathname==='/api/council/run'&&req.method==='POST')return json(res,200,await council.run(body,controller.signal));
-      }catch(e){const code=e instanceof Error&&['plan_required','plan_changed','invalid_conversation','notes_only','invalid_cap','already_running'].includes(e.message)?e.message:'council_error';return json(res,409,{error:code,message:'Council: '+code.replace(/_/g,' ')+'.'});}
+        if(url.pathname==='/api/council/cancel'&&req.method==='POST'){council.cancel(body?.conversation,body?.runId);return json(res,200,{cancelled:true});}
+        if(url.pathname==='/api/council/run'&&req.method==='POST'){
+          await council.run(body,controller.signal,event=>{if(res.destroyed){controller.abort();return;}if(!res.headersSent)res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'});res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);});return res.end();
+        }
+      }catch(e){const code=e instanceof Error&&['plan_required','plan_changed','invalid_conversation','invalid_run','notes_only','invalid_cap','already_running'].includes(e.message)?e.message:'council_error';if(res.headersSent){if(!res.destroyed)res.write(`event: error\ndata: ${JSON.stringify({type:'error',code})}\n\n`);return res.end();}return json(res,409,{error:code,message:'Council: '+code.replace(/_/g,' ')+'.'});}
       finally{res.removeListener('close',abort);}
     }
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await (await explorerReady).tree());

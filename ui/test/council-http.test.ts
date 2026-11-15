@@ -11,15 +11,21 @@ it('Council HTTP requires auth and explicit plan approval; POST returns independ
   const listed=await(await fetch(base+'/api/harness/sessions?all=1',{headers})).json();expect(listed.enabled).toBe(true);expect(listed.sessions.some((x:any)=>x.id===own.id)).toBe(true);
   expect((await fetch(base+'/api/harness/sessions/history?id='+own.id,{headers})).status).toBe(200);
   expect((await fetch(base+'/api/harness/sessions/replies?id='+own.id,{headers})).status).toBe(200);
+  // Council's metadata-only conversation fallback must not enable either Claude tool profile.
+  for(const attachments of [{notes:[],files:[],repo:true},{notes:[],files:['src/app.ts'],repo:false},{notes:[],files:[],repo:false}])for(const route of ['plan','approve','turn']){const response=await call('/api/conversation/'+route,{conversationId:own.id,path:'plan.md',attachments,text:'Synthetic'});expect(response.status).toBe(409);expect((await response.json()).error).toBe('disabled');}
+  for(const route of ['plan','confirm','send']){const response=await call('/api/harness/investigate/'+route,{session:own.id,question:'Synthetic'});expect(response.status).toBe(409);expect((await response.json()).error).toBe('disabled');}
+  const review=await call('/api/chat/review',{id:own.id,path:'plan.md',session:own.id,question:'Synthetic diagram question',context:[]});expect(review.status).toBe(409);expect((await review.json()).error).toBe('disabled');
+  const tools=await(await call('/api/council/plan',b)).json();expect(tools.tools).toEqual([]);expect(tools.notesOnly).toBe(true);
+  for(const extra of [{tools:['Read']},{profile:'diagrams'},{profile:'investigate'},{repo:true},{files:['src/app.ts']},{diagrams:['x']}]){expect((await call('/api/council/plan',{...b,...extra})).status).toBe(409);expect((await call('/api/council/run',{...b,...extra},'POST')).status).toBe(409);}
   expect((await call('/api/harness/sessions/delete',{id:own.id})).status).toBe(200);expect(await index.get(own.id)).toBeNull();expect(await index.get(s.id)).not.toBeNull();
   expect((await call('/api/council/run',b,'POST')).status).toBe(409);
   const plan=await(await call('/api/council/plan',b)).json();expect(plan.needsApproval).toBe(true);
   expect((await call('/api/council/plan',{...b,hash:plan.hash,approve:true})).status).toBe(200);
-  const result=await(await call('/api/council/run',b,'POST')).json();expect(result.results[0].status).toBe('ok');
+  const response=await call('/api/council/run',b,'POST');expect(response.headers.get('content-type')).toContain('text/event-stream');const events=(await response.text()).split('\n\n').filter(Boolean).map(frame=>JSON.parse(frame.split('\ndata: ')[1]));expect(events.map(e=>e.type)).toEqual(['provider_start','provider_result','done']);expect(events[1].result.status).toBe('ok');
   const history=await(await fetch(base+'/api/council/history?conversation='+s.id,{headers})).json();expect(history.runs[0].results[0].answer).toBe('June.');expect(history.runs[0].question).toBe(b.question);
   expect((await fetch(base+'/api/council/history?conversation=..%2Fx',{headers})).status).toBe(409);
   expect((await fetch(base+'/api/council/availability',{headers})).status).toBe(200);
-  expect(result.buffered).toBe(true);expect(result.events).toContainEqual({provider:'codex',event:{type:'complete',answer:'June.'}});
+  expect(events[1].result.answer).toBe('June.');
   expect((await call('/api/council/run',{...b,providers:['codex','kiro']},'POST')).status).toBe(409);
  }finally{await app.close();watcher.stop();console.info('CLEANUP TARGET:',root);await rm(root,{recursive:true,force:true});}
 });
