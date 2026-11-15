@@ -1549,7 +1549,7 @@ p.chat-wait { margin: 4px 0 0; }
 .council-col .chat-add:hover:not(:disabled), .council-col .chat-add:focus-visible { opacity: 1; }
 .chat-add { opacity: .7; }
 /* The AI thoughts fade out where the note's window ends, instead of being cut off hard: a long thought or diagram reaches the edge and dissolves. */
-.ink-surface .margin-rail.thought-rails { -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 84px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 84px), transparent 100%); }
+.ink-surface .margin-rail.thought-rails { -webkit-mask-image: linear-gradient(to bottom, transparent 0, var(--ink-text) 20px, var(--ink-text) calc(100% - 84px), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, var(--ink-text) 20px, var(--ink-text) calc(100% - 84px), transparent 100%); }
 /* Only the active request rises above the chat; passive thoughts stay behind it.
    A mask creates a stacking context, so the request needs its own unmasked rail. */
 .ink-surface .margin-rail.thought-request-rail { z-index: 55; -webkit-mask-image: none; mask-image: none; }
@@ -1559,8 +1559,8 @@ p.chat-wait { margin: 4px 0 0; }
 @property --fade-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @property --fade-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @keyframes thought-edge-fade {
-  from { --fade-b: 64px; --fade-t: 0px; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-t), #000 calc(100% - var(--fade-b)), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-t), #000 calc(100% - var(--fade-b)), transparent 100%); }
-  to { --fade-b: 0px; --fade-t: 44px; -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-t), #000 calc(100% - var(--fade-b)), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-t), #000 calc(100% - var(--fade-b)), transparent 100%); }
+  from { --fade-b: 64px; --fade-t: 0px; -webkit-mask-image: linear-gradient(to bottom, transparent 0, var(--ink-text) var(--fade-t), var(--ink-text) calc(100% - var(--fade-b)), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, var(--ink-text) var(--fade-t), var(--ink-text) calc(100% - var(--fade-b)), transparent 100%); }
+  to { --fade-b: 0px; --fade-t: 44px; -webkit-mask-image: linear-gradient(to bottom, transparent 0, var(--ink-text) var(--fade-t), var(--ink-text) calc(100% - var(--fade-b)), transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, var(--ink-text) var(--fade-t), var(--ink-text) calc(100% - var(--fade-b)), transparent 100%); }
 }
 @supports (animation-timeline: scroll()) {
   .thought-rails .margin-card.thought-blob { animation: thought-edge-fade linear both; animation-timeline: scroll(self); }
