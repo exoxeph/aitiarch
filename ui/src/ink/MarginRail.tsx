@@ -32,9 +32,10 @@ export function MarginRail({placed,renderDraft,blobs}:{placed:PlacedMargin[];ren
   setGeometry(g=>g&&g.width===next.width&&Math.abs(g.left-next.left)<.5&&Math.abs(g.right-next.right)<.5?g:next);
  },[placed]);
  useLayoutEffect(()=>{
-  const measure=()=>{let changed=false;rail.current?.querySelectorAll<HTMLElement>('.thought-blob').forEach(el=>{el.style.setProperty('--gutter',(el.offsetWidth-el.clientWidth)+'px');const h=el.getBoundingClientRect().height;if(sizes.current.get(el.dataset.inkId!)!==h){sizes.current.set(el.dataset.inkId!,h);changed=true;}});if(changed)rail.current?.dispatchEvent(new CustomEvent('thought-size',{bubbles:true}));};
+  const cards=rail.current?.parentElement?.querySelectorAll<HTMLElement>('.thought-rails .thought-blob');
+  const measure=()=>{let changed=false;cards?.forEach(el=>{el.style.setProperty('--gutter',(el.offsetWidth-el.clientWidth)+'px');const h=el.getBoundingClientRect().height;if(sizes.current.get(el.dataset.inkId!)!==h){sizes.current.set(el.dataset.inkId!,h);changed=true;}});if(changed)rail.current?.dispatchEvent(new CustomEvent('thought-size',{bubbles:true}));};
   rail.current?.dispatchEvent(new CustomEvent('thought-layout',{bubbles:true}));
-  const observer=new ResizeObserver(measure);rail.current?.querySelectorAll('.thought-blob').forEach(el=>observer.observe(el));measure();return()=>observer.disconnect();
+  const observer=new ResizeObserver(measure);cards?.forEach(el=>observer.observe(el));measure();return()=>observer.disconnect();
  },[placed]);
  useLayoutEffect(()=>{const surface=rail.current?.closest('.ink-surface');const hover=(e:Event)=>{const mark=(e.target as Element)?.closest<HTMLElement>('[data-thought-anchor]');if(mark)setActive(e.type==='pointerout'?null:mark.dataset.thoughtAnchor??null);};surface?.addEventListener('pointerover',hover);surface?.addEventListener('pointerout',hover);return()=>{surface?.removeEventListener('pointerover',hover);surface?.removeEventListener('pointerout',hover);};},[]);
  const highlight=(id:string,on:boolean)=>{const surface=rail.current?.closest('.ink-surface');surface?.querySelectorAll<HTMLElement>('[data-thought-anchor]').forEach(el=>el.classList.toggle('thought-active',on&&el.dataset.thoughtAnchor===id));};
@@ -83,15 +84,10 @@ export function MarginRail({placed,renderDraft,blobs}:{placed:PlacedMargin[];ren
   if(!d)return;e.preventDefault();const scroll=blobs.getScroll();
   blobs.onMove(id,{left:clamp(f.left+d[0],0,Math.max(0,geometry.width-f.width)),top:Math.max(-scroll,f.top+d[1])+scroll});
  };
- return <aside className={'margin-rail thought-rails'+(scrolling?' thoughts-scrolling':'')} aria-label="AI thoughts" ref={rail}>
-  {geometry&&<svg className="thought-connectors" aria-hidden="true" width={geometry.width} height="100%">
-   <defs><filter id="thought-rough" filterUnits="userSpaceOnUse" x="-4000" y="-4000" width="12000" height="12000"><feTurbulence type="fractalNoise" baseFrequency="0.025 0.09" numOctaves="2" seed="7" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="3.4" xChannelSelector="R" yChannelSelector="G"/></filter></defs>
-   {frames.filter(f=>f.p.end&&connectorVisible(f.p.target,f.top,rail.current?.clientHeight??0)).map(f=>{
-    const p=f.p,dotX=f.side==='right'?f.left:f.left+f.width;
-    return <path key={p.item.id} className={'thought-connector'+(active===p.item.id||focused===p.item.id?' thought-connector-on':'')} data-ink-id={p.item.id} d={connectorD(p.end!,{x:dotX,y:f.top+14},{left:geometry.left,right:geometry.right},f.side)}/>;
-   })}
-  </svg>}
-  {placed.map(({item,top,side,manual})=>{const fr=frameOf(item.id),depth=depths.get(item.id)??0,moved=!!blobs&&!!manual;
+ // A draft is an active request, not a passive thought. Give only that form its
+ // own unmasked layer so an open chat cannot cover its review/send controls.
+ const draftIds=new Set(placed.filter(p=>renderDraft?.(p.item.id)).map(p=>p.item.id));
+ const card=({item,top,side,manual}:PlacedMargin)=>{const fr=frameOf(item.id),depth=depths.get(item.id)??0,moved=!!blobs&&!!manual;
    const resolved=!!item.thread?.resolvedAt;
    return <article key={item.id} className={'margin-card thought-blob'+(resolved?' thought-resolved':'')} data-resolved={resolved?'true':undefined} data-side={fr?.side??side} data-depth={blobs?depth:undefined} data-stacked={blobs&&stacked.has(item.id)?'true':undefined} data-moved={moved?'true':undefined} data-moving={fr?.moving?'true':undefined}
     style={{top:0,transform:`translateY(${fr?.top??top}px)`,...(fr?{left:fr.left,width:fr.width,right:'auto'}:{}),...(blobs?{zIndex:fr?.moving?1000:1+stack.indexOf(item.id)}:{}),...(depth>0?{filter:`brightness(${dimFor(depth)})`}:{}),...(blobs?{['--depth' as string]:depth}:{})}} data-ink-id={item.id} data-generated-complete={item.generation?.status==='complete'?'true':undefined}
@@ -122,6 +118,19 @@ export function MarginRail({placed,renderDraft,blobs}:{placed:PlacedMargin[];ren
    <button type="button" className="add-to-note add-to-note-icon" aria-label="Add to note" title="Add to note" disabled={item.generation?.status!=='complete'} onClick={e=>e.currentTarget.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id}}))}>
     <i className="add-icon" aria-hidden="true"/></button>
    </>}
-  </article>;})}
- </aside>;
+  </article>;
+ };
+ return <>
+ <aside className={'margin-rail thought-rails'+(scrolling?' thoughts-scrolling':'')} aria-label="AI thoughts" ref={rail}>
+  {geometry&&<svg className="thought-connectors" aria-hidden="true" width={geometry.width} height="100%">
+   <defs><filter id="thought-rough" filterUnits="userSpaceOnUse" x="-4000" y="-4000" width="12000" height="12000"><feTurbulence type="fractalNoise" baseFrequency="0.025 0.09" numOctaves="2" seed="7" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="3.4" xChannelSelector="R" yChannelSelector="G"/></filter></defs>
+   {frames.filter(f=>f.p.end&&connectorVisible(f.p.target,f.top,rail.current?.clientHeight??0)).map(f=>{
+    const p=f.p,dotX=f.side==='right'?f.left:f.left+f.width;
+    return <path key={p.item.id} className={'thought-connector'+(active===p.item.id||focused===p.item.id?' thought-connector-on':'')} data-ink-id={p.item.id} d={connectorD(p.end!,{x:dotX,y:f.top+14},{left:geometry.left,right:geometry.right},f.side)}/>;
+   })}
+  </svg>}
+  {placed.filter(p=>!draftIds.has(p.item.id)).map(card)}
+ </aside>
+ {draftIds.size>0&&<aside className="margin-rail thought-rails thought-request-rail" aria-label="AI request">{placed.filter(p=>draftIds.has(p.item.id)).map(card)}</aside>}
+ </>;
 }

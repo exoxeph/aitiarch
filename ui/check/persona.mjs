@@ -93,7 +93,13 @@ try {
   const invoke = async (button, persona) => {
     await select('A unique selected sentence.');
     await page.getByRole('button', { name: button, exact: true }).click();
-    if (button === 'Ask...') { await page.getByLabel('Question for Claude').fill('Why this sentence?'); await page.getByRole('button', { name: 'Review request', exact: true }).click(); }
+    if (button === 'Ask...') {
+      await page.getByLabel('Question for Claude').fill('Why this sentence?');
+      const review = page.getByRole('button', { name: 'Review request', exact: true });
+      const hit = await review.evaluate(el => { const r=el.getBoundingClientRect(),top=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {reachable:!!top&&(top===el||el.contains(top)),cover:top?.closest('#chat-panel')?'chat overlay':top?.tagName}; });
+      assert(hit.reachable, `Ask review must remain clickable while chat is open; covered by ${hit.cover}`);
+      await review.click();
+    }
     await page.getByRole('button', { name: 'Send to Claude', exact: true }).waitFor();
     await page.locator('.invocation-review .persona-switch').getByRole('radio', { name: LABEL[persona] }).check();
     await page.waitForTimeout(700); // the panel re-reviews with the new persona
