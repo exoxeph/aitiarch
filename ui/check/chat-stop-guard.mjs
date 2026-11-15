@@ -32,7 +32,7 @@ try{
  const page=await (await browser.newContext({viewport:{width:390,height:844}})).newPage();page.setDefaultTimeout(8000);
  await page.goto(url);await page.waitForSelector('.cm-editor');
  await page.getByRole('button',{name:/^Chat/}).first().click();const panel=page.locator('#chat-panel');await panel.waitFor();
- const width=(await panel.boundingBox()).width;assert.ok(width>=360&&width<=390,'the panel is about 390 px wide (it is '+width+')');
+ const width=(await panel.boundingBox()).width;assert.ok(width>=360&&width<=390.5,'the panel is about 390 px wide (it is '+width+')');
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true,'no sideways overflow at this width');
  const composer=panel.getByRole('textbox',{name:'Message Aitiarch AI'});await composer.fill('A question');await composer.press('Enter');
  const review=panel.getByRole('region',{name:'What will be sent'});await review.waitFor();

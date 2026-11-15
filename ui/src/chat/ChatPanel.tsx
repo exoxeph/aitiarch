@@ -1,7 +1,7 @@
 import type {CouncilViewRun as CouncilRun} from './council-model.ts';
 import {CouncilPanel,CouncilResults} from './CouncilPanel.tsx';
 import {ChatModeMenu,type ChatMode} from './ChatMode.tsx';
-import {useEffect,useMemo,useRef,useState,type FormEvent} from 'react';
+import {useEffect,useMemo,useRef,useState,type CSSProperties,type FormEvent,type KeyboardEvent as ReactKeyboardEvent,type PointerEvent as ReactPointerEvent} from 'react';
 import {api,ApiError,streamChat,streamConversation,type ConversationBody} from '../api.ts';
 import type {InvestigateUsage} from '../../shared/usage.ts';
 import {investigateLine} from './investigate-usage.ts';
@@ -33,6 +33,7 @@ import type {InvestigateEvent} from '../../server/harness/investigate.ts';
 import type {ConversationPlan} from '../../server/harness/conversation.ts';
 import {isProfile,type Attachments,type Profile} from '../../shared/profile.ts';
 import {useStickToBottom} from './useStickToBottom.ts';
+import {CHAT_MIN_WIDTH,clampChatWidth,isSheet,loadChatWidth,loadPinned,saveChatWidth,savePinned} from './chat-layout.ts';
 import type {HarnessSession} from '../../shared/harness.ts';
 
 /** One-off chat: questions are not stored by the server; this page remembers them so a closed and reopened panel still reads as a conversation.
@@ -285,6 +286,21 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  const cancelPlan=()=>{const p=planCard;if(!p)return;setPlanCard(null);setTurns(t=>t.filter(x=>x.id!==p.id));if(!p.resume){questions.delete(p.id);setDraft(p.question);}setBusy(false);input.current?.focus();};
  /** `again` re-asks an earlier question through the same path, without touching the draft. */
  const [mode,setMode]=useState<ChatMode>('chat'),councilReview=useRef<(()=>void)|null>(null);
+ // Where the panel sits: a raised overlay by default (the note and the AI thoughts never move), pinned beside them if chosen, a full-width sheet on a narrow window.
+ const [pinned,setPinned]=useState(loadPinned),[storedWidth,setStoredWidth]=useState<number|null>(loadChatWidth),[vw,setVw]=useState(()=>window.innerWidth),panel=useRef<HTMLElement>(null);
+ const sheet=isSheet(vw),layout=sheet?'sheet':pinned?'pinned':'overlay',width=clampChatWidth(storedWidth,vw);
+ useEffect(()=>{const on=()=>setVw(window.innerWidth);window.addEventListener('resize',on);return()=>window.removeEventListener('resize',on);},[]);
+ // Focus moves into the panel when it opens and goes back to where it was when it closes.
+ useEffect(()=>{const opener=document.activeElement instanceof HTMLElement?document.activeElement:null;input.current?.focus();return()=>{if(opener&&opener!==document.body&&opener.isConnected)opener.focus();};},[]);
+ const togglePin=()=>{const next=!pinned;setPinned(next);savePinned(next);};
+ const startResize=(e:ReactPointerEvent<HTMLDivElement>)=>{
+  const handle=e.currentTarget,box=panel.current;if(!box)return;e.preventDefault();handle.setPointerCapture(e.pointerId);
+  const right=box.getBoundingClientRect().right;let last=width;
+  const move=(ev:PointerEvent)=>{last=clampChatWidth(right-ev.clientX,window.innerWidth);setStoredWidth(last);};
+  const up=()=>{handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',up);handle.removeEventListener('pointercancel',up);saveChatWidth(last);};
+  handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',up);handle.addEventListener('pointercancel',up);
+ };
+ const keyResize=(e:ReactKeyboardEvent<HTMLDivElement>)=>{const step=e.key==='ArrowLeft'?24:e.key==='ArrowRight'?-24:0;if(!step)return;e.preventDefault();const next=clampChatWidth(width+step,window.innerWidth);setStoredWidth(next);saveChatWidth(next);};
  const submit=async(again?:string)=>{
   if(mode==='council'&&again===undefined){councilReview.current?.();return;}
   const question=(again??draft).trim();if(!question||!path||busy||pending||planCard)return;
@@ -345,8 +361,9 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  useEffect(()=>{if(!composing&&!document.activeElement?.closest('.chat-review, .chat-plan'))input.current?.focus();},[composing]);
  const lastInv=[...turns].reverse().find(t=>t.inv);
 
- return <aside id="chat-panel" className="chat-panel" aria-label="Aitiarch AI chat" onPointerDownCapture={pullEditor} onFocusCapture={pullEditor} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();onClose();}}}>
-  <header className="chat-head"><h2>{chatHeader(openPath)}</h2><button type="button" className="ghost chat-close" aria-label="Close chat" onClick={onClose}>×</button></header>
+ return <aside id="chat-panel" ref={panel} className="chat-panel" data-layout={layout} style={layout==="overlay"?({"--chat-w":width+"px"} as CSSProperties):undefined} aria-label="Aitiarch AI chat" onPointerDownCapture={pullEditor} onFocusCapture={pullEditor} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();onClose();}}}>
+  {layout==="overlay"&&<div className="chat-resize" role="separator" aria-orientation="vertical" aria-label="Resize chat. Drag, or use the left and right arrow keys." aria-valuemin={CHAT_MIN_WIDTH} aria-valuemax={Math.floor(vw*0.9)} aria-valuenow={width} tabIndex={0} onPointerDown={startResize} onKeyDown={keyResize}/>}
+  <header className="chat-head"><h2>{chatHeader(openPath)}</h2>{!sheet&&<button type="button" className="ghost chat-pin" aria-pressed={pinned} aria-label="Pin chat beside the note" title={pinned?"Unpin: let the chat float over the note":"Pin: dock the chat beside the note"} onClick={togglePin}>Pin</button>}<button type="button" className="ghost chat-close" aria-label="Close chat" onClick={onClose}>×</button></header>
   {openPath&&<ChatSessions path={openPath} value={conversation} onChange={setConversation} disabled={composing} refresh={listRefresh+turns.filter(t=>t.status==='complete').length} onCurrent={setCurrent}/>}
   <div className="chat-context" role="group" aria-label="What the chat can see">
    <button type="button" className="chat-ctl chat-context-sum" aria-expanded={ctxOpen} aria-controls="chat-context-body" onClick={()=>setCtxOpen(v=>!v)}>

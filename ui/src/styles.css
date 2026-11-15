@@ -823,7 +823,7 @@ input.chat-ctl { background: var(--paper); cursor: text; }
 .chat-send { display: grid; place-items: center; padding: 6px; border: 0; border-radius: 50%; background: transparent; color: var(--accent); cursor: pointer; }
 .chat-send:disabled { color: var(--muted); opacity: .5; cursor: default; }
 .chat-send:not(:disabled):hover { background: var(--accent-soft); }
-@media (max-width: 900px) { .chat-panel { position: fixed; z-index: 50; right: 8px; top: 56px; bottom: 36px; width: min(380px, calc(100vw - 16px)); margin: 0; } }
+@media (max-width: 900px) { .chat-panel[data-layout="pinned"] { position: fixed; z-index: 50; right: 8px; top: 56px; bottom: 36px; width: min(380px, calc(100vw - 16px)); margin: 0; } }
 @media (prefers-reduced-motion: reduce) {
   .sidebar { transform: none; opacity: 0; transition: opacity 120ms linear, visibility 0s linear 120ms !important; }
   .sidebar[data-state="open"] { opacity: 1; transition: opacity 120ms linear !important; }
@@ -1516,3 +1516,19 @@ p.chat-wait { margin: 4px 0 0; }
 .council-meta dd { margin: 0; color: var(--ink-text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .council-calm { display: flex; gap: var(--space-2); margin: 0; padding: var(--space-1) var(--space-2); border-radius: var(--radius-small); background: var(--paper); color: var(--muted); font-size: var(--text-meta); line-height: 1.45; }
 .council-overcap { border-left: 3px solid var(--accent); color: var(--ink-text); }
+
+/* The chat is a raised layer by default: it sits over the note and the AI thoughts in the same grid cell, so their layout is the same open or closed.
+   Pinned keeps the old docked column; a narrow window gets a full-width sheet. */
+.chat-panel[data-layout="overlay"] { grid-area: main; position: relative; z-index: 30; justify-self: end; align-self: stretch; width: min(var(--chat-w, 45vw), 100%); min-width: min(380px, 100%); box-shadow: -1px 0 0 color-mix(in srgb, var(--accent) 38%, transparent), -22px 0 38px -14px color-mix(in srgb, var(--accent) 24%, transparent), -16px 0 44px color-mix(in srgb, black 45%, transparent), var(--shadow-page); animation: chat-raise 160ms cubic-bezier(.2, .8, .2, 1); }
+.chat-panel[data-layout="overlay"]::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; z-index: 2; pointer-events: none; background: linear-gradient(to bottom, transparent, var(--accent) 24%, var(--accent) 76%, transparent); opacity: .75; }
+.chat-panel[data-layout="sheet"] { position: fixed; z-index: 50; inset: 44px 0 30px 0; width: auto; margin: 0; border-radius: 0; grid-area: auto; animation: chat-raise 160ms cubic-bezier(.2, .8, .2, 1); }
+@keyframes chat-raise { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .chat-panel[data-layout] { animation: none; } }
+.chat-resize { position: absolute; inset: 0 auto 0 0; width: 8px; z-index: 3; cursor: ew-resize; touch-action: none; }
+.chat-resize:hover, .chat-resize:active { background: var(--accent-soft); }
+.chat-resize:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; background: var(--accent-soft); }
+.chat-pin { margin-left: auto; min-height: 28px; padding: 0 var(--space-3); border: 1px solid var(--control-border); border-radius: 999px; font: 500 var(--text-meta) var(--font-ui); color: var(--ink-text); }
+.chat-pin:hover { background: var(--accent-soft); }
+.chat-pin[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+/* Short windows: the log gives up room so the Council bar (providers, Review) and the composer stay fully on screen. */
+@media (max-height: 760px) { .chat-panel .chat-log { min-height: 96px; } .chat-dock { max-height: 70%; } }
