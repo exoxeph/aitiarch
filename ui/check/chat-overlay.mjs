@@ -34,10 +34,12 @@ try {
   const fresh = async (width, height) => { const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 }), page = await ctx.newPage(); page.setDefaultTimeout(9000); const errors = []; page.on('pageerror', (e) => errors.push(e.message)); await page.goto(url + '&debug'); await page.locator('.cm-editor').waitFor(); await page.waitForTimeout(700); return { ctx, page, errors }; };
   const results = [];
   // 1. The layout underneath is identical open and closed, at every size, and the composer and the Council bar stay on screen.
-  for (const [width, height] of [[1440, 900], [1024, 800], [1440, 700], [1280, 650], [600, 800], [390, 860]]) {
+  for (const [width, height] of [[1440, 900], [1024, 800], [1440, 700], [1280, 650], [600, 800], [390, 860], [360, 640], [320, 640]]) {
     const { ctx, page, errors } = await fresh(width, height);
-    const before = await snap(page); assert(before['.cm-content'].length === 1 && (before['.margin-card'].length + before['.cm-ink-block'].length) >= 2, `the long thoughts are on the page at ${width}`);
+    const before = await snap(page); assert(before['.cm-content'].length === 1 && (width < 390 || (before['.margin-card'].length + before['.cm-ink-block'].length) >= 2), `the editor and, at the original check widths, long thoughts are on the page at ${width}`);
     await open(page);
+    const overflow = await page.evaluate(() => { const r = document.querySelector('.chat-pill').getBoundingClientRect(); return {page:document.documentElement.scrollWidth-innerWidth, pill:r.right+scrollX-innerWidth}; });
+    assert(overflow.page <= 0 && overflow.pill <= 0, `no sideways overflow or offscreen Chat button at ${width}: ${JSON.stringify(overflow)}`);
     assert.deepEqual(await snap(page), before, `the note and the thoughts moved when the chat opened at ${width}x${height}`);
     const box = await page.locator('#chat-panel').boundingBox(), layout = await page.locator('#chat-panel').getAttribute('data-layout');
     assert.equal(layout, width < 700 ? 'sheet' : 'overlay');

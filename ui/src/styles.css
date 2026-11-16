@@ -1382,6 +1382,11 @@ a.menu-row { text-decoration: none; }
 @media (max-width: 860px) { .cn-body { grid-template-columns: 1fr; } .cn-list { display: none; } .cn-legend { display: none; } }
 @media (prefers-reduced-motion: reduce) { .map-pill { transition: none; } }
 @media (max-width: 720px) { .map-pill { padding: 6px 9px; } .map-pill-label { display: none; } } /* a phone-width top bar keeps just the icon */
+@media (max-width: 420px) {
+  .topbar { min-width: 0; gap: 2px; }
+  .topbar .map-pill { margin-left: 0; padding: 6px; }
+  .topbar .chat-pill { margin-left: 0; padding: 6px 8px; }
+}
 .commands-icon { display: none; vertical-align: middle; }
 @media (max-width: 480px) { .commands-label { display: none; } .commands-icon { display: inline-block; } }
 
