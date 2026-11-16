@@ -51,6 +51,10 @@ export type SaveResult =
 /** What GET /api/pipeline-config returns (the server's own shape). `warning` is set when the saved file could not be read. */
 export interface PipelineView {effective:import('../shared/pipeline-config.ts').PipelineConfig;defaults:import('../shared/pipeline-config.ts').PipelineConfig;overrides:Record<string,unknown>;warning?:string}
 
+/** One piece of a prompt: wording you can change, a fixed rule, or a placeholder for what is filled in when you send. */
+export interface PromptSegment {kind:'editable'|'locked'|'placeholder';id:string;text:string}
+export interface PipelinePreview {surface:string;variant:string;segments:PromptSegment[];inputs:PromptSegment[];session?:{segments:PromptSegment[];inputs:PromptSegment[]};claude?:{segments:PromptSegment[];inputs:PromptSegment[]}}
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -161,6 +165,12 @@ export const api = {
   pipelineConfig:()=>ok<PipelineView>('GET','/api/pipeline-config'),
   pipelineSave:(overrides:Record<string,unknown>)=>ok<PipelineView>('PUT','/api/pipeline-config',{overrides}),
   pipelineReset:()=>ok<PipelineView>('POST','/api/pipeline-config/reset',{}),
+  /** What is actually sent for one surface, with the saved settings applied: ordered segments the server labels editable, locked or placeholder. */
+  pipelinePreview:(surface:string)=>ok<PipelinePreview>('GET','/api/pipeline-config/preview?surface='+encodeURIComponent(surface)),
+  /** The settings as the one JSON document the server exports (the page never reads the file itself). */
+  pipelineExport:()=>ok<unknown>('GET','/api/pipeline-config/export'),
+  /** Replaces the settings with an exported document. The server checks all of it, locked rules included, and refuses in words. */
+  pipelineImport:(doc:unknown)=>ok<PipelineView>('PUT','/api/pipeline-config/import',doc),
   investigateBring:<T,>(action:'bring-preview'|'bring-prepare',body:unknown)=>ok<T>('PUT','/api/harness/investigate/'+action,body),
   councilBring:<T,>(action:'bring-preview'|'bring-prepare',body:unknown)=>ok<T>('POST','/api/council/'+action,body),
   councilCancel:(conversation:string,runId:string)=>ok<{cancelled:boolean}>('POST','/api/council/cancel',{conversation,runId}),

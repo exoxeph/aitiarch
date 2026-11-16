@@ -96,13 +96,13 @@ export function parseField(text:string):number|null{
  const t=text.trim();if(!t)return null;const v=Number(t);return Number.isFinite(v)?v:null;
 }
 /** The saved overrides with this node's settings set to `values`; a value equal to the default is dropped, so the file only keeps what you changed. */
-export function overridesWith(saved:Tree,values:Record<string,number>,defaults:unknown):Tree{
+export function overridesWith(saved:Tree,values:Record<string,number|string>,defaults:unknown):Tree{
  let next=saved;
- for(const [key,v] of Object.entries(values))next=v===numberAt(defaults,key)?deletePath(next,key):setPath(next,key,v);
+ for(const [key,v] of Object.entries(values)){let d:any=defaults;for(const k of key.split('.'))d=d?.[k];next=v===d?deletePath(next,key):setPath(next,key,v);}
  return next;
 }
-/** The saved overrides without this node's settings (back to the defaults for that node only). */
-export function overridesWithout(saved:Tree,node:Pick<PipelineNode,'fields'|'answerer'>):Tree{
- let next=saved;for(const k of node.fields)next=deletePath(next,k);
+/** The saved overrides without this node's settings (back to the defaults for that node only). `more` names extra keys, such as its wording. */
+export function overridesWithout(saved:Tree,node:Pick<PipelineNode,'fields'|'answerer'>,more:readonly string[]=[]):Tree{
+ let next=saved;for(const k of [...node.fields,...more])next=deletePath(next,k);
  if(node.answerer)next=deletePath(next,'normalAnswerer');return next;
 }
