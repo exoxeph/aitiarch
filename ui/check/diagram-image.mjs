@@ -1,6 +1,7 @@
 // An inserted AI diagram in the note: full width with no horizontal scroll, a line-sized caret beside it, click below places the caret
 // after it, and Backspace removes the whole image in one undoable step instead of leaving raw text. Synthetic note, temp folder, fake provider only.
 // Run: BATCH2A_OUTPUT=<dir outside the repo> node check/diagram-image.mjs   (after `vite build`)
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';

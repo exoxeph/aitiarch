@@ -1,5 +1,6 @@
 // Fake provider + hand-built references only. No external calls or user notes.
 const confirmOn=async page=>{await page.keyboard.press('Control+k');await page.waitForTimeout(150);await page.keyboard.type('Add to note');await page.waitForTimeout(150);if(await page.getByText(/Add to note: confirm before adding/).count()){await page.keyboard.press('Enter');}else{await page.keyboard.press('Escape');}await page.waitForTimeout(100);};
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';import {mkdtemp,mkdir,writeFile,readFile,rm,unlink,readdir} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {execFileSync} from 'node:child_process';import {chromium} from 'playwright-core';
 import {Store} from '../server/store.ts';import {InkStore} from '../server/ink-store.ts';import {NoteWatcher} from '../server/watch.ts';import {createApp} from '../server/http.ts';import {cicd,rag,lifecycle,diagramCases} from '../test/fixtures/diagrams.ts';
 const out=path.resolve(process.env.BATCH2A_OUTPUT??'');assert(process.env.BATCH2A_OUTPUT&&!out.toLowerCase().startsWith(path.resolve('..').toLowerCase()));await mkdir(out,{recursive:true});

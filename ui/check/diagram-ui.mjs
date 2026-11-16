@@ -1,6 +1,7 @@
 // Browser check for the diagram UI: Visualize (toolbar and palette), repair of a near-miss spec, the reason text and
 // "Try diagram again", one-callout insertion, the image in the editor, one undo. Fake provider only; synthetic note.
 // Run after `vite build`: BATCH2A_OUTPUT=<folder outside the repo> node check/diagram-ui.mjs
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm, readdir } from 'node:fs/promises';
 import os from 'node:os';

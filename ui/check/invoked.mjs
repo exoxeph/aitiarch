@@ -1,4 +1,5 @@
 // Synthetic fixture only. No installed CLI, login, transcript or real notebook.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, rm, mkdir, unlink } from 'node:fs/promises';
 import os from 'node:os';

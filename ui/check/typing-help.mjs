@@ -1,4 +1,5 @@
 // Three local browser checks. Synthetic Markdown, fake provider, no screenshots.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {execFileSync} from 'node:child_process';
 import {chromium} from 'playwright-core';

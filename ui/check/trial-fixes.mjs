@@ -1,4 +1,5 @@
 // Disposable synthetic notebook and fake provider only. Screenshots stay outside the repo.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import os from 'node:os';import path from 'node:path';import {fileURLToPath} from 'node:url';

@@ -1,4 +1,5 @@
 // Regression: upward scrolling across local image widgets keeps visible text steady.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';

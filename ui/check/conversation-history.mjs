@@ -6,6 +6,7 @@
 //  (e) a one-off chat stays per note: only that note's own one-off history, never a conversation's replies;
 //  (f) Delete conversation works from another note and leaves each note's one-off history alone.
 // Run after `vite build`: BATCH2A_OUTPUT=<folder outside the repo> node check/conversation-history.mjs
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';

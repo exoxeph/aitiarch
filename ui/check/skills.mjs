@@ -1,6 +1,7 @@
 // Phase 5 check: a synthetic skill library exercises bounded discovery/search;
 // the quiet "Used:" line shows on an AI thought and on a chat reply. No owner data or provider calls.
 // Run: BATCH2A_OUTPUT=<dir outside the repo> node check/skills.mjs   (after `vite build`)
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

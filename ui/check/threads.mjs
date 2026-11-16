@@ -1,4 +1,5 @@
 // Browser integration: synthetic fixtures and in-process fake providers only.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';import {mkdtemp,readFile,writeFile,rm,mkdir} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';import {chromium} from 'playwright-core';
 import {Store} from '../server/store.ts';import {NoteWatcher} from '../server/watch.ts';import {createApp} from '../server/http.ts';

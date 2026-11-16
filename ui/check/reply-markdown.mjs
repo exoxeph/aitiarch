@@ -1,4 +1,5 @@
 // Fake provider only. Rich replies, no fetched resources, and exact editor insertion/undo.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,readFile,rm,mkdir} from 'node:fs/promises';
 import os from 'node:os';import path from 'node:path';import {execFileSync} from 'node:child_process';

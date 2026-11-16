@@ -3,6 +3,7 @@
 // recording: for each of the three personas in the chat, switching back changes it again, and Think and Ask in the selection panel too.
 // The project is not git-ignored, so the setting is only kept for the session (persisted:false). Synthetic note, fake CLI, no live call.
 // Run: BATCH2A_OUTPUT=<dir outside the repo> node check/persona.mjs   (after `vite build`)
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';

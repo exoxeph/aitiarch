@@ -1,4 +1,5 @@
 // Product screenshots with synthetic fixtures only. No real providers or credentials.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm,readdir} from 'node:fs/promises';
 import path from 'node:path';import os from 'node:os';import {fileURLToPath} from 'node:url';

@@ -1,5 +1,6 @@
 // Real-browser check: Settings > Pipeline and the Codex/Kiro chat hookup (slice 3b-i). Fake adapters only, synthetic temp notes and a temp settings folder; no provider is called.
 // Needs BATCH2A_OUTPUT (a folder outside the repo) for screenshots. Run from the ui folder after a build.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import {existsSync} from 'node:fs';
 import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';

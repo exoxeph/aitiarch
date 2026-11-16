@@ -1,3 +1,4 @@
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import {chromium} from 'playwright-core';
 import {Store} from '../server/store.ts';import {NoteWatcher} from '../server/watch.ts';import {SessionIndex} from '../server/harness/session-index.ts';import {createApp} from '../server/http.ts';import {TurnFailure} from '../server/providers/turn.ts';

@@ -3,6 +3,7 @@
 //  - back on A: tool-less, no card, nothing of B in the message; on C: the approval for B does not cover it (card again, C's diagram only, and the server refuses the turn without it); then B needs the card again;
 //  - a diagram that is withheld (secret-looking text) and that the model asks for: the row "Could not open D2" and a plain reply, and the row is still there after a reload.
 // Run after `vite build`: BATCH2A_OUTPUT=<folder outside the repo> node check/conversation-open-note.mjs
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';

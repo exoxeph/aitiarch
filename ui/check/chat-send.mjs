@@ -2,6 +2,7 @@
 //  1. a CLI that emits what the installed Claude CLI really emits with partial messages (a status event, a thinking block) gets its reply streamed;
 //  2. a failing CLI shows a specific reason in words, not the one generic sentence.
 // Synthetic note, fake CLI, no live provider call. Run: BATCH2A_OUTPUT=<dir outside the repo> node check/chat-send.mjs   (after `vite build`)
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';

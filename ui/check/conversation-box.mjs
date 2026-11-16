@@ -5,6 +5,7 @@
 //  - one list holds conversations (named after their first question) and an investigation; rename still works;
 //  - from send until the first text an elapsed-seconds line shows; the panel uses the width it has and keeps a readable line length.
 // Run after `vite build`: BATCH2A_OUTPUT=<folder outside the repo> node check/conversation-box.mjs
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';

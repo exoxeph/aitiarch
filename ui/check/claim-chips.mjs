@@ -2,6 +2,7 @@
 // an honest "not found" when the quote has moved, and (Cite in note) the exact bytes of the inserted link in LF, CRLF and BOM notes. Keyboard only.
 // Synthetic OS-temp note, fake provider that returns scripted claims, no live call. Run after `vite build`:
 //   BATCH2A_OUTPUT=<folder outside the repo> node check/claim-chips.mjs
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import os from 'node:os';

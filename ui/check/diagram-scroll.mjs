@@ -1,6 +1,7 @@
 // Real-browser check: scrolling UP through a note with diagrams in it does not make the text jump. A diagram block that has a margin makes the editor
 // mis-measure every diagram by the margin (it measures a block widget without its margins), so the text below shifted by that much each time one scrolled
 // into view. Here the visible text must move by exactly the wheel distance on every step. Synthetic temp notebook; no provider is called.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';

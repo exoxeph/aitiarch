@@ -2,6 +2,7 @@
 // full-width line behind it or along its edge, no overlap with the neighbouring thought, and its connector still reaching the anchored text.
 // Real browser, fake provider, synthetic long note (so the note scrolls), no model call.
 // Run after `vite build`: BATCH2A_OUTPUT=<folder outside the repo> node check/skill-diagram-layout.mjs
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';

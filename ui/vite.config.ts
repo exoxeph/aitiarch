@@ -21,7 +21,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    setupFiles: ["test/setup/temp-cleanup.ts"],
+    setupFiles: ["test/setup/temp-cleanup.ts", "test/setup/isolated-config.ts"],
     // Two groups. Most files are light and run in parallel. The files below start processes, servers or git, or make many temp folders: on a loaded machine they
     // ran out of time (five-second tests, ten-second hooks, a dozen of them at once). They run after the light group, two at a time, with a minute per test.
     // This is configuration only: no assertion differs between the groups.

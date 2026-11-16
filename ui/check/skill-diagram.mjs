@@ -4,6 +4,7 @@
 // CSP in header and document) runs a hostile document that reaches nothing. (C) A while(true){} page is never fetched or run unclicked and does not freeze
 // the app. (D) Try with Built-in. A local "evil" server that every attempt points at must see ZERO requests; a control shows it would see them.
 // Fake provider only; synthetic note. Run after `vite build`: BATCH2A_OUTPUT=<folder outside the repo> node check/skill-diagram.mjs
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { mkdtemp, mkdir, writeFile, readdir, readFile, rm } from 'node:fs/promises';

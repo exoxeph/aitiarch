@@ -8,6 +8,7 @@
 //  - the D3 bug: a note with an unnamed diagram, one saved without a picture and one whose saved picture is oversize, plus a secret-shaped one: the page makes or repairs the pictures, and the card
 //    and the manifest show all of them with the right status; a Read of the withheld one gets a row with the reason and a reply, not a dead turn.
 // Run after `vite build`: BATCH2A_OUTPUT=<folder outside the repo> node check/diagram-chat.mjs
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';

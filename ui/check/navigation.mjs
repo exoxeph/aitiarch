@@ -1,4 +1,5 @@
 // Real-pointer navigation gate; synthetic BOM+CRLF fixture, no provider calls.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import path from 'node:path';import os from 'node:os';import {fileURLToPath} from 'node:url';

@@ -1,4 +1,5 @@
 // Real-browser check for M3: the chat panel against a scripted fake stream. Synthetic OS-temp note, in-process server, no CLI, no network.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import {mkdtemp,readFile,rm,writeFile,mkdir} from 'node:fs/promises';
 import os from 'node:os';

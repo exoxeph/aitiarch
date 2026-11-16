@@ -4,6 +4,7 @@
 // (b) Tab into the editor shows a visible focus indicator around the writing column only: it never reaches under or over a thought card.
 // (c) The same holds with the tall diagram card present, and a click after the keyboard focus takes the indicator away again.
 // Run after `vite build`: BATCH2A_OUTPUT=<folder outside the repo> node check/focus-frame.mjs   (SHOT=before|after names the click screenshot)
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';

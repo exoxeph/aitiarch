@@ -5,6 +5,7 @@
 //   - the persona chosen for A's chat is not B's; B keeps the default;
 //   - each project's CLI files (the notes, the instruction, the sessions folder) are its own.
 // Never touches the real %APPDATA%\aitiarch or any real notebook.   Run (after `vite build`): BATCH2A_OUTPUT=<folder outside the repo> node check/two-projects.mjs
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {mkdir,mkdtemp,readFile,readdir,rm,writeFile} from 'node:fs/promises';

@@ -1,4 +1,5 @@
 // Synthetic session files + fake provider only; no external requests or screenshots.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import os from 'node:os';import path from 'node:path';import {fileURLToPath} from 'node:url';

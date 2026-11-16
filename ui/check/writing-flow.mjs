@@ -2,6 +2,7 @@
 // marker removes it, Tab nests, a code block is left with Enter on its empty last line and removed with Backspace from the line under it.
 // Real key presses, synthetic notes in a temp folder, fake provider only.
 // Run: BATCH2A_OUTPUT=<dir outside the repo> node check/writing-flow.mjs   (after `vite build`)
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import path from 'node:path';import os from 'node:os';import {fileURLToPath} from 'node:url';

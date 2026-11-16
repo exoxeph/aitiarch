@@ -1,6 +1,7 @@
 // Margin blobs: a new request finds empty space without disturbing the others; blobs can be dragged (or moved by keyboard), overlap freely,
 // the one chosen goes in front and the ones behind get linearly darker; positions survive a reload; Home puts a blob back.
 // Synthetic note, no provider. Run: BATCH2A_OUTPUT=<dir outside the repo> node check/blobs.mjs   (after `vite build`)
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';

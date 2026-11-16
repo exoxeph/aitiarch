@@ -2,6 +2,7 @@
 // the plan card before the first turn that reads the repo (also enforced by the server), no card for the next turn, the live trail (thinking, Glob, Grep, Read, a denied read), file claim chips and the read-only excerpt,
 // Cancel, the partial-answer banner at the turn limit, the tripwire banner and Restore, a reload that shows the questions, Delete, narrow width and
 // keyboard focus. Run after `vite build`: BATCH2A_OUTPUT=<folder outside the repo> node check/investigate-ui.mjs
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';

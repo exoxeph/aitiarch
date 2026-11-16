@@ -1,4 +1,5 @@
 // M7: synthetic session files and fake provider only. Screenshots opt-in, at most three.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';import {mkdtemp,mkdir,writeFile,readFile,rm,utimes} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright-core';import {Store} from '../server/store.ts';import {NoteWatcher} from '../server/watch.ts';import {createApp} from '../server/http.ts';import {sessionModules} from '../server/chat/ide-sessions.ts';import {FakeChatProvider} from '../server/chat/fake.ts';
 const root=await mkdtemp(path.join(os.tmpdir(),'aitiarch-m7-')),claude=path.join(root,'claude'),codex=path.join(root,'codex');await mkdir(claude);await mkdir(codex);

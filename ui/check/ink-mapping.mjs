@@ -1,5 +1,6 @@
 // Real-browser mapping check; all notes are synthetic temporary fixtures.
 // Run after npm run build: node check/ink-mapping.mjs
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";

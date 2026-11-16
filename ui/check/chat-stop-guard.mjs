@@ -2,6 +2,7 @@
 // not cancel; a deliberate Stop double tap at/after 600ms must cancel. RAF,
 // animations, scrolling and network keep running on real time.
 // Synthetic OS-temp note, in-process server, scripted fake stream, no CLI, no network.
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import {mkdtemp,rm,writeFile,mkdir} from 'node:fs/promises';
 import os from 'node:os';

@@ -12,6 +12,7 @@
 //  - a reply's source chip names the note its question was asked on, with the same Found / Not found state, whichever note is open now;
 //  - a conversation started on a note with a very long name: the picker still says "started on", the name is cut with an ellipsis (full name in a tooltip), and nothing overflows in the narrow full-width sheet.
 // Run after `vite build`: BATCH2A_OUTPUT=<folder outside the repo> node check/editor-context.mjs
+import './config-isolation.mjs'; // first: an empty temp config folder, never the machine's real one
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
