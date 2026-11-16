@@ -132,7 +132,7 @@ function create(view: EditorView): TooltipView {
       row(
         button("B", "Bold (Ctrl+B)", () => apply(toggleInline(view.state, "**")), "b"),
         button("I", "Italic (Ctrl+I)", () => apply(toggleInline(view.state, "*")), "i"),
-        button("S", "Strikethrough (Ctrl+Shift+X)", () => apply(toggleInline(view.state, "~~")), "failed-btn"),
+        button("S", "Strikethrough (Ctrl+Shift+X)", () => apply(toggleInline(view.state, "~~")), "strike-btn"),
         button("<>", "Inline code", () => apply(toggleInline(view.state, "`"))),
         button("Link", "Link", () => {
           const r = view.state.selection.main, text = view.state.sliceDoc(r.from, r.to);

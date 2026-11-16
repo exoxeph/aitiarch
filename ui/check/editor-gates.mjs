@@ -288,6 +288,10 @@ await session('toolbar-b',small,async({page,theme,root,bytes})=>{
  await put(page,from,to);const toolbar=page.getByRole('toolbar',{name:'Format selection'});await toolbar.waitFor();
  assert.equal(await toolbar.locator('.cm-sel-row').count(),5,'compact toolbar row order');
  for(const title of ['Bold (Ctrl+B)','Italic (Ctrl+I)','Strikethrough (Ctrl+Shift+X)','Inline code','Link','Text style'])assert.equal(await toolbar.locator(`[title="${title}"]`).count(),1);
+ const failed=toolbar.getByRole('button',{name:'Mark as failed…',exact:true});
+ assert.equal(await failed.isEnabled(),true,'single-line failed-decision action works');
+ assert.equal(await failed.evaluate(e=>getComputedStyle(e).textDecorationLine),'none','failed-decision action must not look struck out');
+ assert.match(await toolbar.getByTitle('Strikethrough (Ctrl+Shift+X)',{exact:true}).evaluate(e=>getComputedStyle(e).textDecorationLine),/line-through/,'only the formatting glyph illustrates strike');
  await toolbar.getByTitle('Bold (Ctrl+B)',{exact:true}).click();assert.equal(await doc(page),d.slice(0,from)+'**'+d.slice(from,to)+'**'+d.slice(to));
  await page.keyboard.press('Control+z');assert.equal(await doc(page),d);assert.deepEqual(await disk(page,root),bytes);
  await put(page,from,to);await page.keyboard.press('Alt+F10');assert.equal(await page.evaluate(()=>document.activeElement?.closest('.cm-sel-toolbar')!==null),true,'keyboard cannot enter toolbar');

@@ -3,6 +3,10 @@ import {describe,it,expect} from 'vitest';
 const css=()=>readFileSync(new URL('../src/tokens.css',import.meta.url),'utf8');
 const styles=()=>readFileSync(new URL('../src/styles.css',import.meta.url),'utf8');
 describe('Grove visual contract',()=>{
+ it('strikes only the formatting glyph, never the working failed-decision action',()=>{
+  expect(styles()).not.toMatch(/\.failed-btn\s*\{[^}]*text-decoration:\s*line-through/);
+  expect(styles()).toMatch(/\.strike-btn\s*\{[^}]*text-decoration:\s*line-through/);
+ });
  it('centralizes the two dark palettes (Ember, Moss), bundled fonts and no light theme',()=>{
   const t=css();for(const hex of ['#15110d','#1b150f','#efe6d3','#e39a52','#10130e','#151a12','#e9e7d6','#bccc7a'])expect(t).toContain(hex);
   expect(t).not.toContain('prefers-color-scheme');expect(t).not.toMatch(/color-scheme:s*light/);expect(t).toContain('Newsreader Variable');expect(t).toContain('Instrument Sans Variable');expect(t).not.toMatch(/https?:/);expect(t).toContain('--radius-page: 15px');
