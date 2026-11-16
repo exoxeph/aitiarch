@@ -38,9 +38,11 @@ export function validateResponseSchema(value:unknown) {
     throw new ProductValidationError({rule:'response_schema',counts:validationCounts(value)});
 }
 interface Sources { note:string; decisions:{id:string;text:string}[] }
+/** Normal chat also uses Kiro's tool-less boundary. This does not enable Kiro for invoked ink. */
+export type ProductResult=Omit<Result,'provider'>&{provider:Result['provider']|'kiro'};
 // The production and offline paths share these checks and their original order.
-export function validateProductResult(result:Result,expectedId:string,sources:Sources,
-  redact:(value:string)=>string,hash:(value:string)=>string,expectedProvider:Result['provider']='claude') {
+export function validateProductResult(result:ProductResult,expectedId:string,sources:Sources,
+  redact:(value:string)=>string,hash:(value:string)=>string,expectedProvider:ProductResult['provider']='claude') {
   const passedRules:ProductRule[]=[];
   let claimIndex=-1,sourceLength=-1;
   const requireRule=(rule:ProductRule,pass:boolean)=>{

@@ -196,6 +196,10 @@ export class ChatRuntime {
   const {review,request}=frozen,s=this.state(review.path,frozen.session?.id);
   if(s.serial!==frozen.serial)throw new ChatError('stale_review');
   if(s.running||[...this.states.values()].filter(x=>x.running).length>=2)throw new ChatError('busy');
+  // Slice 3a-ii's transport boundary exists, but named conversations still need
+  // stateless history and native-unit grants. Never silently run Claude instead.
+  const answerer=activePipelineConfig().normalAnswerer;
+  if(answerer!=='claude')throw new ChatError('disabled',undefined,{ruleId:'provider-unavailable',nodeId:'provider_contracts',detail:`${answerer} normal chat is not enabled yet: session history and native-unit cap integration are pending. No fallback was tried.`});
   if(!this.provider||this.provider.name!=='claude')throw new ChatError('disabled');
   // The server decides what this conversation may do, again at send: a turn that needs more than the conversation was approved for is refused here, whatever the page showed or claimed.
   let authorized:Authorized|undefined;
@@ -248,7 +252,7 @@ export class ChatRuntime {
    try{finished=finishReply({text:result.answer,legacy:result.rawReply!==true,claims:result.claims},{note:request.note,selection:request.selection,decisions:request.decisions,...(claimable.length?{diagrams:claimable}:{})},hash,redact);}
    catch(error){const shape:Record<string,string>={'Invalid answer shape.':'the reply was JSON with the wrong fields','Invalid answer formatting.':'the reply looked like JSON but was incomplete or malformed'};
     const failure=new ProviderError('invalid_response');failure.reason={kind:'unparseable',detail:error instanceof Error&&shape[error.message]?shape[error.message]:'the reply could not be read'};throw failure;}
-   const validated=validateProductResult({...result,answer:finished.body,claims:[]},request.id,request,redact,hash,'claude');
+   const validated=validateProductResult({...result,answer:finished.body,claims:[]},request.id,request,redact,hash,answerer);
    const message:ChatMessage={id:request.id,role:'assistant',body:validated.body,at:new Date().toISOString(),provider:'claude',model:validated.model,evidence:finished.claims.flatMap(c=>c.status==='found'&&c.source!=='file'&&c.sourceHash?[{sourceId:c.sourceId,sourceHash:c.sourceHash,quote:c.quote}]:[]),usage:result.usage,insertionBlocked:!!s.privateContext||secretKinds(result.answer).length>0||secretKinds(validated.body).length>0,
    claims:finished.claims,...(finished.noCitation?{noCitation:finished.noCitation}:{}),...(finished.citation?{citation:finished.citation}:{}),...(request.persona?{persona:request.persona,contract:checkContract(request.persona,validated.body)}:{}),...(gate.echo||echoes(validated.body,review.instruction)?{echo:true as const}:{}),...(frozen.skillNames.length?{skills:frozen.skillNames}:{}),...(frozen.session?{session:frozen.session.id}:{}),...(facts.reads.length?{diagramReads:facts.reads}:{}),...(facts.misses.length?{diagramMisses:facts.misses}:{}),...(facts.costUsd!==null?{costUsd:facts.costUsd}:{}),...(review.editor&&review.editor.path!==review.path?{askedOn:review.editor.path}:{}),...(s.privateContext?{ephemeral:true as const}:{})};
    stage='save'; // from here on, a failure is about saving the reply

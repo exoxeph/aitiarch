@@ -38,6 +38,19 @@ async function withServer<T>(fn:(s:Awaited<ReturnType<typeof server>>,dir:string
 const files=async(dir:string)=>(await readdir(dir)).sort();
 const putOverrides=(s:Awaited<ReturnType<typeof server>>,overrides:unknown)=>s.call('PUT','/api/pipeline-config',{overrides});
 
+it('PUT accepts normalAnswerer without unlocking role or safety-label edits',async()=>{
+ await withServer(async(s)=>{
+  for(const normalAnswerer of ['codex','kiro','claude']){
+   const response=await putOverrides(s,{normalAnswerer});
+   expect(response.status).toBe(200);expect((await response.json()).effective.normalAnswerer).toBe(normalAnswerer);
+  }
+  expect((await putOverrides(s,{normalAnswerer:'chatgpt-plan'})).status).toBe(422);
+  expect((await putOverrides(s,{roles:{chat:'codex'}})).status).toBe(422);
+  expect((await putOverrides(s,{safetyLabels:{codex:'fenced'}})).status).toBe(422);
+  expect((await putOverrides(s,{permission_gate:true})).status).toBe(403);
+ });
+});
+
 describe('GET /api/pipeline-config',()=>{
  it('with no file returns the defaults as the effective config, the locked list, no overrides and no warning, and writes nothing',async()=>{
   await withServer(async(s,dir)=>{

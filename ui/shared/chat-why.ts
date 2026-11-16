@@ -8,6 +8,7 @@ export const WHY_DETAIL_MAX=200;
 const R=(nodeId:string,label:string):WhyRule=>({nodeId,label});
 // Node ids: `protocol_limits`, `provider_contracts`, `redaction` and `permission_gate` are the locked-rule ids of shared/pipeline-config.ts; the others are short ids for the parts that have none there.
 const CODE_RULES:Record<string,WhyRule>={
+ 'provider-unavailable':R('provider_contracts','The selected provider is unavailable; no fallback was tried'),
  plan_required:R('permission_gate','The approved plan does not cover this message'),grant_mismatch:R('permission_gate','The approval belongs to another conversation'),
  review_required:R('permission_gate','The message was not reviewed'),stale_review:R('permission_gate','The chat changed after the review'),
  invalid_chat:R('request-intake','The request was not valid'),busy:R('request-queue','Another request is already running'),

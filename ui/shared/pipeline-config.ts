@@ -1,10 +1,12 @@
 // Data only. No loader, persistence, UI, provider switching or safety overrides.
 export type PipelineProvider='claude'|'codex'|'kiro'|'chatgpt-plan';
+export type NormalAnswerer='claude'|'codex'|'kiro';
 export type PipelineSafetyLabel='fenced'|'contained'|'host-gated';
 type Mode='plan'|'grill'|'explain';
 type Role='chat'|'think'|'ask'|'visualize'|'investigate'|'diagram';
 interface Cap {unit:'usd'|'tokens'|'credits';amount:number;deadlineMs:number}
 export interface PipelineConfig {
+ normalAnswerer:NormalAnswerer;
  roles:Record<Role,PipelineProvider>;
  safetyLabels:Record<'claude'|'codex'|'kiro',PipelineSafetyLabel>;
  personaModes:Record<'chat'|'think'|'ask'|'visualize',Mode>;
@@ -22,6 +24,7 @@ export interface PipelineConfig {
 function freeze<T>(value:T):T{if(value&&typeof value==='object'){for(const v of Object.values(value))freeze(v);Object.freeze(value);}return value;}
 
 export const DEFAULT_PIPELINE_CONFIG=freeze({
+ normalAnswerer:'claude',
  roles:{chat:'claude',think:'claude',ask:'claude',visualize:'claude',investigate:'claude',diagram:'claude'},
  safetyLabels:{claude:'fenced',codex:'contained',kiro:'host-gated'},
  personaModes:{chat:'plan',think:'plan',ask:'explain',visualize:'explain'},
@@ -82,6 +85,7 @@ export function validPipelineConfig(value:unknown):value is PipelineConfig{
   if(typeof shape==='number'){const r=ranges[path];return !!r&&typeof v==='number'&&Number.isFinite(v)&&(fractional.has(path)||Number.isSafeInteger(v))&&v>=r[0]&&v<=r[1];}
   if(typeof shape==='string'){
    if(typeof v!=='string')return false;
+   if(path==='normalAnswerer')return ['claude','codex','kiro'].includes(v);
    if(path.startsWith('roles.'))return ['claude','codex','kiro','chatgpt-plan'].includes(v);
    if(path.startsWith('safetyLabels.'))return ['fenced','contained','host-gated'].includes(v);
    if(path.startsWith('personaModes.'))return ['plan','grill','explain'].includes(v);

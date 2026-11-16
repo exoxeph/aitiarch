@@ -38,7 +38,7 @@ function productDetail(rule:string,c:ProductValidationError['record']['counts'])
   case 'claims_array':return 'claims is not a list';
   case 'claims_count':return `${c.claimsCount} claims; the limit is 32`;
   case 'result_id':return 'the result id does not match the request';
-  case 'result_provider':return 'the result provider is not claude';
+  case 'result_provider':return 'the result provider is not the configured answerer';
   case 'model':return `the model name is ${c.modelLength} characters or not an allowed name`;
   case 'claim_source':return `${claim}its source id (${c.sourceIdLength} characters) was not sent with the request`;
   case 'claim_quote_type':return `${claim}the quote is not text`;

@@ -12,6 +12,7 @@ import {InsertionStore} from '../server/insertion-store.ts';import {LedgerStore}
 import {EditorState} from '@codemirror/state';import {history,undo} from '@codemirror/commands';
 import {ProviderError} from '../server/providers/index.ts';
 import {contextModules} from '../server/chat/context.ts';
+import {DEFAULT_PIPELINE_CONFIG,setActivePipelineConfig} from '../shared/pipeline-config.ts';
 import {sessionModules} from '../server/chat/ide-sessions.ts';
 // These integration tests spawn real local Git processes on Windows (never a model).
 // Browser-process startup can contend with them; this is not a performance assertion.
@@ -28,6 +29,15 @@ async function fixture(ignore=true){
  const input:ChatInput={id:'chat-one',path:'fixture.md',question:'Explain the plan.',context:[{moduleId:'this-note',ids:['note']}]};
  return {root,store,ink,provider,chats,runtime,input};
 }
+it('non-Claude configuration fails closed until session/cap integration; it never silently invokes Claude',async()=>{
+ const f=await fixture();
+ try{for(const normalAnswerer of ['codex','kiro'] as const){
+  setActivePipelineConfig({...structuredClone(DEFAULT_PIPELINE_CONFIG),normalAnswerer});
+  const review=await f.runtime.review(f.input);
+  await expect(f.runtime.send({reviewId:review.reviewId,confirmed:true},()=>{})).rejects.toMatchObject({code:'disabled',why:{ruleId:'provider-unavailable',nodeId:'provider_contracts'}});
+  expect(f.provider.requests).toHaveLength(0);
+ }}finally{setActivePipelineConfig(null);await f.runtime.close();}
+});
 it('ledger failure at chat start, completion and context reads never loses the reply; pending audit is visible and retried',async()=>{
  const f=await fixture(),write=vi.spyOn(LedgerStore.prototype,'append').mockRejectedValue(new Error('The ledger lock was taken over; nothing was written.')),log=vi.spyOn(console,'warn').mockImplementation(()=>{});
  try{const review=await f.runtime.review(f.input),events:ChatEvent[]=[];await f.runtime.send({reviewId:review.reviewId,confirmed:true},e=>events.push(e));
