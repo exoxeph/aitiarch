@@ -45,13 +45,44 @@ try{
  assert.equal(await studio.locator('g[data-stitch]').count(),3,'three stitched joins into the Council');assert.deepEqual(await studio.locator('g[data-stitch]').evaluateAll(g=>g.map(e=>e.getAttribute('data-limb')).sort()),['council-claude','council-codex','council-kiro']);
  assert.equal(await studio.locator('.studio-node[data-main]').count(),7,'the seven nodes of the main path are set apart');
  assert.equal(await studio.locator('.studio-edges path[data-trunk]').count(),edgesOf().filter(e=>e.to==='ledger').length,'every edge into the Ledger is part of the trunk');
- assert(await studio.locator('.studio-edges path[data-trunk]').first().evaluate(e=>+getComputedStyle(e).strokeOpacity)<.5,'the Ledger lines are faint until their path is lit');
- assert((await studio.locator('.studio-edges path[data-far]').count())>=2,'long hauls across lanes are marked');
- assert(await studio.locator('.studio-edges path[data-edge="permission_gate>council"]').evaluate(e=>e.hasAttribute('data-far')&&+getComputedStyle(e).strokeOpacity<.5),'the gate-to-Council haul is faint by default');
+ assert(await studio.locator('.studio-edges path[data-trunk]').first().evaluate(e=>parseFloat(getComputedStyle(e).strokeWidth))<=2.2,'edges are thin and calm until you point at a node');
+ assert.equal(await studio.locator('.studio-edges path[data-edge]:not([data-active]):not([data-dim])').count(),await studio.locator('.studio-edges path[data-edge]').count(),'nothing is lit or dimmed before you hover');
+ // 1a. Layout: spread out, readable at the default fit, edges clear of unrelated nodes, and dashed means locked only.
+ const measure=async()=>page.evaluate(({nodes,margin})=>{
+  const k=document.querySelector('.studio-node').getBoundingClientRect().width/document.querySelector('.studio-node').offsetWidth;
+  const titles=[...document.querySelectorAll('.studio-node-title')].map(e=>parseFloat(getComputedStyle(e).fontSize)*k),meta=[...document.querySelectorAll('.studio-kind')].map(e=>parseFloat(getComputedStyle(e).fontSize)*k);
+  const rects=Object.fromEntries([...document.querySelectorAll('.studio-node')].map(e=>[e.dataset.node,e.getBoundingClientRect()])),lanes=[...document.querySelectorAll('.studio-region')].map(e=>({g:e.dataset.group,r:e.getBoundingClientRect()}));
+  const gap=(a,b)=>Math.max(a.left-b.right,b.left-a.right,a.top-b.bottom,b.top-a.bottom);
+  const problems=[],ids=Object.keys(rects);
+  for(const a of ids)for(const b of ids)if(a<b&&gap(rects[a],rects[b])<20*k)problems.push(`nodes ${a} / ${b} are too close`);
+  for(const x of lanes)for(const y of lanes)if(x.g<y.g&&gap(x.r,y.r)<36*k)problems.push(`lanes ${x.g} / ${y.g} touch`);
+  for(const n of nodes){const r=rects[n.id],own=lanes.find(l=>l.g===n.group).r;
+   if(r.left-own.left<14*k||own.right-r.right<14*k||r.top-own.top<14*k||own.bottom-r.bottom<14*k)problems.push(`${n.id} sits against its lane border`);
+   for(const l of lanes)if(l.g!==n.group&&gap(r,l.r)<20*k)problems.push(`${n.id} is next to the ${l.g} lane`);
+   if(Math.abs(r.height/k-n.h)>1.5)problems.push(`${n.id} grew past its box (${Math.round(r.height/k)})`);}
+  // Every drawn edge, sampled along its length, stays out of the nodes it is not part of.
+  const world=Object.fromEntries(nodes.map(n=>[n.id,{x:n.x,y:n.y}]));
+  for(const p of document.querySelectorAll('.studio-edges path[data-edge]')){const [from,to]=p.dataset.edge.split('>'),len=p.getTotalLength();
+   for(let t=0;t<=len;t+=4){const q=p.getPointAtLength(t);for(const n of nodes){if(n.id===from||n.id===to)continue;const w=world[n.id];if(q.x>w.x-4&&q.x<w.x+184+4&&q.y>w.y-4&&q.y<w.y+n.h+4){problems.push(`edge ${p.dataset.edge} runs through ${n.id}`);break;}}}}
+  return {k,minTitle:Math.min(...titles),minMeta:Math.min(...meta),problems:[...new Set(problems)]};
+ },{nodes:PIPELINE_NODES.map(n=>({id:n.id,group:n.group,x:n.x,y:n.y,h:n.id==='ledger'?136:88})),margin:0});
+ const m1440=await measure();assert.deepEqual(m1440.problems,[],'the 1440 layout is spread out and clear: '+JSON.stringify(m1440.problems));
+ assert(m1440.minTitle>=12,`node text is at least 12px at the default fit at 1440 (smallest title ${m1440.minTitle.toFixed(1)}px, tags ${m1440.minMeta.toFixed(1)}px, zoom ${m1440.k.toFixed(2)})`);
+ await page.screenshot({path:path.join(output,'layout-1440.png')});
+ await page.setViewportSize({width:1920,height:1080});await studio.getByRole('button',{name:'Reset layout'}).click();await page.waitForTimeout(250);
+ const m1920=await measure();assert.deepEqual(m1920.problems,[],'the 1920 layout is spread out and clear: '+JSON.stringify(m1920.problems));assert(m1920.minTitle>=12,`node text is at least 12px at 1920 (${m1920.minTitle.toFixed(1)}px)`);
+ await page.screenshot({path:path.join(output,'layout-1920.png')});
+ await page.setViewportSize({width:1440,height:900});await studio.getByRole('button',{name:'Reset layout'}).click();await page.waitForTimeout(250);
+ for(const id of ['council-claude','council-codex','council-kiro']){const s=await node(id).evaluate(e=>{const c=getComputedStyle(e);return {outline:c.outlineStyle,border:c.borderTopStyle};});assert.deepEqual(s,{outline:'none',border:'solid'},`${id} has no dashed treatment: dashed always means locked`);}
+ for(const e of await studio.locator('.studio-edges path[data-edge]').evaluateAll(ps=>ps.map(p=>p.getAttribute('d'))))assert(!/C/.test(e.replace(/[QA]/g,'')),'no free curves: only straight runs, rounded elbows and hops');
+ assert.equal(await studio.locator('.studio-edges path[data-edge][marker-end]').count(),await studio.locator('.studio-edges path[data-edge]').count(),'every edge ends in an arrowhead');
  // 1c. Hovering a node lights its edges upstream and downstream, and quiets the nodes that are not on its path.
  await node('permission_gate').hover();
  const gateLit=await studio.locator('.studio-edges path[data-active]').evaluateAll(p=>p.map(e=>e.getAttribute('data-edge')));
  for(const e of ['redaction>permission_gate','permission_gate>request-queue','token-budget>normal-answerer','request-intake>redaction','claim-check>chat-store'])assert(gateLit.includes(e),`hovering the gate lights ${e}: ${gateLit}`);
+ await page.waitForTimeout(300); // the dimming eases in over 140 ms
+ assert(await studio.locator('.studio-edges path[data-active]').first().evaluate(e=>parseFloat(getComputedStyle(e).strokeWidth))>=3,'the lit path is bold');
+ assert(await studio.locator('.studio-edges path[data-dim]').first().evaluate(e=>+getComputedStyle(e).strokeOpacity)<.3,'the edges off the path step back');
  assert.equal(await node('exclusion_lists').getAttribute('data-dim'),'true','a node off the path is quieted');assert.equal(await node('redaction').getAttribute('data-dim'),null,'a node on the path is not');
  await page.screenshot({path:path.join(output,'studio-polish-hover-gate.png')});
  await node('ledger').hover();const ledgerLit=await studio.locator('.studio-edges path[data-trunk][data-active]').count();assert.equal(ledgerLit,await studio.locator('.studio-edges path[data-trunk]').count(),'hovering the Ledger brightens its whole trunk');
@@ -77,7 +108,7 @@ try{
  // 4. Dragging moves a node and the place is remembered; Reset layout puts everything back.
  const dflt=nodeById('token-budget'),b=await node('token-budget').boundingBox();
  await page.mouse.move(b.x+b.width/2,b.y+b.height/2);await page.mouse.down();await page.mouse.move(b.x+b.width/2+60,b.y+b.height/2+40,{steps:8});await page.mouse.up();
- const moved=JSON.parse(await page.evaluate(()=>localStorage.getItem('aitiarch.pipeline.layout')));assert(moved['token-budget']&&Math.abs(moved['token-budget'].x-(dflt.x+60/(b.width/210)))<=3&&Math.abs(moved['token-budget'].y-(dflt.y+40/(b.width/210)))<=3,'the new place is stored: '+JSON.stringify(moved));
+ const moved=JSON.parse(await page.evaluate(()=>localStorage.getItem('aitiarch.pipeline.layout')));assert(moved['token-budget']&&Math.abs(moved['token-budget'].x-(dflt.x+60/(b.width/184)))<=3&&Math.abs(moved['token-budget'].y-(dflt.y+40/(b.width/184)))<=3,'the new place is stored: '+JSON.stringify(moved));
  assert.equal(await studio.locator('[data-editor]').count(),0,'a drag is not a click');
  await boot();await openStudio();assert.equal(await node('token-budget').evaluate(e=>e.style.left),moved['token-budget'].x+'px','the place survives a reload');
  await studio.getByRole('button',{name:'Reset layout'}).click();assert.equal(await node('token-budget').evaluate(e=>e.style.left),dflt.x+'px');assert.equal(await page.evaluate(()=>localStorage.getItem('aitiarch.pipeline.layout')),null,'the stored layout is cleared');

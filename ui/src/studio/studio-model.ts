@@ -2,7 +2,10 @@
 import {GROUP_ORDER,PIPELINE_NODES,numberAt,type NodeGroup,type PipelineNode} from '../../shared/pipeline-nodes.ts';
 
 export const LAYOUT_KEY='aitiarch.pipeline.layout';
-export const NODE_W=210,NODE_H=62,WORLD_W=1900,WORLD_H=1300;
+export const NODE_W=184,NODE_H=88,WORLD_W=1900,WORLD_H=1100;
+/** The Ledger takes in six edges, so its box is taller: each arrowhead gets its own clear spot on its left side. */
+export const LEDGER_H=136;
+export const nodeH=(id:string)=>id==='ledger'?LEDGER_H:NODE_H;
 export type Place={x:number;y:number};
 export type Layout=Record<string,Place>;
 export interface Camera {x:number;y:number;k:number}
@@ -36,18 +39,6 @@ export function zoomAt(cam:Camera,factor:number,px:number,py:number):Camera{
 }
 /** A camera that puts the middle of a node in the middle of a viewport. */
 export const centerOn=(p:Place,view:{w:number;h:number},k=1):Camera=>({k,x:view.w/2-(p.x+NODE_W/2)*k,y:view.h/2-(p.y+NODE_H/2)*k});
-/** A smooth curve between two nodes: right edge to left edge when the next node is to the right; bottom to top (or top to bottom) when they share a column. */
-export function edgePath(a:Place,b:Place):string{
- if(b.x<a.x+NODE_W+24){
-  const gap=Math.abs(b.y-a.y);
-  // Nodes in a column with others between them: bow out around the right side instead of running behind the ones in the middle.
-  if(gap>NODE_H+60){const x1=a.x+NODE_W,y1=a.y+NODE_H/2,x2=b.x+NODE_W,y2=b.y+NODE_H/2,bow=56+Math.min(40,gap/10);return `M${x1},${y1} C${x1+bow},${y1} ${x2+bow},${y2} ${x2},${y2}`;}
-  const down=b.y>=a.y,x1=a.x+NODE_W/2,y1=down?a.y+NODE_H:a.y,x2=b.x+NODE_W/2,y2=down?b.y:b.y+NODE_H,dy=Math.max(24,Math.abs(y2-y1)/2)*(down?1:-1);
-  return `M${x1},${y1} C${x1},${y1+dy} ${x2},${y2-dy} ${x2},${y2}`;
- }
- const x1=a.x+NODE_W,y1=a.y+NODE_H/2,x2=b.x,y2=b.y+NODE_H/2,dx=Math.max(40,Math.abs(x2-x1)/2);
- return `M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`;
-}
 /** The main path of a reply, drawn a little stronger than the side nodes: your note, redaction, the permission gate, the answerer, the integrity check, the claim check and saving. */
 export const MAIN_NODES:ReadonlySet<string>=new Set(['request-intake','redaction','permission_gate','normal-answerer','reply-integrity','claim-check','chat-store']);
 /** The edges that carry that path (the steps between the main nodes included). */
@@ -64,16 +55,17 @@ export function regionsOf(nodes:readonly PipelineNode[],place:(n:PipelineNode)=>
  const out:Region[]=[];
  for(const group of GROUP_ORDER){
   const own=nodes.filter(n=>n.group===group);if(!own.length)continue;
-  const ps=own.map(place),x0=Math.min(...ps.map(p=>p.x)),x1=Math.max(...ps.map(p=>p.x))+NODE_W,y0=Math.min(...ps.map(p=>p.y)),y1=Math.max(...ps.map(p=>p.y))+NODE_H;
+  const ps=own.map(place),x0=Math.min(...ps.map(p=>p.x)),x1=Math.max(...ps.map(p=>p.x))+NODE_W,y0=Math.min(...ps.map(p=>p.y)),y1=Math.max(...own.map((n,i)=>ps[i].y+nodeH(n.id)));
   out.push({group,x:x0-REGION_PAD,y:y0-REGION_PAD-REGION_LABEL,w:x1-x0+2*REGION_PAD,h:y1-y0+2*REGION_PAD+REGION_LABEL});
  }
  return out;
 }
-export const REGION_PAD=16,REGION_LABEL=26;
-/** A camera that shows every place at once, as large as fits (never past 1:1 nor below the smallest zoom). */
-export function fitCamera(places:readonly Place[],view:{w:number;h:number},pad=24):Camera{
+/** Room inside a lane around its nodes, and the strip at its top that holds the lane's label. */
+export const REGION_PAD=20,REGION_LABEL=28;
+/** A camera that shows every place at once (and any extra boxes, such as the lanes with their labels), as large as fits: never past 1:1, never below the smallest zoom. */
+export function fitCamera(places:readonly Place[],view:{w:number;h:number},pad=12,extra:readonly {x:number;y:number;w:number;h:number}[]=[]):Camera{
  if(!places.length||view.w<=0||view.h<=0)return {x:16,y:16,k:.75};
- const minX=Math.min(...places.map(p=>p.x)),maxX=Math.max(...places.map(p=>p.x))+NODE_W,minY=Math.min(...places.map(p=>p.y)),maxY=Math.max(...places.map(p=>p.y))+NODE_H;
+ const minX=Math.min(...places.map(p=>p.x),...extra.map(r=>r.x)),maxX=Math.max(...places.map(p=>p.x+NODE_W),...extra.map(r=>r.x+r.w)),minY=Math.min(...places.map(p=>p.y),...extra.map(r=>r.y)),maxY=Math.max(...places.map(p=>p.y+NODE_H),...extra.map(r=>r.y+r.h));
  const k=clampZoom(Math.min((view.w-2*pad)/(maxX-minX),(view.h-2*pad)/(maxY-minY),1));
  return {k,x:(view.w-(maxX-minX)*k)/2-minX*k,y:(view.h-(maxY-minY)*k)/2-minY*k};
 }

@@ -1,7 +1,7 @@
 import {expect,it} from 'vitest';
 import {DEFAULT_PIPELINE_CONFIG} from '../shared/pipeline-config.ts';
 import {PIPELINE_NODES,nodeById} from '../shared/pipeline-nodes.ts';
-import {LAYOUT_KEY,MAIN_EDGES,MAIN_NODES,NODE_W,REGION_LABEL,REGION_PAD,pathAround,regionsOf,fitCamera,centerOn,clampPlace,clampZoom,deletePath,edgePath,isNarrow,loadLayout,overridesWith,overridesWithout,parseField,saveLayout,setPath,zoomAt} from '../src/studio/studio-model.ts';
+import {LAYOUT_KEY,MAIN_EDGES,MAIN_NODES,NODE_W,REGION_LABEL,REGION_PAD,pathAround,regionsOf,fitCamera,centerOn,clampPlace,clampZoom,deletePath,NODE_H,WORLD_H,isNarrow,loadLayout,overridesWith,overridesWithout,parseField,saveLayout,setPath,zoomAt} from '../src/studio/studio-model.ts';
 
 const store=(initial?:string)=>{let v=initial;return {getItem:()=>v??null,setItem:(_k:string,x:string)=>{v=x;},get value(){return v;}};};
 
@@ -16,19 +16,11 @@ it('never throws when storage is blocked',()=>{
  expect(loadLayout(broken)).toEqual({});expect(saveLayout({},broken)).toBe(false);expect(loadLayout(null)).toEqual({});expect(saveLayout({},null)).toBe(false);
 });
 it('keeps nodes inside the world and zoom inside its limits',()=>{
- expect(clampPlace({x:-50,y:99999})).toEqual({x:0,y:1238});expect(clampZoom(10)).toBe(2);expect(clampZoom(.01)).toBe(.4);
+ expect(clampPlace({x:-50,y:99999})).toEqual({x:0,y:WORLD_H-NODE_H});expect(clampZoom(10)).toBe(2);expect(clampZoom(.01)).toBe(.4);
 });
 it('zooms around the point under the pointer',()=>{
  const c=zoomAt({x:0,y:0,k:1},2,100,50);expect(c).toEqual({k:2,x:-100,y:-50});expect((100-c.x)/c.k).toBe(100);
  expect(centerOn({x:0,y:0},{w:800,h:600}).x).toBe(400-NODE_W/2);
-});
-it('draws an edge from the right of one node to the left of the next',()=>{expect(edgePath({x:0,y:0},{x:300,y:100})).toMatch(/^M210,31 C/);});
-it('joins nodes in the same column bottom to top instead of looping around them',()=>{
- expect(edgePath({x:100,y:0},{x:100,y:110})).toMatch(/^M205,62 C205,\S+ 205,\S+ 205,110$/);
- expect(edgePath({x:100,y:110},{x:100,y:0})).toMatch(/^M205,110 C.* 205,62$/);
-});
-it('bows out around the side when other nodes sit between two in a column',()=>{
- expect(edgePath({x:100,y:0},{x:100,y:330})).toMatch(/^M310,31 C3\d\d,31 3\d\d,361 310,361$/);
 });
 it('knows the main path and everything upstream and downstream of a node',()=>{
  expect(MAIN_NODES.has('permission_gate')).toBe(true);expect(MAIN_NODES.has('ledger')).toBe(false);expect(MAIN_EDGES.has('redaction>permission_gate')).toBe(true);
@@ -47,7 +39,9 @@ it('keeps the lanes apart: no two group regions overlap in the default layout',(
 });
 it('fits every place in the view, centred, and never past 1:1',()=>{
  const places=[{x:40,y:40},{x:1490,y:850}],cam=fitCamera(places,{w:1400,h:780});
- for(const p of places){const sx=p.x*cam.k+cam.x,sy=p.y*cam.k+cam.y;expect(sx).toBeGreaterThanOrEqual(0);expect(sy).toBeGreaterThanOrEqual(0);expect(sx+NODE_W*cam.k).toBeLessThanOrEqual(1400);expect(sy+62*cam.k).toBeLessThanOrEqual(780);}
+ for(const p of places){const sx=p.x*cam.k+cam.x,sy=p.y*cam.k+cam.y;expect(sx).toBeGreaterThanOrEqual(0);expect(sy).toBeGreaterThanOrEqual(0);expect(sx+NODE_W*cam.k).toBeLessThanOrEqual(1400);expect(sy+NODE_H*cam.k).toBeLessThanOrEqual(780);}
+ // lane boxes (with their labels) count too, so a label above the top node is not cut off
+ const withLane=fitCamera(places,{w:1400,h:780},12,[{x:10,y:-30,w:300,h:200}]);expect(-30*withLane.k+withLane.y).toBeGreaterThanOrEqual(0);
  expect(fitCamera([{x:0,y:0}],{w:2000,h:2000}).k).toBe(1);expect(fitCamera([],{w:10,h:10}).k).toBe(.75);
 });
 it('switches to the list at 480 px and below',()=>{expect(isNarrow(360)).toBe(true);expect(isNarrow(480)).toBe(true);expect(isNarrow(481)).toBe(false);});

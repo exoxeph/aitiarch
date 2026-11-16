@@ -1612,7 +1612,7 @@ p.chat-wait { margin: 4px 0 0; }
    radial-gradient(circle at 12% 33%, color-mix(in srgb, var(--ink-text) 48%, transparent) 0 .9px, transparent 1.6px);
   background-size: 1300px 900px, 331px 283px, 421px 359px, 137px 113px, 83px 97px, 47px 53px; }
 .studio-viewport:active { cursor: grabbing; }
-.studio-world { position: absolute; left: 0; top: 0; width: 1900px; height: 1300px; transform-origin: 0 0; }
+.studio-world { position: absolute; left: 0; top: 0; width: 1900px; height: 1100px; transform-origin: 0 0; }
 /* Each group has a muted colour from the existing tokens, used for its lane, its label and the stripe on its nodes. */
 .studio [data-group="request"] { --g: var(--link); }
 .studio [data-group="guard"] { --g: var(--danger); }
@@ -1622,40 +1622,43 @@ p.chat-wait { margin: 4px 0 0; }
 .studio [data-group="council"] { --g: color-mix(in srgb, var(--accent) 50%, var(--ai-ink)); }
 .studio [data-group="records"] { --g: var(--muted); }
 .studio-region { position: absolute; box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--g) 26%, transparent); border-radius: 20px; background: linear-gradient(180deg, color-mix(in srgb, var(--g) 11%, transparent), color-mix(in srgb, var(--g) 4%, transparent)); pointer-events: none; }
-.studio-region-label { position: absolute; left: 16px; top: 8px; color: color-mix(in srgb, var(--g) 70%, var(--ink-text)); font: 700 14px/1.2 var(--font-ui); letter-spacing: .09em; text-transform: uppercase; }
+.studio-region-label { position: absolute; left: 20px; top: 12px; color: color-mix(in srgb, var(--g) 70%, var(--ink-text)); font: 700 14.5px/1.2 var(--font-ui); letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
 .studio-edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; color: var(--muted); }
-.studio-edges path { fill: none; stroke: color-mix(in srgb, var(--muted) 52%, transparent); stroke-width: 1.3; }
-.studio-edges path[data-main] { stroke: color-mix(in srgb, var(--ink-text) 62%, transparent); stroke-width: 2.2; }
-/* The lines into the Ledger are one trunk of many: faint until the node you are on lies on their path. */
-.studio-edges path[data-trunk], .studio-edges path[data-far] { stroke-opacity: .26; }
-.studio-edges path[data-active] { stroke: var(--accent); stroke-width: 2.4; stroke-opacity: 1; color: var(--accent); }
+/* Edges are thin and calm until you point at a node: its path, upstream and downstream, turns bold and bright and everything else steps back. */
+.studio-edges path { fill: none; stroke: color-mix(in srgb, var(--muted) 70%, transparent); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; transition: stroke-opacity 140ms; }
+.studio-edges path[data-main] { stroke: color-mix(in srgb, var(--ink-text) 62%, transparent); stroke-width: 2; }
+.studio-edges path[data-dim] { stroke-opacity: .13; }
+.studio-edges path[data-active] { stroke: var(--accent); stroke-width: 3.6; stroke-opacity: 1; }
 /* The Council is stitched together from three providers: a seam with cross-stitches, each limb in its own colour. */
-.studio-edges .stitch-ticks { stroke: var(--accent); stroke-width: 9; stroke-dasharray: 1.6 7.4; stroke-opacity: .8; }
-.studio-edges .stitch-seam { stroke: var(--accent); stroke-width: 1.4; stroke-opacity: .85; }
+.studio-edges .stitch-ticks { stroke: var(--accent); stroke-width: 11; stroke-linecap: butt; stroke-dasharray: 1.8 8.2; stroke-opacity: .85; }
+.studio-edges .stitch-seam { stroke: var(--accent); stroke-width: 1.8; stroke-opacity: .9; }
 .studio-edges g[data-limb="council-codex"] path { stroke: var(--link); }
 .studio-edges g[data-limb="council-kiro"] path { stroke: var(--ai-ink); }
 .studio-edges g[data-active] path { stroke-opacity: 1; }
-.studio-node { position: absolute; display: flex; flex-direction: column; justify-content: center; gap: 4px; box-sizing: border-box; padding: 8px 12px 8px 14px; text-align: left; border: 1px solid color-mix(in srgb, var(--g, var(--rule)) 50%, var(--rule)); border-left: 4px solid var(--g, var(--rule)); border-radius: var(--radius-card); background: var(--paper-2); color: var(--ink-text); font: 13px/1.3 var(--font-ui); cursor: grab; box-shadow: var(--shadow-small); touch-action: none; transition: border-color 140ms, opacity 140ms; }
+.studio-edges g[data-active] .stitch-seam { stroke-width: 3.4; }
+.studio-edges g[data-dim] path { stroke-opacity: .13; }
+.studio-node { position: absolute; display: flex; flex-direction: column; justify-content: center; gap: 4px; box-sizing: border-box; padding: 7px 10px 7px 12px; text-align: left; border: 1px solid color-mix(in srgb, var(--g, var(--rule)) 50%, var(--rule)); border-left: 4px solid var(--g, var(--rule)); border-radius: var(--radius-card); background: var(--paper-2); color: var(--ink-text); font: 17px/1.22 var(--font-ui); cursor: grab; box-shadow: var(--shadow-small); touch-action: none; transition: border-color 140ms, opacity 140ms; }
 .studio-node:hover { border-color: var(--accent); }
 /* Locked: hatched, dashed and flat, so it reads as "not for editing" before you read a word. Editable: solid, lifted, with its mark. */
 .studio-node[data-kind="locked"] { border-style: dashed; border-left-style: solid; background-color: var(--paper); background-image: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--muted) 14%, transparent) 6px 7px); box-shadow: none; }
 .studio-node[data-kind="editable"] { background-image: linear-gradient(180deg, color-mix(in srgb, var(--g, var(--accent)) 12%, transparent), transparent 70%); }
 .studio-node[data-main] { border-width: 1.5px; border-left-width: 5px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--g) 35%, transparent), 0 8px 22px -10px color-mix(in srgb, var(--g) 70%, transparent); }
-.studio-node[data-main] .studio-node-title { font-size: 14.5px; }
+.studio-node[data-main] .studio-node-title { font-size: 18px; }
 .studio-node[data-dim] { opacity: .42; }
 .studio-node[data-selected] { border-color: var(--accent); background-color: var(--accent-soft); }
 .studio-node[data-highlight] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-small); }
 /* The three Council limbs: patches of different cloth, with a stitched inner border and their own colour. */
-.studio-node[data-node^="council-"] { --g: var(--accent); outline: 2px dashed color-mix(in srgb, var(--g) 60%, transparent); outline-offset: -6px; }
+/* No dashes here: dashed always means locked. A limb is a solid patch with a stitched double ring and a wide band of its own colour. */
+.studio-node[data-node^="council-"] { --g: var(--accent); border-left-width: 9px; box-shadow: inset 0 0 0 2px var(--paper-2), inset 0 0 0 4px color-mix(in srgb, var(--g) 70%, transparent), var(--shadow-small); }
 .studio-node[data-provider="codex"] { --g: var(--link); }
 .studio-node[data-provider="kiro"] { --g: var(--ai-ink); }
 .studio-node-title { display: flex; align-items: center; gap: 6px; font-weight: 600; }
-.studio-node-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.studio-kind { display: inline-flex; align-items: center; gap: 5px; padding: 0 7px; border-radius: 999px; font: 600 11px/1.6 var(--font-ui); letter-spacing: .03em; }
+.studio-node-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; }
+.studio-kind { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 999px; font: 600 14px/1.35 var(--font-ui); letter-spacing: .01em; }
 .studio-kind[data-kind="editable"] { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ink-text); }
 .studio-kind[data-kind="locked"] { border: 1px dashed var(--muted); color: var(--muted); }
-.studio-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 30%, transparent); }
-.studio-node .council-badge { font-size: 11px; line-height: 1.5; }
+.studio-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 30%, transparent); }
+.studio-node .council-badge { font-size: 14px; line-height: 1.45; }
 .studio-lock { flex: none; color: var(--muted); }
 .studio-card { position: absolute; left: 16px; bottom: 16px; z-index: 2; box-sizing: border-box; width: min(27rem, calc(100% - 32px)); max-height: min(70%, 30rem); overflow: auto; padding: 12px 14px; border: 1px solid var(--rule); border-radius: var(--radius-card); background: var(--paper-2); box-shadow: var(--shadow-page); font: 13px/1.5 var(--font-ui); cursor: default; user-select: text; }
 .studio-card h3 { display: flex; align-items: center; gap: 6px; margin: 0; font: 600 15px/1.3 var(--font-ui); }
