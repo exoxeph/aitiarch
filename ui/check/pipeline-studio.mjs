@@ -237,7 +237,16 @@ try{
  await tb.getByRole('button',{name:'Reset this node'}).click();await tb.getByText('This node is back to its defaults.').waitFor();assert.deepEqual(await saved(),{normalAnswerer:'codex'},'only this node was reset');
  await page.keyboard.press('Escape');await page.keyboard.press('Escape');await studio.waitFor({state:'detached'});
  // 9. Settings keeps its plain form, with a link to the Studio.
+ // Hold its config response so this also covers the first render before settings have loaded.
+ let resumeSettings;const settingsReady=new Promise(resolve=>{resumeSettings=resolve;});
+ await page.route('**/api/pipeline-config',async route=>{if(route.request().method()==='GET')await settingsReady;await route.continue();});
  await page.getByRole('button',{name:'Notes menu',exact:true}).click();await page.getByRole('button',{name:'AI settings'}).click();const dialog=page.getByRole('dialog',{name:'AI settings'});await dialog.getByRole('tab',{name:'Pipeline'}).click();
+ const settingsAnswerer=dialog.getByLabel('Normal chat is answered by');
+ assert.equal(await settingsAnswerer.isDisabled(),true,'settings remain disabled until the config arrives');
+ console.log('Settings before config: '+JSON.stringify({disabled:await settingsAnswerer.isDisabled(),value:await settingsAnswerer.inputValue()}));
+ resumeSettings();
+ await page.waitForFunction(()=>{const select=document.querySelector('#pipeline-answerer');return select&&!select.disabled;});
+ await page.unroute('**/api/pipeline-config');
  assert.equal(await dialog.getByLabel('Normal chat is answered by').inputValue(),'codex','the plain form still works');await dialog.getByRole('button',{name:'Open Pipeline Studio'}).click();await studio.waitFor();assert.equal(await dialog.count(),0,'Settings closed');
  // 10. At phone width the canvas gives way to a readable list of the same nodes.
  await page.setViewportSize({width:360,height:740});await studio.locator('[data-list=true]').waitFor();
