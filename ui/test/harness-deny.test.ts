@@ -18,8 +18,12 @@ describe('repoDenied (what a repo never gives out)',()=>{
  it('keeps out secret STORES: a file named secrets or credentials with no extension, or as json, yml, yaml, toml or env',()=>{
   for(const p of ['secrets','credentials','config/secrets.json','credentials.json','a/b/secrets.yml','secrets.yaml','credentials.toml','secrets.env','Secrets.JSON','secrets.prod.yml','credentials.production.json','secret.yaml','.secrets','my/credentials'])expect(repoDenied(p),p).toBe(true);
  });
- it('lets source code through even when its name says secrets or credentials',()=>{
-  for(const p of ['src/secrets.ts','lib/credentials.py','ui/server/chat/secrets.ts','secrets.js','credentials.go','Secrets.cs','secrets.test.ts','credentials.rb','docs/credentials.md','my-secrets.txt','credentials_helper.py','secretsManager.ts'])expect(repoDenied(p),p).toBe(false);
+ // shared/harness.ts: source code named secrets.* stays code, but any name that starts with credentials is always kept out (the exclusions were strengthened in commit 0bbb8c5).
+ it('lets source code through when its name only says secrets',()=>{
+  for(const p of ['src/secrets.ts','ui/server/chat/secrets.ts','secrets.js','Secrets.cs','secrets.test.ts','my-secrets.txt','secretsManager.ts'])expect(repoDenied(p),p).toBe(false);
+ });
+ it('keeps out every name that starts with credentials, source code or not',()=>{
+  for(const p of ['lib/credentials.py','credentials.go','credentials.rb','docs/credentials.md','credentials_helper.py'])expect(repoDenied(p),p).toBe(true);
  });
  it('treats a FOLDER named exactly secrets or credentials like the file rule: whatever is inside is kept out',()=>{
   for(const p of ['secrets/db.txt','config/credentials/token.txt','deploy/secrets/index.ts'])expect(repoDenied(p),p).toBe(true);
