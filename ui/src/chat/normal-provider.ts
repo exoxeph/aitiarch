@@ -5,7 +5,7 @@ import {formatUsage,providerName} from './council-view.ts';
 export type Answerer='claude'|'codex'|'kiro';
 export const ANSWERERS:readonly Answerer[]=['claude','codex','kiro'];
 /** Cheap local check status, in the same plain words in Settings and Studio. */
-export function availabilityStatus(avail:readonly {id:string;available:boolean;reason?:string}[]|null|undefined,id:Answerer):{word:string;why?:string}{
+export function availabilityStatus(avail:readonly {id:string;available:boolean;reason?:string|null}[]|null|undefined,id:Answerer):{word:string;why?:string}{
  if(avail===undefined)return {word:'Checking…'};
  if(avail===null)return {word:'Could not check',why:'Availability could not be checked.'};
  const p=avail.find(a=>a.id===id);
