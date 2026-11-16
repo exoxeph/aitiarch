@@ -1706,3 +1706,49 @@ p.chat-wait { margin: 4px 0 0; }
 .studio-list section[aria-label="Records"] { --g: var(--muted); }
 .studio-list li { border-left: 4px solid var(--g, var(--rule)); }
 .studio-list h3 { color: color-mix(in srgb, var(--g, var(--muted)) 70%, var(--ink-text)); }
+
+/* Pipeline Studio, wording: the text fields a node owns, with a counter, an unsaved marker and a reset for each. */
+.studio-wording { margin: 4px 0 12px; }
+.studio-wording-head { margin: 8px 0 4px; font: 600 var(--text-meta)/1.3 var(--font-ui); color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.studio-wording-group { min-width: 0; margin: 0 0 10px; padding: 0; border: 0; }
+.studio-wording-group legend { padding: 0; margin-bottom: 4px; font-weight: 600; }
+.studio-text { display: grid; gap: 4px; margin: 0 0 12px; }
+.studio-text-top, .studio-text-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; }
+.studio-editor textarea { width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid var(--control-border); border-radius: var(--radius-small); background: var(--paper); color: var(--ink-text); font: inherit; line-height: 1.45; resize: vertical; }
+.studio-count { color: var(--muted); font-size: var(--text-meta); font-variant-numeric: tabular-nums; }
+.studio-count[data-over] { color: var(--danger); font-weight: 600; }
+.studio-unsaved { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-text); font-size: var(--text-meta); font-weight: 600; }
+.studio-unsaved i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.pipeline-actions .studio-unsaved { margin-left: 4px; }
+
+/* "What is actually sent": your wording highlighted, fixed rules hatched with a padlock, placeholders as chips. Scrolls; reads at phone width. */
+.studio-preview { margin-top: 12px; }
+.studio-preview-body { margin-top: 8px; }
+.pv-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 8px; color: var(--muted); font-size: var(--text-meta); }
+.pv-part { margin: 0 0 10px; }
+.studio-row-body > *, .studio-editor, .studio-preview, .studio-preview-body, .pv-part, .studio-text { min-width: 0; max-width: 100%; }
+.pv-chip { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
+.pv-inputs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin: 6px 0 0; color: var(--muted); font-size: var(--text-meta); }
+.pv-part h5 { margin: 0 0 4px; font: 600 var(--text-meta)/1.3 var(--font-ui); color: var(--muted); }
+.pv-text { box-sizing: border-box; max-height: 18rem; overflow: auto; padding: 10px 12px; border: 1px solid var(--rule); border-radius: var(--radius-small); background: var(--paper); font: 13px/1.6 var(--font-ui); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pv-text:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.pv-editable { padding: 0 2px; border-bottom: 2px solid var(--accent); border-radius: 2px; background: var(--accent-soft); color: var(--ink-text); }
+.pv-locked { color: var(--muted); border-left: 3px dashed var(--muted); padding-left: 6px; background-image: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--muted) 16%, transparent) 6px 7px); }
+.pv-locked .studio-lock { display: inline-block; margin-right: 4px; vertical-align: -1px; }
+.pv-tag { display: inline-block; margin-right: 6px; padding: 0 7px; border: 1px dashed var(--muted); border-radius: 999px; color: var(--muted); font: normal 600 11px/1.5 var(--font-ui); white-space: nowrap; }
+.pv-locked-legend { display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border: 1px dashed var(--muted); border-radius: 999px; }
+.pv-chip { display: inline-block; padding: 0 8px; border: 1px solid var(--rule); border-radius: 999px; background: var(--paper-2); color: var(--ink-text); font: 600 12px/1.5 var(--font-ui); white-space: nowrap; }
+
+/* A node you changed says so, on the canvas and in its card. */
+.studio-custom { position: absolute; right: 8px; top: -10px; padding: 0 8px; border-radius: 999px; background: var(--accent); color: var(--paper); font: 700 12px/1.5 var(--font-ui); letter-spacing: .02em; pointer-events: none; }
+.studio-node[data-customized] { border-color: var(--accent); }
+.studio-custom-tag { display: inline-block; margin-left: 8px; padding: 0 8px; border-radius: 999px; background: var(--accent); color: var(--paper); font: 700 11px/1.5 var(--font-ui); font-style: normal; vertical-align: 2px; }
+.studio-row-kind .studio-custom-tag { margin: 0 8px 0 0; }
+
+/* Export, import and Reset all: a confirmation and a message, inline under the header. */
+.studio-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px var(--space-4); border-bottom: 1px solid var(--rule); background: var(--accent-soft); }
+.studio-confirm p { flex: 1 1 18rem; margin: 0; font-size: var(--text-control); line-height: 1.45; }
+.studio-confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.studio-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 8px var(--space-4); border-bottom: 1px solid var(--rule); background: var(--paper-2); font-size: var(--text-control); }
+.studio-notice[data-notice="studio-notice-error"] { color: var(--danger); border-left: 3px solid var(--danger); }
+.studio-notice .ghost { flex: none; }
