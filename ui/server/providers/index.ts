@@ -72,6 +72,8 @@ export interface InvokeOptions { signal?: AbortSignal; timeoutMs?: number; retry
   onStreamEvent?:(event:unknown)=>void;
 }
 export interface Provider {
+  /** Explicit synthetic provider, for honest review copy only. */
+  readonly demo?:true;
   readonly name?: ProviderName;
   checkAvailability(): Promise<Availability>;
   invoke(request: Request, options?: InvokeOptions): Promise<Result>;

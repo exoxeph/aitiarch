@@ -61,7 +61,7 @@ try {
     if (sent === 1) { // the first message shows the review card; after "don't ask again" later messages send straight away
       const review = panel.getByRole('region', { name: 'What will be sent' }); await review.waitFor();
       await review.getByLabel(/ask again this session/i).check();
-      await review.getByRole('button', { name: 'Send', exact: true }).click();
+      await review.getByRole('button', { name: 'Send to Claude', exact: true }).click();
     }
     await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').nth(sent - 1).waitFor();
     const got = await recorded(before);

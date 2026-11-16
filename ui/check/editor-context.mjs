@@ -58,7 +58,7 @@ try {
   const chipWords = async (loc) => ({ label: (await loc.locator('.claim-label').textContent()).trim(), state: (await loc.locator('.claim-state').textContent()).replace(/^\s*·\s*/, '').trim() });
   const footer = async () => text(panel.locator('.chat-usage'));
   const ask = async (question) => { const c = panel.getByRole('textbox', { name: 'Message Aitiarch AI' }); await c.fill(question); await c.press('Enter'); const review = panel.getByRole('region', { name: 'What will be sent' }); await review.waitFor(); return review; };
-  const sendReview = async (review) => { const done = panel.locator('.chat-ai:not(.chat-streaming) .chat-add').last(); const before = await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').count(); await review.getByRole('button', { name: 'Send', exact: true }).click(); await page.waitForFunction((n) => document.querySelectorAll('#chat-panel .chat-ai:not(.chat-streaming) .chat-add').length > n, before); return done; };
+  const sendReview = async (review) => { const done = panel.locator('.chat-ai:not(.chat-streaming) .chat-add').last(); const before = await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').count(); await review.getByRole('button', { name: 'Send to Claude', exact: true }).click(); await page.waitForFunction((n) => document.querySelectorAll('#chat-panel .chat-ai:not(.chat-streaming) .chat-add').length > n, before); return done; };
 
   await page.goto(url); await page.waitForSelector('.cm-editor');
   await openNote('plan.md');

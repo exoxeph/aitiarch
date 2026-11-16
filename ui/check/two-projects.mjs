@@ -81,7 +81,7 @@ try{
  assert.equal(review.status,409,'B refuses a conversation id that belongs to A');report.reviewInBWithAsession=JSON.parse(review.body).error;
  // ---- a message in A reaches A's CLI with A's note; B's CLI is never started
  const composer=panelA.getByRole('textbox',{name:'Message Aitiarch AI'});await composer.fill('What does the note say?');await composer.press('Enter');
- const rv=panelA.getByRole('region',{name:'What will be sent'});await rv.waitFor();await rv.getByRole('button',{name:'Send',exact:true}).click();
+ const rv=panelA.getByRole('region',{name:'What will be sent'});await rv.waitFor();await rv.getByRole('button',{name:'Send to Claude',exact:true}).click();
  await panelA.locator('.chat-ai:not(.chat-streaming)').first().waitFor();
  const callsA=(await readFile(projects.alpha.record,'utf8')).trim().split('\n').map(l=>JSON.parse(l));
  assert.equal(callsA.length,1);assert.ok(callsA[0].addendum.includes('ALPHA-ONLY-SENTENCE'));assert.ok(!callsA[0].addendum.includes('BETA-ONLY-SENTENCE'),'A\'s CLI never got B\'s note');

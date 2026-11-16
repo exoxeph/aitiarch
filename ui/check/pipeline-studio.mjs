@@ -217,7 +217,7 @@ try{
  await studio.getByRole('button',{name:'Close Pipeline Studio'}).click();await studio.waitFor({state:'detached'});
  await page.getByRole('button',{name:/^Chat/}).first().click();const panel=page.locator('#chat-panel');await panel.waitFor();
  await panel.getByRole('textbox',{name:'Message Aitiarch AI'}).fill('When is launch?');await panel.getByRole('textbox',{name:'Message Aitiarch AI'}).press('Enter');
- const review=panel.getByRole('region',{name:'What will be sent'});await review.waitFor();await review.getByRole('button',{name:'Send',exact:true}).click();
+ const review=panel.getByRole('region',{name:'What will be sent'});await review.waitFor();await review.getByRole('button',{name:'Send to Claude',exact:true}).click();
  const err=panel.locator('.chat-error');await err.waitFor();await err.locator('summary',{hasText:'Why?'}).click();
  const link=err.getByRole('button',{name:'Show on pipeline'});await link.waitFor();const target=await link.getAttribute('data-why-link');assert(nodeById(target),'the link names a real node: '+target);
  await link.click();await studio.waitFor();const lit=studio.locator('.studio-node[data-highlight]');await lit.waitFor();assert.equal(await lit.count(),1);assert.equal(await lit.getAttribute('data-node'),target,'the blocked step is highlighted');

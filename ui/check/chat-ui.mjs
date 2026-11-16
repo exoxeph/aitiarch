@@ -91,10 +91,10 @@ try{
  assert.equal(calls.length,0,'the review card must appear before any provider call');
  const reviewText=await review.innerText();
  for(const needle of ['What does the fixture say?','A unique selected sentence.','This note','tokens in all','Don’t ask again this session'])assert.ok(reviewText.includes(needle),`review card should show “${needle}”`);
- assert.ok(await review.getByRole('button',{name:'Send',exact:true}).evaluate(b=>document.activeElement===b),'Send takes focus so Enter confirms');
+ assert.ok(await review.getByRole('button',{name:'Send to Claude',exact:true}).evaluate(b=>document.activeElement===b),'Send takes focus so Enter confirms');
  await page.screenshot({path:path.join(output,'chat-review.png')});
  await review.getByLabel(/ask again this session/i).check();
- await review.getByRole('button',{name:'Send',exact:true}).click();
+ await review.getByRole('button',{name:'Send to Claude',exact:true}).click();
 
  // ---- streamed tokens with a gentle caret
  await page.waitForFunction(()=>(document.querySelector('.chat-stream')?.textContent??'').length>4);

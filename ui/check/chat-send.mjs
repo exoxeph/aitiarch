@@ -42,7 +42,7 @@ async function inApp(scenario, run) {
     const composer = panel.getByRole('textbox', { name: 'Message Aitiarch AI' });
     await composer.fill('What does the fixture say?'); await composer.press('Enter');
     const review = panel.getByRole('region', { name: 'What will be sent' }); await review.waitFor();
-    await review.getByRole('button', { name: 'Send', exact: true }).click();
+    await review.getByRole('button', { name: 'Send to Claude', exact: true }).click();
     await run({ page, panel, captured });
     await context.close();
   } finally { watcher.stop(); await app.close(); await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }

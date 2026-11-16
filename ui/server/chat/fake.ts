@@ -1,6 +1,7 @@
 import {ProviderError,type Provider,type Request,type Result,type InvokeOptions} from '../providers/index.ts';
 /** Explicit synthetic stream; never launches an executable or contacts a provider. */
 export class FakeChatProvider implements Provider {
+ readonly demo=true as const;
  readonly name='claude' as const;
  requests:Request[]=[];
  answer:{answer:string;claims:unknown[]}={answer:'**Synthetic** reply.',claims:[]};

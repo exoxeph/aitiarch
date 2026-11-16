@@ -43,7 +43,7 @@ async function inApp(name, text, run) {
     await page.waitForFunction(() => { const t = document.querySelector('.chat-composer textarea'); return t && !t.disabled; });
     const composer = panel.getByRole('textbox', { name: 'Message Aitiarch AI' });
     await composer.fill('Which store did we pick?'); await composer.press('Enter');
-    await panel.getByRole('region', { name: 'What will be sent' }).getByRole('button', { name: 'Send', exact: true }).click();
+    await panel.getByRole('region', { name: 'What will be sent' }).getByRole('button', { name: 'Send to Claude', exact: true }).click();
     await panel.locator('.claim-chips').waitFor();
     await run({ page, panel, root, name });
     await context.close();

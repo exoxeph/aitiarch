@@ -141,6 +141,8 @@ export interface ChatInput {id:string;path:string;question:string;selection?:str
  editor?:EditorInfo}
 
 export interface ChatReview {
+ /** Display-only recipient, frozen with the request; never changes provider routing. */
+ provider?:'claude'|'codex'|'kiro';demo?:true;
  /** Normal Codex/Kiro chat uses the existing Council approval endpoint, bound to this conversation/provider. */
  normalPlan?:{conversation:string;providers:('codex'|'kiro')[];notes:string[];question:string;caps:Partial<Record<'codex'|'kiro',import('./council.ts').CouncilCap>>;hash:string};
  reviewId:string;requestId:string;path:string;question:string;selection:string;

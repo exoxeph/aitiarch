@@ -32,7 +32,7 @@ try{
  const select=dialog.getByLabel('Normal chat is answered by'),save=dialog.getByRole('button',{name:'Save',exact:true});
  const openChat=async()=>{await page.getByRole('button',{name:/^Chat/}).first().click();await panel.waitFor();};
  const composer=()=>panel.getByRole('textbox',{name:'Message Aitiarch AI'});
- const sendThroughReview=async()=>{const review=panel.getByRole('region',{name:'What will be sent'});await review.waitFor();await review.getByRole('button',{name:'Send',exact:true}).click();};
+ const sendThroughReview=async()=>{const review=panel.getByRole('region',{name:'What will be sent'});await review.waitFor();await review.getByRole('button',{name:'Send to Claude',exact:true}).click();};
  // 1. The section: the note, the three providers with safety label and availability, Save only when something changed.
  await boot();await openSettings();
  await dialog.getByText('Applies to every project on this computer.').waitFor();

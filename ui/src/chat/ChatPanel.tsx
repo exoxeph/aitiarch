@@ -73,12 +73,13 @@ function OpenedRows({opened,running}:{opened:readonly {n:number;title:string;why
  </ol>;
 }
 
-function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:ChatReview;stopAsking:boolean;setStopAsking:(v:boolean)=>void;onSend:()=>void;onCancel:()=>void}){
+export function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:ChatReview;stopAsking:boolean;setStopAsking:(v:boolean)=>void;onSend:()=>void;onCancel:()=>void}){
  const send=useRef<HTMLButtonElement>(null);
+ const recipient=providerName(review.provider??review.normalPlan?.providers[0]??'claude');
  useEffect(()=>{send.current?.focus();},[]);
  return <section className="chat-review" aria-label="What will be sent">
-  <h3>What will be sent</h3>
-  <p className="chat-review-lead">Nothing has gone to Claude yet. It will see exactly this, and nothing else.</p>
+  <h3>Review — nothing sent yet</h3>
+  <p className="chat-review-lead">{review.demo?'Demo mode: no model is called':`Nothing has been sent to ${recipient} yet.`} Review the context and instructions below before sending.</p>
   <dl>
    <dt>Your question</dt><dd>{review.question}</dd>
    {review.selection&&<><dt>Selection{review.editor?.lines?` · ${linesText(review.editor.lines.from,review.editor.lines.to)}`:''}</dt><dd className="chat-review-quote">{previewText(review.selection,300)}</dd></>}
@@ -93,11 +94,11 @@ function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:Ch
    <dd>{review.session?`Kept in the conversation “${review.session.label}” (${review.session.turns} so far), not pasted again.`:review.historyPairs===0?'None yet.':`${review.historyPairs} earlier ${review.historyPairs===1?'exchange':'exchanges'} included${review.omittedPairs>0?`, ${review.omittedPairs} older left out`:''}.`}{review.otherModePairs?` ${review.otherModePairs} earlier ${review.otherModePairs===1?'exchange':'exchanges'} left out: different mode.`:''}</dd>
   </dl>
   <SkillsReviewList review={review.skills}/>
-  <details className="chat-review-source"><summary>Instructions Claude gets</summary><pre>{review.instruction}</pre></details>
+  <details className="chat-review-source"><summary>Instructions {recipient} gets</summary><pre>{review.instruction}</pre></details>
   <p className="chat-review-total">About {formatCount(review.estimatedTokens)} tokens in all</p>
   {review.budget&&<p className="chat-review-budget">Budget: {formatCount(review.budget.spent)} used + about {formatCount(review.budget.next)} for this message of {formatCount(review.budget.budget)}{review.budget.spent+review.budget.next>review.budget.budget?'. This will not fit; the send will be refused.':'.'}</p>}
   {review.ephemeral?<><p>{SESSION_NOTICES.privacy}</p><details><summary>Recent messages included</summary>{review.history.map(t=><div key={t.id}><pre>{t.user}</pre><pre>{t.assistant}</pre></div>)}</details></>:<label className="chat-review-ask"><input type="checkbox" checked={stopAsking} onChange={e=>setStopAsking(e.target.checked)}/> Don’t ask again this session</label>}
-  <div className="chat-review-actions"><button ref={send} type="button" className="chat-review-send" onClick={onSend}>Send</button><button type="button" className="ghost" onClick={onCancel}>Cancel</button></div>
+  <div className="chat-review-actions"><button ref={send} type="button" className="chat-review-send" onClick={onSend}>Send to {recipient}</button><button type="button" className="ghost" onClick={onCancel}>Cancel</button></div>
  </section>;
 }
 

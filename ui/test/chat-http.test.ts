@@ -11,7 +11,7 @@ it('authenticated chat review/send uses SSE; budget appears in usage; reload pla
  const call=(url:string,body:unknown)=>fetch(base+url,{method:'PUT',headers,body:JSON.stringify(body)});
  const input={id:'message-one',path:'fixture.md',question:'Synthetic question.',context:[{moduleId:'this-note',ids:['note']}]};
  expect((await fetch(base+'/api/chat?path=fixture.md')).status).toBe(401);
- const review=await (await call('/api/chat/review',input)).json();expect(review.requiresConfirmation).toBe(true);
+ const review=await (await call('/api/chat/review',input)).json();expect(review.requiresConfirmation).toBe(true);expect(review).toMatchObject({provider:'claude',demo:true});
  expect((await call('/api/chat/send',{reviewId:review.reviewId})).status).toBe(409);
  const response=await call('/api/chat/send',{reviewId:review.reviewId,confirmed:true});expect(response.headers.get('content-type')).toContain('text/event-stream');
  const events=await response.text();expect(events).toContain('event: delta');expect(events).toContain('event: complete');

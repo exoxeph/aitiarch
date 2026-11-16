@@ -64,7 +64,7 @@ try {
     await page.waitForFunction((k) => document.querySelector('#chat-panel .chat-plan') || document.querySelector('#chat-panel .chat-review') || document.querySelector('#chat-panel .chat-turn[data-status="streaming"]') || document.querySelectorAll('#chat-panel .chat-turn[data-status="complete"]').length > k, before);
     const showedCard = await card.count() > 0;
     assert.equal(showedCard, expectCard, `"${q}": the plan card ${expectCard ? 'is' : 'is not'} shown`);
-    return { card, review, finish: async () => { if (await review.count()) { if (!reviewed) { await review.getByRole('checkbox').check(); reviewed = true; } await review.getByRole('button', { name: 'Send', exact: true }).click(); } await settled(before); } };
+    return { card, review, finish: async () => { if (await review.count()) { if (!reviewed) { await review.getByRole('checkbox').check(); reviewed = true; } await review.getByRole('button', { name: 'Send to Claude', exact: true }).click(); } await settled(before); } };
   };
 
   await page.goto(url); await page.waitForSelector('.cm-editor'); await openNote('plan.md');
@@ -91,7 +91,7 @@ try {
   await scenario('slow-start');
   let t = await ask('What do the plan and the ideas say together?');
   // 6. The wait line: from send until the first text, in whole seconds.
-  if (await t.review.count()) { await t.review.getByRole('checkbox').check(); reviewed = true; const before = await done(); await t.review.getByRole('button', { name: 'Send', exact: true }).click();
+  if (await t.review.count()) { await t.review.getByRole('checkbox').check(); reviewed = true; const before = await done(); await t.review.getByRole('button', { name: 'Send to Claude', exact: true }).click();
     const wait = panel.locator('[data-wait]'); await wait.waitFor(); await page.waitForFunction(() => /Waiting for Claude · [12]s/.test(document.querySelector('#chat-panel [data-wait]')?.textContent ?? ''));
     report.wait = await wait.innerText(); await panel.screenshot({ path: path.join(output, 'box-wait.png') }); await settled(before); }
   assert.equal(await panel.locator('[data-wait]').count(), 0, 'the wait line goes when the text comes');
@@ -120,7 +120,7 @@ try {
   assert.equal(await text(t.card.locator('[data-plan="diagrams"]')), "Claude may open this diagram: D1 'pipeline' (up to $0.50). It opens one only when your question needs it.", 'the card lists the diagrams of the open note, as the review does');
   await panel.screenshot({ path: path.join(output, 'box-diagram-card.png') });
   let before4 = await done(); await t.card.getByRole('button', { name: 'Approve and send' }).click();
-  if (await t.review.count()) await t.review.getByRole('button', { name: 'Send', exact: true }).click();
+  if (await t.review.count()) await t.review.getByRole('button', { name: 'Send to Claude', exact: true }).click();
   await settled(before4); c = (await calls()).at(-1); assert.equal(arg(c, '--tools'), 'Read', 'the diagram turn ran with Read');
   assert.match(await text(panel.locator('.chat-turn').last().locator('.chat-opened')), /Opened D1 'pipeline'/);
   t = await ask('And again?'); await t.finish(); c = (await calls()).at(-1); assert.equal(arg(c, '--tools'), 'Read', 'no card the second time: the grant covers it');

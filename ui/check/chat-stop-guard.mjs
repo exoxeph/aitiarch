@@ -50,7 +50,7 @@ try{
    }
    const composer=panel.getByRole('textbox',{name:'Message Aitiarch AI'});await composer.fill('A question');await composer.press('Enter');
    const review=panel.getByRole('region',{name:'What will be sent'});await review.waitFor();
-   const send=review.getByRole('button',{name:'Send',exact:true});
+   const send=review.getByRole('button',{name:'Send to Claude',exact:true});
    // Bound the clock to the send, not to how quickly CDP returns from a click.
    // The old check's first click sometimes took >900ms, making its "early" Stop deliberate.
    const sentAt=Date.now();await page.clock.setFixedTime(new Date(sentAt));
