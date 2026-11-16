@@ -235,7 +235,7 @@ await session('slash',slashNote,async({page,theme,root,bytes})=>{
  const R={};report[`slash-${theme}`]=R;const d=await doc(page);const menu=()=>page.locator('.cm-tooltip-autocomplete');
  const labels=()=>page.locator('.cm-tooltip-autocomplete .cm-completionLabel').allTextContents();
  await put(page,d.length);await page.keyboard.press('Enter');await page.keyboard.type('/');await menu().waitFor({timeout:3000});
- R.allItems=await labels();assert.equal(R.allItems.length,17);
+ R.allItems=await labels();assert.equal(R.allItems.length,19);assert(R.allItems.includes('Decision'));assert(R.allItems.includes('Rejected option'));
  assert.equal(await page.getByRole('listbox').count(),1);
  const active=()=>page.locator('.cm-content').getAttribute('aria-activedescendant');
  for(const [key,last] of [['End',true],['Home',false],['Control+ArrowRight',true],['Control+ArrowLeft',false]]){await page.keyboard.press(key);const id=await active();assert(id);assert.equal(await page.locator(`[id="${id}"] .cm-completionLabel`).textContent(),last?'Footnote':'Text');}

@@ -33,6 +33,8 @@ export const SLASH_ITEMS: readonly SlashItem[] = [
   {label:'Text',detail:'Start a plain paragraph',group:'Text',icon:'T',shortcut:'/text',aliases:['paragraph'],insert:''},
   ...[1,2,3].map(n=>({label:`Heading ${n}`,detail:`Section heading, level ${n}`,group:'Text' as const,icon:`H${n}`,shortcut:`/h${n}`,aliases:[`h${n}`],insert:'#'.repeat(n)+' '})),
   {label:'Quote',detail:'Quote a passage',group:'Text',icon:'❝',shortcut:'/quote',aliases:['blockquote'],insert:'> '},
+  {label:'Decision',detail:'Write your decision and its reason',group:'Text',icon:'D',shortcut:'/decision',aliases:['decision'],insert:'Decision: \nWhy: ',caret:10},
+  {label:'Rejected option',detail:'Record an option you chose not to use',group:'Text',icon:'R',shortcut:'/rejected',aliases:['rejected'],insert:'Rejected: '},
   {label:'Bulleted list',detail:'An unordered list of items',group:'Lists',icon:'•',shortcut:'/bullets',aliases:['bullets','unordered'],insert:'- '},
   {label:'Numbered list',detail:'Items in a numbered order',group:'Lists',icon:'1.',shortcut:'/numbered',aliases:['ordered'],insert:'1. '},
   {label:'Checklist',detail:'Items you can tick off',group:'Lists',icon:'☑',shortcut:'/todo',aliases:['todo','to-do','task','tasks'],insert:'- [ ] '},

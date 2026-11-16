@@ -18,6 +18,8 @@ const base=`http://127.0.0.1:${await app.listen(0)}`;const browser=await chromiu
 const V=`window.__aitiarch['n.md'].view`;
 // start: the note before typing; caret: index to start at (default end); keys: text to type or {Key} to press; want: the note afterwards.
 const cases=[
+ {name:'/decision inserts human-owned blanks with the caret after Decision',start:'',keys:['/decision','{Enter}','Queue'],want:'Decision: Queue\nWhy: '},
+ {name:'/rejected inserts a human-owned rejected option',start:'',keys:['/rejected','{Enter}','Polling'],want:'Rejected: Polling'},
  {name:'bullets continue and the second Enter leaves the list',start:'',keys:['- One','{Enter}','Two','{Enter}','{Enter}','After'],want:'- One\n- Two\nAfter'},
  {name:'numbers count up and leave on an empty item',start:'',keys:['1. A','{Enter}','B','{Enter}','{Enter}','X'],want:'1. A\n2. B\nX'},
  {name:'checklist items continue unticked and leave on an empty item',start:'',keys:['- [ ] A','{Enter}','B','{Enter}','{Enter}','X'],want:'- [ ] A\n- [ ] B\nX'},
