@@ -43,6 +43,25 @@ try{
  assert.equal(await ed.locator('[data-unsaved]').count(),0,'nothing is unsaved yet');
  await page.screenshot({path:path.join(output,'wording-editor.png')});
  await closeEditor();
+ // The largest editor must grow its fields and keep its final preview above the footer.
+ for(const width of [360,1280,1440,1920]){
+  await page.setViewportSize({width,height:900});await boot();
+  if(width===360){await page.getByRole('button',{name:'Pipeline Studio',exact:true}).click();await studio.locator('[data-list=true]').waitFor();}else await openStudio();
+  let editor;
+  if(width===360){await studio.locator('[data-node="request-intake"] .studio-row').click();editor=studio.locator('[data-node="request-intake"] .studio-editor');}
+  else editor=await edit('request-intake');
+  const fields=editor.locator('textarea'),short=fields.first(),long=fields.last();
+  const originalShort=await short.inputValue(),originalLong=await long.inputValue();
+  await short.fill('Short instruction.');await long.fill(Array.from({length:8},(_,i)=>`Instruction line ${i+1}: keep this wording visible.`).join('\n'));
+  const sizes=await long.evaluate(e=>({height:e.clientHeight,scroll:e.scrollHeight,line:parseFloat(getComputedStyle(e).lineHeight)}));
+  assert(sizes.height>(await short.boundingBox()).height&&sizes.height>=sizes.line*8&&sizes.scroll<=sizes.height+1,`eight lines visible without inner scrolling at ${width}: ${JSON.stringify(sizes)}`);
+  await short.fill(originalShort);await long.fill(originalLong);
+  await editor.getByRole('button',{name:'What is actually sent'}).click();
+  const last=editor.locator('.pv-part').last();await last.waitFor();await last.scrollIntoViewIfNeeded();
+  const end=await last.boundingBox(),bar=await page.locator('.statusbar').boundingBox();
+  assert(end&&bar&&end.y+end.height<=bar.y,`last preview is above status bar at ${width}: ${JSON.stringify({end,bar})}`);
+ }
+ await page.setViewportSize({width:1440,height:900});await boot();await openStudio();
  const expected={'request-intake':9,'normal-answerer':1,'diagram-route':1,'investigate':1,'council':1};
  for(const [id,n] of Object.entries(expected)){ed=await edit(id);assert.equal(await ed.locator('textarea').count(),n,`${id} has ${n} wording field(s)`);assert.equal(await ed.locator('.studio-preview').count(),1,`${id} has the "what is actually sent" toggle`);await closeEditor();}
  ed=await edit('permission_gate');assert.equal(await ed.locator('textarea,input,select').count(),0,'a locked node still shows no editable fields');await closeEditor();
