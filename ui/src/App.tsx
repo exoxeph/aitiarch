@@ -8,7 +8,7 @@ const Constellation = lazy(() => import("./constellation/Constellation.tsx"));
 const PipelineStudio = lazy(() => import("./studio/PipelineStudio.tsx"));
 import { api, ApiError, connectEvents, type Backlink, type InkSnapshot, type NoteFile, type ServerEvent, type TreeNode } from "./api.ts";
 import {useNoteIndex} from './notes/use-note-index.ts';
-import {decisionRows} from '../shared/note-index.ts';
+import {decisionRows,searchNotes} from '../shared/note-index.ts';
 import { previewText, titleOf, type CiteNote } from "./citations/citation-model.ts";
 import { citeAtCursor } from "./citations/cite-editor.ts";
 import { BacklinksPanel } from "./citations/BacklinksPanel.tsx";
@@ -16,7 +16,7 @@ import type { InkItem } from "../shared/ink.ts";
 import { OrphanList } from "./ink/OrphanList.tsx";
 import {inkField} from './editor/ink.ts';
 import { EditorView } from "@codemirror/view";
-import { flattenTree, Overlay, PropertiesPanel, StatusBar, Tabs, Tree, type OverlayItem } from "./components.tsx";
+import { flattenTree, fuzzy, Overlay, PropertiesPanel, StatusBar, Tabs, Tree, type OverlayItem } from "./components.tsx";
 import { EditorPane, type PaneHandle } from "./editor/EditorPane.tsx";
 import { indentLines, restoreFailed, setHeading, toggleCodeBlock, toggleInline, toggleList } from "./editor/format.ts";
 import type { SyncStatus } from "./editor/session.ts";
@@ -662,8 +662,13 @@ export default function App() {
           title="Command palette"
           placeholder="Type a command…"
           items={commands}
-          onPick={(id) => {
+          searchItems={(query,items)=>[
+            ...searchNotes(indexedNotes,query).map(hit=>({id:`match:${hit.path}:${hit.lineNumber}`,label:hit.snippet,hint:`${hit.noteName} · ${hit.path} · line ${hit.lineNumber}`,group:hit.kind==='decision'?'Decisions':'Note text',location:{path:hit.path,line:hit.lineNumber}})),
+            ...fuzzy(items.map(item=>item.label),query).map(label=>items.find(item=>item.label===label)!),
+          ]}
+          onPick={(id,item) => {
             setOverlay(null);
+            if(item?.location){const {path,line}=item.location;setTimeout(()=>openLine(path,line),0);return;}
             const c = commands.find((x) => x.id === id);
             setTimeout(() => c?.run(), 0);
           }}

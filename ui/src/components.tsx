@@ -173,21 +173,23 @@ export interface OverlayItem {
   label: string;
   hint?: string;
   group?: string;
+  location?: {path:string;line:number};
 }
 
-export function Overlay({ title, placeholder, items, onPick, onClose }: { title: string; placeholder: string; items: OverlayItem[]; onPick: (id: string) => void; onClose: () => void }) {
+export function Overlay({ title, placeholder, items, onPick, onClose, searchItems }: { title: string; placeholder: string; items: OverlayItem[]; onPick: (id: string,item?:OverlayItem) => void; onClose: () => void; searchItems?:(query:string,items:OverlayItem[])=>OverlayItem[] }) {
   const [q, setQ] = useState("");
   const [i, setI] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => input.current?.focus(), []);
   useEffect(()=>transient(()=>input.current?.parentElement??null,onClose,300,()=>false),[onClose]);
   const shown = useMemo(() => {
+    if(searchItems)return searchItems(q,items);
     const order = fuzzy(
       items.map((x) => x.label),
       q,
     );
     return order.map((l) => items.find((x) => x.label === l)!).filter(Boolean);
-  }, [items, q]);
+  }, [items, q,searchItems]);
   useEffect(() => setI(0), [q]);
   useEffect(() => {input.current?.parentElement?.querySelector('[aria-selected="true"]')?.scrollIntoView({block:'nearest'});},[i]);
   return (
@@ -201,13 +203,13 @@ export function Overlay({ title, placeholder, items, onPick, onClose }: { title:
           onKeyDown={(e) => {
             if (e.key === "ArrowDown") (e.preventDefault(), setI((x) => Math.max(0,Math.min(49,shown.length - 1, x + 1))));
             else if (e.key === "ArrowUp") (e.preventDefault(), setI((x) => Math.max(0, x - 1)));
-            else if (e.key === "Enter" && shown[i]) (e.preventDefault(), onPick(shown[i].id));
+            else if (e.key === "Enter" && shown[i]) (e.preventDefault(), onPick(shown[i].id,shown[i]));
             else if (e.key === "Escape") (e.preventDefault(), onClose());
           }}
         />
         <ul role="listbox">
           {shown.slice(0, 50).map((it, n) => (
-            <li key={it.id} role="option" aria-selected={n === i} className={n === i ? "on" : ""} onMouseEnter={() => setI(n)} onClick={() => onPick(it.id)}>
+            <li key={it.id} role="option" aria-selected={n === i} className={`${n === i ? 'on' : ''}${it.location?' note-match':''}`} onMouseEnter={() => setI(n)} onClick={() => onPick(it.id,it)}>
               <span>{it.group&&(n===0||shown[n-1].group!==it.group)&&<small className="palette-group">{it.group}</small>}{it.label}</span>
               {it.hint && <span className="muted small">{it.hint}</span>}
             </li>
