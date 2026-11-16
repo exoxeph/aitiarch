@@ -1,8 +1,8 @@
 // Pure helpers for the Pipeline Studio: remembered node places, the camera, and editing the saved overrides. No React, no I/O except the browser's own storage (always in try/catch).
-import {PIPELINE_NODES,numberAt,type PipelineNode} from '../../shared/pipeline-nodes.ts';
+import {GROUP_ORDER,PIPELINE_NODES,numberAt,type NodeGroup,type PipelineNode} from '../../shared/pipeline-nodes.ts';
 
 export const LAYOUT_KEY='aitiarch.pipeline.layout';
-export const NODE_W=210,NODE_H=62,WORLD_W=1800,WORLD_H=1300;
+export const NODE_W=210,NODE_H=62,WORLD_W=1900,WORLD_H=1300;
 export type Place={x:number;y:number};
 export type Layout=Record<string,Place>;
 export interface Camera {x:number;y:number;k:number}
@@ -39,12 +39,37 @@ export const centerOn=(p:Place,view:{w:number;h:number},k=1):Camera=>({k,x:view.
 /** A smooth curve between two nodes: right edge to left edge when the next node is to the right; bottom to top (or top to bottom) when they share a column. */
 export function edgePath(a:Place,b:Place):string{
  if(b.x<a.x+NODE_W+24){
+  const gap=Math.abs(b.y-a.y);
+  // Nodes in a column with others between them: bow out around the right side instead of running behind the ones in the middle.
+  if(gap>NODE_H+60){const x1=a.x+NODE_W,y1=a.y+NODE_H/2,x2=b.x+NODE_W,y2=b.y+NODE_H/2,bow=56+Math.min(40,gap/10);return `M${x1},${y1} C${x1+bow},${y1} ${x2+bow},${y2} ${x2},${y2}`;}
   const down=b.y>=a.y,x1=a.x+NODE_W/2,y1=down?a.y+NODE_H:a.y,x2=b.x+NODE_W/2,y2=down?b.y:b.y+NODE_H,dy=Math.max(24,Math.abs(y2-y1)/2)*(down?1:-1);
   return `M${x1},${y1} C${x1},${y1+dy} ${x2},${y2-dy} ${x2},${y2}`;
  }
  const x1=a.x+NODE_W,y1=a.y+NODE_H/2,x2=b.x,y2=b.y+NODE_H/2,dx=Math.max(40,Math.abs(x2-x1)/2);
  return `M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`;
 }
+/** The main path of a reply, drawn a little stronger than the side nodes: your note, redaction, the permission gate, the answerer, the integrity check, the claim check and saving. */
+export const MAIN_NODES:ReadonlySet<string>=new Set(['request-intake','redaction','permission_gate','normal-answerer','reply-integrity','claim-check','chat-store']);
+/** The edges that carry that path (the steps between the main nodes included). */
+export const MAIN_EDGES:ReadonlySet<string>=new Set(['request-intake>redaction','redaction>permission_gate','permission_gate>request-queue','request-queue>token-budget','token-budget>normal-answerer','normal-answerer>provider-run','provider-run>reply-integrity','reply-integrity>claim-check','claim-check>chat-store']);
+/** Everything upstream and downstream of a node, so hovering it can light the whole path through it. */
+export function pathAround(id:string,edges:readonly {from:string;to:string}[]):{up:Set<string>;down:Set<string>}{
+ const walk=(start:string,next:(e:{from:string;to:string})=>[string,string])=>{const seen=new Set<string>(),todo=[start];
+  while(todo.length){const at=todo.pop()!;for(const e of edges){const [from,to]=next(e);if(from===at&&!seen.has(to)){seen.add(to);todo.push(to);}}}return seen;};
+ return {down:walk(id,e=>[e.from,e.to]),up:walk(id,e=>[e.to,e.from])};
+}
+export interface Region {group:NodeGroup;x:number;y:number;w:number;h:number}
+/** A soft region behind each group: the box around its nodes, with room for its label above. */
+export function regionsOf(nodes:readonly PipelineNode[],place:(n:PipelineNode)=>Place):Region[]{
+ const out:Region[]=[];
+ for(const group of GROUP_ORDER){
+  const own=nodes.filter(n=>n.group===group);if(!own.length)continue;
+  const ps=own.map(place),x0=Math.min(...ps.map(p=>p.x)),x1=Math.max(...ps.map(p=>p.x))+NODE_W,y0=Math.min(...ps.map(p=>p.y)),y1=Math.max(...ps.map(p=>p.y))+NODE_H;
+  out.push({group,x:x0-REGION_PAD,y:y0-REGION_PAD-REGION_LABEL,w:x1-x0+2*REGION_PAD,h:y1-y0+2*REGION_PAD+REGION_LABEL});
+ }
+ return out;
+}
+export const REGION_PAD=16,REGION_LABEL=26;
 /** A camera that shows every place at once, as large as fits (never past 1:1 nor below the smallest zoom). */
 export function fitCamera(places:readonly Place[],view:{w:number;h:number},pad=24):Camera{
  if(!places.length||view.w<=0||view.h<=0)return {x:16,y:16,k:.75};

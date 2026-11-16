@@ -1,7 +1,7 @@
 import {expect,it} from 'vitest';
 import {DEFAULT_PIPELINE_CONFIG} from '../shared/pipeline-config.ts';
-import {nodeById} from '../shared/pipeline-nodes.ts';
-import {LAYOUT_KEY,NODE_W,fitCamera,centerOn,clampPlace,clampZoom,deletePath,edgePath,isNarrow,loadLayout,overridesWith,overridesWithout,parseField,saveLayout,setPath,zoomAt} from '../src/studio/studio-model.ts';
+import {PIPELINE_NODES,nodeById} from '../shared/pipeline-nodes.ts';
+import {LAYOUT_KEY,MAIN_EDGES,MAIN_NODES,NODE_W,REGION_LABEL,REGION_PAD,pathAround,regionsOf,fitCamera,centerOn,clampPlace,clampZoom,deletePath,edgePath,isNarrow,loadLayout,overridesWith,overridesWithout,parseField,saveLayout,setPath,zoomAt} from '../src/studio/studio-model.ts';
 
 const store=(initial?:string)=>{let v=initial;return {getItem:()=>v??null,setItem:(_k:string,x:string)=>{v=x;},get value(){return v;}};};
 
@@ -24,8 +24,26 @@ it('zooms around the point under the pointer',()=>{
 });
 it('draws an edge from the right of one node to the left of the next',()=>{expect(edgePath({x:0,y:0},{x:300,y:100})).toMatch(/^M210,31 C/);});
 it('joins nodes in the same column bottom to top instead of looping around them',()=>{
- expect(edgePath({x:100,y:0},{x:100,y:150})).toMatch(/^M205,62 C205,\S+ 205,\S+ 205,150$/);
- expect(edgePath({x:100,y:150},{x:100,y:0})).toMatch(/^M205,150 C.* 205,62$/);
+ expect(edgePath({x:100,y:0},{x:100,y:110})).toMatch(/^M205,62 C205,\S+ 205,\S+ 205,110$/);
+ expect(edgePath({x:100,y:110},{x:100,y:0})).toMatch(/^M205,110 C.* 205,62$/);
+});
+it('bows out around the side when other nodes sit between two in a column',()=>{
+ expect(edgePath({x:100,y:0},{x:100,y:330})).toMatch(/^M310,31 C3\d\d,31 3\d\d,361 310,361$/);
+});
+it('knows the main path and everything upstream and downstream of a node',()=>{
+ expect(MAIN_NODES.has('permission_gate')).toBe(true);expect(MAIN_NODES.has('ledger')).toBe(false);expect(MAIN_EDGES.has('redaction>permission_gate')).toBe(true);
+ const edges=[{from:'a',to:'b'},{from:'b',to:'c'},{from:'x',to:'c'}],p=pathAround('b',edges);
+ expect([...p.up]).toEqual(['a']);expect([...p.down]).toEqual(['c']);expect(pathAround('c',edges).up).toEqual(new Set(['b','a','x']));
+});
+it('draws one soft region per group, with room for its label',()=>{
+ const regions=regionsOf(PIPELINE_NODES,n=>({x:n.x,y:n.y})),council=regions.find(r=>r.group==='council')!,ledger=nodeById('ledger')!;
+ expect(regions.map(r=>r.group).sort()).toEqual([...new Set(PIPELINE_NODES.map(n=>n.group))].sort());
+ expect(council.w).toBeGreaterThan(2*NODE_W);expect(council.y).toBeLessThan(nodeById('council-claude')!.y-REGION_LABEL);
+ expect(regions.find(r=>r.group==='records')).toMatchObject({x:ledger.x-REGION_PAD});
+});
+it('keeps the lanes apart: no two group regions overlap in the default layout',()=>{
+ const rs=regionsOf(PIPELINE_NODES,n=>({x:n.x,y:n.y}));
+ for(const a of rs)for(const b of rs)if(a!==b)expect(a.x<b.x+b.w&&b.x<a.x+a.w&&a.y<b.y+b.h&&b.y<a.y+a.h,`${a.group} / ${b.group}`).toBe(false);
 });
 it('fits every place in the view, centred, and never past 1:1',()=>{
  const places=[{x:40,y:40},{x:1490,y:850}],cam=fitCamera(places,{w:1400,h:780});

@@ -5,9 +5,13 @@ import {DEFAULT_PIPELINE_CONFIG} from '../../shared/pipeline-config.ts';
 import {GROUP_LABEL,GROUP_ORDER,PIPELINE_NODES,edgesOf,fieldsOf,lockReason,nodeById,numberAt,safetyLabelOf,type PipelineNode} from '../../shared/pipeline-nodes.ts';
 import {ANSWERERS,isAnswerer,overridesFor,saveErrorText,type Answerer} from '../chat/normal-provider.ts';
 import {providerName,safetyHelp} from '../chat/council-view.ts';
-import {NODE_W,NODE_H,WORLD_H,WORLD_W,centerOn,clampPlace,clearLayout,edgePath,fitCamera,isNarrow,loadLayout,overridesWith,overridesWithout,parseField,placeOf,saveLayout,zoomAt,type Camera,type Layout} from './studio-model.ts';
+import {MAIN_EDGES,MAIN_NODES,NODE_W,NODE_H,WORLD_H,WORLD_W,centerOn,clampPlace,clearLayout,edgePath,fitCamera,pathAround,regionsOf,isNarrow,loadLayout,overridesWith,overridesWithout,parseField,placeOf,saveLayout,zoomAt,type Camera,type Layout} from './studio-model.ts';
 
 const fmt=(v:number,unit:string)=>`${v.toLocaleString('en-US',{maximumFractionDigits:4})} ${unit}`.trim();
+/** How far each layer of the starfield follows a pan (the far ones barely move): depth without any animation of its own. */
+const STAR_DEPTH=[.03,.05,.08,.12,.18,.26];
+/** The horizontal distance between two lanes of the default layout; an edge longer than two of them is a long haul. */
+const LANE_PITCH=260;
 const ARROWS:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};
 const Lock=()=><svg className="studio-lock" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>;
 const Badge=({label}:{label:string})=><span className="council-badge" data-safety={label} title={safetyHelp(label)}>{label}</span>;
@@ -95,8 +99,8 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
   },0);return()=>window.clearTimeout(t);
  },[flagged,narrow]);
  const edges=useMemo(()=>edgesOf(),[]);
- const active=selected??peek;
- const place=(n:PipelineNode)=>placeOf(n,layout);
+ const active=selected??peek,around=useMemo(()=>active?pathAround(active,edges):null,[active,edges]);
+ const place=(n:PipelineNode)=>placeOf(n,layout),regions=useMemo(()=>regionsOf(PIPELINE_NODES,n=>placeOf(n,layout)),[layout]);
  const moveNode=(id:string,to:{x:number;y:number},persist:boolean)=>{const next={...layoutRef.current,[id]:clampPlace(to)};layoutRef.current=next;setLayout(next);if(persist)saveLayout(next);};
  const onNodeDown=(e:ReactPointer<HTMLButtonElement>,n:PipelineNode)=>{if(e.button!==0)return;e.stopPropagation();drag.current={id:n.id,sx:e.clientX,sy:e.clientY,from:place(n),moved:false};e.currentTarget.setPointerCapture(e.pointerId);};
  const onNodeMove=(e:ReactPointer<HTMLButtonElement>)=>{const d=drag.current;if(!d)return;const dx=e.clientX-d.sx,dy=e.clientY-d.sy;if(!d.moved&&Math.hypot(dx,dy)<4)return;d.moved=true;moveNode(d.id,{x:d.from.x+dx/camRef.current.k,y:d.from.y+dy/camRef.current.k},false);};
@@ -137,15 +141,27 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
      <button type="button" className="studio-row" aria-expanded={selected===n.id} onClick={()=>setSelected(s=>s===n.id?null:n.id)}><span>{n.kind==='locked'&&<Lock/>}{n.label}</span><span className="studio-row-kind">{n.kind==='locked'?'Locked':'Editable'}</span></button>
      {selected===n.id&&<div className="studio-row-body"><NodeCard node={n} view={view}/>{editor}</div>}</li>)}</ul></section>;})}</div>
    :<div className="studio-body">
-    <div ref={port} className="studio-viewport" data-viewport="true" style={{backgroundPosition:`${cam.x*.15}px ${cam.y*.15}px`}} onScroll={e=>{e.currentTarget.scrollTop=0;e.currentTarget.scrollLeft=0;}} onPointerDown={onPortDown} onPointerMove={onPortMove} onPointerUp={onPortUp} onPointerCancel={onPortUp}>
+    <div ref={port} className="studio-viewport" data-viewport="true" style={{backgroundPosition:STAR_DEPTH.map(f=>`${cam.x*f}px ${cam.y*f}px`).join(',')}} onScroll={e=>{e.currentTarget.scrollTop=0;e.currentTarget.scrollLeft=0;}} onPointerDown={onPortDown} onPointerMove={onPortMove} onPointerUp={onPortUp} onPointerCancel={onPortUp}>
      <div className="studio-world" style={{transform:`translate(${cam.x}px,${cam.y}px) scale(${cam.k})`}}>
+      {regions.map(r=><div key={r.group} className="studio-region" data-group={r.group} style={{left:r.x,top:r.y,width:r.w,height:r.h}}><span className="studio-region-label">{GROUP_LABEL[r.group]}</span></div>)}
       <svg className="studio-edges" width={WORLD_W} height={WORLD_H} aria-hidden="true"><defs><marker id="studio-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>
-       {edges.map(e=>{const a=nodeById(e.from)!,b=nodeById(e.to)!;return <path key={e.from+'>'+e.to} d={edgePath(place(a),place(b))} data-edge={e.from+'>'+e.to} data-active={active&&(e.from===active||e.to===active)||undefined} markerEnd="url(#studio-arrow)"/>;})}</svg>
-      {PIPELINE_NODES.map(n=>{const p=place(n);return <button key={n.id} type="button" className="studio-node" data-node={n.id} data-kind={n.kind} data-group={n.group} data-selected={selected===n.id||undefined} data-highlight={n.id===flagged||undefined} aria-pressed={selected===n.id} aria-describedby={peek===n.id?'studio-peek':undefined}
-        aria-label={`${n.label}, ${n.kind==='locked'?'locked':'editable'}`} style={{left:p.x,top:p.y,width:NODE_W,minHeight:NODE_H}}
+       {edges.map(e=>{
+        const key=e.from+'>'+e.to,d=edgePath(place(nodeById(e.from)!),place(nodeById(e.to)!)),stitched=e.from==='council'&&e.to.startsWith('council-');
+        // Lit when it lies on the path through the hovered, focused or selected node, upstream or downstream.
+        const on=!!active&&!!around&&(e.from===active||around.down.has(e.from)||e.to===active||around.up.has(e.to));
+        // Long hauls across several lanes are drawn faint too, so the canvas is not slashed through; they brighten with their path.
+        const far=Math.abs(place(nodeById(e.to)!).x-place(nodeById(e.from)!).x)>2*LANE_PITCH&&e.to!=='ledger'&&!stitched;
+        const common={'data-active':on||undefined,'data-main':MAIN_EDGES.has(key)||undefined,'data-trunk':e.to==='ledger'||undefined,'data-far':far||undefined} as const;
+        return stitched
+         ?<g key={key} data-stitch="true" data-limb={e.to} data-active={on||undefined}><path d={d} data-edge={key} className="stitch-seam" {...common}/><path d={d} className="stitch-ticks" {...common}/></g>
+         :<path key={key} d={d} data-edge={key} {...common} markerEnd="url(#studio-arrow)"/>;
+       })}</svg>
+      {PIPELINE_NODES.map(n=>{const p=place(n),badge=safetyLabelOf(n,view?.effective??DEFAULT_PIPELINE_CONFIG),onPath=!active||!around||n.id===active||around.up.has(n.id)||around.down.has(n.id);return <button key={n.id} type="button" className="studio-node" data-node={n.id} data-kind={n.kind} data-group={n.group} data-provider={n.provider} data-main={MAIN_NODES.has(n.id)||undefined} data-dim={!onPath||undefined} data-selected={selected===n.id||undefined} data-highlight={n.id===flagged||undefined} aria-pressed={selected===n.id} aria-describedby={peek===n.id?'studio-peek':undefined}
+        aria-label={`${n.label}, ${n.kind==='locked'?'locked':'editable'}${badge?', '+badge:''}`} style={{left:p.x,top:p.y,width:NODE_W,minHeight:NODE_H}}
         onPointerDown={e=>onNodeDown(e,n)} onPointerMove={onNodeMove} onPointerUp={onNodeUp} onPointerCancel={onNodeUp} onClick={()=>choose(n.id)} onKeyDown={e=>onNodeKey(e,n)}
         onPointerEnter={()=>setPeek(n.id)} onPointerLeave={()=>setPeek(c=>c===n.id?(flagged??null):c)} onFocus={e=>{setPeek(n.id);reveal(e,n);}} onBlur={()=>setPeek(c=>c===n.id?(flagged??null):c)}>
-        <span className="studio-node-title">{n.kind==='locked'&&<Lock/>}{n.label}</span><span className="studio-node-group">{GROUP_LABEL[n.group]}</span></button>;})}
+        <span className="studio-node-title">{n.kind==='locked'&&<Lock/>}{n.label}</span>
+        <span className="studio-node-meta"><span className="studio-kind" data-kind={n.kind}>{n.kind==='editable'&&<i className="studio-dot" aria-hidden="true"/>}{n.kind==='locked'?'Locked':'Editable'}</span>{badge&&<Badge label={badge}/>}</span></button>;})}
      </div>
      {peekNode&&!selectedNode&&<NodeCard node={peekNode} view={view} id="studio-peek"/>}
     </div>

@@ -11,7 +11,7 @@ import {createApp} from '../server/http.ts';
 import {ProviderError} from '../server/providers/index.ts';
 import {SessionIndex} from '../server/harness/session-index.ts';
 import {locked} from '../shared/pipeline-config.ts';
-import {PIPELINE_NODES,nodeById} from '../shared/pipeline-nodes.ts';
+import {PIPELINE_NODES,edgesOf,nodeById} from '../shared/pipeline-nodes.ts';
 const output=path.resolve(process.env.BATCH2A_OUTPUT??'');assert(process.env.BATCH2A_OUTPUT&&!output.toLowerCase().startsWith(path.resolve('..').toLowerCase()),'BATCH2A_OUTPUT must be a folder outside the repo');await mkdir(output,{recursive:true});
 const base=await mkdtemp(path.join(os.tmpdir(),'aitiarch-pipeline-studio-')),notes=path.join(base,'notes'),settings=path.join(base,'settings'),configFile=path.join(settings,'pipeline-config.json');await mkdir(notes);
 await writeFile(path.join(notes,'plan.md'),'# Synthetic plan\n\nLaunch in June.\n');
@@ -36,6 +36,30 @@ try{
  for(const rule of locked)assert(shown.includes(rule.id),`the locked rule ${rule.id} is a node`);
  assert((await studio.locator('.studio-edges path').count())>=30,'edges show the flow');
  await page.screenshot({path:path.join(output,'studio-canvas.png')});
+ // 1b. Polish: groups read as groups, editable and locked differ at a glance, the Council is stitched from three labelled limbs, the main path stands out, the Ledger trunk is faint.
+ assert.deepEqual(await studio.locator('.studio-region-label').allInnerTexts(),['YOUR REQUEST','GUARDS','ANSWER','CHECKS ON THE REPLY','INVESTIGATE','COUNCIL','RECORDS'].map(s=>s),'one labelled lane per group, in order');
+ for(const n of PIPELINE_NODES){const kind=node(n.id).locator('.studio-kind');assert.equal((await kind.innerText()).trim(),n.kind==='editable'?'Editable':'Locked',`${n.id} says what it is in words`);
+  assert.equal(await node(n.id).locator('.studio-dot').count(),n.kind==='editable'?1:0,`${n.id}: the editable mark is only on editable nodes`);
+  assert.equal(await node(n.id).evaluate(e=>getComputedStyle(e).borderTopStyle),n.kind==='locked'?'dashed':'solid',`${n.id}: locked is dashed, editable is solid`);}
+ for(const [id,label] of [['council-claude','fenced'],['council-codex','contained'],['council-kiro','host-gated']])assert.equal((await node(id).locator('.council-badge').innerText()).trim(),label,`${id} carries its safety badge`);
+ assert.equal(await studio.locator('g[data-stitch]').count(),3,'three stitched joins into the Council');assert.deepEqual(await studio.locator('g[data-stitch]').evaluateAll(g=>g.map(e=>e.getAttribute('data-limb')).sort()),['council-claude','council-codex','council-kiro']);
+ assert.equal(await studio.locator('.studio-node[data-main]').count(),7,'the seven nodes of the main path are set apart');
+ assert.equal(await studio.locator('.studio-edges path[data-trunk]').count(),edgesOf().filter(e=>e.to==='ledger').length,'every edge into the Ledger is part of the trunk');
+ assert(await studio.locator('.studio-edges path[data-trunk]').first().evaluate(e=>+getComputedStyle(e).strokeOpacity)<.5,'the Ledger lines are faint until their path is lit');
+ assert((await studio.locator('.studio-edges path[data-far]').count())>=2,'long hauls across lanes are marked');
+ assert(await studio.locator('.studio-edges path[data-edge="permission_gate>council"]').evaluate(e=>e.hasAttribute('data-far')&&+getComputedStyle(e).strokeOpacity<.5),'the gate-to-Council haul is faint by default');
+ // 1c. Hovering a node lights its edges upstream and downstream, and quiets the nodes that are not on its path.
+ await node('permission_gate').hover();
+ const gateLit=await studio.locator('.studio-edges path[data-active]').evaluateAll(p=>p.map(e=>e.getAttribute('data-edge')));
+ for(const e of ['redaction>permission_gate','permission_gate>request-queue','token-budget>normal-answerer','request-intake>redaction','claim-check>chat-store'])assert(gateLit.includes(e),`hovering the gate lights ${e}: ${gateLit}`);
+ assert.equal(await node('exclusion_lists').getAttribute('data-dim'),'true','a node off the path is quieted');assert.equal(await node('redaction').getAttribute('data-dim'),null,'a node on the path is not');
+ await page.screenshot({path:path.join(output,'studio-polish-hover-gate.png')});
+ await node('ledger').hover();const ledgerLit=await studio.locator('.studio-edges path[data-trunk][data-active]').count();assert.equal(ledgerLit,await studio.locator('.studio-edges path[data-trunk]').count(),'hovering the Ledger brightens its whole trunk');
+ await page.screenshot({path:path.join(output,'studio-polish-hover-ledger.png')});
+ await node('council').hover();assert.equal(await studio.locator('g[data-stitch][data-active]').count(),3,'hovering the Council lights all three stitches');
+ await studio.locator('.studio-region[data-group=council]').screenshot({path:path.join(output,'studio-polish-council.png')});
+ await page.mouse.move(700,860);await page.waitForTimeout(150);assert.equal(await studio.locator('.studio-edges path[data-active]').count(),0,'with nothing hovered no edge is lit');
+ await page.screenshot({path:path.join(output,'studio-polish-canvas.png')});
  // 2. Hover and keyboard focus show the detailed card, top to bottom.
  await node('normal-answerer').hover();const c=card('Normal chat answerer');await c.waitFor();
  const text=(await c.innerText()).toLowerCase(),order=['what it does','what it receives','what it sends on','safety label','editable fields'].map(s=>text.indexOf(s)).concat(text.lastIndexOf('editable here'));
