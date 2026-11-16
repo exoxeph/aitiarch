@@ -2,7 +2,7 @@ import {useEffect,useState} from 'react';
 import {api,ApiError,type PipelineView} from '../api.ts';
 import type {Availability} from '../../server/providers/council-availability.ts';
 import {providerName,safetyHelp} from '../chat/council-view.ts';
-import {ANSWERERS,isAnswerer,overridesFor,saveErrorText,type Answerer} from '../chat/normal-provider.ts';
+import {ANSWERERS,availabilityStatus,isAnswerer,overridesFor,saveErrorText,type Answerer} from '../chat/normal-provider.ts';
 
 /** Settings > Pipeline: who answers Normal chat. The page only chooses; the server validates, saves and enforces. Nothing is written except through the pipeline-config calls. */
 export function PipelinePane({onOpenStudio}:{onOpenStudio?:()=>void}={}){
@@ -14,12 +14,7 @@ export function PipelinePane({onOpenStudio}:{onOpenStudio?:()=>void}={}){
   return()=>{off=true;};},[]);
  const saved:Answerer=view&&isAnswerer(view.effective.normalAnswerer)?view.effective.normalAnswerer:'claude',dirty=!!view&&choice!==saved;
  const labelOf=(id:Answerer)=>view?.effective.safetyLabels[id]??'';
- const statusOf=(id:Answerer):{word:string;why?:string}=>{
-  if(avail===undefined)return {word:'Checking…'};
-  if(avail===null)return {word:'Availability unknown',why:'Availability could not be checked.'};
-  const p=avail.find(a=>a.id===id);
-  return !p?{word:'Not set up',why:'This provider is not set up on this computer.'}:p.available?{word:'Available'}:{word:'Unavailable',...(p.reason?{why:p.reason}:{})};
- };
+ const statusOf=(id:Answerer)=>availabilityStatus(avail,id);
  const fail=(e:unknown)=>setError(e instanceof ApiError?saveErrorText(e):'The setting could not be saved. Nothing was changed.');
  const save=async()=>{if(!view||busy)return;setBusy(true);setError('');setDone('');
   try{const next=await api.pipelineSave(overridesFor(view.overrides,choice));setView(next);setChoice(isAnswerer(next.effective.normalAnswerer)?next.effective.normalAnswerer:'claude');setDone('Saved. New chat messages use this provider.');window.dispatchEvent(new Event('aitiarch:pipeline-changed'));}

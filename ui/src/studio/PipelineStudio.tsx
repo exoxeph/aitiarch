@@ -3,7 +3,7 @@ import {api,type PipelineView} from '../api.ts';
 import type {Availability} from '../../server/providers/council-availability.ts';
 import {DEFAULT_PIPELINE_CONFIG} from '../../shared/pipeline-config.ts';
 import {GROUP_LABEL,GROUP_ORDER,PIPELINE_NODES,edgesOf,fieldsOf,lockReason,nodeById,numberAt,safetyLabelOf,type NodeGroup,type PipelineNode} from '../../shared/pipeline-nodes.ts';
-import {ANSWERERS,isAnswerer,overridesFor,saveErrorText,type Answerer} from '../chat/normal-provider.ts';
+import {ANSWERERS,availabilityStatus,isAnswerer,overridesFor,saveErrorText,type Answerer} from '../chat/normal-provider.ts';
 import {providerName,safetyHelp} from '../chat/council-view.ts';
 import {pathData,routeEdges,simpleRoute} from './route.ts';
 import {PromptPreview,WordingFields} from './WordingEditor.tsx';
@@ -50,7 +50,7 @@ function NodeEditor({node,view,avail,onChanged,onClose}:{node:PipelineNode;view:
   void run(()=>api.pipelineSave(next),'Saved.');
  };
  const reset=()=>{const next=overridesWithout(view?.overrides??{},node,wkeys);void run(()=>Object.keys(next).length?api.pipelineSave(next):api.pipelineReset(),'This node is back to its defaults.');};
- const statusOf=(id:Answerer)=>avail===undefined?'Checking…':avail===null?'Availability unknown':avail.find(a=>a.id===id)?.available?'Available':'Unavailable';
+ const statusOf=(id:Answerer)=>availabilityStatus(avail,id).word;
  return <section className="studio-editor" aria-label={`Edit ${node.label}`} data-editor={node.id}>
   <header><h3>{node.kind==='locked'&&<Lock/>}{node.label}</h3><button type="button" className="ghost studio-x" aria-label="Close editor" onClick={onClose}>×</button></header>
   {node.kind==='locked'

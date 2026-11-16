@@ -4,6 +4,13 @@ import {formatUsage,providerName} from './council-view.ts';
 
 export type Answerer='claude'|'codex'|'kiro';
 export const ANSWERERS:readonly Answerer[]=['claude','codex','kiro'];
+/** Cheap local check status, in the same plain words in Settings and Studio. */
+export function availabilityStatus(avail:readonly {id:string;available:boolean;reason?:string}[]|null|undefined,id:Answerer):{word:string;why?:string}{
+ if(avail===undefined)return {word:'Checking…'};
+ if(avail===null)return {word:'Could not check',why:'Availability could not be checked.'};
+ const p=avail.find(a=>a.id===id);
+ return !p?{word:'Not set up',why:'This provider is not set up on this computer.'}:p.available?{word:'Available'}:{word:'Unavailable',...(p.reason?{why:p.reason}:{})};
+}
 export const isAnswerer=(v:unknown):v is Answerer=>typeof v==='string'&&(ANSWERERS as readonly string[]).includes(v);
 /** Codex and Kiro answer through the Council transport: notes only, a cap, no session of their own. */
 export const isNativeAnswerer=(a:string|undefined|null):a is 'codex'|'kiro'=>a==='codex'||a==='kiro';
