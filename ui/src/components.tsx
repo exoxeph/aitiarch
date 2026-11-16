@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { EolLabel, TreeNode } from "./api.ts";
 import { parseProperties, wordCount } from "./frontmatter.ts";
 import type { SyncStatus } from "./editor/session.ts";
+import {redact} from '../shared/redact.ts';
 
 export function flattenTree(t: TreeNode | null): string[] {
   if (!t) return [];
@@ -127,6 +128,7 @@ export function StatusBar({
   rootPath: string;
 }) {
   const s = status ?? "saved";
+  const rootLabel = redact(rootPath).split(/[\\/]/).filter(Boolean).at(-1) ?? '';
   return (
     <>
       <span className={`status status-${s}`} role="status">
@@ -136,8 +138,8 @@ export function StatusBar({
       <span className="spacer" />
       {path && text !== undefined && <span>{wordCount(text).toLocaleString()} words</span>}
       {path && eol && <span title="Line endings of the file on disk; kept exactly as they are">{eol === "none" ? "" : eol}{bom ? " · BOM" : ""}</span>}
-      <span className="muted root" title={rootPath}>
-        {rootPath}
+      <span className="muted root" title={rootLabel}>
+        {rootLabel}
       </span>
     </>
   );

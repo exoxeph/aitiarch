@@ -105,16 +105,8 @@ The field is named exactly "quote"; copy its value character for character from 
 No other fields are allowed in a claim. Do not use aliases or alternative field names.
 Return no fields for takeaway, why, failed-reason or accepted decisions.`;
 
-// Best effort only: limitations and the mandatory preview are documented in the design.
-export function redact(text: string): string {
-  return text
-    .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g, '[PRIVATE_KEY]')
-    .replace(/\b(authorization\s*:\s*)(?:bearer\s+|basic\s+)?[^\r\n]+/gi, '$1[SECRET]')
-    .replace(/\b(api[_-]?key|password|secret|token)\s*[:=]\s*["']?[^\s"',;]+/gi, '$1=[SECRET]')
-    .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{16,})/g, '[TOKEN]')
-    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/g, '$1[CREDENTIALS]@')
-    .replace(/[A-Za-z]:\\Users\\[^\s"'<>]+|\/(?:Users|home)\/[^\s"'<>]+/g, '[USER_PATH]');
-}
+import {redact} from '../../shared/redact.ts';
+export {redact} from '../../shared/redact.ts';
 /** The node's persona and attached skills go after the app's own instruction; the app's hard rules come last (shared/instruction.ts). */
 const withExtras=(request:Request,base:string)=>composeInstruction({base,persona:request.persona?personaInstruction(request.persona):null,skillBlock:request.skills});
 export function prepareRequest(request: Request): { instruction: string; data: Request; omittedTurns: number; clippedMessages: number } {
