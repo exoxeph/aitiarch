@@ -456,7 +456,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
   </aside>}
   {notice&&<p className="chat-notice" role="alert">{notice} <button type="button" className="ghost" onClick={()=>setNotice('')}>Dismiss</button></p>}
   <div className="chat-dock">
-  {mode==='chat'&&<PersonaSwitch id="chat" label="How this chat works with you" value={persona.persona} kept={persona.kept} disabled={composing} hint="Change it before you review a message." onChange={p=>void persona.choose(p)}/>}
+  {mode==='chat'&&<PersonaSwitch id="chat" label="Reply style" value={persona.persona} kept={persona.kept} disabled={composing} hint="Change it before you review a message." onChange={p=>void persona.choose(p)}/>}
   {persona.failed&&<p className="chat-notice" role="alert">That choice could not be saved. Nothing was changed.</p>}
   {repoDraft!==null&&<form className="chat-sessions-name chat-repo-form" onSubmit={e=>void chooseRepo(e)} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();setRepoDraft(null);}}}>
    <input ref={repoField} className="chat-ctl" aria-label="Repo folder (absolute path)" placeholder="C:\path\to\repo" value={repoDraft} onChange={e=>setRepoDraft(e.target.value)}/>

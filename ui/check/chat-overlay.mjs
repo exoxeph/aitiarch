@@ -46,10 +46,10 @@ try {
     if (layout === 'overlay') { assert(Math.abs(box.width - Math.round(width * 0.45)) <= 4, `about 45% wide at ${width}: ${box.width}`); assert(box.x + box.width >= width - 20, 'anchored to the right edge'); }
     else assert.equal(Math.round(box.width), width, 'a narrow window gets a full-width sheet');
     const inView = async (loc, what) => { const b = await loc.boundingBox(); assert(b && b.y >= 0 && b.y + b.height <= height + 0.5 && b.x >= 0 && b.x + b.width <= width + 0.5, `${what} is fully on screen at ${width}x${height}: ${JSON.stringify(b)}`); };
-    const composer = page.getByRole('textbox', { name: 'Message Aitiarch AI' }); await inView(composer, 'the composer'); await inView(page.getByRole('button', { name: /^Mode:/ }), 'the Mode menu');
-    await page.getByRole('button', { name: /^Mode:/ }).click(); await page.getByRole('menuitemradio', { name: /^Council/ }).click();
+    const composer = page.getByRole('textbox', { name: 'Message Aitiarch AI' }); await inView(composer, 'the composer'); await inView(page.getByRole('button', { name: /^Chat mode:/ }), 'the Mode menu');
+    await page.getByRole('button', { name: /^Chat mode:/ }).click(); await page.getByRole('menuitemradio', { name: /^Council/ }).click();
     const council = page.getByRole('region', { name: 'Council', exact: true }); await council.waitFor();
-    await inView(composer, 'the composer in Council mode'); await inView(page.getByRole('button', { name: /^Mode:/ }), 'the Mode menu in Council mode'); await inView(council.getByRole('button', { name: 'Review Council question' }), 'the Review Council button');
+    await inView(composer, 'the composer in Council mode'); await inView(page.getByRole('button', { name: /^Chat mode:/ }), 'the Mode menu in Council mode'); await inView(council.getByRole('button', { name: 'Review Council question' }), 'the Review Council button');
     const c = await council.boundingBox(), p = await page.locator('#chat-panel').boundingBox(); assert(c && c.y >= p.y - 0.5 && c.y < p.y + p.height, `the Council bar is inside the panel at ${width}x${height}`);
     await page.screenshot({ path: path.join(output, `chat-overlay-${width}x${height}.png`) });
     assert.deepEqual(errors, []); results.push(`${width}x${height}:${layout}`); await ctx.close();

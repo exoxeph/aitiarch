@@ -8,9 +8,9 @@ import {PersonaSwitch,UsedSkills} from '../src/skills/PersonaSwitch.tsx';
 const h=(el:ReactElement)=>renderToStaticMarkup(el);
 
 describe('PersonaSwitch',()=>{
- const sw=(over:object={})=>h(<PersonaSwitch id="chat" label="How this chat works with you" value="plan" onChange={()=>{}} {...over}/>);
+ const sw=(over:object={})=>h(<PersonaSwitch id="chat" label="Reply style" value="plan" onChange={()=>{}} {...over}/>);
  it('offers Plan with me, Grill me and Explain, and says what the chosen one does in one line',()=>{
-  const out=sw();for(const t of ['How this chat works with you','Plan with me','Grill me','Explain','Weighs options with you and ends on one question.'])expect(out).toContain(t);
+  const out=sw();for(const t of ['Reply style','Plan with me','Grill me','Explain','Weighs options with you and ends on one question.'])expect(out).toContain(t);
   expect(out).not.toContain('Asks one hard question at a time');
  });
  it('the chosen persona is checked and the others are not',()=>{
