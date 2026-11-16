@@ -8,14 +8,16 @@ import {fit,flight,toScreen,toWorld,zoomAt,type Camera,type Size} from './camera
 import {CLUSTER_ABOVE,cardFor,clusterByFolder,lassoSelect,searchStar,visibleNotes} from './view-model.ts';
 import {makeLayout,type Link,type Star} from './layout.ts';
 import {draw,readPalette,type Palette} from './draw.ts';
+import {DecisionsList} from '../notes/DecisionsList.tsx';
+import type {DecisionRow} from '../../shared/note-index.ts';
 
-interface Props {active:string|null;onClose:()=>void;onOpen:(path:string)=>void;onUseAsContext:(paths:string[])=>void;subscribe:(fn:(e:ServerEvent)=>void)=>()=>void}
+interface Props {active:string|null;onClose:()=>void;onOpen:(path:string)=>void;onUseAsContext:(paths:string[])=>void;subscribe:(fn:(e:ServerEvent)=>void)=>()=>void;decisions:DecisionRow[];decisionsLoading:boolean;decisionsError:string;focusDecisions:boolean;onDecision:(path:string,line:number)=>void}
 type Graph={data:GraphData;positions:Record<string,[number,number]>};
 // "Decision" is reserved for the human-marked unit of the handoff spec (not built yet), so the map only speaks of threads.
 const STATE_WORDS:Record<StarState,string>={open:'Has open threads',closed:'All threads closed',stale:'Not edited in 30 days',quiet:'No threads yet'};
 const FLY_MS=650;
 
-export default function Constellation({active,onClose,onOpen,onUseAsContext,subscribe}:Props){
+export default function Constellation({active,onClose,onOpen,onUseAsContext,subscribe,decisions,decisionsLoading,decisionsError,focusDecisions,onDecision}:Props){
  const [graph,setGraph]=useState<Graph|null>(null),[failed,setFailed]=useState('');
  const [mode,setMode]=useState<'local'|'global'>('local'),[folder,setFolder]=useState('*'),[stateF,setStateF]=useState<StarState|'*'>('*');
  const [query,setQuery]=useState(''),[selected,setSelected]=useState<string[]>([]),[chosen,setChosen]=useState<string|null>(active);
@@ -151,7 +153,7 @@ export default function Constellation({active,onClose,onOpen,onUseAsContext,subs
 
  // ---- keys: Escape clears, then closes; / searches
  useEffect(()=>{
-  root.current?.focus();
+  if(!root.current?.contains(document.activeElement))root.current?.focus();
   const key=(e:KeyboardEvent)=>{
    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();
     if(lasso.current){lasso.current=null;dirty.current=true;return;}
@@ -185,7 +187,7 @@ export default function Constellation({active,onClose,onOpen,onUseAsContext,subs
  const notes=selected.filter(p=>!p.startsWith('folder:'));
  const titleOf=(p:string)=>graph?.data.notes.find(n=>n.path===p)?.title??p;
 
- return <section ref={root} className="constellation" role="dialog" aria-modal="true" aria-label="Constellation" tabIndex={-1}>
+ return <section ref={root} className="constellation" data-section={focusDecisions?'decisions':'notes'} role="dialog" aria-modal="true" aria-label="Constellation" tabIndex={-1}>
   <header className="cn-bar">
    <h2>Constellation</h2>
    <div className="seg" role="group" aria-label="Which notes">{(['local','global'] as const).map(m=><button key={m} type="button" aria-pressed={mode===m} onClick={()=>setMode(m)} title={m==='local'?'This note and two links out':'Every note'}>{m==='local'?'Local':'Global'}</button>)}</div>
@@ -210,6 +212,7 @@ export default function Constellation({active,onClose,onOpen,onUseAsContext,subs
         <i className={`cn-dot cn-${st}`} aria-hidden="true"/><span>{n.title}</span>{n.openThreads>0&&<em>{n.openThreads} open</em>}</button></li>;})}</ul>
       {listStars.length>400&&<p className="cn-list-head">and {listStars.length-400} more: use Find</p>}
      </>}
+    <DecisionsList rows={decisions} onOpen={onDecision} loading={decisionsLoading} error={decisionsError} focus={focusDecisions}/>
    </aside>
    <div className="cn-stage" ref={wrap}>
     <canvas ref={canvas} aria-label="Map of notes and the links between them. Use the list for keyboard access." onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onDoubleClick={onDouble}/>

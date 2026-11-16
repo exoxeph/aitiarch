@@ -7,6 +7,8 @@ const Constellation = lazy(() => import("./constellation/Constellation.tsx"));
 // The Pipeline Studio loads only when first opened too.
 const PipelineStudio = lazy(() => import("./studio/PipelineStudio.tsx"));
 import { api, ApiError, connectEvents, type Backlink, type InkSnapshot, type NoteFile, type ServerEvent, type TreeNode } from "./api.ts";
+import {useNoteIndex} from './notes/use-note-index.ts';
+import {decisionRows} from '../shared/note-index.ts';
 import { previewText, titleOf, type CiteNote } from "./citations/citation-model.ts";
 import { citeAtCursor } from "./citations/cite-editor.ts";
 import { BacklinksPanel } from "./citations/BacklinksPanel.tsx";
@@ -197,6 +199,12 @@ export default function App() {
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   // The Constellation view, and the notes it hands to the chat ("Use as chat context").
   const [mapOpen, setMapOpen] = useState(false), [mapNotes, setMapNotes] = useState<string[]>([]), mapButtonRef = useRef<HTMLButtonElement>(null);
+  const [decisionsFocus,setDecisionsFocus]=useState(false);
+  const noteIndex=useNoteIndex(mapOpen||overlay==='palette',subscribe);
+  const indexedNotes=useMemo(()=>noteIndex.notes.map(n=>({...n,text:docs[n.path]??n.text})),[noteIndex.notes,docs]);
+  const decisions=useMemo(()=>decisionRows(indexedNotes),[indexedNotes]);
+  const [lineJump,setLineJump]=useState<{path:string;line:number}|null>(null);
+  const openLine=(path:string,line:number)=>{setMapOpen(false);void openNote(path);setLineJump({path,line});};
   useEffect(() => {
     if (!active) { setBacklinks([]); return; }
     let live = true, timer: ReturnType<typeof setTimeout> | undefined;
@@ -462,6 +470,7 @@ export default function App() {
   useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(null),9000);return()=>clearTimeout(timer);},[toast]);
   const commands = useMemo(() => {
     const list: Array<OverlayItem & { run: () => void }> = [
+      {id:'decisions',label:'Show decisions',group:'Workspace',run:()=>{setDecisionsFocus(true);setMapOpen(true);}},
       ...paths.map(path=>({id:`note:${path}`,label:`Jump to note: ${path}`,group:'Notes',run:()=>void openNote(path)})),
       ...SLASH_ITEMS.map((item,i)=>({id:`insert:${i}`,label:`Insert: ${item.label}`,group:'Insert blocks',run:withView(h=>{
         const r=h.view.state.selection.main,insert=slashInsert(item,r.from,r.to);
@@ -601,7 +610,7 @@ export default function App() {
         )}
         {tabs.map((p) =>
           files[p] ? (
-            <EditorPane key={p} file={files[p]} visible={p === active} resolver={resolver} onOpenWiki={onOpenWiki} cite={cite} jumpTo={jump?.path === p ? jump.heading : null} onJumped={() => setJump(null)} onStatus={onStatus} onDoc={onDoc} onSelection={onSelection} subscribe={subscribe} register={register}
+            <EditorPane key={p} file={files[p]} visible={p === active} resolver={resolver} onOpenWiki={onOpenWiki} cite={cite} jumpTo={jump?.path === p ? jump.heading : null} onJumped={() => setJump(null)} jumpLine={lineJump?.path===p?lineJump.line:null} onLineJumped={()=>setLineJump(null)} onStatus={onStatus} onDoc={onDoc} onSelection={onSelection} subscribe={subscribe} register={register}
               inkItems={inkFiles[p]?.document.items} trustedText={p === active ? trustedText : null}
               typingOptions={{enabled:typingHelpOn,doubleSpace:doubleSpacePeriod,smart:smartCorrections,vocabulary:vocabulary??undefined,neverCorrect,onReject:rejectCorrection}}
               inkVersion={inkFiles[p]?.version} onInk={onInk} onInkSaved={onInkSaved} onInkError={setNotice} />
@@ -615,8 +624,8 @@ export default function App() {
         )}
       </main>
       {mapOpen && <Suspense fallback={<section className="constellation" role="status" aria-label="Constellation"><p className="cn-empty">Charting your notes…</p></section>}>
-        <Constellation active={active} subscribe={subscribe}
-          onClose={() => { setMapOpen(false); mapButtonRef.current?.focus(); }}
+        <Constellation active={active} subscribe={subscribe} decisions={decisions} decisionsLoading={noteIndex.loading} decisionsError={noteIndex.error} focusDecisions={decisionsFocus} onDecision={openLine}
+          onClose={() => { setMapOpen(false);setDecisionsFocus(false); mapButtonRef.current?.focus(); }}
           onOpen={p => { setMapOpen(false); void openNote(p); }}
           onUseAsContext={ps => { setMapNotes(ps); setMapOpen(false); setChatOpen(true); }} />
       </Suspense>}

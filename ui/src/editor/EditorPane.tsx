@@ -47,6 +47,8 @@ interface Props {
   cite?: Omit<CiteEnv, "from">;
   /** A heading fragment to land on (from a citation like plan.md#token-refresh), and the callback once it has been handled. */
   jumpTo?: string | null;
+  jumpLine?: number | null;
+  onLineJumped?: () => void;
   onJumped?: () => void;
   onStatus: (path: string, s: SyncStatus) => void;
   onDoc: (path: string, text: string) => void;
@@ -328,6 +330,12 @@ export function EditorPane(props: Props) {
     if (at !== null) { view.dispatch({ selection: { anchor: at }, effects: EditorView.scrollIntoView(at, { y: "start", yMargin: 48 }) }); view.focus(); }
     props.onJumped?.();
   }, [props.jumpTo, props.visible]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{
+    const view=viewRef.current;
+    if(!props.jumpLine||!props.visible||!view)return;
+    const at=view.state.doc.line(Math.max(1,Math.min(view.state.doc.lines,props.jumpLine))).from;
+    view.dispatch({selection:{anchor:at},effects:EditorView.scrollIntoView(at,{y:'center'})});view.focus();props.onLineJumped?.();
+  },[props.jumpLine,props.visible]);
   // A new note list (or open handler) gives the pane a fresh citation environment, so chips and the picker see the current notes.
   useEffect(() => {
     viewRef.current?.dispatch({ effects: citeSlot.current.reconfigure(props.cite ? citeEnv.of({ from: props.file.path, ...props.cite }) : []) });
