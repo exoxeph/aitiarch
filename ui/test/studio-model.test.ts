@@ -1,7 +1,7 @@
 import {expect,it} from 'vitest';
 import {DEFAULT_PIPELINE_CONFIG} from '../shared/pipeline-config.ts';
 import {PIPELINE_NODES,nodeById} from '../shared/pipeline-nodes.ts';
-import {LAYOUT_KEY,MAIN_EDGES,MAIN_NODES,NODE_W,REGION_LABEL,REGION_PAD,pathAround,regionsOf,fitCamera,centerOn,clampPlace,clampZoom,deletePath,NODE_H,WORLD_H,isNarrow,loadLayout,overridesWith,overridesWithout,parseField,saveLayout,setPath,zoomAt} from '../src/studio/studio-model.ts';
+import {LAYOUT_KEY,MAIN_EDGES,MAIN_NODES,NODE_W,WORLD_W,clampShift,REGION_LABEL,REGION_PAD,pathAround,regionsOf,fitCamera,centerOn,clampPlace,clampZoom,deletePath,NODE_H,WORLD_H,isNarrow,loadLayout,overridesWith,overridesWithout,parseField,saveLayout,setPath,zoomAt} from '../src/studio/studio-model.ts';
 
 const store=(initial?:string)=>{let v=initial;return {getItem:()=>v??null,setItem:(_k:string,x:string)=>{v=x;},get value(){return v;}};};
 
@@ -17,6 +17,13 @@ it('never throws when storage is blocked',()=>{
 });
 it('keeps nodes inside the world and zoom inside its limits',()=>{
  expect(clampPlace({x:-50,y:99999})).toEqual({x:0,y:WORLD_H-NODE_H});expect(clampZoom(10)).toBe(2);expect(clampZoom(.01)).toBe(.4);
+});
+it('keeps a whole lane inside the world when it is moved',()=>{
+ const lane=[{x:100,y:50,h:NODE_H},{x:100,y:300,h:NODE_H}];
+ expect(clampShift(lane,40.4,-10)).toEqual({dx:40,dy:-10});
+ expect(clampShift(lane,-500,-500)).toEqual({dx:-100,dy:-50});
+ expect(clampShift(lane,9999,9999)).toEqual({dx:WORLD_W-(100+NODE_W),dy:WORLD_H-(300+NODE_H)});
+ expect(clampShift([],5,5)).toEqual({dx:0,dy:0});
 });
 it('zooms around the point under the pointer',()=>{
  const c=zoomAt({x:0,y:0,k:1},2,100,50);expect(c).toEqual({k:2,x:-100,y:-50});expect((100-c.x)/c.k).toBe(100);

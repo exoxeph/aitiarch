@@ -30,6 +30,13 @@ export function saveLayout(layout:Layout,storage:Pick<Storage,'setItem'>|null=sa
 export function clearLayout(storage:Pick<Storage,'removeItem'>|null=safeStorage()):void{try{storage?.removeItem(LAYOUT_KEY);}catch{/* a blocked store only means nothing was remembered */}}
 function safeStorage():Storage|null{try{return typeof localStorage==='undefined'?null:localStorage;}catch{return null;}}
 export const placeOf=(node:PipelineNode,layout:Layout):Place=>layout[node.id]??{x:node.x,y:node.y};
+/** The shift (dx,dy) to apply to a whole lane of nodes, cut down so that none of them leaves the world. Rounded to whole units. */
+export function clampShift(boxes:readonly {x:number;y:number;h:number}[],dx:number,dy:number):{dx:number;dy:number}{
+ if(!boxes.length)return {dx:0,dy:0};
+ const minX=Math.min(...boxes.map(b=>b.x)),maxX=Math.max(...boxes.map(b=>b.x+NODE_W)),minY=Math.min(...boxes.map(b=>b.y)),maxY=Math.max(...boxes.map(b=>b.y+b.h));
+ const cut=(v:number,lo:number,hi:number)=>Math.min(hi,Math.max(lo,Math.round(v)));
+ return {dx:cut(dx,-minX,WORLD_W-maxX),dy:cut(dy,-minY,WORLD_H-maxY)};
+}
 export const clampPlace=(p:Place):Place=>({x:Math.min(WORLD_W-NODE_W,Math.max(0,Math.round(p.x))),y:Math.min(WORLD_H-NODE_H,Math.max(0,Math.round(p.y)))});
 
 export const clampZoom=(k:number)=>Math.min(MAX_ZOOM,Math.max(MIN_ZOOM,k));

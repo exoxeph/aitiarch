@@ -1622,7 +1622,11 @@ p.chat-wait { margin: 4px 0 0; }
 .studio [data-group="council"] { --g: color-mix(in srgb, var(--accent) 50%, var(--ai-ink)); }
 .studio [data-group="records"] { --g: var(--muted); }
 .studio-region { position: absolute; box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--g) 26%, transparent); border-radius: 20px; background: linear-gradient(180deg, color-mix(in srgb, var(--g) 11%, transparent), color-mix(in srgb, var(--g) 4%, transparent)); pointer-events: none; }
-.studio-region-label { position: absolute; left: 20px; top: 12px; color: color-mix(in srgb, var(--g) 70%, var(--ink-text)); font: 700 14.5px/1.2 var(--font-ui); letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+/* The strip with a lane's name is its handle: drag it to move the lane and all its nodes (the rest of the lane stays click-through, so the canvas still pans). */
+.studio-region-handle { position: absolute; left: 0; top: 0; right: 0; height: 44px; margin: 0; padding: 0; border: 0; border-radius: 20px 20px 0 0; background: transparent; text-align: left; cursor: grab; pointer-events: auto; touch-action: none; }
+.studio-region-handle:hover { background: color-mix(in srgb, var(--g) 12%, transparent); }
+.studio-region-handle:active { cursor: grabbing; }
+.studio-region-label { display: block; padding: 12px 20px 0; color: color-mix(in srgb, var(--g) 70%, var(--ink-text)); font: 700 14.5px/1.2 var(--font-ui); letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
 .studio-edges { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; color: var(--muted); }
 /* Edges are thin and calm until you point at a node: its path, upstream and downstream, turns bold and bright and everything else steps back. */
 .studio-edges path { fill: none; stroke: color-mix(in srgb, var(--muted) 70%, transparent); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; transition: stroke-opacity 140ms; }

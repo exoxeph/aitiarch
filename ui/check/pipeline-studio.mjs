@@ -113,6 +113,66 @@ try{
  await boot();await openStudio();assert.equal(await node('token-budget').evaluate(e=>e.style.left),moved['token-budget'].x+'px','the place survives a reload');
  await studio.getByRole('button',{name:'Reset layout'}).click();assert.equal(await node('token-budget').evaluate(e=>e.style.left),dflt.x+'px');assert.equal(await page.evaluate(()=>localStorage.getItem('aitiarch.pipeline.layout')),null,'the stored layout is cleared');
  await studio.getByRole('button',{name:'Zoom in'}).click();await studio.getByRole('button',{name:'Zoom out'}).click();
+ // 4b. Lanes move too. A lane's header drags the lane and all its nodes together; one node moves alone and its lane grows to follow; all of it persists; Escape cancels; Reset restores.
+ const posOf=async ids=>Object.fromEntries(await Promise.all(ids.map(async id=>[id,await node(id).evaluate(e=>({x:parseFloat(e.style.left),y:parseFloat(e.style.top)}))])));
+ const region=g=>studio.locator(`.studio-region[data-group=${g}]`),handle=g=>region(g).locator('.studio-region-handle');
+ const rectOf=loc=>loc.evaluate(e=>{const r=e.getBoundingClientRect();return {l:r.left,t:r.top,r:r.right,b:r.bottom};});
+ const laneIds=g=>PIPELINE_NODES.filter(n=>n.group===g).map(n=>n.id),guards=laneIds('guard'),others=PIPELINE_NODES.filter(n=>n.group!=='guard').map(n=>n.id),allIds=PIPELINE_NODES.map(n=>n.id);
+ // Edges must still end on their own nodes, stay straight-runs only, and never be hidden behind a node they are not part of.
+ const edgeProblems=()=>page.evaluate(()=>{
+  const nodes=[...document.querySelectorAll('.studio-node')].map(e=>({id:e.dataset.node,x:parseFloat(e.style.left),y:parseFloat(e.style.top),w:e.offsetWidth,h:parseFloat(e.style.height)})),by=Object.fromEntries(nodes.map(n=>[n.id,n])),bad=[];
+  for(const p of document.querySelectorAll('.studio-edges path[data-edge]')){
+   const [from,to]=p.dataset.edge.split('>'),d=p.getAttribute('d'),len=p.getTotalLength(),end=p.getPointAtLength(len),t=by[to];
+   if(/C/.test(d.replace(/[QA]/g,'')))bad.push(p.dataset.edge+' is a curve');
+   if(!(Math.abs(end.x-t.x)<1.5&&end.y>=t.y&&end.y<=t.y+t.h)&&!(Math.abs(end.y-t.y)<1.5&&end.x>=t.x&&end.x<=t.x+t.w))bad.push(p.dataset.edge+' does not end on its node');
+   for(let s=0;s<=len;s+=4){const q=p.getPointAtLength(s);for(const n of nodes){if(n.id===from||n.id===to)continue;if(q.x>n.x-2&&q.x<n.x+n.w+2&&q.y>n.y-2&&q.y<n.y+n.h+2){bad.push(p.dataset.edge+' is hidden behind '+n.id);break;}}}
+  }
+  return [...new Set(bad)];
+ });
+ assert.equal(await studio.locator('.studio-region-handle').count(),7,'every lane has a handle');
+ const before=await posOf(allIds),k=await node('redaction').evaluate(e=>e.getBoundingClientRect().width/e.offsetWidth);
+ let hb=await handle('guard').boundingBox();const grab={x:hb.x+hb.width-30,y:hb.y+14};
+ await page.mouse.move(grab.x,grab.y);await page.mouse.down();await page.mouse.move(grab.x+24,grab.y+70,{steps:8});
+ assert.equal(await studio.locator('.studio-edges path[data-edge][marker-end]').count(),edgesOf().length,'while the lane is held every edge is still drawn, with its arrowhead');
+ await page.mouse.up();await page.waitForTimeout(250);
+ const after=await posOf(allIds),dx=after[guards[0]].x-before[guards[0]].x,dy=after[guards[0]].y-before[guards[0]].y;
+ assert(Math.abs(dx-24/k)<=2&&Math.abs(dy-70/k)<=2,`the lane moved by the drag (${dx},${dy} for 24,70 screen px at zoom ${k.toFixed(2)})`);
+ for(const id of guards)assert.deepEqual({x:after[id].x-before[id].x,y:after[id].y-before[id].y},{x:dx,y:dy},`${id} moved with its lane by the same offset (locked nodes too)`);
+ for(const id of others)assert.deepEqual(after[id],before[id],`${id} in another lane did not move`);
+ assert.equal(await studio.locator('[data-editor]').count(),0,'moving a lane is not a click on a node');
+ assert.deepEqual(await edgeProblems(),[],'after a lane move every edge ends on its node and none is hidden behind another');
+ await page.screenshot({path:path.join(output,'lane-moved.png')});
+ // Escape cancels a drag in progress, and does not close the Studio.
+ const resting=await posOf(guards);hb=await handle('guard').boundingBox();
+ await page.mouse.move(hb.x+hb.width-30,hb.y+14);await page.mouse.down();await page.mouse.move(hb.x+hb.width-30+120,hb.y+14,{steps:6});
+ assert.notDeepEqual(await posOf(guards),resting,'mid-drag the lane has moved');
+ await page.keyboard.press('Escape');assert.deepEqual(await posOf(guards),resting,'Escape puts the lane back where it was');
+ await page.mouse.up();assert.equal(await studio.count(),1,'Escape cancelled the drag and did not close the Studio');assert.deepEqual(await posOf(guards),resting);
+ // One node moves alone; its lane-mates stay and the lane grows to contain it; its label stays on the lane.
+ const lane0=await posOf(guards),rg0=await rectOf(region('guard')),tokenBox=await node('token-budget').boundingBox();
+ await page.mouse.move(tokenBox.x+tokenBox.width/2,tokenBox.y+tokenBox.height/2);await page.mouse.down();await page.mouse.move(tokenBox.x+tokenBox.width/2-70,tokenBox.y+tokenBox.height/2,{steps:8});await page.mouse.up();await page.waitForTimeout(250);
+ const lane1=await posOf(guards);
+ for(const id of guards.filter(i=>i!=='token-budget'))assert.deepEqual(lane1[id],lane0[id],`${id} stayed put while its lane-mate was dragged`);
+ assert(lane1['token-budget'].x<lane0['token-budget'].x-50,'the dragged node moved');
+ const rg1=await rectOf(region('guard')),nb=await rectOf(node('token-budget'));
+ assert(rg1.l<rg0.l-30&&(rg1.r-rg1.l)>(rg0.r-rg0.l)+30,'the lane grew to follow the node out past its old edge');assert(nb.l>=rg1.l-.5&&nb.r<=rg1.r+.5&&nb.t>=rg1.t&&nb.b<=rg1.b+.5,'the lane contains the dragged node');
+ assert.equal((await handle('guard').innerText()).trim(),'GUARDS','the lane label stays on its lane');assert(Math.abs((await handle('guard').boundingBox()).y-(await region('guard').boundingBox()).y)<2,'at the top of the lane');
+ assert.deepEqual(await edgeProblems(),[],'a node dragged over another lane still has its edges routed around the nodes in the way');
+ await page.screenshot({path:path.join(output,'node-moved-lane-grown.png')});
+ // Keyboard: a focused lane or node is nudged with the arrow keys.
+ const k0=await posOf(guards);await handle('guard').focus();await page.keyboard.press('ArrowRight');await page.keyboard.press('ArrowDown');
+ const k1=await posOf(guards);for(const id of guards)assert.deepEqual(k1[id],{x:k0[id].x+16,y:k0[id].y+16},`${id} moves with the lane on the arrow keys`);
+ const l0=await posOf(['ledger']);await node('ledger').focus();await page.keyboard.press('ArrowLeft');assert.equal((await posOf(['ledger'])).ledger.x,l0.ledger.x-16,'a focused node nudges on its own');
+ // Everything persists, lanes and nodes, across a reload.
+ const savedPlaces=await posOf(allIds),stored=JSON.parse(await page.evaluate(()=>localStorage.getItem('aitiarch.pipeline.layout')));
+ for(const id of guards)assert(stored[id],`${id} is remembered`);
+ await boot();await openStudio();assert.deepEqual(await posOf(allIds),savedPlaces,'lane and node places survive a reload');
+ assert.deepEqual(await edgeProblems(),[],'and the edges are routed again around them');
+ // Reset layout restores both.
+ await studio.getByRole('button',{name:'Reset layout'}).click();await page.waitForTimeout(250);
+ const reset=await posOf(allIds);for(const n of PIPELINE_NODES)assert.deepEqual(reset[n.id],{x:n.x,y:n.y},`${n.id} is back at its default place`);
+ assert.equal(await page.evaluate(()=>localStorage.getItem('aitiarch.pipeline.layout')),null,'the stored layout is cleared');
+ const rgd=await rectOf(region('guard'));assert((rgd.r-rgd.l)<(rg1.r-rg1.l)-30,'and the lane is its default size again');
  // 5. A blocked reply links to the node that blocked it.
  await studio.getByRole('button',{name:'Close Pipeline Studio'}).click();await studio.waitFor({state:'detached'});
  await page.getByRole('button',{name:/^Chat/}).first().click();const panel=page.locator('#chat-panel');await panel.waitFor();
@@ -141,7 +201,7 @@ try{
  assert.equal(await dialog.getByLabel('Normal chat is answered by').inputValue(),'codex','the plain form still works');await dialog.getByRole('button',{name:'Open Pipeline Studio'}).click();await studio.waitFor();assert.equal(await dialog.count(),0,'Settings closed');
  // 10. At phone width the canvas gives way to a readable list of the same nodes.
  await page.setViewportSize({width:360,height:740});await studio.locator('[data-list=true]').waitFor();
- assert.equal(await studio.locator('.studio-row').count(),PIPELINE_NODES.length,'every node is in the list');assert.equal(await studio.locator('.studio-node').count(),0);
+ assert.equal(await studio.locator('.studio-row').count(),PIPELINE_NODES.length,'every node is in the list');assert.equal(await studio.locator('.studio-node').count(),0);assert.equal(await studio.locator('.studio-region-handle').count(),0,'the list has no lane handles: moving lanes is a canvas feature');
  assert.equal(await studio.evaluate(e=>e.scrollWidth<=e.clientWidth+1),true,'no sideways scroll at 360px');
  const row=studio.locator('[data-node="council-codex"] .studio-row');await row.scrollIntoViewIfNeeded();await row.click();const open=studio.locator('[data-node="council-codex"]');await open.getByRole('region',{name:'Details: Council: Codex'}).waitFor();assert.equal(await open.locator('input[data-field="council.caps.codex.amount"]').count(),1);
  assert.equal(await studio.evaluate(e=>e.scrollWidth<=e.clientWidth+1),true,'an opened row still fits at 360px');await page.screenshot({path:path.join(output,'studio-list-360.png')});

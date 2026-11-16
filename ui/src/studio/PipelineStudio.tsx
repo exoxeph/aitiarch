@@ -2,11 +2,11 @@ import {useEffect,useMemo,useRef,useState,type KeyboardEvent as ReactKey,type Po
 import {api,type PipelineView} from '../api.ts';
 import type {Availability} from '../../server/providers/council-availability.ts';
 import {DEFAULT_PIPELINE_CONFIG} from '../../shared/pipeline-config.ts';
-import {GROUP_LABEL,GROUP_ORDER,PIPELINE_NODES,edgesOf,fieldsOf,lockReason,nodeById,numberAt,safetyLabelOf,type PipelineNode} from '../../shared/pipeline-nodes.ts';
+import {GROUP_LABEL,GROUP_ORDER,PIPELINE_NODES,edgesOf,fieldsOf,lockReason,nodeById,numberAt,safetyLabelOf,type NodeGroup,type PipelineNode} from '../../shared/pipeline-nodes.ts';
 import {ANSWERERS,isAnswerer,overridesFor,saveErrorText,type Answerer} from '../chat/normal-provider.ts';
 import {providerName,safetyHelp} from '../chat/council-view.ts';
 import {pathData,routeEdges,simpleRoute} from './route.ts';
-import {MAIN_EDGES,MAIN_NODES,NODE_W,WORLD_H,WORLD_W,nodeH,centerOn,clampPlace,clearLayout,fitCamera,pathAround,regionsOf,isNarrow,loadLayout,overridesWith,overridesWithout,parseField,placeOf,saveLayout,zoomAt,type Camera,type Layout} from './studio-model.ts';
+import {MAIN_EDGES,MAIN_NODES,NODE_W,WORLD_H,WORLD_W,nodeH,centerOn,clampPlace,clampShift,clearLayout,fitCamera,pathAround,regionsOf,isNarrow,loadLayout,overridesWith,overridesWithout,parseField,placeOf,saveLayout,zoomAt,type Camera,type Layout} from './studio-model.ts';
 
 const fmt=(v:number,unit:string)=>`${v.toLocaleString('en-US',{maximumFractionDigits:4})} ${unit}`.trim();
 /** How far each layer of the starfield follows a pan (the far ones barely move): depth without any animation of its own. */
@@ -73,13 +73,13 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
  const [selected,setSelected]=useState<string|null>(null),selectedRef=useRef<string|null>(null);selectedRef.current=selected;
  const [peek,setPeek]=useState<string|null>(flagged??null);
  const [narrow,setNarrow]=useState(()=>isNarrow(window.innerWidth));
- const root=useRef<HTMLElement>(null),port=useRef<HTMLDivElement>(null),drag=useRef<{id:string;sx:number;sy:number;from:{x:number;y:number};moved:boolean}|null>(null),pan=useRef<{sx:number;sy:number;cx:number;cy:number}|null>(null),swallow=useRef(false);
+ const root=useRef<HTMLElement>(null),port=useRef<HTMLDivElement>(null),drag=useRef<{id:string;sx:number;sy:number;from:{x:number;y:number};before:Layout;moved:boolean}|null>(null),laneDrag=useRef<{group:NodeGroup;sx:number;sy:number;origin:Layout;before:Layout;moved:boolean}|null>(null),cancelDrag=useRef<()=>boolean>(()=>false),afterCancel=useRef(false),pan=useRef<{sx:number;sy:number;cx:number;cy:number}|null>(null),swallow=useRef(false);
  useEffect(()=>{let off=false;api.pipelineConfig().then(v=>{if(!off)setView(v);}).catch(()=>{if(!off)setLoadFailed(true);});api.councilAvailability().then(d=>{if(!off)setAvail(d.providers);}).catch(()=>{if(!off)setAvail(null);});return()=>{off=true;};},[]);
  useEffect(()=>{const on=()=>setNarrow(isNarrow(window.innerWidth));window.addEventListener('resize',on);return()=>window.removeEventListener('resize',on);},[]);
  // Escape closes the editor first, then the Studio; nothing underneath also hears it. Tab stays inside.
  useEffect(()=>{
   const el=root.current,key=(e:KeyboardEvent)=>{
-   if(e.key==='Escape'){e.preventDefault();e.stopPropagation();if(selectedRef.current)setSelected(null);else onClose();return;}
+   if(e.key==='Escape'){e.preventDefault();e.stopPropagation();if(cancelDrag.current())return;if(selectedRef.current)setSelected(null);else onClose();return;} // a drag in progress is cancelled first
    if(e.key!=='Tab'||!el)return;const f=[...el.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled])')].filter(x=>x.offsetParent!==null);if(!f.length)return;
    const first=f[0],last=f[f.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
   };
@@ -107,7 +107,20 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
   return edges.map(e=>({key:e.from+'>'+e.to,from:e.from,to:e.to,stack:false,points:simpleRoute(box(e.from),box(e.to))}));
  },[layout,dragging,regions,edges]);
  const moveNode=(id:string,to:{x:number;y:number},persist:boolean)=>{const next={...layoutRef.current,[id]:clampPlace(to)};layoutRef.current=next;setLayout(next);if(persist)saveLayout(next);};
- const onNodeDown=(e:ReactPointer<HTMLButtonElement>,n:PipelineNode)=>{if(e.button!==0)return;e.stopPropagation();drag.current={id:n.id,sx:e.clientX,sy:e.clientY,from:place(n),moved:false};e.currentTarget.setPointerCapture(e.pointerId);};
+ const onNodeDown=(e:ReactPointer<HTMLButtonElement>,n:PipelineNode)=>{if(e.button!==0)return;e.stopPropagation();afterCancel.current=false;drag.current={id:n.id,sx:e.clientX,sy:e.clientY,from:place(n),before:{...layoutRef.current},moved:false};e.currentTarget.setPointerCapture(e.pointerId);};
+ // A whole lane moves with its nodes: its header is the handle. The lane's box is always drawn around its nodes, so a node dragged out on its own makes the lane grow to follow it.
+ const laneOrigin=(g:NodeGroup)=>Object.fromEntries(PIPELINE_NODES.filter(n=>n.group===g).map(n=>[n.id,place(n)])) as Layout;
+ const shiftLane=(g:NodeGroup,origin:Layout,dx:number,dy:number,persist:boolean)=>{
+  const ns=PIPELINE_NODES.filter(n=>n.group===g),s=clampShift(ns.map(n=>({...origin[n.id],h:nodeH(n.id)})),dx,dy),next={...layoutRef.current};
+  for(const n of ns)next[n.id]={x:origin[n.id].x+s.dx,y:origin[n.id].y+s.dy};
+  layoutRef.current=next;setLayout(next);if(persist)saveLayout(next);
+ };
+ const onLaneDown=(e:ReactPointer<HTMLButtonElement>,g:NodeGroup)=>{if(e.button!==0)return;e.stopPropagation();afterCancel.current=false;laneDrag.current={group:g,sx:e.clientX,sy:e.clientY,origin:laneOrigin(g),before:{...layoutRef.current},moved:false};e.currentTarget.setPointerCapture(e.pointerId);};
+ const onLaneMove=(e:ReactPointer<HTMLButtonElement>)=>{const d=laneDrag.current;if(!d)return;const dx=e.clientX-d.sx,dy=e.clientY-d.sy;if(!d.moved&&Math.hypot(dx,dy)<4)return;if(!d.moved)setDragging(true);d.moved=true;shiftLane(d.group,d.origin,dx/camRef.current.k,dy/camRef.current.k,false);};
+ const onLaneUp=(e:ReactPointer<HTMLButtonElement>)=>{const d=laneDrag.current;laneDrag.current=null;setDragging(false);if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);if(d?.moved)saveLayout(layoutRef.current);};
+ const onLaneKey=(e:ReactKey<HTMLButtonElement>,g:NodeGroup)=>{const v=ARROWS[e.key];if(!v)return;e.preventDefault();const s=e.shiftKey?48:16;shiftLane(g,laneOrigin(g),v[0]*s,v[1]*s,true);};
+ // Escape puts everything back as it was when the drag began (nothing is saved).
+ cancelDrag.current=()=>{const d=drag.current,l=laneDrag.current;if(!d&&!l)return false;const before=(d??l)!.before;drag.current=null;laneDrag.current=null;layoutRef.current=before;setLayout(before);setDragging(false);afterCancel.current=true;return true;};
  const onNodeMove=(e:ReactPointer<HTMLButtonElement>)=>{const d=drag.current;if(!d)return;const dx=e.clientX-d.sx,dy=e.clientY-d.sy;if(!d.moved&&Math.hypot(dx,dy)<4)return;if(!d.moved)setDragging(true);d.moved=true;moveNode(d.id,{x:d.from.x+dx/camRef.current.k,y:d.from.y+dy/camRef.current.k},false);};
  const onNodeUp=(e:ReactPointer<HTMLButtonElement>)=>{const d=drag.current;drag.current=null;setDragging(false);if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);if(d?.moved){swallow.current=true;saveLayout(layoutRef.current);window.setTimeout(()=>{swallow.current=false;},0);}};
  const onNodeKey=(e:ReactKey<HTMLButtonElement>,n:PipelineNode)=>{const v=ARROWS[e.key];if(!v)return;e.preventDefault();const s=e.shiftKey?48:16,p=place(n);moveNode(n.id,{x:p.x+v[0]*s,y:p.y+v[1]*s},true);};
@@ -118,8 +131,8 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
   const dx=sx<pad?pad-sx:sx+w>r.width-pad?r.width-pad-(sx+w):0,dy=sy<pad?pad-sy:sy+h>r.height-pad?r.height-pad-(sy+h):0;
   if(dx||dy)setCam(cur=>({...cur,x:cur.x+dx,y:cur.y+dy}));
  };
- const choose=(id:string)=>{if(swallow.current)return;setSelected(s=>s===id?null:id);};
- const onPortDown=(e:ReactPointer<HTMLDivElement>)=>{if(e.button!==0||(e.target as HTMLElement).closest('.studio-node,.studio-card'))return;pan.current={sx:e.clientX,sy:e.clientY,cx:camRef.current.x,cy:camRef.current.y};e.currentTarget.setPointerCapture(e.pointerId);};
+ const choose=(id:string)=>{if(swallow.current||afterCancel.current){afterCancel.current=false;return;}setSelected(s=>s===id?null:id);};
+ const onPortDown=(e:ReactPointer<HTMLDivElement>)=>{if(e.button!==0||(e.target as HTMLElement).closest('.studio-node,.studio-card,.studio-region-handle'))return;pan.current={sx:e.clientX,sy:e.clientY,cx:camRef.current.x,cy:camRef.current.y};e.currentTarget.setPointerCapture(e.pointerId);};
  const onPortMove=(e:ReactPointer<HTMLDivElement>)=>{const p=pan.current;if(p)setCam(c=>({...c,x:p.cx+e.clientX-p.sx,y:p.cy+e.clientY-p.sy}));};
  const onPortUp=(e:ReactPointer<HTMLDivElement>)=>{pan.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);};
  const zoom=(f:number)=>{const r=port.current?.getBoundingClientRect();setCam(c=>zoomAt(c,f,(r?.width??600)/2,(r?.height??400)/2));};
@@ -148,7 +161,9 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
    :<div className="studio-body">
     <div ref={port} className="studio-viewport" data-viewport="true" style={{backgroundPosition:STAR_DEPTH.map(f=>`${cam.x*f}px ${cam.y*f}px`).join(',')}} onScroll={e=>{e.currentTarget.scrollTop=0;e.currentTarget.scrollLeft=0;}} onPointerDown={onPortDown} onPointerMove={onPortMove} onPointerUp={onPortUp} onPointerCancel={onPortUp}>
      <div className="studio-world" style={{transform:`translate(${cam.x}px,${cam.y}px) scale(${cam.k})`}}>
-      {regions.map(r=><div key={r.group} className="studio-region" data-group={r.group} style={{left:r.x,top:r.y,width:r.w,height:r.h}}><span className="studio-region-label">{GROUP_LABEL[r.group]}</span></div>)}
+      {regions.map(r=><div key={r.group} className="studio-region" data-group={r.group} style={{left:r.x,top:r.y,width:r.w,height:r.h}}>
+       <button type="button" className="studio-region-handle" data-group={r.group} aria-label={`${GROUP_LABEL[r.group]} lane. Drag to move the lane and all its nodes, or use the arrow keys.`}
+        onPointerDown={e=>onLaneDown(e,r.group)} onPointerMove={onLaneMove} onPointerUp={onLaneUp} onPointerCancel={onLaneUp} onKeyDown={e=>onLaneKey(e,r.group)}><span className="studio-region-label">{GROUP_LABEL[r.group]}</span></button></div>)}
       <svg className="studio-edges" width={WORLD_W} height={WORLD_H} aria-hidden="true"><defs><marker id="studio-arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="13" markerHeight="13" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,1 L12,6 L0,11 z" fill="context-stroke"/></marker></defs>
        {routes.map(route=>{
         const key=route.key,d=pathData(route,routes),stitched=route.from==='council'&&route.to.startsWith('council-');
