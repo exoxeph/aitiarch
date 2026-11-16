@@ -208,7 +208,7 @@ The notebook opens in your browser. Details and the practice notebook: [ui/READM
 
 ## &nbsp;Read on
 
-[BRIEF.md](BRIEF.md) the vision and the principles the human keeps &nbsp;·&nbsp; [JOURNEY.md](JOURNEY.md) how it was built, with the measurements &nbsp;·&nbsp; [NOTES.md](NOTES.md) findings and open problems &nbsp;·&nbsp; [docs/build-plan.md](docs/build-plan.md) the plan &nbsp;·&nbsp; [docs/try-it.md](docs/try-it.md) a guided first run &nbsp;·&nbsp; [ARCHIVE.md](ARCHIVE.md) the early experiments
+[docs/try-it.md](docs/try-it.md) a guided first run
 
 <br>
 
