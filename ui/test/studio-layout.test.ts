@@ -65,5 +65,5 @@ it('spreads the six arrowheads at the Ledger far enough apart to read as six',()
 });
 it('draws a path for every edge, with a hop only where a horizontal run crosses another edge',()=>{
  for(const r of routes){const d=pathData(r,routes);expect(d.startsWith('M'),r.key).toBe(true);expect(d).not.toMatch(/NaN/);}
- expect(routes.filter(r=>r.to==='ledger')).toHaveLength(6);
+ expect(routes.filter(r=>r.to==='ledger')).toHaveLength(5); // chat-store, investigate and the three Council providers; the tripwire reports to the chat, not the ledger
 });
