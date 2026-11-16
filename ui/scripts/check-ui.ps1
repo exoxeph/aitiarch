@@ -1,10 +1,11 @@
 param(
  [Parameter(Mandatory=$true)][string]$OutputDirectory,
- [string]$CheckDirectory=(Join-Path $PSScriptRoot '../check')
+ [string]$CheckDirectory=''
 )
 # Run after npm run build. Logs and screenshots must stay outside the repository.
 $ErrorActionPreference='Stop'
 $ui=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+if(!$CheckDirectory){$CheckDirectory=Join-Path $ui 'check'}
 $repo=[IO.Path]::GetFullPath((Join-Path $ui '..'))
 $output=[IO.Path]::GetFullPath($OutputDirectory)
 if($output.Equals($repo,[StringComparison]::OrdinalIgnoreCase) -or $output.StartsWith($repo+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'OutputDirectory must be outside the repository.'}

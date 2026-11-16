@@ -24,5 +24,11 @@ it.skipIf(!hasShell)('UI runner preserves failing exit codes, continues checks a
   expect(failed.stdout).toContain('TOTAL=3 FAILED=1');
   const passed=run(green,path.join(root,'passed-output'));
   expect(passed.status,passed.stderr).toBe(0);expect(passed.stdout).toContain('TOTAL=1 FAILED=0');
+  // Exercise the actual no-CheckDirectory invocation without starting the real browser suite.
+  const copy=path.join(root,'runner','ui','scripts','check-ui.ps1');
+  await mkdir(path.dirname(copy),{recursive:true});await writeFile(copy,await readFile(script));
+  const checks=path.join(root,'runner','ui','check');await mkdir(checks);await writeFile(path.join(checks,'a.mjs'),'process.exit(0);');
+  const defaults=spawnSync(shell,['-NoProfile','-File',copy,'-OutputDirectory',path.join(root,'default-output')],{encoding:'utf8',timeout:20000,windowsHide:true});
+  expect(defaults.status,defaults.stderr).toBe(0);expect(defaults.stdout).toContain('TOTAL=1 FAILED=0');
  }finally{console.log('CLEANUP TARGET (synthetic runner fixtures only): '+root);await rm(root,{recursive:true,force:true});}
 },30000);
