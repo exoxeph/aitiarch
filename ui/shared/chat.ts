@@ -167,11 +167,11 @@ export interface ChatReview {
  *  in full made a long conversation look about three quarters spent on tokens it barely paid for. */
 export const CACHE_READ_WEIGHT=DEFAULT_PIPELINE_CONFIG.estimates.cacheReadWeight;
 /** Tokens that count against the budget: new input (with cache writes) and output in full, cache reads at CACHE_READ_WEIGHT, rounded. */
-export const budgetTokens=(usage:{inputTokens:number;outputTokens:number;cachedTokens?:number})=>usage.inputTokens+Math.round((usage.cachedTokens??0)*CACHE_READ_WEIGHT)+usage.outputTokens;
+export const budgetTokens=(usage:{inputTokens:number;outputTokens:number;cachedTokens?:number})=>usage.inputTokens+Math.round((usage.cachedTokens??0)*activePipelineConfig().estimates.cacheReadWeight)+usage.outputTokens;
 /** The one token estimate the chat uses before a call (chips, review card, budget gate). The Claude CLI measured about 2.8 UTF-8 bytes per token on mixed
  *  notes (about 4 on plain prose), so 3 slightly overestimates. Bytes were shown as tokens before, which made a 19 KB context look like 19k tokens. */
 export const BYTES_PER_TOKEN=DEFAULT_PIPELINE_CONFIG.estimates.bytesPerToken;
-export const textTokens=(text:string)=>Math.ceil(new TextEncoder().encode(text).length/BYTES_PER_TOKEN);
+export const textTokens=(text:string)=>Math.ceil(new TextEncoder().encode(text).length/activePipelineConfig().estimates.bytesPerToken);
 /** Room kept for the reply (and the CLI's own overhead) in the next-turn estimate. Charged in full, like output. */
 export const REPLY_ALLOWANCE=DEFAULT_PIPELINE_CONFIG.estimates.replyAllowance;
 /** What the next message is expected to take from the budget. `sent` is what is being sent now (instruction, sources and the message), at full weight.
@@ -179,7 +179,7 @@ export const REPLY_ALLOWANCE=DEFAULT_PIPELINE_CONFIG.estimates.replyAllowance;
  *  The footer, the review card and the gate all use `total`. */
 export interface TurnEstimate {sent:number;replay:number;allowance:number;total:number}
 export const nextTurnEstimate=(sent:number,replayTokens:number):TurnEstimate=>{
- const replay=Math.round(Math.max(0,replayTokens)*CACHE_READ_WEIGHT);return {sent,replay,allowance:REPLY_ALLOWANCE,total:sent+replay+REPLY_ALLOWANCE};
+ const {cacheReadWeight,replyAllowance}=activePipelineConfig().estimates,replay=Math.round(Math.max(0,replayTokens)*cacheReadWeight);return {sent,replay,allowance:replyAllowance,total:sent+replay+replyAllowance};
 };
 /** 950 -> "950", 4204 -> "4.2k", 28000 -> "28k". */
 export const formatTokens=(n:number):string=>{
@@ -200,5 +200,6 @@ export const cancelText=(cause?:AbortCause):string=>{
   default:return 'This request was cancelled, but Aitiarch could not tell why.'+end;
  }
 };
-export const CHAT_LIMITS=DEFAULT_PIPELINE_CONFIG.chat;
-import {DEFAULT_PIPELINE_CONFIG} from './pipeline-config.ts';
+/** Follows the user's saved overrides (see shared/pipeline-config.ts); the defaults when there are none. */
+export const CHAT_LIMITS=liveView(()=>activePipelineConfig().chat);
+import {DEFAULT_PIPELINE_CONFIG,activePipelineConfig,liveView} from './pipeline-config.ts';

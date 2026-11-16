@@ -12,13 +12,13 @@ import {CHAT_INVARIANTS,SESSION_INVARIANTS} from '../server/chat/request.ts';
 import {SKILL_DIAGRAM_INSTRUCTION} from '../shared/skill-diagram.ts';
 
 describe('pipeline configurables',()=>{
- it('validates the defaults and keeps the established values and consumer identities',()=>{
+ it('validates the defaults and keeps the established values; the consumers are live views that equal the defaults when nothing is overridden',()=>{
   expect(validPipelineConfig(defaults)).toBe(true);expect(defaults.roles.chat).toBe('claude');
-  expect(CHAT_LIMITS).toBe(defaults.chat);expect(CHAT_LIMITS).toEqual({noteCharacters:40000,questionCharacters:2000,historyPairs:4,historyCharacters:4000,sources:8,otherCharacters:20000,tokenBudget:50000,requestReserve:16000,rollingRequestCap:12,windowMinutes:60});
+  expect(CHAT_LIMITS).toEqual(defaults.chat);expect(CHAT_LIMITS).toEqual({noteCharacters:40000,questionCharacters:2000,historyPairs:4,historyCharacters:4000,sources:8,otherCharacters:20000,tokenBudget:50000,requestReserve:16000,rollingRequestCap:12,windowMinutes:60});
   expect([CACHE_READ_WEIGHT,BYTES_PER_TOKEN,REPLY_ALLOWANCE]).toEqual([0.1,3,3000]);
-  expect(COUNCIL_DEFAULT_CAPS).toBe(defaults.council.caps);expect(COUNCIL_DEFAULT_CAPS).toEqual({claude:{unit:'usd',amount:.5,deadlineMs:60000},codex:{unit:'tokens',amount:40000,deadlineMs:60000},kiro:{unit:'credits',amount:.1,deadlineMs:60000}});
+  expect(COUNCIL_DEFAULT_CAPS).toEqual(defaults.council.caps);expect(COUNCIL_DEFAULT_CAPS).toEqual({claude:{unit:'usd',amount:.5,deadlineMs:60000},codex:{unit:'tokens',amount:40000,deadlineMs:60000},kiro:{unit:'credits',amount:.1,deadlineMs:60000}});
   expect(INVESTIGATE_LIMITS).toEqual({turns:40,budgetUsd:.5,timeoutMs:300000});expect(DEFAULT_BUDGET_USD).toBe(.5);expect(DIAGRAM_TURN_CAP_USD).toBe(.5);
-  expect(PERSONAS).toBe(defaults.prompts.personas);expect(['think','ask','visualize','chat'].map(n=>defaultPersona(n as any))).toEqual(['plan','explain','explain','plan']);
+  expect(PERSONAS).toEqual(defaults.prompts.personas);expect(['think','ask','visualize','chat'].map(n=>defaultPersona(n as any))).toEqual(['plan','explain','explain','plan']);
   expect(Object.isFrozen(defaults.prompts.personas.plan)).toBe(true);
  });
  it.each([null,[],{}, {unexpected:true}])('rejects invalid roots: %j',value=>expect(validPipelineConfig(value)).toBe(false));

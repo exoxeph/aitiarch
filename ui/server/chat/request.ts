@@ -1,6 +1,6 @@
 // The chat's prompt, built in one place. Order: what the data is (invariants), then the chosen mode, which IS the answer style (there is no
 // default style above it to outvote it), then any skills, then the output format, and last the rules that always win.
-import {DEFAULT_PIPELINE_CONFIG} from '../../shared/pipeline-config.ts';
+import {DEFAULT_PIPELINE_CONFIG,withActivePrompt} from '../../shared/pipeline-config.ts';
 import {PERSONAS,type PersonaMode} from '../../shared/persona.ts';
 import {SKILL_HEADING,type SkillBlock} from '../../shared/instruction.ts';
 
@@ -120,7 +120,7 @@ export function chatSessionInstruction(request:{persona?:PersonaMode;skills?:Ski
  if(request.skills?.text)head.push(`${SKILL_INTRO}\n\n${request.skills.text}`);
  head.push(CHAT_FORMAT);
  const rules=options.canOpen?CHAT_HARD_RULES_DIAGRAMS:CHAT_HARD_RULES;
- return {instruction:[...head,rules].join('\n\n'),addendum:[...head,sourcesBlock(sources),rules].join('\n\n')};
+ const live=(s:string)=>withActivePrompt(s,c=>c.prompts.chatLength);return {instruction:live([...head,rules].join('\n\n')),addendum:live([...head,sourcesBlock(sources),rules].join('\n\n'))};
 }
 
 export function chatInstruction(request:{persona?:PersonaMode;skills?:SkillBlock}):string{
@@ -128,5 +128,5 @@ export function chatInstruction(request:{persona?:PersonaMode;skills?:SkillBlock
  if(request.persona)parts.push(chatMode(request.persona));
  if(request.skills?.text)parts.push(`${SKILL_INTRO}\n\n${request.skills.text}`);
  parts.push(CHAT_FORMAT,CHAT_HARD_RULES);
- return parts.join('\n\n');
+ return withActivePrompt(parts.join('\n\n'),c=>c.prompts.chatLength);
 }

@@ -2,7 +2,7 @@
 // acting; keeping the human in the loop with checkpoints and a way to discuss; and one probing question at a time.
 // (Credits, for the README: Superpowers, VibeWise (MIT), and Matt Pocock's grill-me. No text is copied from any of them.)
 // The test-driven parts of those skills are for coding agents and do not apply to thoughts or chat.
-import {DEFAULT_PIPELINE_CONFIG} from './pipeline-config.ts';
+import {activePipelineConfig,liveView} from './pipeline-config.ts';
 export type PersonaMode='plan'|'grill'|'explain';
 export type PersonaNode='think'|'ask'|'visualize'|'chat';
 export const PERSONA_ORDER:readonly PersonaMode[]=['plan','grill','explain'];
@@ -14,11 +14,11 @@ Never write, suggest or pre-fill the user's takeaway, their why, or a failed rea
 Label a hypothesis as a hypothesis. Never claim what the note says without seeing it; say what you could not see.
 Stay within the existing length caps.`;
 
-export const PERSONAS:Record<PersonaMode,{label:string;oneLine:string;instruction:string}>=DEFAULT_PIPELINE_CONFIG.prompts.personas;
+export const PERSONAS:Record<PersonaMode,{label:string;oneLine:string;instruction:string}>=liveView(()=>activePipelineConfig().prompts.personas);
 
 export const isPersona=(v:unknown):v is PersonaMode=>v==='plan'||v==='grill'||v==='explain';
 /** Plan with me where you are deciding (Think, Chat); Explain where you want an answer (Ask, Visualize). Opt-in for Grill me. */
-export const defaultPersona=(node:PersonaNode):PersonaMode=>DEFAULT_PIPELINE_CONFIG.personaModes[node];
+export const defaultPersona=(node:PersonaNode):PersonaMode=>activePipelineConfig().personaModes[node];
 
 /** The mode comes after the app's own answer-style guidance, which says to answer directly and first. It has to say outright that it wins over
  *  that guidance, or the earlier, longer rules outweigh it. The output format is not part of the style and always still applies. */

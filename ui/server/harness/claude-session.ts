@@ -4,7 +4,7 @@
 //
 // A turn for a note that shows diagrams may open their pictures: the working folder then holds ONLY the app's validated PNG copies (d1.png ...), the CLI has the Read tool and nothing else,
 // and every event is read by DiagramTurnWatcher before the chat stream sees it. A turn without diagrams has no tools and an empty folder, as it always had.
-import {DEFAULT_PIPELINE_CONFIG} from '../../shared/pipeline-config.ts';
+import {DEFAULT_PIPELINE_CONFIG,activePipelineConfig} from '../../shared/pipeline-config.ts';
 import {mkdir,mkdtemp,readdir,realpath,rm,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {validSessionId} from '../../shared/harness.ts';
@@ -95,7 +95,7 @@ export class ClaudeSessionRunner {
     };
     if(copies.length)watcher=new DiagramTurnWatcher({cwd,copies,forward:e=>stream.feed(e),onRead:c=>t.onDiagramRead?.(c),onUnavailable:n=>t.onDiagramUnavailable?.(n),onReadResult:(c,ok)=>t.onDiagramReadResult?.(c,ok),
      onTool:()=>{checks=checks.then(()=>verifyDiagramFolder(cwd,copies)).catch(broke);}}); // every tool event: is the folder still exactly what the app made?
-    const timer=setTimeout(()=>stop('timeout'),this.cfg.timeoutMs??DEFAULT_PIPELINE_CONFIG.transport.sessionTimeoutMs),abort=()=>stop('cancelled');
+    const timer=setTimeout(()=>stop('timeout'),this.cfg.timeoutMs??activePipelineConfig().transport.sessionTimeoutMs),abort=()=>stop('cancelled');
     t.signal?.addEventListener('abort',abort,{once:true});
     child.stdout.on('data',(b:Buffer)=>{
      if(failure)return;

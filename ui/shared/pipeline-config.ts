@@ -94,3 +94,58 @@ export function validPipelineConfig(value:unknown):value is PipelineConfig{
  };
  try{return check(value,DEFAULT_PIPELINE_CONFIG,'');}catch{return false;}
 }
+
+// ---- The user's overrides (slice 3a-i). Settings only: numbers, mode names and prompt wording. No secrets, no note text, no paths.
+// An override file holds only the values the user changed. `effective` is the defaults with those values on top, and it is checked by the same validator as the defaults.
+const cloneConfig=<T>(v:T):T=>JSON.parse(JSON.stringify(v));
+const plain=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v)&&[Object.prototype,null].includes(Object.getPrototypeOf(v));
+const lockedIds=new Set<string>(['locked',...locked.map(l=>l.id)]);
+const shown=(path:string)=>/^[\w.-]{1,80}$/.test(path)?path:'(unusual name)';
+export type OverrideFault='not_object'|'locked'|'unknown_key'|'invalid_value';
+export type OverrideResult={ok:true;overrides:Record<string,unknown>;effective:PipelineConfig}|{ok:false;fault:OverrideFault;path:string;message:string};
+const fail=(fault:OverrideFault,path:string,message:string):OverrideResult=>({ok:false,fault,path:shown(path),message});
+/** Checks a sparse overrides object against the defaults and returns the pruned overrides (values equal to a default are dropped) and the effective config.
+ *  Rejects: anything that is not a plain object, a locked id at any depth, a key the defaults do not have, a value of the wrong type, and any value the validator refuses (out of range, above a hard maximum, unknown provider or mode). Messages name the setting, never the value. */
+export function applyOverrides(value:unknown):OverrideResult{
+  if(!plain(value))return fail('not_object','','The overrides must be a JSON object.');
+  const leaves:{path:string[];value:number|string}[]=[];
+  const walk=(over:Record<string,unknown>,base:Record<string,unknown>,path:string[]):OverrideResult|null=>{
+    for(const key of Object.keys(over)){
+      const at=[...path,key].join('.');
+      if(lockedIds.has(key))return fail('locked',at,'This setting is locked in code and cannot be changed here.');
+      if(!Object.hasOwn(base,key))return fail('unknown_key',at,'This is not a setting.');
+      const shape=base[key],v=over[key];
+      if(shape&&typeof shape==='object'){
+        if(!plain(v))return fail('invalid_value',at,'This setting needs an object.');
+        const inner=walk(v,shape as Record<string,unknown>,[...path,key]);if(inner)return inner;
+      }else{
+        if(typeof v!==typeof shape)return fail('invalid_value',at,'This value has the wrong type.');
+        if(v!==shape)leaves.push({path:[...path,key],value:v as number|string});
+      }
+    }
+    return null;
+  };
+  const bad=walk(value,DEFAULT_PIPELINE_CONFIG as unknown as Record<string,unknown>,[]);if(bad)return bad;
+  const withLeaves=(set:typeof leaves)=>{const next=cloneConfig(DEFAULT_PIPELINE_CONFIG) as unknown as Record<string,any>;for(const l of set){let o=next;for(const k of l.path.slice(0,-1))o=o[k];o[l.path.at(-1)!]=l.value;}return next as unknown as PipelineConfig;};
+  for(const l of leaves)if(!validPipelineConfig(withLeaves([l])))return fail('invalid_value',l.path.join('.'),'This value is out of range or not allowed.');
+  const effective=withLeaves(leaves);
+  if(!validPipelineConfig(effective))return fail('invalid_value','','The settings together are not allowed.');
+  const overrides:Record<string,any>={};
+  for(const l of leaves){let o=overrides;for(const k of l.path.slice(0,-1))o=o[k]??={};o[l.path.at(-1)!]=l.value;}
+  return {ok:true,overrides,effective:freeze(effective)};
+}
+let active:PipelineConfig=DEFAULT_PIPELINE_CONFIG;
+/** The config in force now: the defaults, or the defaults with the user's validated overrides. Read it when a turn starts, not at import. */
+export const activePipelineConfig=():PipelineConfig=>active;
+/** Called by the server at start and after the overrides change. `null`, or anything the validator refuses, puts the defaults back. */
+export function setActivePipelineConfig(next:PipelineConfig|null):void{active=next&&validPipelineConfig(next)?freeze(cloneConfig(next)):DEFAULT_PIPELINE_CONFIG;}
+/** Swaps the default wording of one editable prompt for the active wording inside an instruction that was built from the defaults. The same text when there is no override. */
+export function withActivePrompt(text:string,pick:(c:PipelineConfig)=>string):string{const was=pick(DEFAULT_PIPELINE_CONFIG),now=pick(active);return now===was?text:text.split(was).join(now);}
+/** An object that reads the active config each time a property is read, so `CHAT_LIMITS.sources` and the like follow a change on the next turn without every caller changing. */
+export function liveView<T extends object>(read:()=>T):T{
+  return new Proxy({} as T,{
+    get:(_,key)=>(read() as Record<PropertyKey,unknown>)[key],has:(_,key)=>key in read(),ownKeys:()=>Reflect.ownKeys(read()),
+    getOwnPropertyDescriptor:(_,key)=>{const d=Object.getOwnPropertyDescriptor(read(),key);return d?{...d,configurable:true,writable:false}:undefined;},
+    set:()=>false,defineProperty:()=>false,deleteProperty:()=>false,
+  });
+}

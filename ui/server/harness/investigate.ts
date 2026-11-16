@@ -29,8 +29,9 @@ const exec=promisify(execFile);
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
 
 /** `turns` is a hidden safety backstop against a looping run, not a limit the user is shown; the user's limit is the cost cap (`budgetUsd`, editable). */
-import {DEFAULT_PIPELINE_CONFIG} from '../../shared/pipeline-config.ts';
+import {DEFAULT_PIPELINE_CONFIG,activePipelineConfig,withActivePrompt} from '../../shared/pipeline-config.ts';
 export const INVESTIGATE_LIMITS=Object.freeze({turns:40,...DEFAULT_PIPELINE_CONFIG.investigate});
+const liveInstruction=()=>withActivePrompt(INVESTIGATE_INSTRUCTION,c=>c.prompts.investigateStyle);
 export const BUDGET_MIN=0.05,BUDGET_MAX=5;
 /** What the copy never contains, in the words the plan card shows. */
 export const EXCLUDED=['ignored files (by the repo\'s .gitignore)','.env files, and the .git, .claude and .codex folders','your notebook folder, if it is inside this repo','Aitiarch state: ui-state.json*',
@@ -171,10 +172,10 @@ interface RunSpec {id:string;repo:string;/** Only these repo files are in the co
  /** The attached files the run is told to start with (the whole copy when the repo is attached too). */focus?:string[];
  /** The one line that starts the message: what was attached, and the diagrams withheld because the repo is. Never any file text. */prefix?:string}
 export class InvestigateService {
- private o:InvestigateConfig;private limits:typeof INVESTIGATE_LIMITS;private plans=new Map<string,Plan>();private running=new Map<string,AbortController>();
+ private o:InvestigateConfig;/** The saved pipeline settings (investigate budget and timeout) are read each time, so a change applies from the next turn; an explicit limits option still wins. */private get limits():typeof INVESTIGATE_LIMITS{return {...INVESTIGATE_LIMITS,...activePipelineConfig().investigate,...this.o.limits};}private plans=new Map<string,Plan>();private running=new Map<string,AbortController>();
  private last=new Map<string,{changes:Drift;backup:string}>();
  private ledger:LedgerStore;private totals?:Promise<InvestigateUsage>;
- constructor(o:InvestigateConfig){this.o=o;this.limits={...INVESTIGATE_LIMITS,...o.limits};this.ledger=new LedgerStore(o.notebook);}
+ constructor(o:InvestigateConfig){this.o=o;this.ledger=new LedgerStore(o.notebook);}
  /** What Investigate turns have used, from the notebook's ledger (so it survives a restart). Never part of a chat's token budget. */
  usage():Promise<InvestigateUsage>{return this.totals??=this.loadUsage();}
  private async loadUsage():Promise<InvestigateUsage>{
@@ -284,10 +285,10 @@ export class InvestigateService {
    else if(p.focus?.length)extra.push('The user attached these files; start with them:\n'+p.focus.map(f=>'- '+f).join('\n'));
    const earlier=cli.fresh&&this.o.carried?buildCarriedHistory(await this.o.carried((await this.o.index.get(id))!).catch(()=>[])):'';
    if(earlier)extra.push(earlier);
-   const head=INVESTIGATE_INSTRUCTION.split('\n\n'),rules=head.pop()!;
+   const head=liveInstruction().split('\n\n'),rules=head.pop()!;
    await writeFile(file,[...head,...extra,rules].join('\n\n'),{mode:0o600});
    if(this.o.gate)await appendLedger(this.ledger,{id:randomUUID(),inkId:'investigate-'+id,requestId:randomId(),note:'',event:'conversation_turn',at,conv:{session:id,profile:'investigate',files:p.files?.length??p.focus?.length??0,notes:0,repo:!p.files,diagrams:0,fresh:cli.fresh,budgetUsd}});
-   const gate=new StreamGate({instruction:INVESTIGATE_INSTRUCTION}),thinking=new StreamGate({instruction:INVESTIGATE_INSTRUCTION});
+   const gate=new StreamGate({instruction:liveInstruction()}),thinking=new StreamGate({instruction:liveInstruction()});
    // Text goes through the gate (redaction, the echo guard) into the trail. Whatever the gate holds back is released when a tool call or a new
    // text block starts (a space or a blank line is pushed), so narration lands before the call it belongs to and paragraphs stay separate.
    const say=(raw:string)=>{const delta=gate.push(raw);if(delta){trail=addText(trail,delta);emit({type:'delta',text:delta});}};

@@ -12,7 +12,7 @@ const ALLOWED:Record<PersonaMode,readonly ContractIssue[]>={
  plan:['several_questions','no_final_question'],
  explain:['too_long'],
 };
-import {DEFAULT_PIPELINE_CONFIG} from './pipeline-config.ts';
+import {DEFAULT_PIPELINE_CONFIG,activePipelineConfig} from './pipeline-config.ts';
 export const GRILL_MAX_WORDS=DEFAULT_PIPELINE_CONFIG.prompts.grillMaxWords,GRILL_MAX_SENTENCES=DEFAULT_PIPELINE_CONFIG.prompts.grillMaxSentences,ANSWER_WORD_CAP=DEFAULT_PIPELINE_CONFIG.prompts.answerWordCap,EXPLAIN_MAX_WORDS=DEFAULT_PIPELINE_CONFIG.prompts.explainMaxWords;
 
 const wordCount=(s:string)=>s.trim().split(/\s+/).filter(Boolean).length;
@@ -30,14 +30,14 @@ export function checkContract(mode:PersonaMode,body:string):Contract{
   const text=body.trim();
   if(!endsWithQuestion(text))found.add('no_question');
   if(questions(text)>1)found.add('several_questions');
-  if(sentenceCount(text)>GRILL_MAX_SENTENCES)found.add('too_many_sentences');
-  if(wordCount(text)>GRILL_MAX_WORDS)found.add('too_long');
+  if(sentenceCount(text)>activePipelineConfig().prompts.grillMaxSentences)found.add('too_many_sentences');
+  if(wordCount(text)>activePipelineConfig().prompts.grillMaxWords)found.add('too_long');
   if(hasStructure(text))found.add('has_list_or_table_or_code');
  }else if(mode==='plan'){
   const paragraphs=withoutCode(body).split(/\n[ \t]*\n/).map(p=>p.trim()).filter(Boolean),last=paragraphs.at(-1)??'';
   if(!endsWithQuestion(last))found.add('no_final_question');
   else if(questions(last)>1)found.add('several_questions');
- }else if(wordCount(body)>EXPLAIN_MAX_WORDS)found.add('too_long');
+ }else if(wordCount(body)>activePipelineConfig().prompts.explainMaxWords)found.add('too_long');
  const issues=CONTRACT_ISSUES.filter(i=>found.has(i));
  return {mode,met:issues.length===0,issues};
 }
@@ -55,7 +55,7 @@ export function contractText(c:Contract):string|null{
  if(c.met||!c.issues.length)return null;
  const clause:Record<ContractIssue,string>={
   no_question:'does not end with a question',several_questions:'has more than one question',too_many_sentences:'has more than two sentences',
-  too_long:c.mode==='explain'?'is longer than twice the length limit':`is longer than ${GRILL_MAX_WORDS} words`,has_list_or_table_or_code:'has a list, table, heading or code block',no_final_question:'does not end with a question',
+  too_long:c.mode==='explain'?'is longer than twice the length limit':`is longer than ${activePipelineConfig().prompts.grillMaxWords} words`,has_list_or_table_or_code:'has a list, table, heading or code block',no_final_question:'does not end with a question',
  };
  const list=c.issues.map(i=>clause[i]),joined=list.length<2?list.join(''):`${list.slice(0,-1).join(', ')} and ${list.at(-1)}`;
  return `Not what ${PERSONAS[c.mode].label} asks for: it ${joined}.`;

@@ -12,7 +12,7 @@ import {cleanAttachments,covers,needOf,normalizeAttachedPath,resumePlan,type Att
 import {redact} from '../providers/index.ts';
 import {estimateTokens} from '../chat/context.ts';
 
-import {DEFAULT_PIPELINE_CONFIG} from '../../shared/pipeline-config.ts';
+import {DEFAULT_PIPELINE_CONFIG,activePipelineConfig} from '../../shared/pipeline-config.ts';
 export const DEFAULT_BUDGET_USD=DEFAULT_PIPELINE_CONFIG.conversation.budgetUsd,BUDGET_MIN_USD=0.05,BUDGET_MAX_USD=5;
 export const CARRY_TOKEN_CAP=DEFAULT_PIPELINE_CONFIG.conversation.carryTokenCap;
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
@@ -71,7 +71,7 @@ export class ConversationGate {
    return ok?{grant:g,mismatch:false}:{grant:null,mismatch:true};
   }
   if(s.mode==='investigate'&&s.confirmed&&s.repo){ // older than grants: the confirmed plan was repo access at its cap
-   const legacy:Omit<Grant,'confirmed'>={v:1,project:this.project,session:s.id,profile:'investigate',files:[],repo:true,diagrams:false,budgetUsd:s.budgetUsd??DEFAULT_BUDGET_USD};
+   const legacy:Omit<Grant,'confirmed'>={v:1,project:this.project,session:s.id,profile:'investigate',files:[],repo:true,diagrams:false,budgetUsd:s.budgetUsd??activePipelineConfig().conversation.budgetUsd};
    return {grant:{...legacy,confirmed:grantHash(legacy)},mismatch:false};
   }
   return {grant:null,mismatch:false};
@@ -121,7 +121,7 @@ export class ConversationGate {
   const s=await this.session(input.conversation),clean=cleanAttachments(input.attachments);
   if(!clean.ok)throw new GateRefusal('attachments',{message:clean.reason});
   const att=clean.value,need=needOf(att,input.hasDiagrams,input.diagramNote??''),{grant:have}=this.effective(s);
-  const budget=input.budgetUsd===undefined||input.budgetUsd===null?have?.budgetUsd??DEFAULT_BUDGET_USD:Number(input.budgetUsd);
+  const budget=input.budgetUsd===undefined||input.budgetUsd===null?have?.budgetUsd??activePipelineConfig().conversation.budgetUsd:Number(input.budgetUsd);
   if(!Number.isFinite(budget)||budget<BUDGET_MIN_USD||budget>BUDGET_MAX_USD)throw new GateRefusal('invalid_cap');
   const cap=Math.round(budget*100)/100,files=await this.checkFiles(att.files),repo=need.profile==='investigate'?await this.o.repo():null;
   if(need.profile==='investigate'&&(att.repo||att.files.length)&&!repo)throw new GateRefusal('no_repo');
@@ -159,7 +159,7 @@ export class ConversationGate {
    const plan=await this.plan({...input,attachments:att}).catch(()=>undefined);
    throw new GateRefusal(mismatch&&need.profile!=='notes'?'grant_mismatch':'plan_required',{...(plan?{plan}:{}),files});
   }
-  const used=grant??{profile:'notes' as Profile,files:[],repo:false,diagrams:false,budgetUsd:DEFAULT_BUDGET_USD};
+  const used=grant??{profile:'notes' as Profile,files:[],repo:false,diagrams:false,budgetUsd:activePipelineConfig().conversation.budgetUsd};
   return {session:s,profile:need.profile,need,attachments:att,grant:{profile:used.profile,files:used.files,repo:used.repo,diagrams:used.diagrams,budgetUsd:used.budgetUsd},files:files.map(f=>f.path),repo:need.profile==='investigate'?await this.o.repo():null};
  }
 }
@@ -182,7 +182,7 @@ export async function carriedPairs(s:HarnessSession,questions:{read(id:string):P
  * The earlier questions and final answers of a conversation, for a fresh CLI session: this is what the app kept, never trails, tool output or thinking. Each side goes through the same
  * redaction as anything sent, the newest pairs are kept first, and the whole stays under the cap. The text says it was carried over, not resumed.
  */
-export function buildCarriedHistory(pairs:readonly {question:string;answer:string}[],capTokens=CARRY_TOKEN_CAP):string{
+export function buildCarriedHistory(pairs:readonly {question:string;answer:string}[],capTokens=activePipelineConfig().conversation.carryTokenCap):string{
  const lines:string[]=[];let used=0;
  for(const p of [...pairs].reverse()){
   const block=`You: ${redact(p.question).trim()}\nAI: ${redact(p.answer).trim()}`,cost=estimateTokens(block);

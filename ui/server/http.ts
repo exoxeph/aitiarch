@@ -1,4 +1,4 @@
-import {DEFAULT_PIPELINE_CONFIG as defaults} from '../shared/pipeline-config.ts';
+import {activePipelineConfig} from '../shared/pipeline-config.ts';
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
 import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {randomUUID} from 'node:crypto';import {ConversationGate,GateRefusal,carriedPairs,projectRepo} from './harness/conversation.ts';import {cleanAttachments} from '../shared/profile.ts';import {removeTranscript} from './harness/transcripts.ts';import {sweepStaleTurnFolders} from './harness/sweep.ts';import {QuestionStore} from './harness/questions.ts';
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
@@ -37,11 +37,15 @@ import { NodeSettingsService } from "./node-settings.ts";
 import { validSavedNodes } from "../shared/node-settings.ts";
 import { homedir } from "node:os";
 import {CouncilService} from './council.ts';
+import {PipelineConfigStore,PipelineConfigError,pipelineView,PIPELINE_CONFIG_MAX_BYTES} from './pipeline-config-store.ts';
+import {resolveConfigFolder} from './registry.ts';
 import {CouncilHistory} from './council-history.ts';
 import type {AvailabilityCheck} from './providers/council-availability.ts';
 import type {TurnAdapter} from './providers/turn.ts';
 
 export interface AppOptions {
+  /** The per-user folder for pipeline-config.json (the folder that holds the project list). Tests pass a temp folder; otherwise AITIARCH_CONFIG_DIR or the real config folder, which is refused under tests. */
+  pipelineConfigDir?:string;
   council?:{adapters:TurnAdapter[];index?:SessionIndex;availabilityChecks?:AvailabilityCheck[]};
   sessionModules?:import('../shared/chat.ts').ContextModule[];
   store: Store;
@@ -149,13 +153,13 @@ export function createApp(opts: AppOptions) {
     res.end(data);
   };
 
-  const readBody = (req: http.IncomingMessage): Promise<unknown> =>
+  const readBody = (req: http.IncomingMessage, max = MAX_BODY): Promise<unknown> =>
     new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
       let n = 0;
       req.on("data", (c: Buffer) => {
         n += c.length;
-        if (n > MAX_BODY) {
+        if (n > max) {
           reject(new PathError(413, "too_large", "Request body too large."));
           req.destroy();
         } else chunks.push(c);
@@ -251,6 +255,32 @@ export function createApp(opts: AppOptions) {
       }
     }
 
+    if (url.pathname === "/api/pipeline-config" || url.pathname.startsWith("/api/pipeline-config/")) {
+      // The user's pipeline overrides. Same front door as everything else (origin, session cookie, and for changes the JSON/x-aitiarch/origin rules above); bodies are capped at 64 KB.
+      let store: PipelineConfigStore;
+      try { store = new PipelineConfigStore(opts.pipelineConfigDir ?? resolveConfigFolder()); }
+      catch { return json(res, 409, { error: "unavailable", message: "The settings folder is not available." }); }
+      const route = `${req.method} ${url.pathname}`;
+      try {
+        if (route === "GET /api/pipeline-config") return json(res, 200, pipelineView(await store.load()));
+        if (route === "GET /api/pipeline-config/export") {
+          const data = JSON.stringify(await store.export(), null, 2) + "\n";
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "Content-Disposition": 'attachment; filename="aitiarch-pipeline-config.json"' });
+          return void res.end(data);
+        }
+        if (route === "PUT /api/pipeline-config") {
+          const body = await readBody(req, PIPELINE_CONFIG_MAX_BYTES) as Record<string, unknown> | null;
+          if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).join() !== "overrides") throw new PipelineConfigError(422, "invalid_value", "Send {\"overrides\":{...}}.");
+          return json(res, 200, pipelineView(await store.save(body.overrides)));
+        }
+        if (route === "PUT /api/pipeline-config/import") return json(res, 200, pipelineView(await store.import(await readBody(req, PIPELINE_CONFIG_MAX_BYTES))));
+        if (route === "POST /api/pipeline-config/reset") { await readBody(req, PIPELINE_CONFIG_MAX_BYTES); return json(res, 200, pipelineView(await store.reset())); }
+        return json(res, 404, { error: "not_found" });
+      } catch (e) {
+        if (e instanceof PipelineConfigError) return json(res, e.status, { error: e.code, message: e.message, ...(e.path ? { path: e.path } : {}) });
+        throw e;
+      }
+    }
     if(url.pathname.startsWith('/api/council/')&&req.method==='GET'){const council=await councilReady;if(!council)return json(res,409,{error:'disabled'});try{if(url.pathname==='/api/council/availability')return json(res,200,{providers:await council.availability.get(url.searchParams.get('refresh')==='1')});if(url.pathname==='/api/council/history')return json(res,200,await council.history(url.searchParams.has('conversation')?url.searchParams.get('conversation')!:undefined));}catch{return json(res,409,{error:'invalid_conversation',message:'Council history could not be read for this conversation.'});}}
     if(url.pathname.startsWith('/api/council/')&&(req.method==='PUT'||req.method==='POST')){
       const council=await councilReady;if(!council)return json(res,409,{error:'disabled',message:'Council is not configured.'});
@@ -307,7 +337,7 @@ export function createApp(opts: AppOptions) {
     }
     if(url.pathname==='/api/usage'&&req.method==='GET'){
       const chats=(await chatReady).usage(),h=await harnessReady,investigate=h?await h.investigate.usage():null;
-      let privateUsage:import('../shared/usage.ts').UsageSummary={since:new Date().toISOString(),hourlyCap:defaults.transport.planHourlyCap,providers:[]};
+      let privateUsage:import('../shared/usage.ts').UsageSummary={since:new Date().toISOString(),hourlyCap:activePipelineConfig().transport.planHourlyCap,providers:[]};
       if(opts.usage)try{privateUsage=await opts.usage.summary();}catch{privateUsage.privateUsageUnavailable=true;console.warn('Private usage log unavailable.',{kind:'private_usage_unavailable'});}
       return json(res,200,{...privateUsage,councilCli:opts.council?.adapters.find(a=>a.id==='codex')?.status?.(),...(chats.length?{chats}:{}),...(investigate&&(investigate.turns>0||investigate.ledgerUnavailable)?{investigate}:{}),...(h?{cli:{version:await h.runner.version(),tested:TESTED_CLI_VERSION}}:{})});
     }

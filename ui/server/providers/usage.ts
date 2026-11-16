@@ -1,4 +1,4 @@
-import {DEFAULT_PIPELINE_CONFIG as defaults} from '../../shared/pipeline-config.ts';
+import {activePipelineConfig} from '../../shared/pipeline-config.ts';
 import path from 'node:path';
 import {PlanVault,planDirectory} from './plan-vault.ts';
 import type {UsageSummary,UsageTotals} from '../../shared/usage.ts';
@@ -33,6 +33,6 @@ export class UsageLogs implements UsageLog {
    providers.push(total);
   }
   const cap=await this.plan.peek('cap.json');
-  return {since:new Date(this.since).toISOString(),hourlyCap:Number.isInteger(cap.limit)&&cap.limit>=1&&cap.limit<=100?cap.limit:defaults.transport.planHourlyCap,providers};
+  return {since:new Date(this.since).toISOString(),hourlyCap:Number.isInteger(cap.limit)&&cap.limit>=1&&cap.limit<=100?cap.limit:activePipelineConfig().transport.planHourlyCap,providers};
  }
 }

@@ -3,7 +3,7 @@ import type {ChatEvent,ChatInput,ChatReview,ChatMessage,ChatUsage,ChatErrorCode,
 import path from 'node:path';
 import {sessionModules} from './ide-sessions.ts';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
-import {CHAT_LIMITS,REPLY_ALLOWANCE,budgetTokens,isAbortCause,nextTurnEstimate,type AbortCause,type BudgetDetail} from '../../shared/chat.ts';
+import {CHAT_LIMITS,budgetTokens,isAbortCause,nextTurnEstimate,type AbortCause,type BudgetDetail} from '../../shared/chat.ts';
 import {Store} from '../store.ts';import {InkStore} from '../ink-store.ts';import {LedgerStore,appendLedger} from '../ledger-store.ts';
 import {ChatStore} from './store.ts';import {contextModules,hash,estimateTokens} from './context.ts';import {secretKinds} from './secrets.ts';
 import {prepareRequest,ProviderError,redact,type Provider,type Request,type Result} from '../providers/index.ts';
@@ -23,6 +23,7 @@ import type {ClaudeSessionRunner} from '../harness/claude-session.ts';
 import type {WantedCopy} from '../harness/diagram-folder.ts';
 import {validateProductResult,ProductValidationError} from '../product-validation.ts';
 import {resultFault,usageFault,whyOfError} from './why.ts';
+import {activePipelineConfig} from '../../shared/pipeline-config.ts';
 import type {ChatWhy} from '../../shared/chat-why.ts';
 import type {ExtrasFor} from '../node-settings.ts';
 import {describeFailure} from '../../shared/chat-failure.ts';
@@ -181,7 +182,7 @@ export class ChatRuntime {
   if(profile){review.profile=profile;if(needsPlan)review.needsPlan=true;}
   if(excluded.length)review.excluded=excluded;
   review.manifest=manifest;if(editor)review.editor=editor;
-  if(canOpen){review.diagrams=prepared.open.map(o=>({n:o.ref.n,title:redact(o.ref.title)}));review.diagramCapUsd=DIAGRAM_TURN_CAP_USD;}
+  if(canOpen){review.diagrams=prepared.open.map(o=>({n:o.ref.n,title:redact(o.ref.title)}));review.diagramCapUsd=activePipelineConfig().diagram.turnCapUsd;}
   if(prepared.withheld.length)review.diagramsWithheld=prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title),why:WITHHELD_WORDS[w.reason]}));
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');
@@ -201,7 +202,7 @@ export class ChatRuntime {
   if(frozen.session&&this.harness?.gate){
    try{authorized=await this.harness.gate.authorize({conversation:frozen.session.id,attachments:{},hasDiagrams:!!frozen.diagrams?.open.length,...(frozen.diagrams?{diagramNote:frozen.diagrams.note}:{})});}
    catch(e){if(e instanceof GateRefusal)throw new ChatError(e.code==='grant_mismatch'?'grant_mismatch':'plan_required');throw e;}
-   frozen.capUsd=Math.min(authorized.grant.budgetUsd,DIAGRAM_TURN_CAP_USD); // a diagram turn never gets a larger cap than it always had
+   frozen.capUsd=Math.min(authorized.grant.budgetUsd,activePipelineConfig().diagram.turnCapUsd); // a diagram turn never gets a larger cap than it always had
   }
   s.calls=s.calls.filter(at=>Date.now()-at<3600000);
   if(s.calls.length>=s.usage.rollingRequestCap)throw new ChatError('hourly_cap');
@@ -222,7 +223,7 @@ export class ChatRuntime {
    if(input.dontAskAgain===true&&!frozen.privateContext)this.dontAsk=true;
    if(frozen.privateContext)s.privateContext=true;
    s.calls.push(Date.now());s.usage.calls++;called=true;emit({type:'start',id:request.id,...(frozen.profile?{profile:frozen.profile}:{})});
-   let json='';const outputRoom=s.usage.tokenBudget-s.usage.spent-(frozen.reservation-REPLY_ALLOWANCE),gate=new StreamGate({instruction:review.instruction});
+   let json='';const outputRoom=s.usage.tokenBudget-s.usage.spent-(frozen.reservation-activePipelineConfig().estimates.replyAllowance),gate=new StreamGate({instruction:review.instruction});
    const onTextDelta=(text:string)=>{
     if(controller.signal.aborted)return; // stopped: the CLI is being ended, nothing more is taken
     json+=text;if(json.length>100000)throw new ProviderError('output_limit');

@@ -1,4 +1,4 @@
-import {DEFAULT_PIPELINE_CONFIG as defaults} from '../shared/pipeline-config.ts';
+import {DEFAULT_PIPELINE_CONFIG as defaults,activePipelineConfig} from '../shared/pipeline-config.ts';
 import {randomUUID,createHash} from 'node:crypto';
 import type {Store} from './store.ts';import type {InkStore} from './ink-store.ts';import type {SessionIndex} from './harness/session-index.ts';import {projectId} from './harness/conversation.ts';
 import {LedgerStore,appendLedger} from './ledger-store.ts';import {contextModules} from './chat/context.ts';import {harnessDenied} from '../shared/harness.ts';import {normalizeAttachedPath} from '../shared/profile.ts';
@@ -47,7 +47,7 @@ export class CouncilService {
   const save=async()=>{try{if(this.o.history)pruned=(await this.o.history.saveRun(b.conversation,run)).pruned;}catch{historyUnavailable=true;}};
   try{await save();for(const provider of b.providers)emit?.({type:'provider_start',provider,run:structuredClone(run)});
   const results=await Promise.all(b.providers.map(async id=>{
-   const cap=grant.caps[id]!,adapter=this.o.adapters.find(a=>a.id===id);let result:TurnResult=adapter?await runTurn(adapter,{question,notes:sources,cap,deadlineMs:cap.deadlineMs,maxOutputBytes:defaults.council.outputBytes},controller.signal):{provider:id,safetyLabel:defaults.safetyLabels[id],status:'unavailable',answer:'',usage:[],durationMs:0,code:'not_configured'};
+   const cap=grant.caps[id]!,adapter=this.o.adapters.find(a=>a.id===id);let result:TurnResult=adapter?await runTurn(adapter,{question,notes:sources,cap,deadlineMs:cap.deadlineMs,maxOutputBytes:activePipelineConfig().council.outputBytes},controller.signal):{provider:id,safetyLabel:defaults.safetyLabels[id],status:'unavailable',answer:'',usage:[],durationMs:0,code:'not_configured'};
    if(result.status==='ok'){
     const block=parseClaimsBlock(result.answer);const reply=finishReply({text:result.answer,legacy:false},{note:sources[0]?.text??'',selection:'',decisions:sources.slice(1).map(s=>({id:s.id,text:s.text}))},text=>createHash('sha256').update(text).digest('hex'),redact);
     const invalid=block.block==='missing'||block.block==='malformed'||!reply.body.trim()||!!reply.citation||reply.claims.some(c=>c.status!=='found')||secretKinds(reply.body).length>0;
