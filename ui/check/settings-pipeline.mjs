@@ -32,7 +32,7 @@ try{
  const select=dialog.getByLabel('Normal chat is answered by'),save=dialog.getByRole('button',{name:'Save',exact:true});
  const openChat=async()=>{await page.getByRole('button',{name:/^Chat/}).first().click();await panel.waitFor();};
  const composer=()=>panel.getByRole('textbox',{name:'Message Aitiarch AI'});
- const sendThroughReview=async()=>{const review=panel.getByRole('region',{name:'What will be sent'});await review.waitFor();await review.getByRole('button',{name:'Send to Claude',exact:true}).click();};
+ const sendThroughReview=async(provider='Codex')=>{const review=panel.getByRole('region',{name:'What will be sent'});await review.waitFor();await review.getByRole('button',{name:`Send to ${provider}`,exact:true}).click();};
  // 1. The section: the note, the three providers with safety label and availability, Save only when something changed.
  await boot();await openSettings();
  await dialog.getByText('Applies to every project on this computer.').waitFor();
@@ -79,7 +79,7 @@ try{
  await openChat();await composer().fill('When is launch, Kiro?');await composer().press('Enter');
  const kiro=panel.getByRole('group',{name:'Approval for Kiro'});await kiro.waitFor();const kb=await kiro.boundingBox();assert(kb&&kb.x>=0&&kb.x+kb.width<=360.5,'the approval card fits at 360px: '+JSON.stringify(kb));{const pc=await panel.boundingBox();assert(pc&&pc.x>=0&&pc.x+pc.width<=360.5,'the chat panel fits at 360px');}
  const kiroText=await kiro.innerText();assert.match(kiroText,/host-gated/);assert.match(kiroText,/0\.1 credits/);assert.equal(await kiro.getAttribute('data-provider'),'kiro');await page.screenshot({path:path.join(output,'chat-approval-kiro-360.png')});
- await kiro.getByRole('button',{name:'Approve and send'}).click();await sendThroughReview();const kiroReply=panel.locator('.chat-ai[data-provider=kiro]');await kiroReply.first().waitFor();
+ await kiro.getByRole('button',{name:'Approve and send'}).click();await sendThroughReview('Kiro');const kiroReply=panel.locator('.chat-ai[data-provider=kiro]');await kiroReply.first().waitFor();
  assert.match(await kiroReply.first().locator('.chat-who').innerText(),/AI · Kiro/);assert.match(await kiroReply.first().locator('[data-usage=native]').innerText(),/0\.05 credits/);
  // 8. Reset: Claude again, and its memory line is back.
  await page.keyboard.press('Escape');await panel.waitFor({state:'detached'});await page.setViewportSize({width:1280,height:900});await openSettings();await dialog.getByRole('button',{name:'Reset to defaults'}).click();await dialog.getByText(/^Reset\./).waitFor();await closeSettings();
