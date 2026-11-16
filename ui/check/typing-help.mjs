@@ -24,7 +24,22 @@ try{
  const expected=async text=>{try{await page.waitForFunction(text=>window.__aitiarch['fixture.md'].view.state.doc.toString()===text,text);}catch{assert.equal(await doc(),text);}};
  const flush=()=>page.evaluate(()=>window.__aitiarch['fixture.md'].session.flush());
  // 1. Actual typing, boundary corrections, separate undo/Backspace, Enter, and both palette preferences.
- const clearPersonal=async()=>{await page.evaluate(async()=>{const state=await (await fetch('/api/ui-state')).json();await fetch('/api/ui-state',{method:'PUT',headers:{'Content-Type':'application/json','X-Aitiarch':'1'},body:JSON.stringify({...state,neverCorrect:[]})});});await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);await page.keyboard.press('Shift');await page.waitForSelector('[data-smart-ready="true"]');};
+ // The page saves its settings 300 ms after its last change, from what it holds in memory, and a reload can take seconds under load. A save still pending in the old page when the list is cleared would
+  // put the cleared words back. So the old page's saves are held (not refused: a refused save would switch the app's persistence off) until the reloaded page has committed, and the clearing is done outside the page.
+  const clearPersonal=async()=>{
+   let holding=true;const hold=route=>{if(holding&&route.request().method()==='PUT')return;return route.continue();};
+   const committed=()=>{holding=false;};page.once('framenavigated',committed);await page.route('**/api/ui-state',hold);
+   try{
+    const state=await (await page.request.get(base+'/api/ui-state')).json();
+    assert.ok((await page.request.put(base+'/api/ui-state',{headers:{'Content-Type':'application/json','X-Aitiarch':'1',Origin:base},data:{...state,neverCorrect:[]}})).ok(),'the personal list was cleared');
+    await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);
+   }finally{holding=false;page.off('framenavigated',committed);await page.unroute('**/api/ui-state',hold);}
+   await page.keyboard.press('Shift');await page.waitForSelector('[data-smart-ready="true"]');};
+  // A word the person undid (Ctrl+Z or Backspace) is saved by the app a moment later (its settings are saved 300 ms after the last change). Clearing before that save lands lets it put the word back,
+  // and the next "teh" is then left alone. Wait until the app has saved it.
+  const rejectedPersisted=word=>page.waitForFunction(async w=>(await (await fetch('/api/ui-state')).json()).neverCorrect?.includes(w),word);
+  // After a reload the page starts with the defaults and applies the saved settings when /api/ui-state answers. Typing before that uses the defaults, so wait until the command palette shows the saved state.
+  const shows=async label=>{await page.keyboard.press('Control+k');const input=page.getByPlaceholder(/Type a command/);await input.waitFor();await input.fill(label.split(':')[0]);await page.getByText(label).first().waitFor();await page.keyboard.press('Escape');await input.waitFor({state:'hidden'});};
  // New dictionary path: actual key events, safe local lazy assets, and the requested sentence.
  await reset('');await page.keyboard.type('Helo wht do itt do? ');await expected('Hello what do it do? ');
  await page.waitForSelector('[data-smart-ready="true"]');await reset('A sentnce');await page.keyboard.type(' ');await expected('A sentence ');
@@ -37,18 +52,20 @@ try{
  await writeFile(path.join(root,'terms.md'),'Project vocabulary: documnt.');await changedVocabulary;await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
  await reset('A documnt');await page.keyboard.type(' ');await expected('A documnt ');
  await reset('A pargraph');await page.keyboard.type(' ');await expected('A paragraph ');
- await reset('A teh');await page.keyboard.type(' ');await expected('A the ');await page.keyboard.press('Control+z');await expected('A teh ');await clearPersonal();
- await reset('A teh');await page.keyboard.type(' ');await expected('A the ');await page.keyboard.press('Backspace');await expected('A teh ');await clearPersonal();
+ await reset('A teh');await page.keyboard.type(' ');await expected('A the ');await page.keyboard.press('Control+z');await expected('A teh ');await rejectedPersisted('teh');await clearPersonal();
+ await reset('A teh');await page.keyboard.type(' ');await expected('A the ');await page.keyboard.press('Backspace');await expected('A teh ');await rejectedPersisted('teh');await clearPersonal();
  await reset('hello');await page.keyboard.type(' ');await expected('Hello ');
  await reset('A word ');await page.keyboard.type(' ');await expected('A word. ');await page.keyboard.press('Backspace');await expected('A word  ');
  await reset('A recieve');await page.keyboard.press('Enter');await expected('A receive\n');
- const toggle=async query=>{const field=query==='Typing help'?'typingHelp':query==='Smart corrections'?'smartCorrections':'doubleSpacePeriod',value=await page.evaluate(async field=>(await (await fetch('/api/ui-state')).json())[field]??true,field);
+ const toggle=async query=>{const field=query==='Typing help'?'typingHelp':query==='Smart corrections'?'smartCorrections':'doubleSpacePeriod';
+  await page.keyboard.press('Control+k');const input=page.getByPlaceholder(/Type a command/);await input.waitFor();await input.fill(query);
+   const value=/: On/.test(await page.getByText(new RegExp(query+': (On|Off)')).first().innerText());
   const saved=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/ui-state'&&r.request().method()==='PUT'&&r.request().postDataJSON()?.[field]===!value&&r.ok());
-  await page.keyboard.press('Control+k');const input=page.getByPlaceholder(/Type a command/);await input.waitFor();await input.fill(query);await page.keyboard.press('Enter');await input.waitFor({state:'hidden'});await saved;
+   await page.keyboard.press('Enter');await input.waitFor({state:'hidden'});await saved;
  };
- await toggle('Smart corrections');await reset('A sentnce');await page.keyboard.type(' ');await expected('A sentnce ');await flush();await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);await toggle('Smart corrections');
+ await toggle('Smart corrections');await reset('A sentnce');await page.keyboard.type(' ');await expected('A sentnce ');await flush();await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);await shows('Smart corrections: Off');await toggle('Smart corrections');
  await toggle('Typing help');await reset('teh');await page.keyboard.type(' ');await expected('teh ');await flush();
- await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);await reset('teh');await page.keyboard.type(' ');await expected('teh ');await toggle('Typing help');
+ await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);await shows('Typing help: Off');await reset('teh');await page.keyboard.type(' ');await expected('teh ');await toggle('Typing help');
  await toggle('Double-space period');await reset('A word ');await page.keyboard.type(' ');await expected('A word  ');await toggle('Double-space period');
  // 2. Clipboard paste, subsequent programmatic insertion and reload preserve the input verbatim.
  await reset('');await page.evaluate(()=>navigator.clipboard.writeText('Helo wht do itt do? \nsentnce teh  i\nrecieve '));await page.keyboard.press('Control+v');await expected('Helo wht do itt do? \nsentnce teh  i\nrecieve ');await flush();await page.reload();await page.waitForFunction(()=>window.__aitiarch?.['fixture.md']);assert.equal(await doc(),'Helo wht do itt do? \nsentnce teh  i\nrecieve ');

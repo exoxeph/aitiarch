@@ -35,12 +35,25 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
   page.setDefaultTimeout(6000);
   await page.goto(url); await page.waitForSelector('.cm-editor');
-  const select = async quote => page.evaluate(q => {
-    const { view } = window.__aitiarch['fixture.md'], from = view.state.doc.toString().indexOf(q);
-    view.dispatch({ selection: { anchor: from, head: from + q.length } }); view.focus();
-  }, quote);
+  const select = async quote => {
+    await page.evaluate(q => {
+      const { view } = window.__aitiarch['fixture.md'], from = view.state.doc.toString().indexOf(q);
+      view.dispatch({ selection: { anchor: from, head: from + q.length } }); view.focus();
+    }, quote);
+    // Under load the focus can be taken back after view.focus() (a closing dialog gives it back to its opener), and a key press then goes nowhere. Press keys only once the editor
+    // has the focus and the selection is in place; anything that moved either is put back.
+    await page.waitForFunction(q => {
+      const { view } = window.__aitiarch['fixture.md'], from = view.state.doc.toString().indexOf(q), r = view.state.selection.main;
+      if (r.from !== from || r.to !== from + q.length) { view.dispatch({ selection: { anchor: from, head: from + q.length } }); return false; }
+      if (!view.hasFocus) { view.focus(); return false; }
+      return true;
+    }, quote);
+  };
+  // Poll an observable condition (never a fixed sleep) until it holds.
+  const until = async (ok, what) => { for (let n = 0; n < 300; n++) { if (await ok().catch(() => false)) return; await new Promise(r => setTimeout(r, 50)); } throw new Error('Timed out waiting for: ' + what); };
   await select('A unique selected sentence.');
-  await page.getByRole('button', { name: 'Think on this', exact: true }).click({ timeout: 3000 });
+  // The selection toolbar is a tooltip the editor places on its next measure, so wait for it to exist (an observable), then click.
+  const think = page.getByRole('button', { name: 'Think on this', exact: true }); await think.waitFor(); await think.click();
   await page.getByRole('button', { name: 'Send to Claude', exact: true }).waitFor();
   assert.equal(calls.length, 0, 'preview must not call a provider');
   await page.getByRole('button', { name: 'Send to Claude', exact: true }).click();
@@ -91,6 +104,9 @@ try {
   assert(!JSON.stringify(ledger).includes('Synthetic answer'));
   assert.equal(calls.length, 2);
   // Keyboard path opens the same frozen preview and never sends by itself.
+  // The dismissed thought has lost its blob, so its conversation panel moves to the floating place and takes the focus (src/ink/ThoughtChat.tsx: the same step that sets data-floating). That happens a moment after the
+  // server acknowledged the dismissal, and under load it came after the editor was selected and focused, so Ctrl+Enter went to the panel's button. Select only once the panel has settled.
+  await page.locator('section.thought-chat[data-floating="true"]').waitFor();
   await select('The ending.'); await page.keyboard.press('Control+Enter');
   console.log('invoked check: keyboard reached');
   await page.getByRole('button', { name: 'Send to Claude', exact: true }).waitFor();
@@ -104,7 +120,7 @@ try {
   await page.getByRole('button', { name: 'Send to Claude', exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll('[data-request-status="pending"]').length === 1);
   pending.shift()(); await page.getByText('Synthetic answer 3.', { exact: true }).first().waitFor();
-  await page.waitForTimeout(700);
+  await until(async () => { const a = JSON.parse(await readFile(path.join(root, 'ink/fixture.ink.json'), 'utf8')).items.find(i => i.id === calls[2].id)?.attachment; return a?.status === 'attached' && a.from === originalFrom && a.to === originalFrom + 'The ending.'.length; }, 'the browser identity is saved with the answer');
   ink = JSON.parse(await readFile(path.join(root, 'ink/fixture.ink.json'), 'utf8'));
   assert.deepEqual(ink.items.find(i => i.id === calls[2].id).attachment,
     { status: 'attached', from: originalFrom, to: originalFrom + 'The ending.'.length }, 'browser identity must persist after a preview-time duplication');
