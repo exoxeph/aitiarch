@@ -9,7 +9,7 @@ need breaking one, stop and ask.
    checks, scripts or the app while developing. Use the fake providers. A real call needs the owner's explicit approval
    for that call.
 2. **Never touch the real `notebook.md`.** The owner's notebooks (including the trial notebook under
-   `C:\Users\UseR\Documents\aitiarch-trial`) are theirs. Copy fixtures into a temp folder; never edit the originals.
+   `<your Documents folder>\aitiarch-trial`) are theirs. Copy fixtures into a temp folder; never edit the originals.
 3. **Markdown on disk stays byte-exact.** No normalising line endings, BOM, trailing newlines or whitespace. CRLF and BOM
    must round-trip. Rendering is display only: decorations never dispatch document changes. Edits come only from explicit
    user commands (typing, toolbar, slash menu, shortcuts, checkbox click) and only insert or replace plain Markdown text.

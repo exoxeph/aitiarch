@@ -9,8 +9,25 @@ __pycache__/
 /NOTES.private.md
 
 # Git Bash crash dumps (a shell artifact, not project output).
-bash.exe.stackdump
 *.stackdump
 
 # Opt-in local capture of rejected diagram specs (AITIARCH_DEBUG_DIAGRAMS=1); may contain note text.
 /ui/.debug-diagrams/
+
+# Dependencies and build output at any level (ui/.gitignore repeats these for work done inside ui/).
+node_modules/
+dist/
+*.log
+
+# Secrets and local environment files.
+.env
+.env.*
+
+# A notebook folder or the trial notebook must never be committed into the repo.
+.aitiarch/
+aitiarch-trial/
+
+# OS junk.
+.DS_Store
+Thumbs.db
+desktop.ini
