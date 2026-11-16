@@ -186,6 +186,8 @@ await session('d1',d1,async({page,theme,root,bytes})=>{
  // code block: header label, Copy copies exactly the code, fences always hidden
  await put(page,d.length);
  R.header=await page.evaluate(()=>[...document.querySelectorAll('.cm-fence-lang')].map(e=>e.textContent));assert.deepEqual(R.header,['JavaScript','Shell']);
+ const copyBounds=await page.locator('.cm-fence-copy').evaluateAll(buttons=>buttons.map(b=>{const r=b.getBoundingClientRect(),line=b.closest('.cm-line').getBoundingClientRect();return {top:r.top-line.top,bottom:line.bottom-r.bottom};}));
+ assert(copyBounds.every(b=>b.top>=0&&b.bottom>=0),`Copy buttons fit inside their fence lines: ${JSON.stringify(copyBounds)}`);
  R.fenceAway=await page.evaluate(()=>[...document.querySelectorAll('.cm-fence-open')].map(e=>getComputedStyle(e).color));assert(R.fenceAway.every(c=>/rgba\(0, 0, 0, 0\)|transparent/.test(c)),'fences not hidden away from the block');
  await page.locator('.cm-fence-copy').first().click();R.copied=await page.evaluate(()=>window.__copied.at(-1));assert.equal(R.copied,'const answer = "forty-two"; // note\nfunction go(n) { return n + 1; }');
  assert.equal(await doc(page),d,'Copy changed the document');

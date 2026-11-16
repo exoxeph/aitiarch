@@ -392,7 +392,7 @@ summary { cursor: pointer; }
 :root { --code-keyword: var(--accent); --code-string: var(--link); --code-number: var(--ai-ink); --code-comment: var(--muted); --code-type: var(--ai-ink); --code-function: var(--ink-text); }
 .cm-fence.cm-fence-off { color: transparent; }
 .cm-fence.cm-fence-on { color: var(--muted); }
-.cm-fence-head { position: absolute; right: 8px; top: 3px; display: inline-flex; align-items: center; gap: 8px; font: 12px/1.4 var(--font-ui); color: var(--muted); user-select: none; }
+.cm-fence-head { position: absolute; right: 8px; top: 0; bottom: 0; display: inline-flex; align-items: center; gap: 8px; font: 12px/1.4 var(--font-ui); color: var(--muted); user-select: none; }
 .cm-fence-copy { font: inherit; border: 1px solid var(--control-border); background: var(--paper); color: var(--ink-text); border-radius: var(--radius-small); padding: 1px 8px; cursor: pointer; }
 .cm-fence-copy:hover { border-color: var(--accent); }
 .cm-fence-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
