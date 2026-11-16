@@ -56,5 +56,5 @@ describe('names and the list',()=>{
   const merged=mergeSessions([s('a','chat','2026-01-02T00:00:00Z'),s('b','chat','2026-01-04T00:00:00Z')],[s('c','investigate','2026-01-03T00:00:00Z'),s('a','chat','2026-01-02T00:00:00Z')]);
   expect(merged.map(x=>x.id)).toEqual(['b','c','a']);expect(isLegacyInvestigation(merged[1])).toBe(true);expect(isLegacyInvestigation(merged[0])).toBe(false);expect(isLegacyInvestigation(null)).toBe(false);
  });
- it('says how long the wait has been, in whole seconds',()=>{expect(waitText(0)).toBe('Waiting for Claude · 0s');expect(waitText(4999)).toBe('Waiting for Claude · 4s');expect(waitText(-5)).toBe('Waiting for Claude · 0s');});
+ it('says how long the wait has been, in whole seconds',()=>{expect(waitText(0)).toBe('Sent, waiting for the answer... · 0s');expect(waitText(4999)).toBe('Sent, waiting for the answer... · 4s');expect(waitText(-5)).toBe('Sent, waiting for the answer... · 0s');});
 });

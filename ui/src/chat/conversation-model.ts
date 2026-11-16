@@ -88,4 +88,4 @@ export function refusalText(code:string):string{
 /** "earlier context carried over" on the card, when the plan says so. */
 export const CARRIED_TEXT='Earlier questions and answers of this conversation are carried over to the new session (not resumed). Only the questions and final answers go.';
 /** The wait line from send until the first text. */
-export const waitText=(ms:number)=>`Waiting for Claude · ${Math.max(0,Math.floor(ms/1000))}s`;
+export const waitText=(ms:number)=>`Sent, waiting for the answer... · ${Math.max(0,Math.floor(ms/1000))}s`;

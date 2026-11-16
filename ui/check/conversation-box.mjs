@@ -92,7 +92,7 @@ try {
   let t = await ask('What do the plan and the ideas say together?');
   // 6. The wait line: from send until the first text, in whole seconds.
   if (await t.review.count()) { await t.review.getByRole('checkbox').check(); reviewed = true; const before = await done(); await t.review.getByRole('button', { name: 'Send to Claude', exact: true }).click();
-    const wait = panel.locator('[data-wait]'); await wait.waitFor(); await page.waitForFunction(() => /Waiting for Claude · [12]s/.test(document.querySelector('#chat-panel [data-wait]')?.textContent ?? ''));
+    const wait = panel.locator('[data-wait]'); await wait.waitFor(); await page.waitForFunction(() => /Sent, waiting for the answer... · [12]s/.test(document.querySelector('#chat-panel [data-wait]')?.textContent ?? ''));
     report.wait = await wait.innerText(); await panel.screenshot({ path: path.join(output, 'box-wait.png') }); await settled(before); }
   assert.equal(await panel.locator('[data-wait]').count(), 0, 'the wait line goes when the text comes');
   let c = (await calls()).at(-1); assert.equal(arg(c, '--tools'), '', 'tool-less'); assert(c.addendum.includes('# Ideas'), 'the picked note went with it');
