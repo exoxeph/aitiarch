@@ -21,7 +21,11 @@ function checkNoProviderSwitch(effective:PipelineConfig){
 }
 /** Validates sparse overrides with the shared validator. Throws a PipelineConfigError naming the setting (never the value). */
 export function validateOverrides(value:unknown):{overrides:Record<string,unknown>;effective:PipelineConfig}{
-  const r=applyOverrides(value);
+  // Validate the original size/shape first; sanitising cannot make an invalid value admissible.
+  const original=applyOverrides(value);
+  if(!original.ok)throw new PipelineConfigError(original.fault==='locked'?403:422,original.fault,original.message,original.path);
+  const clean=(v:unknown,prompt=false):unknown=>typeof v==='string'&&prompt?v.replace(/[\u0000-\u001f\u007f-\u009f]/g,''):plainObject(v)?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,clean(x,prompt||k==='prompts')])):v;
+  const r=applyOverrides(clean(value));
   if(!r.ok)throw new PipelineConfigError(r.fault==='locked'?403:422,r.fault,r.message,r.path);
   checkNoProviderSwitch(r.effective);
   return {overrides:r.overrides,effective:r.effective};

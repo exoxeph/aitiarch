@@ -1,0 +1,60 @@
+// Pure templates only. No request content, filesystem, context modules or provider execution.
+import {DEFAULT_PIPELINE_CONFIG,activePipelineConfig,type PipelineConfig} from '../shared/pipeline-config.ts';
+import {chatInstruction,chatSessionInstruction,CHAT_HARD_RULES} from './chat/request.ts';
+import {skillDiagramInstruction,SKILL_DIAGRAM_RULES} from '../shared/skill-diagram.ts';
+import {investigateInstruction,INVESTIGATE_INSTRUCTION} from './harness/investigate.ts';
+import {turnPrompt} from './providers/tool-less.ts';
+
+export type PromptSurface='chat'|'skill-diagram'|'investigate'|'council';
+export interface PromptSegment {kind:'editable'|'locked'|'placeholder';id:string;text:string}
+export const PREVIEW_SOURCES=[{id:'N1',label:'This note',text:'[your note]'},{id:'S1',label:'Selection',text:'[your selection]'}];
+export const PREVIEW_SKILLS={text:'[selected skill instructions, if any]',loaded:[],skipped:[],truncated:false};
+export const PREVIEW_QUESTION='[your question]';
+export const PREVIEW_INVESTIGATE_DATA=['[approved repo / attached file scope]','[earlier question and final-answer pairs, if carried]'];
+const placeholder=(id:string,text:string):PromptSegment=>({kind:'placeholder',id,text});
+const data=[placeholder('note','[your note]'),placeholder('selection','[your selection]'),placeholder('question',PREVIEW_QUESTION),placeholder('history','[earlier question and final-answer pairs, if carried]')];
+
+/** Annotate the production builder's output, without rebuilding or normalising its bytes.
+ * Fixed rule blocks win over coincident editable text, so they are never presented as editable. */
+function annotate(text:string,fields:(PromptSegment&{replacement?:string})[],fixed:PromptSegment[]):PromptSegment[]{
+ const candidates=[...fixed,...fields].filter(p=>p.text.length),out:PromptSegment[]=[];let at=0;
+ while(at<text.length){
+  let next=-1,chosen:(PromptSegment&{replacement?:string})|undefined;
+  for(const p of candidates){const i=text.indexOf(p.text,at);if(i>=0&&(next<0||i<next||i===next&&p.text.length>(chosen?.text.length??0))){next=i;chosen=p;}}
+  if(!chosen){out.push({kind:'locked',id:'fixed-'+out.length,text:text.slice(at)});break;}
+  if(next>at)out.push({kind:'locked',id:'fixed-'+out.length,text:text.slice(at,next)});
+  out.push({kind:chosen.kind,id:chosen.id,text:chosen.replacement??chosen.text});at=next+chosen.text.length;
+ }return out;
+}
+export function pipelinePreview(surface:PromptSurface,config:PipelineConfig=activePipelineConfig()){
+ const mode=config.personaModes.chat,marked=structuredClone(config),editable:(PromptSegment&{replacement:string})[]=[];
+ // Build once with distinct field markers. Equal/short user values cannot match locked prose.
+ const mark=(object:Record<string,unknown>,parts:string[])=>{for(const [key,value] of Object.entries(object)){
+  if(typeof value==='string'){const id=[...parts,key].join('.'),slot=`[__aitiarch_prompt_slot_${editable.length}__]`;object[key]=slot;
+   const replacement=id.startsWith('prompts.personas.')&&config.prompts.chatLength!==DEFAULT_PIPELINE_CONFIG.prompts.chatLength?value.split(DEFAULT_PIPELINE_CONFIG.prompts.chatLength).join(config.prompts.chatLength):value;
+   editable.push({kind:'editable',id,text:slot,replacement});
+  }else if(value&&typeof value==='object')mark(value as Record<string,unknown>,[...parts,key]);
+ }};mark(marked.prompts as unknown as Record<string,unknown>,['prompts']);
+ const placeholders=[...data,placeholder('skills',PREVIEW_SKILLS.text),...PREVIEW_INVESTIGATE_DATA.map((text,i)=>placeholder('investigate-data-'+i,text))];
+ const fixed:PromptSegment[]=[{kind:'locked',id:'chat-hard-rules',text:CHAT_HARD_RULES},{kind:'locked',id:'skill-diagram-hard-rules',text:SKILL_DIAGRAM_RULES}];
+ let text:string,expected:string,inputs:PromptSegment[]=[],variant:string;
+ if(surface==='chat'){
+  text=chatInstruction({persona:mode,skills:PREVIEW_SKILLS},marked);expected=chatInstruction({persona:mode,skills:PREVIEW_SKILLS},config);inputs=data;variant='stateless chat instruction; request data supplied separately';
+ }else if(surface==='skill-diagram'){
+  text=skillDiagramInstruction(PREVIEW_SKILLS,marked);expected=skillDiagramInstruction(PREVIEW_SKILLS,config);inputs=data;variant='skill diagram instruction; request data supplied separately';
+ }else if(surface==='investigate'){
+  text=investigateInstruction(PREVIEW_INVESTIGATE_DATA,marked);expected=investigateInstruction(PREVIEW_INVESTIGATE_DATA,config);
+  for(const [i,block] of INVESTIGATE_INSTRUCTION.split('\n\n').entries())if(i!==2)fixed.push({kind:'locked',id:'investigate-rule-'+i,text:block});
+  inputs=[placeholder('question',PREVIEW_QUESTION),placeholder('tool-context','[repo snapshot and file contents: approved tools only, not inlined]')];variant='fresh Investigate instruction; question and tool results supplied separately';
+ }else if(surface==='council'){
+  text=turnPrompt({question:PREVIEW_QUESTION,notes:PREVIEW_SOURCES},marked);expected=turnPrompt({question:PREVIEW_QUESTION,notes:PREVIEW_SOURCES},config);variant='Council Codex/Kiro notes-only adapter prompt';
+ }else throw new Error('invalid_surface');
+ const checked=(template:string,real:string)=>{const segments=annotate(template,[...editable,...placeholders],fixed);if(segments.map(s=>s.text).join('')!==real)throw new PreviewUnavailable();return segments;};
+ const segments=checked(text,expected);
+ // The session form uses the same builder as Claude conversations. No CLI history is read.
+ const session=surface==='chat'?{segments:checked(chatSessionInstruction({persona:mode,skills:PREVIEW_SKILLS},PREVIEW_SOURCES,{},marked).addendum,chatSessionInstruction({persona:mode,skills:PREVIEW_SKILLS},PREVIEW_SOURCES,{},config).addendum),inputs:[placeholder('message','[editor location and question]'),placeholder('history','[same-provider CLI history, or app-store replay on a fresh session]')]}:undefined;
+ // Claude Council uses the isolated Provider's stateless chat instruction, not turnPrompt.
+ const claude=surface==='council'?{segments:checked(chatInstruction({},marked),chatInstruction({},config)),inputs:data}:undefined;
+ return {surface,variant,segments,inputs,...(session?{session}:{}),...(claude?{claude}:{})};
+}
+export class PreviewUnavailable extends Error {constructor(){super('The prompt template could not be verified.');}}

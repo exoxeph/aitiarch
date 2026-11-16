@@ -89,7 +89,7 @@ export function validPipelineConfig(value:unknown):value is PipelineConfig{
    if(path.startsWith('roles.'))return ['claude','codex','kiro','chatgpt-plan'].includes(v);
    if(path.startsWith('safetyLabels.'))return ['fenced','contained','host-gated'].includes(v);
    if(path.startsWith('personaModes.'))return ['plan','grill','explain'].includes(v);
-   if(path.startsWith('prompts.'))return v.trim().length>0&&v.length<=12000;
+   if(path.startsWith('prompts.'))return v.trim().length>0&&v.length<=2000;
    return v===shape; // Usage units belong to their provider and cannot be relabelled.
   }
   if(!v||typeof v!=='object'||Array.isArray(v)||![Object.prototype,null].includes(Object.getPrototypeOf(v)))return false;
@@ -144,7 +144,7 @@ export const activePipelineConfig=():PipelineConfig=>active;
 /** Called by the server at start and after the overrides change. `null`, or anything the validator refuses, puts the defaults back. */
 export function setActivePipelineConfig(next:PipelineConfig|null):void{active=next&&validPipelineConfig(next)?freeze(cloneConfig(next)):DEFAULT_PIPELINE_CONFIG;}
 /** Swaps the default wording of one editable prompt for the active wording inside an instruction that was built from the defaults. The same text when there is no override. */
-export function withActivePrompt(text:string,pick:(c:PipelineConfig)=>string):string{const was=pick(DEFAULT_PIPELINE_CONFIG),now=pick(active);return now===was?text:text.split(was).join(now);}
+export function withActivePrompt(text:string,pick:(c:PipelineConfig)=>string,config:PipelineConfig=active):string{const was=pick(DEFAULT_PIPELINE_CONFIG),now=pick(config);return now===was?text:text.split(was).join(now);}
 /** An object that reads the active config each time a property is read, so `CHAT_LIMITS.sources` and the like follow a change on the next turn without every caller changing. */
 export function liveView<T extends object>(read:()=>T):T{
   return new Proxy({} as T,{

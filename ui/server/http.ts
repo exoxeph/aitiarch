@@ -40,6 +40,7 @@ import { validSavedNodes } from "../shared/node-settings.ts";
 import { homedir } from "node:os";
 import {CouncilService} from './council.ts';
 import {PipelineConfigStore,PipelineConfigError,pipelineView,PIPELINE_CONFIG_MAX_BYTES} from './pipeline-config-store.ts';
+import {pipelinePreview,PreviewUnavailable} from './pipeline-preview.ts';
 import {resolveConfigFolder} from './registry.ts';
 import {CouncilHistory} from './council-history.ts';
 import type {AvailabilityCheck} from './providers/council-availability.ts';
@@ -265,6 +266,11 @@ export function createApp(opts: AppOptions) {
       catch { return json(res, 409, { error: "unavailable", message: "The settings folder is not available." }); }
       const route = `${req.method} ${url.pathname}`;
       try {
+        if (route === "GET /api/pipeline-config/preview") {
+          const surface=url.searchParams.get('surface');
+          if(surface!=='chat'&&surface!=='skill-diagram'&&surface!=='investigate'&&surface!=='council')throw new PipelineConfigError(422,'invalid_surface','Choose chat, skill-diagram, investigate or council.');
+          return json(res,200,pipelinePreview(surface,(await store.load()).effective));
+        }
         if (route === "GET /api/pipeline-config") return json(res, 200, pipelineView(await store.load()));
         if (route === "GET /api/pipeline-config/export") {
           const data = JSON.stringify(await store.export(), null, 2) + "\n";
@@ -280,6 +286,7 @@ export function createApp(opts: AppOptions) {
         if (route === "POST /api/pipeline-config/reset") { await readBody(req, PIPELINE_CONFIG_MAX_BYTES); return json(res, 200, pipelineView(await store.reset())); }
         return json(res, 404, { error: "not_found" });
       } catch (e) {
+        if(e instanceof PreviewUnavailable)return json(res,409,{error:'preview_unavailable',message:e.message});
         if (e instanceof PipelineConfigError) return json(res, e.status, { error: e.code, message: e.message, ...(e.path ? { path: e.path } : {}) });
         throw e;
       }
