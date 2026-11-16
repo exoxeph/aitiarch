@@ -1,11 +1,12 @@
 import { suggestAnchorCandidates } from "../../shared/anchors.ts";
 import type { InkItem } from "../../shared/ink.ts";
 
-export function OrphanList({ text, items, onPick, onSelect }: {
+export function OrphanList({ text, items, onPick, onSelect, onOpen }: {
   text: string;
   items: InkItem[];
   onPick: (item: InkItem, from: number, to: number) => void;
   onSelect: (item: InkItem) => void;
+  onOpen?: (item: InkItem) => void;
 }) {
   const orphaned = items.filter(i => i.attachment.status === "orphaned" && !i.thread?.dismissed && !i.generation?.dismissed);
   return <section className="orphan-list" aria-label="Orphaned ink">
@@ -17,6 +18,7 @@ export function OrphanList({ text, items, onPick, onSelect }: {
         <div className="orphan-cap">AI · {item.kind === "answer" ? "Inline answer" : "Margin note"} · {item.attachment.status === "orphaned" ? item.attachment.reason : ""}</div>
         <div className="orphan-body">{!item.generation||item.generation.status==='complete'?item.body:'Waiting, failed or interrupted. No partial answer accepted.'}</div>
         <blockquote>{item.anchor.quote}</blockquote>
+        {item.thread&&item.generation&&onOpen&&<button type="button" onClick={()=>onOpen(item)}>Open thread</button>}
         {choices.length ? <div className="orphan-choices">
           {choices.map((c, n) => <button key={`${c.from}-${c.to}`} onClick={() => onPick(item, c.from, c.to)}
             title={text.slice(c.from, c.to)}>{`Attach here? ${n + 1}: ${text.slice(c.from, c.to).slice(0, 45)}`}</button>)}

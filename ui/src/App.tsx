@@ -554,6 +554,7 @@ export default function App() {
           <BacklinksPanel items={backlinks} onOpen={p => { setNoteMenuOpen(false); void openNote(p); }} />
           <PropertiesPanel text={active ? (docs[active] ?? activeFile?.text) : undefined} />
           {active && <OrphanList text={activeText} items={activeItems} onPick={(item, from, to) => void prepareAttach(item, from, to)}
+            onOpen={item=>{setNoteMenuOpen(false);setThreadId(item.id);setThoughtChat(item.id);}}
             onSelect={item => {
               const h = activeHandle();
               if (!h) return;
