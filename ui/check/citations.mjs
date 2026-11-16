@@ -146,7 +146,8 @@ try {
     let box = v.dom; while (box && !(box.scrollHeight > box.clientHeight + 4 && /(auto|scroll)/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
     const top = box ? box.getBoundingClientRect().top : 0, offset = r ? Math.round(r.top - top) : null;
     const third = box ? box.clientHeight / 3 : 300; // near the top: within the top third of what the pane shows
-    return { ok: head === at && offset !== null && offset >= 0 && offset < third, head, at, offset, third: Math.round(third), scroller: box?.className ?? null };
+    return { ok: head === at && offset !== null && offset >= 0 && offset < third, head, at, offset, third: Math.round(third), scroller: box?.className ?? null,
+      scrollTop: box?.scrollTop, maxScroll: box ? box.scrollHeight-box.clientHeight : null, bottomRoom: getComputedStyle(v.scrollDOM).paddingBottom };
   });
   const landed = await until(async () => (await activeNote()) === "auth/plan.md" && (await atHeading()).ok);
   check("a heading link opens the note at that heading, scrolled into view", landed, JSON.stringify(await atHeading()));
