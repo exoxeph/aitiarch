@@ -5,6 +5,7 @@ import {useEffect,useMemo,useRef,useState,type CSSProperties,type FormEvent,type
 import {api,ApiError,streamChat,streamConversation,type ConversationBody} from '../api.ts';
 import type {InvestigateUsage} from '../../shared/usage.ts';
 import {investigateLine} from './investigate-usage.ts';
+import {whyText} from '../../shared/chat-why.ts';
 import {CHAT_MESSAGES,type BudgetDetail,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatReview,type ChatUsage} from '../../shared/chat.ts';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
 import {SessionPicker} from './SessionPicker.tsx';
@@ -414,7 +415,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
       {t.message&&<ReplyNotes message={t.message} question={t.question} busy={composing} onAskAgain={q=>void submit(q)} note={asked(t.message)}/>}<UsedSkills names={t.message?.skills}/>{t.message?.costUsd!==undefined&&<p className="chat-turn-cost">{turnCostText(t.message.costUsd)}</p>}
       {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
       <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}><i className="add-icon" aria-hidden="true"/></button></div></div>}
-     {t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason,t.error.errorName,t.error)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button></div>}
+     {t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason,t.error.errorName,t.error)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button><details className="chat-why"><summary>Why?</summary><div className="chat-why-text">{whyText({ruleId:t.error.ruleId,detail:t.error.detail},t.error.code)}</div></details></div>}
      </>}
     </div>)}
    <span className="chat-sr" role="status">{busy&&!pending&&!planCard?'Claude is replying…':''}</span>

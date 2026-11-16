@@ -896,8 +896,12 @@ input.chat-ctl { background: var(--paper); cursor: text; }
 .chat-add:hover:not(:disabled), .chat-stop:hover { border-color: var(--accent); background: var(--accent-soft); }
 .chat-add:disabled { color: var(--muted); cursor: not-allowed; }
 .chat-warn { margin: 8px 0 0; padding: 8px 10px; border: 1px solid var(--danger); border-radius: var(--radius-small); color: var(--danger); font-size: var(--text-meta); line-height: 1.45; }
-.chat-error { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; border: 1px solid var(--danger); border-radius: var(--radius-card); }
+.chat-error { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; border: 1px solid var(--danger); border-radius: var(--radius-card); }
 .chat-error p { margin: 0; font-size: var(--text-control); line-height: 1.45; }
+.chat-error p { flex: 1 1 0; min-width: 0; }
+.chat-why { order: 3; flex: 1 0 100%; font-size: var(--text-control); color: var(--muted); }
+.chat-why summary { cursor: pointer; width: max-content; }
+.chat-why-text { margin-top: 4px; overflow-wrap: anywhere; line-height: 1.45; }
 .chat-notice { margin: 0 16px 8px; padding: 8px 10px; border: 1px solid var(--rule); border-radius: var(--radius-small); font-size: var(--text-meta); line-height: 1.45; }
 
 .chat-review { padding: 14px; border: 1px solid var(--accent); border-radius: var(--radius-card); background: var(--paper); box-shadow: 0 0 0 3px var(--glow); }

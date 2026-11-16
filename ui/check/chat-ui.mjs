@@ -151,6 +151,8 @@ try{
  await ask('This one will fail.');
  const err=panel.locator('.chat-error');await err.waitFor();
  assert.match(await err.innerText(),/could not complete this request/);
+  const why=err.locator('details.chat-why');assert.equal(await why.count(),1,'the error has a Why? line');assert.equal(await why.getAttribute('open'),null,'the Why? line starts collapsed');assert.equal(await err.locator('p').count(),1,'the message is still the only paragraph');
+  await why.locator('summary').click();assert.match(await why.locator('.chat-why-text').innerText(),/^Blocked by: The Claude run did not complete/,'Why? says what blocked the reply');assert.match(await err.innerText(),/could not complete this request/,'the message is unchanged');
  assert.equal(calls.length,before+1,'a failed request is never retried');
  await err.getByRole('button',{name:'Dismiss'}).click();assert.equal(await panel.locator('.chat-error').count(),0);
 

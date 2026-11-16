@@ -22,13 +22,15 @@ import type {QuestionStore} from '../harness/questions.ts';
 import type {ClaudeSessionRunner} from '../harness/claude-session.ts';
 import type {WantedCopy} from '../harness/diagram-folder.ts';
 import {validateProductResult,ProductValidationError} from '../product-validation.ts';
+import {resultFault,usageFault,whyOfError} from './why.ts';
+import type {ChatWhy} from '../../shared/chat-why.ts';
 import type {ExtrasFor} from '../node-settings.ts';
 import {describeFailure} from '../../shared/chat-failure.ts';
 import {StreamGate,dropManifestEcho,echoes} from './gate.ts';
 import {finishReply} from './reply.ts';
 import {checkContract} from '../../shared/persona-contract.ts';
 import type {PersonaMode} from '../../shared/persona.ts';
-export class ChatError extends Error {code:ChatErrorCode;/** For budget_reached: the numbers the gate used. */budget?:BudgetDetail;constructor(code:ChatErrorCode,budget?:BudgetDetail){super(code);this.code=code;if(budget)this.budget=budget;}}
+export class ChatError extends Error {code:ChatErrorCode;/** For budget_reached: the numbers the gate used. */budget?:BudgetDetail;/** Which rule said no, for the page's Why? line. Reporting only. */why?:ChatWhy;constructor(code:ChatErrorCode,budget?:BudgetDetail,why?:ChatWhy){super(code);this.code=code;if(budget)this.budget=budget;if(why)this.why=why;}}
 interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true;
  /** A harness session turn: the session id and the exact file text the CLI gets (instruction, sources, rules last). */
  session?:{id:string};addendum?:string;
@@ -231,13 +233,13 @@ export class ChatRuntime {
    const reply=frozen.session?await this.sessionTurn(frozen,request,controller.signal,onTextDelta,facts,emit):await this.provider.invoke(request,{signal:controller.signal,onTextDelta});
    const result:Result={...reply,answer:dropManifestEcho(reply.answer)}; // the editor line is the app's, never part of a reply, in a conversation or a one-off chat
    if(controller.signal.aborted)throw new ChatError('cancelled');
-   if(result.usage){for(const n of Object.values(result.usage))if(typeof n!=='number'||!Number.isFinite(n)||n<0)throw new ChatError('validation');
+   if(result.usage){for(const n of Object.values(result.usage))if(typeof n!=='number'||!Number.isFinite(n)||n<0)throw new ChatError('validation',undefined,usageFault(result.usage));
     s.usage.input+=result.usage.inputTokens;s.usage.cached+=result.usage.cachedTokens??0;s.usage.output+=result.usage.outputTokens;
     s.usage.spent+=budgetTokens(result.usage); // cache reads count at a reduced weight
     if(frozen.session)this.rememberReplay(frozen.session.id,result.usage.inputTokens+(result.usage.cachedTokens??0)+result.usage.outputTokens);
    }else{s.usage.spent+=frozen.reservation;s.usage.estimated=(s.usage.estimated??0)+frozen.reservation;s.usage.unreportedCalls++;}charged=true;
    // Enforce exact keys for fake/adapted providers too; never accept owned fields or aliases.
-   if(!Array.isArray(result.claims)||result.claims.some(c=>!c||typeof c!=='object'||Object.keys(c).sort().join()!=='quote,sourceId')||Object.keys(result).some(k=>!['id','provider','model','answer','claims','usage','rawReply','costUsd'].includes(k))||(Object.hasOwn(result,'costUsd')&&!(typeof result.costUsd==='number'&&Number.isFinite(result.costUsd)&&result.costUsd>=0)))throw new ChatError('validation'); // costUsd is the CLI's own dollar figure (optional): a finite number of 0 or more, nothing else
+   if(!Array.isArray(result.claims)||result.claims.some(c=>!c||typeof c!=='object'||Object.keys(c).sort().join()!=='quote,sourceId')||Object.keys(result).some(k=>!['id','provider','model','answer','claims','usage','rawReply','costUsd'].includes(k))||(Object.hasOwn(result,'costUsd')&&!(typeof result.costUsd==='number'&&Number.isFinite(result.costUsd)&&result.costUsd>=0)))throw new ChatError('validation',undefined,resultFault(result)); // costUsd is the CLI's own dollar figure (optional): a finite number of 0 or more, nothing else
    // The output gate's final part: the body, each claim checked on its own, and whether the citations need attention.
    // A claim about a diagram's picture is accepted only for a diagram this conversation's stream shows a Read of: one opened in this turn, or in an earlier reply of the conversation (saved with it).
    const opened=new Set([...(frozen.diagrams?.earlier??[]),...facts.reads.map(r=>r.asset)]),claimable=(frozen.diagrams?.all??[]).filter(d=>opened.has(d.asset)).map(d=>'D'+d.n);
@@ -262,7 +264,8 @@ export class ChatRuntime {
    const cause=controller.signal.aborted?s.abortCause:undefined;
    const code:ChatErrorCode=cause==='budget_gate'?'budget_reached':e instanceof ChatError?e.code:e instanceof ProductValidationError?'validation':e instanceof ProviderError&&e.code==='cancelled'?'cancelled':e instanceof ProviderError?'provider_failed':stage==='save'?'persistence':'internal';
    await this.audit(review.path,request.id,'chat_failed',cause);
-   emit({type:'error',id:request.id,code,...(e instanceof FenceStop?{fence:e.fence,...(e.costUsd!==undefined?{costUsd:e.costUsd}:{}),...(e.fence==='budget'?{capUsd:DIAGRAM_TURN_CAP_USD}:{})}:{}),...(cause&&(code==='cancelled'||code==='budget_reached')?{cause}:{}),...(code==='budget_reached'?{budget:e instanceof ChatError&&e.budget?e.budget:budgetNow}:{}),...(e instanceof ProductValidationError?{rule:e.record.rule}:{}),...(code==='provider_failed'&&e instanceof ProviderError?{reason:describeFailure(e.code,e.reason)}:{}),...(code==='internal'&&e instanceof Error&&/^[A-Za-z]{1,40}$/.test(e.name)?{errorName:e.name}:{})});
+   const why=whyOfError(code,e,{cause,budget:e instanceof ChatError&&e.budget?e.budget:budgetNow});
+    emit({type:'error',id:request.id,code,ruleId:why.ruleId,nodeId:why.nodeId,...(why.detail?{detail:why.detail}:{}),...(e instanceof FenceStop?{fence:e.fence,...(e.costUsd!==undefined?{costUsd:e.costUsd}:{}),...(e.fence==='budget'?{capUsd:DIAGRAM_TURN_CAP_USD}:{})}:{}),...(cause&&(code==='cancelled'||code==='budget_reached')?{cause}:{}),...(code==='budget_reached'?{budget:e instanceof ChatError&&e.budget?e.budget:budgetNow}:{}),...(e instanceof ProductValidationError?{rule:e.record.rule}:{}),...(code==='provider_failed'&&e instanceof ProviderError?{reason:describeFailure(e.code,e.reason)}:{}),...(code==='internal'&&e instanceof Error&&/^[A-Za-z]{1,40}$/.test(e.name)?{errorName:e.name}:{})});
   }finally{s.running=false;s.controller=undefined;s.usage.reserved=0;signal?.removeEventListener('abort',abort);resolve();this.jobs.delete(done);}
  }
  /** Which of a note's diagrams can be opened in a turn, and which are withheld with the reason in words. The picture must exist and be a valid PNG (the store checks signature, checksums, size and dimensions), and the

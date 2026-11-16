@@ -1,5 +1,6 @@
 // Pure chat state for the panel: turns, streamed events, context chips and the one-line usage summary. No DOM and no network here.
 import {failureText,type FailureReason} from '../../shared/chat-failure.ts';
+import {cleanDetail} from '../../shared/chat-why.ts';
 import {CHAT_MESSAGES,budgetText,cancelText,formatTokens,textTokens,type AbortCause,type BudgetDetail,type ChatClaim,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatUsage,type CitationIssue,type ClaimSourceKind,type ContextChoice} from '../../shared/chat.ts';
 import {contractText} from '../../shared/persona-contract.ts';
 import {isFenceCode,type FenceCode} from '../../shared/diagram-fence.ts';
@@ -15,7 +16,7 @@ export interface Turn {id:string;question:string|null;status:TurnStatus;text:str
  sentAt?:number;at?:string;
  /** The diagrams Claude opened in this turn, as live rows (a conversation turn that may open diagrams); the saved reply's diagramReads replace them once it is in. */
  opened?:{n:number;title:string;/** Set when it could not be opened (withheld): the reason. */why?:string}[];
- error?:{code:ChatErrorCode;rule?:string;reason?:FailureReason;errorName?:string;cause?:AbortCause;budget?:BudgetDetail;fence?:FenceCode;costUsd?:number;capUsd?:number}}
+ error?:{code:ChatErrorCode;rule?:string;ruleId?:string;nodeId?:string;detail?:string;reason?:FailureReason;errorName?:string;cause?:AbortCause;budget?:BudgetDetail;fence?:FenceCode;costUsd?:number;capUsd?:number}}
 
 /** The rows a saved reply shows above it: the diagrams it opened, then the ones it asked for and could not open (with the reason). */
 export const openedRows=(m:Pick<ChatMessage,'diagramReads'|'diagramMisses'>):NonNullable<Turn['opened']>=>[...(m.diagramReads??[]).map(r=>({n:r.n,title:r.title})),...(m.diagramMisses??[]).map(r=>({n:r.n,title:r.title,why:r.why}))];
@@ -29,7 +30,7 @@ export function applyEvent(turns:readonly Turn[],event:ChatEvent):Turn[]{
    case 'diagram_read':return {...t,opened:[...(t.opened??[]),{n:event.n,title:event.title}]};
    case 'diagram_unavailable':return {...t,opened:[...(t.opened??[]),{n:event.n,title:event.title,why:event.why}]};
    case 'complete':{const rows=t.opened?.length?t.opened:openedRows(event.message);return {...t,status:'complete',text:event.message.body,message:event.message,...(rows.length?{opened:rows}:{})};} // the live rows are in the order they happened; a reply loaded from disk has them from what was saveds on the trail too
-   case 'error':{const {message:_dropped,...rest}=t;return {...rest,status:'error',text:'',error:{code:event.code,...(event.rule?{rule:event.rule}:{}),...(event.reason?{reason:event.reason}:{}),...(event.errorName?{errorName:event.errorName}:{}),...(event.cause?{cause:event.cause}:{}),...(event.budget?{budget:event.budget}:{}),...(isFenceCode(event.fence)?{fence:event.fence}:{}),...(typeof event.costUsd==='number'?{costUsd:event.costUsd}:{}),...(typeof event.capUsd==='number'?{capUsd:event.capUsd}:{})}};} // a partial reply is never kept; the rows of what it opened stay
+   case 'error':{const {message:_dropped,...rest}=t;return {...rest,status:'error',text:'',error:{code:event.code,...(event.rule?{rule:event.rule}:{}),...(typeof event.ruleId==='string'&&event.ruleId.length<=60?{ruleId:event.ruleId}:{}),...(typeof event.nodeId==='string'&&event.nodeId.length<=40?{nodeId:event.nodeId}:{}),...(cleanDetail(event.detail)?{detail:cleanDetail(event.detail)}:{}),...(event.reason?{reason:event.reason}:{}),...(event.errorName?{errorName:event.errorName}:{}),...(event.cause?{cause:event.cause}:{}),...(event.budget?{budget:event.budget}:{}),...(isFenceCode(event.fence)?{fence:event.fence}:{}),...(typeof event.costUsd==='number'?{costUsd:event.costUsd}:{}),...(typeof event.capUsd==='number'?{capUsd:event.capUsd}:{})}};} // a partial reply is never kept; the rows of what it opened stay
   }
  });
 }

@@ -122,7 +122,7 @@ export type ChatEvent=
  /** The model tried to open a diagram that is withheld (or not in the note): a live row with the reason. Nothing was read. */
  |{type:'diagram_unavailable';id:string;n:number;title:string;why:string}
  |{type:'complete';id:string;message:ChatMessage;persistence:'private'|'memory';usage:ChatUsage}
- |{type:'error';id:string;code:ChatErrorCode;rule?:string;/** For internal errors: the kind of error (for example TypeError), never its message. */errorName?:string;/** For provider_failed: why, in a safe form the page can say in words. */reason?:import('./chat-failure.ts').FailureReason;
+ |{type:'error';id:string;code:ChatErrorCode;rule?:string;/** Why Pipeline Studio's Why? line: the rule id, the pipeline node it belongs to and a short content-free detail (a limit, a count, a field name). Reporting only. */ruleId?:string;nodeId?:string;detail?:string;/** For internal errors: the kind of error (for example TypeError), never its message. */errorName?:string;/** For provider_failed: why, in a safe form the page can say in words. */reason?:import('./chat-failure.ts').FailureReason;
   /** For a turn that may open diagrams and was stopped by the fence: why (see shared/diagram-fence.ts), what the CLI said it had cost so far, and the cap it had. */fence?:import('./diagram-fence.ts').FenceCode;costUsd?:number;capUsd?:number;
   /** For a stopped request (cancelled, or budget_reached part-way): what stopped it. Absent when it is not known. */cause?:AbortCause;/** For budget_reached: the numbers. */budget?:BudgetDetail};
 export interface ChatInput {id:string;path:string;question:string;selection?:string;context:ContextChoice[];
