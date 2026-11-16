@@ -84,7 +84,7 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
  const [notice,setNotice]=useState<{kind:'ok'|'error';text:string}|null>(null),[confirm,setConfirm]=useState<{kind:'reset'}|{kind:'import';doc:unknown;name:string}|null>(null),confirmRef=useRef(confirm);confirmRef.current=confirm;
  const fileInput=useRef<HTMLInputElement>(null);
  const [narrow,setNarrow]=useState(()=>isNarrow(window.innerWidth));
- const root=useRef<HTMLElement>(null),port=useRef<HTMLDivElement>(null),drag=useRef<{id:string;sx:number;sy:number;from:{x:number;y:number};before:Layout;moved:boolean}|null>(null),laneDrag=useRef<{group:NodeGroup;sx:number;sy:number;origin:Layout;before:Layout;moved:boolean}|null>(null),cancelDrag=useRef<()=>boolean>(()=>false),afterCancel=useRef(false),pan=useRef<{sx:number;sy:number;cx:number;cy:number}|null>(null),swallow=useRef(false);
+ const root=useRef<HTMLElement>(null),port=useRef<HTMLDivElement>(null),drag=useRef<{id:string;sx:number;sy:number;from:{x:number;y:number};before:Layout;moved:boolean}|null>(null),laneDrag=useRef<{group:NodeGroup;sx:number;sy:number;origin:Layout;before:Layout;moved:boolean}|null>(null),cancelDrag=useRef<()=>boolean>(()=>false),afterCancel=useRef(false),pan=useRef<{sx:number;sy:number;cx:number;cy:number;moved:boolean}|null>(null),swallow=useRef(false);
  useEffect(()=>{let off=false;api.pipelineConfig().then(v=>{if(!off)setView(v);}).catch(()=>{if(!off)setLoadFailed(true);});api.councilAvailability().then(d=>{if(!off)setAvail(d.providers);}).catch(()=>{if(!off)setAvail(null);});return()=>{off=true;};},[]);
  useEffect(()=>{const on=()=>setNarrow(isNarrow(window.innerWidth));window.addEventListener('resize',on);return()=>window.removeEventListener('resize',on);},[]);
  // Escape closes the editor first, then the Studio; nothing underneath also hears it. Tab stays inside.
@@ -109,6 +109,8 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
  },[flagged,narrow]);
  const edges=useMemo(()=>edgesOf(),[]);
  const active=selected??peek,around=useMemo(()=>active?pathAround(active,edges):null,[active,edges]);
+ // Pointing at or focusing a node lights only its own links and the nodes at their ends; clicking it (or Enter) extends that to the whole path through it. Clicking empty canvas clears it.
+ const fullPath=!!selected,neighbours=useMemo(()=>{const s=new Set<string>();if(active)for(const e of edges){if(e.from===active)s.add(e.to);if(e.to===active)s.add(e.from);}return s;},[active,edges]);
  const place=(n:PipelineNode)=>placeOf(n,layout),regions=useMemo(()=>regionsOf(PIPELINE_NODES,n=>placeOf(n,layout)),[layout]);
  // The full orthogonal route is worked out when the layout settles; while a node is being dragged the edges follow with plain right-down-right runs.
  const [dragging,setDragging]=useState(false);
@@ -143,9 +145,10 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
   if(dx||dy)setCam(cur=>({...cur,x:cur.x+dx,y:cur.y+dy}));
  };
  const choose=(id:string)=>{if(swallow.current||afterCancel.current){afterCancel.current=false;return;}setSelected(s=>s===id?null:id);};
- const onPortDown=(e:ReactPointer<HTMLDivElement>)=>{if(e.button!==0||(e.target as HTMLElement).closest('.studio-node,.studio-card,.studio-region-handle'))return;pan.current={sx:e.clientX,sy:e.clientY,cx:camRef.current.x,cy:camRef.current.y};e.currentTarget.setPointerCapture(e.pointerId);};
- const onPortMove=(e:ReactPointer<HTMLDivElement>)=>{const p=pan.current;if(p)setCam(c=>({...c,x:p.cx+e.clientX-p.sx,y:p.cy+e.clientY-p.sy}));};
- const onPortUp=(e:ReactPointer<HTMLDivElement>)=>{pan.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);};
+ const onPortDown=(e:ReactPointer<HTMLDivElement>)=>{if(e.button!==0||(e.target as HTMLElement).closest('.studio-node,.studio-card,.studio-region-handle'))return;pan.current={sx:e.clientX,sy:e.clientY,cx:camRef.current.x,cy:camRef.current.y,moved:false};e.currentTarget.setPointerCapture(e.pointerId);};
+ const onPortMove=(e:ReactPointer<HTMLDivElement>)=>{const p=pan.current;if(!p)return;if(Math.hypot(e.clientX-p.sx,e.clientY-p.sy)>=4)p.moved=true;setCam(c=>({...c,x:p.cx+e.clientX-p.sx,y:p.cy+e.clientY-p.sy}));};
+ // A press on empty canvas that does not move is a click on nothing: it clears the selection (and so the lit path).
+ const onPortUp=(e:ReactPointer<HTMLDivElement>)=>{const p=pan.current;pan.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);if(p&&!p.moved){setSelected(null);setPeek(flagged??null);}};
  const zoom=(f:number)=>{const r=port.current?.getBoundingClientRect();setCam(c=>zoomAt(c,f,(r?.width??600)/2,(r?.height??400)/2));};
  /** Shows every node at once, as large as fits. */
  const fit=()=>{const r=port.current?.getBoundingClientRect();if(r){const at=(n:PipelineNode)=>placeOf(n,layoutRef.current);setCam(fitCamera(PIPELINE_NODES.map(at),{w:r.width,h:r.height},12,regionsOf(PIPELINE_NODES,at)));}};
@@ -208,13 +211,13 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
        {routes.map(route=>{
         const key=route.key,d=pathData(route,routes),stitched=route.from==='council'&&route.to.startsWith('council-');
         // Bold and bright when it lies on the path through the hovered, focused or selected node, upstream or downstream; everything else steps back.
-        const on=!!active&&!!around&&(route.from===active||around.down.has(route.from)||route.to===active||around.up.has(route.to));
+        const on=!!active&&!!around&&(route.from===active||route.to===active||(fullPath&&(around.down.has(route.from)||around.up.has(route.to))));
         const common={'data-active':on||undefined,'data-dim':(!!active&&!on)||undefined,'data-main':MAIN_EDGES.has(key)||undefined,'data-trunk':route.to==='ledger'||undefined} as const;
         return stitched
          ?<g key={key} data-stitch="true" data-limb={route.to} data-active={on||undefined} data-dim={(!!active&&!on)||undefined}><path d={d} data-edge={key} className="stitch-seam" {...common} markerEnd="url(#studio-arrow)"/><path d={d} className="stitch-ticks" {...common}/></g>
          :<path key={key} d={d} data-edge={key} {...common} markerEnd="url(#studio-arrow)"/>;
        })}</svg>
-      {PIPELINE_NODES.map(n=>{const p=place(n),badge=safetyLabelOf(n,view?.effective??DEFAULT_PIPELINE_CONFIG),onPath=!active||!around||n.id===active||around.up.has(n.id)||around.down.has(n.id);return <button key={n.id} type="button" className="studio-node" data-node={n.id} data-kind={n.kind} data-group={n.group} data-provider={n.provider} data-main={MAIN_NODES.has(n.id)||undefined} data-dim={!onPath||undefined} data-selected={selected===n.id||undefined} data-highlight={n.id===flagged||undefined} aria-pressed={selected===n.id} aria-describedby={peek===n.id?'studio-peek':undefined}
+      {PIPELINE_NODES.map(n=>{const p=place(n),badge=safetyLabelOf(n,view?.effective??DEFAULT_PIPELINE_CONFIG),onPath=!active||!around||n.id===active||(fullPath?around.up.has(n.id)||around.down.has(n.id):neighbours.has(n.id));return <button key={n.id} type="button" className="studio-node" data-node={n.id} data-kind={n.kind} data-group={n.group} data-provider={n.provider} data-main={MAIN_NODES.has(n.id)||undefined} data-dim={!onPath||undefined} data-selected={selected===n.id||undefined} data-highlight={n.id===flagged||undefined} aria-pressed={selected===n.id} aria-describedby={peek===n.id?'studio-peek':undefined}
         data-customized={isCustomized(view?.overrides,n)||undefined} aria-label={`${n.label}, ${n.kind==='locked'?'locked':'editable'}${badge?', '+badge:''}${isCustomized(view?.overrides,n)?', customized':''}`} style={{left:p.x,top:p.y,width:NODE_W,minHeight:nodeH(n.id),height:nodeH(n.id)}}
         onPointerDown={e=>onNodeDown(e,n)} onPointerMove={onNodeMove} onPointerUp={onNodeUp} onPointerCancel={onNodeUp} onClick={()=>choose(n.id)} onKeyDown={e=>onNodeKey(e,n)}
         onPointerEnter={()=>setPeek(n.id)} onPointerLeave={()=>setPeek(c=>c===n.id?(flagged??null):c)} onFocus={e=>{setPeek(n.id);reveal(e,n);}} onBlur={()=>setPeek(c=>c===n.id?(flagged??null):c)}>

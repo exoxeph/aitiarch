@@ -76,11 +76,15 @@ try{
  for(const id of ['council-claude','council-codex','council-kiro']){const s=await node(id).evaluate(e=>{const c=getComputedStyle(e);return {outline:c.outlineStyle,border:c.borderTopStyle};});assert.deepEqual(s,{outline:'none',border:'solid'},`${id} has no dashed treatment: dashed always means locked`);}
  for(const e of await studio.locator('.studio-edges path[data-edge]').evaluateAll(ps=>ps.map(p=>p.getAttribute('d'))))assert(!/C/.test(e.replace(/[QA]/g,'')),'no free curves: only straight runs, rounded elbows and hops');
  assert.equal(await studio.locator('.studio-edges path[data-edge][marker-end]').count(),await studio.locator('.studio-edges path[data-edge]').count(),'every edge ends in an arrowhead');
- // 1c. Hovering a node lights its edges upstream and downstream, and quiets the nodes that are not on its path.
- await node('permission_gate').hover();
- const gateLit=await studio.locator('.studio-edges path[data-active]').evaluateAll(p=>p.map(e=>e.getAttribute('data-edge')));
- for(const e of ['redaction>permission_gate','permission_gate>request-queue','token-budget>normal-answerer','request-intake>redaction','claim-check>chat-store'])assert(gateLit.includes(e),`hovering the gate lights ${e}: ${gateLit}`);
- await page.waitForTimeout(300); // the dimming eases in over 140 ms
+ // 1c. Pointing at a node lights only its own links and the nodes at their ends; clicking it (or Enter) extends that to the whole path; clicking empty canvas clears it.
+ const litNow=async()=>(await studio.locator('.studio-edges path[data-active]').evaluateAll(p=>p.map(e=>e.getAttribute('data-edge')))).sort();
+ const directOf=id=>edgesOf().filter(e=>e.from===id||e.to===id).map(e=>e.from+'>'+e.to).sort();
+ await node('permission_gate').hover();await page.waitForTimeout(300); // the dimming eases in over 140 ms
+ assert.deepEqual(await litNow(),directOf('permission_gate'),'hover lights exactly the gate’s own links');
+ assert(!(await litNow()).includes('token-budget>normal-answerer'),'and not the path beyond them');
+ for(const id of ['redaction','permission_gate','request-queue','council','repo-attach'])assert.equal(await node(id).getAttribute('data-dim'),null,`${id} (the gate, or at the end of one of its links) is not dimmed`);
+ assert.equal(await node('token-budget').getAttribute('data-dim'),'true','a node two steps away is quieted on hover');
+ assert.equal(await studio.locator('.studio-card').count(),1,'one detail card while hovering');
  assert(await studio.locator('.studio-edges path[data-active]').first().evaluate(e=>parseFloat(getComputedStyle(e).strokeWidth))>=3,'the lit path is bold');
  assert(await studio.locator('.studio-edges path[data-dim]').first().evaluate(e=>+getComputedStyle(e).strokeOpacity)<.3,'the edges off the path step back');
  assert.equal(await node('exclusion_lists').getAttribute('data-dim'),'true','a node off the path is quieted');assert.equal(await node('redaction').getAttribute('data-dim'),null,'a node on the path is not');
@@ -91,6 +95,21 @@ try{
  await studio.locator('.studio-region[data-group=council]').screenshot({path:path.join(output,'studio-polish-council.png')});
  await page.mouse.move(700,860);await page.waitForTimeout(150);assert.equal(await studio.locator('.studio-edges path[data-active]').count(),0,'with nothing hovered no edge is lit');
  await page.screenshot({path:path.join(output,'studio-polish-canvas.png')});
+ // Click extends the lit path to everything upstream and downstream, and there is still exactly one detail card.
+ await node('permission_gate').click();await page.waitForTimeout(300);
+ const fullLit=await litNow();for(const e of ['redaction>permission_gate','token-budget>normal-answerer','request-intake>redaction','claim-check>chat-store'])assert(fullLit.includes(e),`clicking the gate lights the whole path: ${e}`);
+ assert(fullLit.length>directOf('permission_gate').length,'more than the direct links are lit after a click');assert.equal(await node('permission_gate').getAttribute('aria-pressed'),'true');
+ assert.equal(await studio.locator('.studio-card').count(),1,'one detail card with the panel open: no pinned panel plus a hover card');
+ await node('permission_gate').hover();assert.equal(await studio.locator('.studio-card').count(),1,'hovering the selected node adds no second card');
+ await node('redaction').hover();await page.waitForTimeout(150);assert.equal(await studio.locator('.studio-card').count(),1,'hovering another node adds none either');assert.deepEqual(await litNow(),fullLit,'and the selection keeps its path lit');
+ await page.screenshot({path:path.join(output,'studio-click-path.png')});
+ // Clicking empty canvas clears the selection and the path.
+ await page.mouse.click(700,860);await page.waitForTimeout(300);
+ assert.equal(await studio.locator('.studio-edges path[data-active]').count(),0,'clicking empty canvas clears the lit path');assert.equal(await node('permission_gate').getAttribute('aria-pressed'),'false');assert.equal(await studio.locator('.studio-card').count(),0);assert.equal(await studio.locator('[data-editor]').count(),0);
+ // Keyboard: focus lights the direct links like hover; Enter extends to the full path.
+ await node('redaction').focus();await page.waitForTimeout(250);assert.deepEqual(await litNow(),directOf('redaction'),'keyboard focus lights the direct links');
+ await page.keyboard.press('Enter');await page.waitForTimeout(250);assert((await litNow()).length>directOf('redaction').length,'Enter extends it to the full path');
+ await page.mouse.click(700,860);await page.waitForTimeout(250);assert.equal(await studio.locator('.studio-edges path[data-active]').count(),0);
  // 2. Hover and keyboard focus show the detailed card, top to bottom.
  await node('normal-answerer').hover();const c=card('Normal chat answerer');await c.waitFor();
  const text=(await c.innerText()).toLowerCase(),order=['what it does','what it receives','what it sends on','safety label','editable fields'].map(s=>text.indexOf(s)).concat(text.lastIndexOf('editable here'));
@@ -105,6 +124,26 @@ try{
  assert.equal(await ed.locator('[data-locked=true]').count(),1);assert.equal(await ed.locator('.studio-lock').count(),1,'a padlock');assert.equal(await ed.locator('input,select,textarea').count(),0,'no editable fields');
  assert.equal(await ed.getByRole('button',{name:'Save'}).count(),0,'nothing to save');await page.screenshot({path:path.join(output,'studio-locked.png')});
  await ed.getByRole('button',{name:'Close editor'}).click();await ed.waitFor({state:'detached'});
+ // 3b. With the detail panel open nothing is clipped at 1280, 1440 or 1920: the header buttons are on screen and uncovered, and the panel's text stays inside it.
+ const clipped=()=>page.evaluate(()=>{
+  const bad=[],vw=innerWidth,bar=document.querySelector('.studio-bar'),side=document.querySelector('.studio-side');
+  for(const b of document.querySelectorAll('.studio-tools button')){const r=b.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+   if(r.left<0||r.right>vw+.5)bad.push(`${b.textContent||b.getAttribute('aria-label')} is off screen`);if(!hit||!b.contains(hit))bad.push(`${b.textContent||b.getAttribute('aria-label')} is covered`);}
+  if(bar.scrollWidth>bar.clientWidth+1)bad.push('the header overflows');
+  if(!side)return [...bad,'no detail panel'];
+  const s=side.getBoundingClientRect();if(s.right>vw+.5)bad.push('the panel is off screen');if(side.scrollWidth>side.clientWidth+1)bad.push('the panel scrolls sideways');
+  for(const e of side.querySelectorAll('*')){const r=e.getBoundingClientRect();if(!r.width||!r.height||getComputedStyle(e).position==='absolute')continue;if(r.left<s.left-1||r.right>s.right+1)bad.push(`${e.tagName}.${String(e.className).slice(0,24)} sticks out of the panel`);}
+  const x=side.querySelector('.studio-x');if(x){const r=x.getBoundingClientRect();if(r.right>s.right+1||r.top<s.top-1)bad.push('the close button is clipped');}
+  return [...new Set(bad)];
+ });
+ for(const [w,h] of [[1280,800],[1440,900],[1920,1080]]){
+  await page.setViewportSize({width:w,height:h});await page.waitForTimeout(200);
+  await node('request-intake').click();await studio.getByRole('region',{name:'Edit Your note and mode'}).waitFor();
+  assert.deepEqual(await clipped(),[],`nothing is clipped with the panel open at ${w}`);
+  await page.screenshot({path:path.join(output,`panel-open-${w}.png`)});
+  await page.mouse.click(Math.round(w*.3),h-40);await page.waitForTimeout(150);
+ }
+ await page.setViewportSize({width:1440,height:900});await studio.getByRole('button',{name:'Reset layout'}).click();await page.waitForTimeout(250);
  // 4. Dragging moves a node and the place is remembered; Reset layout puts everything back.
  const dflt=nodeById('token-budget'),b=await node('token-budget').boundingBox();
  await page.mouse.move(b.x+b.width/2,b.y+b.height/2);await page.mouse.down();await page.mouse.move(b.x+b.width/2+60,b.y+b.height/2+40,{steps:8});await page.mouse.up();
