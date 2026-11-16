@@ -39,6 +39,27 @@ export class SessionIndex {
   return (await this.load()).filter(s=>(!filter.mode||s.mode===filter.mode)&&(filter.note===undefined||s.note===filter.note)).sort((a,b)=>Date.parse(b.lastUsed)-Date.parse(a.lastUsed)||b.created.localeCompare(a.created));
  }
  async get(id:string){if(!validSessionId(id))return null;return (await this.list()).find(s=>s.id===id)??null;}
+ /** Stable approval identity for classic per-note chat. Questions still live outside the notebook. */
+ normalConversation(note:string){return this.change(all=>{
+  const found=all.find(s=>s.mode==='chat'&&s.note===note&&s.normalOneOff);if(found)return {...found};
+  if(all.length>=MAX_SESSIONS)throw new SessionIndexError('Too many sessions. Remove some first.');
+  const now=new Date().toISOString(),s:HarnessSession={id:randomUUID(),mode:'chat',label:'Note chat',note,created:now,lastUsed:now,turns:0,normalOneOff:true};all.push(s);return {...s};
+ });}
+ /** Provider switches cannot resume a CLI's hidden history. Past ids remain available to Delete. */
+ async selectNormalAnswerer(id:string,answerer:'claude'|'codex'|'kiro'){
+  if(!['claude','codex','kiro'].includes(answerer))throw new SessionIndexError('Invalid answerer.');
+  const previous=await this.get(id);if(!previous||previous.mode!=='chat')throw new SessionIndexError('No such chat.');
+  if((previous.normalAnswerer??'claude')===answerer)return false;
+  return this.change(all=>{
+   const s=all.find(x=>x.id===id);if(!s||s.mode!=='chat')throw new SessionIndexError('No such chat.');
+   if((s.normalAnswerer??'claude')===answerer)return false;
+   if(s.cli)(s.past??=[]).push({id:s.cli.id,...(s.cli.cwd?{cwd:s.cli.cwd}:{})});else if(s.turns>0&&!s.normalAnswerer)(s.past??=[]).push({id:s.id});
+   if(s.past&&s.past.length>50)s.past.splice(0,s.past.length-50);
+   delete s.cli;s.normalAnswerer=answerer;
+   if(answerer==='claude')s.cli={id:randomUUID(),profile:'notes',turns:0,cwd:'chat'};
+   return true;
+  });
+ }
  create(input:{mode:HarnessMode;label:string;note?:string;repo?:string}):Promise<HarnessSession>{
   const label=cleanLabel(input.label);
   if(!label||input.mode!=='chat'&&input.mode!=='investigate'||input.note!==undefined&&(typeof input.note!=='string'||input.note.length>400)

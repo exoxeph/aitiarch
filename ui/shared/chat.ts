@@ -56,7 +56,9 @@ export function validDiagramMisses(v:unknown):v is DiagramMiss[]{
  return Array.isArray(v)&&v.length<=24&&v.every(r=>r&&typeof r==='object'&&!Array.isArray(r)&&Object.keys(r).sort().join()==='n,title,why'&&Number.isInteger(r.n)&&r.n>=1&&r.n<=99&&typeof r.title==='string'&&r.title.length<=80&&typeof r.why==='string'&&r.why.length>=1&&r.why.length<=200&&!/[\u0000-\u001f\u007f]/.test(r.title+r.why));
 }
 export interface ChatMessage {
- id:string;role:'assistant';body:string;at:string;provider:'claude';model:string|null;
+ id:string;role:'assistant';body:string;at:string;provider:'claude'|'codex'|'kiro';model:string|null;
+ /** Native Council-contract usage; never relabel credits as tokens or invent a price. */
+ nativeUsage?:NativeChatUsage[];overCap?:true;warning?:string;
  evidence:{sourceId:string;sourceHash:string;quote:string}[];
  usage:{inputTokens:number;outputTokens:number;cachedTokens?:number}|null;
  insertionBlocked:boolean;
@@ -96,7 +98,10 @@ export interface ChatUsage {
  session?:string;label?:string;calls:number;input:number;cached:number;output:number;unreportedCalls:number;
  /** `spent` counts what the CLI reported (cache reads at CACHE_READ_WEIGHT) plus `estimated`: the estimate charged for calls that reported no counts. */
  tokenBudget:number;spent:number;reserved:number;rollingRequestCap:number;windowMinutes:number;estimated?:number;
+ nativeUsage?:(NativeChatUsage&{provider:'codex'|'kiro'})[];
 }
+export interface NativeChatUsage {unit:'usd'|'tokens'|'credits';amount:number;afterTurn:boolean}
+export function validNativeChatUsage(v:unknown):v is NativeChatUsage[]{return Array.isArray(v)&&v.length<=32&&v.every(u=>u&&typeof u==='object'&&!Array.isArray(u)&&Object.keys(u).sort().join()==='afterTurn,amount,unit'&&['usd','tokens','credits'].includes(u.unit)&&typeof u.amount==='number'&&Number.isFinite(u.amount)&&u.amount>=0&&typeof u.afterTurn==='boolean');}
 export type ChatErrorCode='invalid_chat'|'review_required'|'stale_review'|'busy'|'budget_reached'|'hourly_cap'|'disabled'|'cancelled'|'validation'|'provider_failed'|'internal'|'persistence'|'secrets_blocked'|'session_format'|'session_limit'|'session_selection'|'plan_required'|'grant_mismatch';
 export const CHAT_MESSAGES:Record<ChatErrorCode,string>={
  plan_required:'This message needs more than this conversation was approved for. Review the plan first. Nothing was sent.',grant_mismatch:'This conversation’s approval does not belong to it here. Review the plan again. Nothing was sent.',
@@ -136,6 +141,8 @@ export interface ChatInput {id:string;path:string;question:string;selection?:str
  editor?:EditorInfo}
 
 export interface ChatReview {
+ /** Normal Codex/Kiro chat uses the existing Council approval endpoint, bound to this conversation/provider. */
+ normalPlan?:{conversation:string;providers:('codex'|'kiro')[];notes:string[];question:string;caps:Partial<Record<'codex'|'kiro',import('./council.ts').CouncilCap>>;hash:string};
  reviewId:string;requestId:string;path:string;question:string;selection:string;
  sources:(ContextPreview&{text:string})[];historyPairs:number;omittedPairs:number;
  instruction:string;history:{id:string;user:string;assistant:string}[];

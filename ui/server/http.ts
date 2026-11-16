@@ -2,6 +2,8 @@ import {activePipelineConfig} from '../shared/pipeline-config.ts';
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
 import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {randomUUID} from 'node:crypto';import {ConversationGate,GateRefusal,carriedPairs,projectRepo} from './harness/conversation.ts';import {cleanAttachments} from '../shared/profile.ts';import {removeTranscript} from './harness/transcripts.ts';import {sweepStaleTurnFolders} from './harness/sweep.ts';import {QuestionStore} from './harness/questions.ts';
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
+import {NormalChat} from './chat/normal-answerer.ts';
+import {whyOfError} from './chat/why.ts';
 import {CHAT_MESSAGES,budgetText} from '../shared/chat.ts';
 import {validSessionId} from '../shared/harness.ts';
 import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/insertion.ts';import {CouncilInsertion} from './council-insertion.ts';import {InvestigateInsertion} from './investigate-insertion.ts';
@@ -196,10 +198,11 @@ export function createApp(opts: AppOptions) {
     const investigate=new InvestigateService({index,dir:index.dir,notebook:store.rootReal,command:h.command,prefixArgs:h.prefixArgs,model:h.model,gate,carried});investigateRef.resolve(investigate);
     return {index,runner,questions,version:()=>runner.version(), // the CLI's version, for the ledger at a conversation's first turn and for Settings
     investigate,gate,carried};}):Promise.resolve(null);
-  const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady]).then(([ink,harness])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages);chatRef.resolve(runtime);return runtime;});
   // Council's app-owned conversation index needs no CLI or transcript access.
   const councilIndexReady=opts.council?harnessReady.then(async h=>opts.council!.index??h?.index??await SessionIndex.open(harnessDirectory(store.rootReal))):Promise.resolve(null);
   const councilReady=opts.council?Promise.all([inkReady,councilIndexReady]).then(async([ink,index])=>new CouncilService({store,ink,index:index!,history:new CouncilHistory(index!,1024*1024,store.rootReal),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters})):Promise.resolve(null);
+  const normalReady=Promise.all([councilIndexReady,councilReady]).then(([index,council])=>index&&council?new NormalChat({index,questions:new QuestionStore(index.dir),council,adapters:opts.council!.adapters}):undefined);
+  const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady,normalReady]).then(([ink,harness,normal])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages,normal);chatRef.resolve(runtime);return runtime;});
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const councilInsertion=insertionsReady.then(insertions=>new CouncilInsertion(store,insertions));
   const investigateInsertion=insertionsReady.then(insertions=>new InvestigateInsertion(store,insertions));
@@ -350,7 +353,7 @@ export function createApp(opts: AppOptions) {
     }
     // What Delete conversation would remove from the chat record of the note a conversation was started on: that note and how many saved replies. The confirmation says it.
     if(url.pathname==='/api/harness/sessions/replies'&&req.method==='GET'){
-      if(!await harnessReady){const index=await councilIndexReady,s=await index?.get(url.searchParams.get('id')??'');return s?json(res,200,{note:s.note??null,replies:0}):json(res,409,{error:'invalid_session',message:'No such conversation.'});}
+      if(!await harnessReady){const normal=await normalReady,s=await normal?.index.get(url.searchParams.get('id')??'');if(!s)return json(res,409,{error:'invalid_session',message:'No such conversation.'});const replies=s.mode==='chat'&&s.note?await(await chatReady).conversationReplies(s.note,s.id,new Set(Object.keys(await normal!.questions.read(s.id)))):0;return json(res,200,{note:s.note??null,replies});}
       const h=await harnessReady;if(!h)return json(res,409,{error:'disabled',message:'Sessions need the Claude Code CLI. Start Aitiarch with --claude.'});
       const s=await h.index.get(url.searchParams.get('id')??'');if(!s)return json(res,409,{error:'invalid_session',message:'No such session.'});
       const replies=s.mode==='chat'&&s.note?await (await chatReady).conversationReplies(s.note,s.id,new Set(Object.keys(await h.questions.read(s.id)))):0;
@@ -372,7 +375,7 @@ export function createApp(opts: AppOptions) {
     // A named conversation's whole history by its id: its saved replies (from the chat record of the note it was started on, in order), its questions, its counters and the label. It does
     // not depend on which note is open.
     if(url.pathname==='/api/harness/sessions/history'&&req.method==='GET'){
-      if(!await harnessReady){const index=await councilIndexReady,s=await index?.get(url.searchParams.get('id')??'');return s?.mode==='chat'?json(res,200,{session:s,messages:[],questions:{},persistence:{enabled:true},usage:null}):json(res,409,{error:'invalid_session',message:'No such conversation.'});}
+      if(!await harnessReady){const normal=await normalReady,s=await normal?.index.get(url.searchParams.get('id')??'');if(!s||s.mode!=='chat')return json(res,409,{error:'invalid_session',message:'No such conversation.'});const questions=await normal!.questions.read(s.id),runtime=await chatReady;return json(res,200,{session:s,messages:s.note?await runtime.conversationMessages(s.note,s.id,new Set(Object.keys(questions))):[],questions,persistence:await chatStore.status(),usage:runtime.usage().find(c=>c.session===s.id)??null});}
       const h=await harnessReady;if(!h)return json(res,409,{error:'disabled',message:'Sessions need the Claude Code CLI. Start Aitiarch with --claude.'});
       const s=await h.index.get(url.searchParams.get('id')??'');if(!s||s.mode!=='chat'||!s.note)return json(res,409,{error:'invalid_session',message:'No such conversation.'});
       const questions=await h.questions.read(s.id),runtime=await chatReady;
@@ -380,7 +383,7 @@ export function createApp(opts: AppOptions) {
     }
     if(url.pathname==='/api/harness/questions'&&req.method==='GET'){
       // `session=<id>`: that conversation's questions by message id, whichever note is open; `path`: every conversation's started on that note.
-      const h=await harnessReady,wanted=url.searchParams.get('session');
+      const h=await harnessReady??await normalReady,wanted=url.searchParams.get('session');
       if(wanted!==null){const s=h?await h.index.get(wanted):null;if(!s||s.mode!=='chat')return json(res,409,{error:'invalid_session',message:'No such conversation.'});return json(res,200,{questions:await h!.questions.read(s.id)});}
       const note=url.searchParams.get('path')??'';await store.read(note);
       const out:Record<string,string>={};if(h)for(const s of await h.index.list({mode:'chat',note}))Object.assign(out,await h.questions.read(s.id));
@@ -392,7 +395,7 @@ export function createApp(opts: AppOptions) {
         const index=await councilIndexReady;if(index)try{
           if(url.pathname==='/api/harness/sessions/new'){if(b?.mode!=='chat'||typeof b.path!=='string')throw new SessionIndexError('Invalid session.');await store.read(b.path);return json(res,200,await index.create({mode:'chat',label:b.label,note:b.path}));}
           if(url.pathname==='/api/harness/sessions/rename')return json(res,200,await index.rename(b?.id,b?.label));
-          if(url.pathname==='/api/harness/sessions/delete'){if(!await index.get(b?.id))throw new SessionIndexError('No such session.');await index.remove(b.id);return json(res,200,{removed:[],replies:0});}
+          if(url.pathname==='/api/harness/sessions/delete'){const s=await index.get(b?.id);if(!s)throw new SessionIndexError('No such session.');const normal=await normalReady,replies=s.mode==='chat'&&s.note?await(await chatReady).forgetConversation(s.note,s.id,new Set(Object.keys(await normal!.questions.read(s.id)))):0;await normal!.questions.remove(s.id);await index.remove(b.id);return json(res,200,{removed:[],replies});}
         }catch(e){if(e instanceof SessionIndexError)return json(res,400,{error:'invalid_session',message:e.message});throw e;}
       }
       if(!h)return json(res,409,{error:'disabled',message:'Sessions need the Claude Code CLI. Start Aitiarch with --claude.'});
@@ -535,7 +538,7 @@ export function createApp(opts: AppOptions) {
       }catch(e){
         if(res.headersSent)return res.end();
         const code=e instanceof ChatError?e.code:e instanceof ProviderError?'provider_failed':'invalid_chat';
-        return json(res,409,{error:code,message:e instanceof ChatError&&e.budget?budgetText(e.budget):CHAT_MESSAGES[code],...(e instanceof ChatError&&e.budget?{budget:e.budget}:{})});
+        return json(res,409,{error:code,message:e instanceof ChatError&&e.budget?budgetText(e.budget):CHAT_MESSAGES[code],...(e instanceof ChatError&&e.budget?{budget:e.budget}:{}),...(activePipelineConfig().normalAnswerer!=='claude'?whyOfError(code,e):{})});
       }
       throw new PathError(400,'bad_body','Unknown chat action.');
     }

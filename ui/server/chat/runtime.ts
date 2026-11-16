@@ -24,6 +24,12 @@ import type {WantedCopy} from '../harness/diagram-folder.ts';
 import {validateProductResult,ProductValidationError} from '../product-validation.ts';
 import {resultFault,usageFault,whyOfError} from './why.ts';
 import {activePipelineConfig} from '../../shared/pipeline-config.ts';
+import type {NormalAnswerer} from '../../shared/pipeline-config.ts';
+import {NormalChat,normalHistory} from './normal-answerer.ts';
+import type {ProductResult} from '../product-validation.ts';
+import type {TurnResult} from '../providers/turn.ts';
+import {cleanAttachments} from '../../shared/profile.ts';
+import {safeName} from '../../shared/chat-why.ts';
 import type {ChatWhy} from '../../shared/chat-why.ts';
 import type {ExtrasFor} from '../node-settings.ts';
 import {describeFailure} from '../../shared/chat-failure.ts';
@@ -32,7 +38,7 @@ import {finishReply} from './reply.ts';
 import {checkContract} from '../../shared/persona-contract.ts';
 import type {PersonaMode} from '../../shared/persona.ts';
 export class ChatError extends Error {code:ChatErrorCode;/** For budget_reached: the numbers the gate used. */budget?:BudgetDetail;/** Which rule said no, for the page's Why? line. Reporting only. */why?:ChatWhy;constructor(code:ChatErrorCode,budget?:BudgetDetail,why?:ChatWhy){super(code);this.code=code;if(budget)this.budget=budget;if(why)this.why=why;}}
-interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true;
+interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true;answerer:NormalAnswerer;normalReset?:boolean;
  /** A harness session turn: the session id and the exact file text the CLI gets (instruction, sources, rules last). */
  session?:{id:string};addendum?:string;
  /** What this turn may do (tool-less or Read in the diagram folder), as the gate saw it at review; and the cap the grant gives it, set at send. */
@@ -68,8 +74,9 @@ export class ChatRuntime {
  private replay=new Map<string,number>();
  /** The saved pictures of the note's diagrams. Absent: no diagram is ever opened by a conversation. */
  private images?:DiagramImageStore;
+ private normal?:NormalChat;
 
- constructor(store:Store,ink:InkStore,chats:ChatStore,provider?:Provider,sessions?:ContextModule[],extras?:ExtrasFor,harness?:ChatHarness,images?:DiagramImageStore){this.images=images;this.harness=harness;this.extras=extras;this.store=store;this.ink=ink;this.chats=chats;this.provider=provider;this.ledger=new LedgerStore(store.rootReal);this.sessions=sessions??sessionModules({project:path.dirname(store.rootReal)});}
+ constructor(store:Store,ink:InkStore,chats:ChatStore,provider?:Provider,sessions?:ContextModule[],extras?:ExtrasFor,harness?:ChatHarness,images?:DiagramImageStore,normal?:NormalChat){this.normal=normal;this.images=images;this.harness=harness;this.extras=extras;this.store=store;this.ink=ink;this.chats=chats;this.provider=provider;this.ledger=new LedgerStore(store.rootReal);this.sessions=sessions??sessionModules({project:path.dirname(store.rootReal)});}
  memoryMessages(note:string){return structuredClone(this.ephemeral.get(note)??[]);}
  /** The counters of one chat: a note's one-off chat (keyed by the note) or a named conversation (keyed by its id), which owns its budget, hourly cap and calls whichever note is open.
   *  A conversation starts with the budget and cap its note's chat has at that moment. Each kind has its own limit on how many are kept. */
@@ -83,7 +90,7 @@ export class ChatRuntime {
   }
   return s;
  }
- usage(){return [...this.states.values()].map(s=>({...s.usage}));}
+ usage(){return [...this.states.values()].map(s=>structuredClone(s.usage));}
  async settings(note:string,input:{tokenBudget:number;rollingRequestCap:number},session?:string){
   await this.store.read(note);if(!Number.isSafeInteger(input.tokenBudget)||input.tokenBudget<1000||input.tokenBudget>1000000||!Number.isSafeInteger(input.rollingRequestCap)||input.rollingRequestCap<1||input.rollingRequestCap>60)throw new ChatError('invalid_chat');
   const s=this.state(note,session);s.usage.tokenBudget=input.tokenBudget;s.usage.rollingRequestCap=input.rollingRequestCap;return {...s.usage};
@@ -99,6 +106,11 @@ export class ChatRuntime {
  }
  async review(input:ChatInput):Promise<ChatReview>{
   if(this.closed||!input||!/^[\w-]{1,100}$/.test(input.id)||typeof input.question!=='string'||!input.question.trim()||input.question.length>CHAT_LIMITS.questionCharacters||typeof input.path!=='string'||input.selection!==undefined&&(typeof input.selection!=='string'||input.selection.length>8000)||!Array.isArray(input.context)||input.context.length>4)throw new ChatError('invalid_chat');
+  const answerer=activePipelineConfig().normalAnswerer,native=answerer!=='claude'&&!!this.normal;
+  if(answerer!=='claude'){
+   const att=cleanAttachments(input.attachments);
+   if(input.context.some(c=>!['this-note','other-notes'].includes(c?.moduleId))||!att.ok||att.value.files.length||att.value.repo)throw new ChatError('invalid_chat',undefined,{ruleId:'normal-notes-only',nodeId:'provider_contracts'});
+  }
   // Validate target even when no context module is selected. Never implicitly send it.
   if(input.path.split('/').some(part=>part.startsWith('.')))throw new ChatError('invalid_chat');
   // Where the person is: the open note, the cursor's section and the selection's lines. `input.path` is the note this chat is kept under; only a conversation may be open on
@@ -129,20 +141,20 @@ export class ChatRuntime {
   if(sources.length>CHAT_LIMITS.sources||sources.reduce((n,x)=>n+Buffer.byteLength(x.text),0)>85000)throw new ProviderError('context_limit');
   // A harness session: it must be a chat session for this note.
   let session:Awaited<ReturnType<SessionIndex['get']>>=null;
-  if(input.session!==undefined){
-   if(!this.harness)throw new ChatError('disabled');
-   session=await this.harness.index.get(input.session);
+  if(input.session!==undefined||native){
+   if(native)session=input.session===undefined?await this.normal!.index.normalConversation(input.path):await this.normal!.index.get(input.session);
+   else{if(!this.harness)throw new ChatError('disabled');session=await this.harness.index.get(input.session!);}
    if(!session||session.mode!=='chat'||session.note!==undefined&&session.note!==input.path)throw new ChatError('invalid_chat');
   }
   // A conversation about a note that shows diagrams may open their pictures with Read. The note's own text numbers its diagrams D1, D2 ...; the page names none. The pictures are copies the server makes at send
   // (see copiesFor): here it finds out which can be opened, and which are withheld and why (no picture yet, too large, too many pixels, a bad file, an interactive page, or text that looks like a secret: a picture cannot be redacted, so it is not copied at all).
   // None is dropped: each diagram of the note is on the review card and in the manifest, available or withheld with its reason.
-  const diagramRefs=session&&this.images?diagramsIn(openNote.text):[],prepared=await this.prepareDiagrams(diagramRefs),canOpen=prepared.open.length>0;
+  const diagramRefs=!native&&session&&this.images?diagramsIn(openNote.text):[],prepared=await this.prepareDiagrams(diagramRefs),canOpen=prepared.open.length>0;
   const earlier=session&&diagramRefs.length?await this.earlierReads(session.note??input.path,session.id):new Set<string>();
   const withheldWhy=new Map(prepared.withheld.map(w=>[w.ref.asset,WITHHELD_WORDS[w.reason]]));
   // What this turn would be allowed to do, and whether the conversation was approved for it. The review says so (the page shows the plan card); the refusal itself happens at send.
   let profile:Profile|undefined,needsPlan=false;
-  if(session&&this.harness?.gate){
+  if(!native&&session&&this.harness?.gate){
    profile=canOpen?'diagrams':'notes';
    try{await this.harness.gate.authorize({conversation:session.id,attachments:{},hasDiagrams:canOpen,diagramNote:open});} // the approval must be for the diagrams of the note this turn is about (open, validated above), not any other note's
    catch(e){if(e instanceof GateRefusal&&(e.code==='plan_required'||e.code==='grant_mismatch'))needsPlan=true;else throw e;}
@@ -154,6 +166,10 @@ export class ChatRuntime {
   // Earlier replies written in another mode are left out, not tagged: a tagged reply is still a worked example of the other style.
   const sameMode=s.history.filter(p=>p.persona===extra?.persona),otherModePairs=s.history.length-sameMode.length;
   let history=session?[]:sameMode.map(({id,user,assistant})=>({id,user,assistant}));while(history.length>CHAT_LIMITS.historyPairs||history.reduce((n,p)=>n+p.user.length+p.assistant.length,0)>CHAT_LIMITS.historyCharacters)history.shift();
+  if(native&&session){
+   const asked=await this.normal!.questions.read(session.id),messages=await this.conversationMessages(input.path,session.id,new Set(Object.keys(asked)));
+   history=normalHistory(messages.flatMap(m=>asked[m.id]?[{id:m.id,user:asked[m.id],assistant:m.body}]:[]));
+  }
   const request:Request={id:input.id,action:'ask',chat:true,note:sources.find(x=>x.id==='N1')?.text??'',selection:redact(input.selection??''),decisions:sources.filter(x=>x.id!=='N1').map(x=>({id:x.id,text:x.text})),turns:history,question:redact(input.question)};
   if(extra){request.persona=extra.persona;if(extra.skills.loaded.length)request.skills=extra.skills;}
   // A selection that goes with the request is recorded by size and line range, with the note it was taken from; its text never enters the ledger.
@@ -168,17 +184,18 @@ export class ChatRuntime {
    selection:request.selection?{chars:request.selection.length,...(editor?.lines?{lines:editor.lines}:{})}:null,...(editor?.section?{section:editor.section.map(x=>redact(x))}:{}),
    ...(request.selection&&editor?.spans?{span:{from:editor.spans.from.map(x=>redact(x)),to:editor.spans.to.map(x=>redact(x))}}:{}),
    diagrams:diagramRefs.map(d=>({n:d.n,title:redact(d.title),...(withheldWhy.has(d.asset)?{withheld:withheldWhy.get(d.asset)!}:{})})),others:sessionSources.filter(x=>x.id!=='N1'&&x.id!=='S1'&&x.text.length>0).map(x=>({id:x.id,label:cleanLabel(x.label),chars:x.text.length}))});
-  if(!session)request.editor=manifest;
+  if(!session||native)request.editor=manifest;
   const packet=prepareRequest(request);
-  const sessionText=session?chatSessionInstruction(request,sessionSources,{diagrams:diagramRefs.length>0,canOpen}):null;
+  const sessionText=!native&&session?chatSessionInstruction(request,sessionSources,{diagrams:diagramRefs.length>0,canOpen}):null;
   const sent=sessionText?estimateTokens(sessionText.addendum+turnMessage(manifest,request.question)):estimateTokens(JSON.stringify(packet));
   // The next message's cost, the same number the review shows and the gate uses: what is sent now in full, the conversation already in a session at the cache weight, room for the reply.
-  const estimate=nextTurnEstimate(sent,session?this.replay.get(session.id)??0:0).total;
+  const estimate=nextTurnEstimate(sent,!native&&session?this.replay.get(session.id)??0:0).total;
   const privateContext=!!s.privateContext||sources.some(x=>x.ephemeral);
   const review:ChatReview={reviewId:randomUUID(),requestId:input.id,path:input.path,question:request.question,selection:request.selection,sources:sources.map(x=>({id:x.id,label:x.label,text:x.text,characters:x.text.length,estimatedTokens:estimateTokens(x.text)})),historyPairs:history.length,omittedPairs:session?0:s.omittedPairs+sameMode.length-history.length,...(otherModePairs&&!session?{otherModePairs}:{}),instruction:sessionText?.instruction??packet.instruction,history:structuredClone(packet.data.turns),estimatedTokens:estimate,budget:{spent:s.usage.spent,next:estimate,budget:s.usage.tokenBudget},requiresConfirmation:privateContext||!this.dontAsk};
   if(extra?.review)review.skills=extra.review;
   if(privateContext)review.ephemeral=true;
   if(session)review.session={id:session.id,label:session.label,turns:session.turns};
+  if(native&&session){const plan=await this.normal!.plan(session.id,answerer,request.question);review.normalPlan=plan.input;profile='notes';needsPlan=plan.needsApproval;}
   if(profile){review.profile=profile;if(needsPlan)review.needsPlan=true;}
   if(excluded.length)review.excluded=excluded;
   review.manifest=manifest;if(editor)review.editor=editor;
@@ -186,24 +203,24 @@ export class ChatRuntime {
   if(prepared.withheld.length)review.diagramsWithheld=prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title),why:WITHHELD_WORDS[w.reason]}));
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');
-  this.reviews.set(review.reviewId,{review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(profile?{profile}:{}),...(privateContext?{privateContext:true as const}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
+  this.reviews.set(review.reviewId,{answerer,review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(profile?{profile}:{}),...(privateContext?{privateContext:true as const}:{}),...(session&&native?{session:{id:session.id}}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
   return review;
  }
  async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
   const frozen=this.reviews.get(input.reviewId);if(!frozen)throw new ChatError('review_required');
+  if(frozen.answerer!==activePipelineConfig().normalAnswerer)throw new ChatError('stale_review',undefined,{ruleId:'stale_review',nodeId:'permission_gate'});
   if(this.closed||Date.now()-frozen.created>600000)throw new ChatError('stale_review');
   if(frozen.review.requiresConfirmation&&input.confirmed!==true)throw new ChatError('review_required');
   const {review,request}=frozen,s=this.state(review.path,frozen.session?.id);
   if(s.serial!==frozen.serial)throw new ChatError('stale_review');
   if(s.running||[...this.states.values()].filter(x=>x.running).length>=2)throw new ChatError('busy');
-  // Slice 3a-ii's transport boundary exists, but named conversations still need
-  // stateless history and native-unit grants. Never silently run Claude instead.
-  const answerer=activePipelineConfig().normalAnswerer;
-  if(answerer!=='claude')throw new ChatError('disabled',undefined,{ruleId:'provider-unavailable',nodeId:'provider_contracts',detail:`${answerer} normal chat is not enabled yet: session history and native-unit cap integration are pending. No fallback was tried.`});
-  if(!this.provider||this.provider.name!=='claude')throw new ChatError('disabled');
+  const answerer=frozen.answerer,native=answerer!=='claude';
+  if(native&&(!this.normal||!review.normalPlan))throw new ChatError('disabled',undefined,{ruleId:'provider-unavailable',nodeId:'provider_contracts'});
+  if(!native&&(!this.provider||this.provider.name!=='claude'))throw new ChatError('disabled');
+  if(native&&!await this.normal!.authorized(review.normalPlan!))throw new ChatError('plan_required',undefined,{ruleId:'plan_required',nodeId:'permission_gate'});
   // The server decides what this conversation may do, again at send: a turn that needs more than the conversation was approved for is refused here, whatever the page showed or claimed.
   let authorized:Authorized|undefined;
-  if(frozen.session&&this.harness?.gate){
+  if(!native&&frozen.session&&this.harness?.gate){
    try{authorized=await this.harness.gate.authorize({conversation:frozen.session.id,attachments:{},hasDiagrams:!!frozen.diagrams?.open.length,...(frozen.diagrams?{diagramNote:frozen.diagrams.note}:{})});}
    catch(e){if(e instanceof GateRefusal)throw new ChatError(e.code==='grant_mismatch'?'grant_mismatch':'plan_required');throw e;}
    frozen.capUsd=Math.min(authorized.grant.budgetUsd,activePipelineConfig().diagram.turnCapUsd); // a diagram turn never gets a larger cap than it always had
@@ -221,7 +238,8 @@ export class ChatRuntime {
   let resolve!:()=>void;const done=new Promise<void>(r=>{resolve=r;});this.jobs.add(done);
   let called=false,charged=false,stage:'run'|'save'='run';const facts:TurnFacts={costUsd:null,reads:[],misses:[]};
   try{
-   const available=await this.provider.checkAvailability();if(!available.available||available.textStreaming===false)throw new ChatError('disabled');
+   if(!native){const available=await this.provider!.checkAvailability();if(!available.available||available.textStreaming===false)throw new ChatError('disabled');}
+   if(this.normal&&frozen.session)frozen.normalReset=await this.normal.index.selectNormalAnswerer(frozen.session.id,answerer);
    if(controller.signal.aborted)throw new ChatError('cancelled');
    await this.audit(review.path,request.id,'chat_started');
    if(input.dontAskAgain===true&&!frozen.privateContext)this.dontAsk=true;
@@ -235,14 +253,25 @@ export class ChatRuntime {
     // Only what the output gate lets through reaches the page. The final, validated message replaces it.
     const delta=gate.push(text);if(delta)emit({type:'delta',id:request.id,text:delta,provisional:true});
    };
-   const reply=frozen.session?await this.sessionTurn(frozen,request,controller.signal,onTextDelta,facts,emit):await this.provider.invoke(request,{signal:controller.signal,onTextDelta});
-   const result:Result={...reply,answer:dropManifestEcho(reply.answer)}; // the editor line is the app's, never part of a reply, in a conversation or a one-off chat
+   let nativeResult:TurnResult|undefined;
+   if(native){
+    nativeResult=await this.normal!.run(request,review.normalPlan!,controller.signal,onTextDelta);
+    await appendLedger(this.ledger,{id:randomUUID(),inkId:frozen.session!.id,requestId:request.id,note:review.path,event:'council_turn',at:new Date().toISOString(),council:{provider:answerer,status:nativeResult.status,usage:nativeResult.usage,durationMs:Math.round(nativeResult.durationMs),...(nativeResult.overCap?{overCap:true}:{}),...(nativeResult.blockedAttempts?{blockedAttempts:nativeResult.blockedAttempts}:{})}});
+    s.usage.nativeUsage??=[];
+    for(const u of nativeResult.usage){const have=s.usage.nativeUsage.find(x=>x.provider===answerer&&x.unit===u.unit&&x.afterTurn===u.afterTurn);if(have)have.amount+=u.amount;else s.usage.nativeUsage.push({provider:answerer,...u});}
+    const tokens=nativeResult.usage.filter(u=>u.unit==='tokens');
+    if(tokens.length){s.usage.spent+=tokens.reduce((n,u)=>n+u.amount,0);charged=true;} // Actual total tokens, without inventing an input/output split.
+    if(controller.signal.aborted)throw new ChatError('cancelled');
+    if(nativeResult.status!=='ok')throw new ChatError(nativeResult.status==='unavailable'?'disabled':'provider_failed',undefined,{ruleId:nativeResult.status==='unavailable'?'provider-unavailable':nativeResult.status==='refused'?'provider-refused':nativeResult.status==='timeout'?'provider-timeout':'provider-error',nodeId:'provider_contracts',detail:`${answerer}: ${safeName(nativeResult.code)}`});
+   }
+   const reply:ProductResult=nativeResult?{id:request.id,provider:answerer,model:null,answer:nativeResult.answer,claims:[],usage:null,rawReply:true}:frozen.session?await this.sessionTurn(frozen,request,controller.signal,onTextDelta,facts,emit):await this.provider!.invoke(request,{signal:controller.signal,onTextDelta});
+   const result:ProductResult={...reply,answer:dropManifestEcho(reply.answer)}; // the editor line is the app's, never part of a reply, in a conversation or a one-off chat
    if(controller.signal.aborted)throw new ChatError('cancelled');
    if(result.usage){for(const n of Object.values(result.usage))if(typeof n!=='number'||!Number.isFinite(n)||n<0)throw new ChatError('validation',undefined,usageFault(result.usage));
     s.usage.input+=result.usage.inputTokens;s.usage.cached+=result.usage.cachedTokens??0;s.usage.output+=result.usage.outputTokens;
     s.usage.spent+=budgetTokens(result.usage); // cache reads count at a reduced weight
     if(frozen.session)this.rememberReplay(frozen.session.id,result.usage.inputTokens+(result.usage.cachedTokens??0)+result.usage.outputTokens);
-   }else{s.usage.spent+=frozen.reservation;s.usage.estimated=(s.usage.estimated??0)+frozen.reservation;s.usage.unreportedCalls++;}charged=true;
+   }else if(!charged){s.usage.spent+=frozen.reservation;s.usage.estimated=(s.usage.estimated??0)+frozen.reservation;s.usage.unreportedCalls++;}charged=true;
    // Enforce exact keys for fake/adapted providers too; never accept owned fields or aliases.
    if(!Array.isArray(result.claims)||result.claims.some(c=>!c||typeof c!=='object'||Object.keys(c).sort().join()!=='quote,sourceId')||Object.keys(result).some(k=>!['id','provider','model','answer','claims','usage','rawReply','costUsd'].includes(k))||(Object.hasOwn(result,'costUsd')&&!(typeof result.costUsd==='number'&&Number.isFinite(result.costUsd)&&result.costUsd>=0)))throw new ChatError('validation',undefined,resultFault(result)); // costUsd is the CLI's own dollar figure (optional): a finite number of 0 or more, nothing else
    // The output gate's final part: the body, each claim checked on its own, and whether the citations need attention.
@@ -253,12 +282,13 @@ export class ChatRuntime {
    catch(error){const shape:Record<string,string>={'Invalid answer shape.':'the reply was JSON with the wrong fields','Invalid answer formatting.':'the reply looked like JSON but was incomplete or malformed'};
     const failure=new ProviderError('invalid_response');failure.reason={kind:'unparseable',detail:error instanceof Error&&shape[error.message]?shape[error.message]:'the reply could not be read'};throw failure;}
    const validated=validateProductResult({...result,answer:finished.body,claims:[]},request.id,request,redact,hash,answerer);
-   const message:ChatMessage={id:request.id,role:'assistant',body:validated.body,at:new Date().toISOString(),provider:'claude',model:validated.model,evidence:finished.claims.flatMap(c=>c.status==='found'&&c.source!=='file'&&c.sourceHash?[{sourceId:c.sourceId,sourceHash:c.sourceHash,quote:c.quote}]:[]),usage:result.usage,insertionBlocked:!!s.privateContext||secretKinds(result.answer).length>0||secretKinds(validated.body).length>0,
+   const message:ChatMessage={id:request.id,role:'assistant',body:validated.body,at:new Date().toISOString(),provider:answerer,model:validated.model,...(nativeResult?{nativeUsage:nativeResult.usage,...(nativeResult.overCap?{overCap:true as const,warning:nativeResult.warning}:{} )}:{}),evidence:finished.claims.flatMap(c=>c.status==='found'&&c.source!=='file'&&c.sourceHash?[{sourceId:c.sourceId,sourceHash:c.sourceHash,quote:c.quote}]:[]),usage:result.usage,insertionBlocked:!!s.privateContext||secretKinds(result.answer).length>0||secretKinds(validated.body).length>0,
    claims:finished.claims,...(finished.noCitation?{noCitation:finished.noCitation}:{}),...(finished.citation?{citation:finished.citation}:{}),...(request.persona?{persona:request.persona,contract:checkContract(request.persona,validated.body)}:{}),...(gate.echo||echoes(validated.body,review.instruction)?{echo:true as const}:{}),...(frozen.skillNames.length?{skills:frozen.skillNames}:{}),...(frozen.session?{session:frozen.session.id}:{}),...(facts.reads.length?{diagramReads:facts.reads}:{}),...(facts.misses.length?{diagramMisses:facts.misses}:{}),...(facts.costUsd!==null?{costUsd:facts.costUsd}:{}),...(review.editor&&review.editor.path!==review.path?{askedOn:review.editor.path}:{}),...(s.privateContext?{ephemeral:true as const}:{})};
    stage='save'; // from here on, a failure is about saving the reply
    let persistence:'memory'|'private';
    if(s.privateContext){const messages=this.ephemeral.get(review.path)??[];if(messages.length>=200)throw new ChatError('budget_reached');messages.push(message);this.ephemeral.set(review.path,messages);persistence='memory';}
    else persistence=await this.chats.append(review.path,message);
+   if(native&&frozen.session){await this.normal!.questions.add(frozen.session.id,request.id,request.question);await this.normal!.index.touch(frozen.session.id);}
    await this.audit(review.path,request.id,'chat_completed');
    if(!frozen.session)s.history.push({id:request.id,user:request.question,assistant:message.body,...(request.persona?{persona:request.persona}:{})}); // a session keeps its own
    while(s.history.length>4||s.history.reduce((n,p)=>n+p.user.length+p.assistant.length,0)>4000){s.history.shift();s.omittedPairs++;}
@@ -313,7 +343,7 @@ export class ChatRuntime {
    const profile:Profile=copies?.length?'diagrams':'notes';
    const cli=h.gate?await h.index.ensureCli(session.id,profile,'chat'):{id:session.id,resume:session.turns>0,fresh:false};
    let addendum=frozen.addendum;
-   if(cli.fresh&&h.carried){
+   if((cli.fresh||frozen.normalReset)&&h.carried){
     const text=buildCarriedHistory(await h.carried(session).catch(()=>[]));
     if(text){const i=addendum.lastIndexOf(CHAT_HARD_RULES);addendum=i>=0?addendum.slice(0,i)+text+'\n\n'+addendum.slice(i):addendum+'\n\n'+text;} // the rules stay last
    }

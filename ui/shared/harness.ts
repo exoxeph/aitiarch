@@ -23,6 +23,8 @@ export interface HarnessSession {
  grant?:Grant;
  /** Notes-only multi-provider approval; never interpreted as a tool/fence grant. */
  councilGrant?:CouncilGrant;
+ /** Normal-chat transport only. Missing means the established Claude path. */
+ normalAnswerer?:'claude'|'codex'|'kiro';normalOneOff?:true;
  /** The CLI session the next turn would resume, and the profile and folder it runs at. None (a conversation older than grants): its own id, as notes. */
  cli?:CliSession&{cwd?:string};
  /** CLI sessions this conversation used before (a profile change starts a fresh one), so Delete can remove every transcript. */
@@ -38,6 +40,7 @@ export function validSession(v:unknown):v is HarnessSession{
   &&[s.created,s.lastUsed].every(t=>typeof t==='string'&&Number.isFinite(Date.parse(t)))&&Number.isSafeInteger(s.turns)&&s.turns>=0
   &&(s.repo===undefined||typeof s.repo==='string'&&s.repo.length<=1000)&&(s.confirmed===undefined||typeof s.confirmed==='string'&&/^[0-9a-f]{64}$/.test(s.confirmed))
   &&(s.budgetUsd===undefined||typeof s.budgetUsd==='number'&&Number.isFinite(s.budgetUsd)&&s.budgetUsd>0&&s.budgetUsd<=5)
+  &&(s.normalAnswerer===undefined||['claude','codex','kiro'].includes(s.normalAnswerer))&&(s.normalOneOff===undefined||s.normalOneOff===true)
   &&(s.grant===undefined||validGrantShape(s.grant))&&(s.councilGrant===undefined||validCouncilGrant(s.councilGrant))&&(s.cli===undefined||validCliShape(s.cli))
   &&(s.past===undefined||Array.isArray(s.past)&&s.past.length<=50&&s.past.every(p=>p&&validSessionId(p.id)&&(p.cwd===undefined||typeof p.cwd==='string'&&p.cwd.length<=1000)));
 }
