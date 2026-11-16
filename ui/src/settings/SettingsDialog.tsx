@@ -31,7 +31,7 @@ function UsagePane(){
  </div>;
 }
 
-export function SettingsDialog({onClose}:{onClose:()=>void}){
+export function SettingsDialog({onClose,onOpenStudio}:{onClose:()=>void;onOpenStudio?:()=>void}){
  const [tab,setTab]=useState<Tab>('usage');
  const dialog=useRef<HTMLElement>(null);
  // Focus lands on the tabs; Tab stays inside the dialog; Escape closes it and nothing underneath also hears it.
@@ -59,7 +59,7 @@ export function SettingsDialog({onClose}:{onClose:()=>void}){
      {TABS.map(t=><button key={t.id} id={`settings-tab-${t.id}`} type="button" role="tab" aria-selected={tab===t.id} aria-controls={`settings-pane-${t.id}`} tabIndex={tab===t.id?0:-1} onClick={()=>setTab(t.id)}>{t.label}</button>)}
     </div>
     <div className="settings-pane" role="tabpanel" id={`settings-pane-${tab}`} aria-labelledby={`settings-tab-${tab}`}>
-     {tab==='skills'?<SkillsPane/>:tab==='pipeline'?<PipelinePane/>:<UsagePane/>}
+     {tab==='skills'?<SkillsPane/>:tab==='pipeline'?<PipelinePane onOpenStudio={onOpenStudio}/>:<UsagePane/>}
     </div>
    </div>
   </section>

@@ -4,6 +4,8 @@ import type {DiagramLayout} from '../shared/diagram-svg.ts';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 // The Constellation and d3-force load only when the view is first opened: none of it is in the first page load.
 const Constellation = lazy(() => import("./constellation/Constellation.tsx"));
+// The Pipeline Studio loads only when first opened too.
+const PipelineStudio = lazy(() => import("./studio/PipelineStudio.tsx"));
 import { api, ApiError, connectEvents, type Backlink, type InkSnapshot, type NoteFile, type ServerEvent, type TreeNode } from "./api.ts";
 import { previewText, titleOf, type CiteNote } from "./citations/citation-model.ts";
 import { citeAtCursor } from "./citations/cite-editor.ts";
@@ -52,6 +54,8 @@ export default function App() {
   const [tree, setTree] = useState<TreeNode | null>(null);
   const menu=useEdgeMenu(),burgerRef=useRef<HTMLButtonElement>(null),noteMenuRef=useRef<HTMLButtonElement>(null),chatPillRef=useRef<HTMLButtonElement>(null);
   const [noteMenuOpen,setNoteMenuOpen]=useState(false),[chatOpen,setChatOpen]=useState(false),[settingsOpen,setSettingsOpen]=useState(false);
+  // The Pipeline Studio: open or not, and the node to light up when it was opened from a blocked reply's "Show on pipeline".
+  const [studio,setStudio]=useState<{highlight?:string}|null>(null),studioButtonRef=useRef<HTMLButtonElement>(null);
   const [treePersistence,setTreePersistence]=useState(false);
   const [treeNotice,setTreeNotice]=useState(false);
   const [theme,setTheme]=useState<'ember'|'moss'>('ember');
@@ -568,6 +572,10 @@ export default function App() {
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"><circle cx="3.5" cy="11.5" r="1.6" fill="currentColor"/><circle cx="8" cy="4" r="2" fill="currentColor"/><circle cx="12.8" cy="10" r="1.3" fill="currentColor"/><path d="M4.6 10.2 7 5.6M9.6 5.2l2.4 3.6M5.1 11.4l6.3-1.2"/></svg>
           <span className="map-pill-label">Constellation</span>
         </button>
+        <button ref={studioButtonRef} type="button" className="map-pill" aria-label="Pipeline Studio" aria-expanded={!!studio} onClick={() => setStudio(s => s ? null : {})} title="How Aitiarch answers, step by step, and the settings behind each step">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><rect x="1.5" y="2" width="4.5" height="3.5" rx="1"/><rect x="10" y="2" width="4.5" height="3.5" rx="1"/><rect x="5.7" y="10.5" width="4.6" height="3.5" rx="1"/><path d="M6 3.8h4M3.8 5.5v2.2h8.4V5.5M8 7.7v2.8"/></svg>
+          <span className="map-pill-label">Pipeline</span>
+        </button>
         <button ref={chatPillRef} type="button" className="chat-pill" aria-expanded={chatOpen} aria-controls="chat-panel" onClick={() => setChatOpen(v => !v)}><span className="chat-pill-dot" aria-hidden="true" />Chat</button>
       </header>
       <NotesMenu menu={menu} burger={burgerRef} rootName={boot.rootName} rootPath={boot.rootPath} tree={tree} active={active} onOpen={(p) => void openNote(p)} onSearch={() => setOverlay("palette")} onSettings={() => setSettingsOpen(true)} usage={<UsagePanel />} settings={settingsPanel} onTreeChanged={() => refreshTree()} onMoved={m => void afterMove(m)} blocked={moveBlocked} />
@@ -611,8 +619,11 @@ export default function App() {
           onOpen={p => { setMapOpen(false); void openNote(p); }}
           onUseAsContext={ps => { setMapNotes(ps); setMapOpen(false); setChatOpen(true); }} />
       </Suspense>}
-      {chatOpen && <ChatPanel extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} editor={chatEditor} onAdd={addChatMessage} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onCiteClaim={(heading) => { const h = active ? panes.current.get(active) : undefined; return !!h && !!active && citeAtCursor(h.view, active, { path: active, title: titleOf(h.view.state.doc.toString(), active), ...(heading ? { heading } : {}) }); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
-      {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); burgerRef.current?.focus(); }} />}
+      {chatOpen && <ChatPanel extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} editor={chatEditor} onShowOnPipeline={(nodeId) => setStudio({ highlight: nodeId })} onAdd={addChatMessage} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onCiteClaim={(heading) => { const h = active ? panes.current.get(active) : undefined; return !!h && !!active && citeAtCursor(h.view, active, { path: active, title: titleOf(h.view.state.doc.toString(), active), ...(heading ? { heading } : {}) }); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
+      {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); burgerRef.current?.focus(); }} onOpenStudio={() => { setSettingsOpen(false); setStudio({}); }} />}
+      {studio && <Suspense fallback={<section className="studio" role="status" aria-label="Pipeline Studio"><p className="cn-empty">Drawing the pipeline…</p></section>}>
+        <PipelineStudio highlight={studio.highlight} onClose={() => { setStudio(null); studioButtonRef.current?.focus(); }} />
+      </Suspense>}
       {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,toast.undo)}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
       {added&&<div className="thought-toast" role="status"><span>{added.text}<span className="toast-hint"> · Undo (Ctrl+Z)</span></span><details className="added-detail"><summary>What was added</summary><pre>{added.detail}</pre></details><button onClick={()=>{const h=active?panes.current.get(active):undefined;if(h){undo(h.view);h.view.focus();}setAdded(null);}}>Undo</button><button aria-label="Close notice" onClick={()=>setAdded(null)}>Close</button></div>}
       {showDismissed&&<DismissedThoughts items={activeItems} restore={id=>void thoughtAction(id,'restore')} close={()=>setShowDismissed(false)}/>}

@@ -5,7 +5,7 @@ import {providerName,safetyHelp} from '../chat/council-view.ts';
 import {ANSWERERS,isAnswerer,overridesFor,saveErrorText,type Answerer} from '../chat/normal-provider.ts';
 
 /** Settings > Pipeline: who answers Normal chat. The page only chooses; the server validates, saves and enforces. Nothing is written except through the pipeline-config calls. */
-export function PipelinePane(){
+export function PipelinePane({onOpenStudio}:{onOpenStudio?:()=>void}={}){
  const [view,setView]=useState<PipelineView|null>(null),[choice,setChoice]=useState<Answerer>('claude'),[avail,setAvail]=useState<Availability[]|null|undefined>(undefined);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[done,setDone]=useState(''),[loadFailed,setLoadFailed]=useState(false);
  useEffect(()=>{let off=false;
@@ -31,6 +31,7 @@ export function PipelinePane(){
  return <div className="settings-section" data-pane="pipeline">
   <h3>Normal chat</h3>
   <p className="settings-lead">Choose which provider answers Normal chat. Applies to every project on this computer.</p>
+  {onOpenStudio&&<p className="settings-lead">This is the plain form. <button type="button" className="ghost pipeline-studio-link" onClick={onOpenStudio}>Open Pipeline Studio</button> to see every step and change its limits.</p>}
   {loadFailed&&<p className="settings-warn" role="alert">The pipeline settings could not be loaded. Nothing was changed.</p>}
   {view?.warning&&<p className="settings-warn" role="status" data-notice="pipeline-warning">{view.warning}</p>}
   <div className="pipeline-field">

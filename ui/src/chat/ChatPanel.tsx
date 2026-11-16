@@ -5,7 +5,8 @@ import {useEffect,useMemo,useRef,useState,type CSSProperties,type FormEvent,type
 import {api,ApiError,streamChat,streamConversation,type ConversationBody} from '../api.ts';
 import type {InvestigateUsage} from '../../shared/usage.ts';
 import {investigateLine} from './investigate-usage.ts';
-import {whyText} from '../../shared/chat-why.ts';
+import {whyRule,whyText} from '../../shared/chat-why.ts';
+import {nodeById} from '../../shared/pipeline-nodes.ts';
 import {CHAT_MESSAGES,type BudgetDetail,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatReview,type ChatUsage} from '../../shared/chat.ts';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
 import {SessionPicker} from './SessionPicker.tsx';
@@ -61,6 +62,8 @@ export interface ChatPanelProps {
  extraNotes?:string[];onClearExtraNotes?:()=>void;
  /** Source chips: scroll the editor to a claim's quote and mark it for a moment (false when the quote is not in the current note), and cite the note at the cursor. */
  onShowQuote?:(quote:string)=>boolean;onCiteClaim?:(heading:{text:string;slug:string;level:number}|null)=>boolean;
+ /** The Why? panel of a blocked reply: open the Pipeline Studio with the node that blocked it lit up. */
+ onShowOnPipeline?:(nodeId:string)=>void;
 }
 
 /** The diagrams Claude opened in a turn, as rows on the Investigate trail's look: a green dot and "Opened D1 'title'". Live while the reply streams; kept with the reply. */
@@ -123,7 +126,7 @@ interface PendingPlan {plan:ConversationPlan;id:string;question:string;route:Rou
 type AtItem={kind:'repo';label:string;ready:boolean}|{kind:'note';path:string}|{kind:'file';path:string};
 const atItemKey=(i:AtItem)=>i.kind==='repo'?'repo':i.kind+':'+i.path;
 
-function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,extraNotes=[],onClearExtraNotes,onShowQuote=()=>false,onCiteClaim=()=>false,conversation,onConversation}:BodyProps){
+function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,extraNotes=[],onClearExtraNotes,onShowQuote=()=>false,onCiteClaim=()=>false,onShowOnPipeline,conversation,onConversation}:BodyProps){
  const otherNotes=extraNotes.filter(p=>p!==openPath);
  const setConversation=(id:string,session?:HarnessSession)=>onConversation(id,session?.note??path??'');
  const [chips,setChips]=useState<ContextChip[]>(()=>DEFAULT_CONTEXT.map(c=>({...c}))),[turns,setTurns]=useState<Turn[]>([]),[draft,setDraft]=useState('');
@@ -442,7 +445,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
       {t.message?.overCap&&<p className="council-calm council-overcap" role="alert" data-notice="over-cap"><span aria-hidden="true">!</span> {t.message.warning??OVER_CAP_TEXT}</p>}
       {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
       <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}><i className="add-icon" aria-hidden="true"/></button></div></div>}
-     {t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason,t.error.errorName,t.error)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button><details className="chat-why"><summary>Why?</summary><div className="chat-why-text">{whyText({ruleId:t.error.ruleId,detail:t.error.detail},t.error.code)}</div></details></div>}
+     {t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason,t.error.errorName,t.error)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button><details className="chat-why"><summary>Why?</summary><div className="chat-why-text">{whyText({ruleId:t.error.ruleId,detail:t.error.detail},t.error.code)}</div>{(()=>{const node=nodeById(whyRule(t.error.ruleId,t.error.code)?.nodeId);return node&&onShowOnPipeline?<button type="button" className="ghost chat-why-link" data-why-link={node.id} onClick={()=>onShowOnPipeline(node.id)}>Show on pipeline</button>:null;})()}</details></div>}
      </>}
     </div>)}
    <span className="chat-sr" role="status">{busy&&!pending&&!planCard&&!nativeCard?`${providerName(answerer)} is replying…`:''}</span>
