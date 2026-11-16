@@ -28,6 +28,9 @@ import {LiveMarkdown} from '../ink/LiveMarkdown.tsx';
 import {ChatSessions} from './ChatSessions.tsx';
 import {CONTINUE_QUESTION,InvestigateTurnView,money} from './InvestigateView.tsx';
 import {PlanCard} from './PlanCard.tsx';
+import {NativePlanCard} from './NativePlanCard.tsx';
+import {providerName} from './council-view.ts';
+import {APPROVAL_NOTICE,OVER_CAP_TEXT,isAnswerer,isNativeAnswerer,nativeUsageText,type Answerer} from './normal-provider.ts';
 import {FILE_REFUSAL_TEXT,addChip,chipsFromGrant,attachmentsOf,autoName,blockedByRefusals,chipKey,isLegacyInvestigation,isPlaceholder,markRefused,needsCard,refusalText,routeOf,waitText,type AttachmentChip,type Route} from './conversation-model.ts';
 import {applyInvestigate,formatElapsed,fromStoredTurn,startTurn,toolCalls} from './investigate-model.ts';
 import type {InvestigateEvent} from '../../server/harness/investigate.ts';
@@ -41,6 +44,8 @@ import type {HarnessSession} from '../../shared/harness.ts';
  *  A named conversation (harness session) is different: its questions are kept in the app's own folder outside the repo and loaded back below. */
 const questions=new Map<string,string>();
 const knownCode=(code:string):code is ChatErrorCode=>code in CHAT_MESSAGES;
+/** The tag on an AI reply: "AI", and for Codex or Kiro the provider's name too. */
+const aiLabel=(provider?:string)=>isNativeAnswerer(provider)?`AI · ${providerName(provider)}`:'AI';
 /** How long Stop ignores clicks after a send starts (ms). */
 export const STOP_GUARD_MS=600;
 
@@ -134,6 +139,10 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  const [at,setAt]=useState<{query:string;index:number}|null>(null),[atItems,setAtItems]=useState<AtItem[]>([]),[repo,setRepo]=useState<string|null>(null),[repoDraft,setRepoDraft]=useState<string|null>(null);
  const [excerpt,setExcerpt]=useState<{path:string;line:number;from:number;lines:string[]}|null>(null),[restoring,setRestoring]=useState(false);
  const [capUsd,setCapUsd]=useState<number|null>(null); // the cap of the plan the last Investigate turn ran under, for its progress line
+ // Who answers Normal chat (from the saved pipeline settings) and its safety labels. Codex and Kiro get their own approval card before the first turn; Claude's flow is untouched.
+ const [answerer,setAnswerer]=useState<Answerer>('claude'),[safety,setSafety]=useState<Record<string,string>>({}),[nativeCard,setNativeCard]=useState<{id:string;question:string;review:ChatReview;notice?:string}|null>(null);
+ const loadAnswerer=async():Promise<Answerer>=>{try{const v=await api.pipelineConfig(),a=isAnswerer(v.effective.normalAnswerer)?v.effective.normalAnswerer:'claude';if(alive.current){setAnswerer(a);setSafety(v.effective.safetyLabels);}return a;}catch{return answerer;}};
+ useEffect(()=>{void loadAnswerer();const on=()=>void loadAnswerer();window.addEventListener('aitiarch:pipeline-changed',on);return()=>window.removeEventListener('aitiarch:pipeline-changed',on);},[]);
  const justCreated=useRef(''),repoField=useRef<HTMLInputElement>(null),excerptClose=useRef<HTMLButtonElement>(null);
  // What the editor says now: the open note, the selection (line range and text) and the cursor's section. Read again a moment after the caret or selection moves.
  const [ec,setEc]=useState<EditorContext|null>(()=>editor.get()),[switched,setSwitched]=useState<{from:string}|null>(null);
@@ -229,6 +238,9 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
    if(!finished&&alive.current)fail(id,'provider_failed');
   }catch(e){
    if(!alive.current||controller.signal.aborted)return;
+   if(e instanceof ApiError&&e.code==='plan_required'&&review.normalPlan){ // Codex or Kiro: the server withdrew or never had the approval (for example after a turn over its cap). Show its card again; never send around it.
+    setTurns(t=>t.map(x=>x.id===id?{...x,status:'review' as const}:x));setNativeCard({id,question:review.question,review,notice:APPROVAL_NOTICE});return;
+   }
    if(e instanceof ApiError&&(e.code==='plan_required'||e.code==='grant_mismatch')&&conversation){ // the server says this needs the card: show it, never send around it
     setTurns(t=>t.map(x=>x.id===id?{...x,status:'review' as const}:x));await showPlan({id,question:review.question,route:'chat',attachments:{notes:noteIdsOf(attachmentsOf(attach)),files:[],repo:false},review,notice:refusalText(e.code)});return;
    }
@@ -283,6 +295,16 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
   if(p.review){if(p.review.requiresConfirmation){setPending(p.review);setBusy(false);return;}await send(p.review,false);return;}
   setBusy(false);
  };
+ /** Codex or Kiro: the server grants exactly the plan it computed for this conversation and provider (or says it changed), then the turn goes. */
+ const approveNative=async()=>{
+  const c=nativeCard;if(!c?.review.normalPlan)return;setBusy(true);setNotice('');
+  try{await api.councilApprove(c.review.normalPlan);}
+  catch(e){setNativeCard({...c,notice:e instanceof ApiError&&e.code==='plan_changed'?'The plan changed. Cancel, then ask again to review it.':'The plan could not be approved. Nothing was sent.'});setBusy(false);return;}
+  setNativeCard(null);
+  if(c.review.requiresConfirmation){setPending(c.review);setBusy(false);return;}
+  await send(c.review,false);
+ };
+ const cancelNative=()=>{const c=nativeCard;if(!c)return;setNativeCard(null);setTurns(t=>t.filter(x=>x.id!==c.id));questions.delete(c.id);setDraft(c.question);setBusy(false);input.current?.focus();};
  const replanCard=async(budgetUsd:number)=>{const p=planCard;if(!p)return;setBusy(true);const {plan:_old,...rest}=p;await showPlan({...rest,notice:''},budgetUsd);};
  const cancelPlan=()=>{const p=planCard;if(!p)return;setPlanCard(null);setTurns(t=>t.filter(x=>x.id!==p.id));if(!p.resume){questions.delete(p.id);setDraft(p.question);}setBusy(false);input.current?.focus();};
  /** `again` re-asks an earlier question through the same path, without touching the draft. */
@@ -304,13 +326,14 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  const keyResize=(e:ReactKeyboardEvent<HTMLDivElement>)=>{const step=e.key==='ArrowLeft'?24:e.key==='ArrowRight'?-24:0;if(!step)return;e.preventDefault();const next=clampChatWidth(width+step,window.innerWidth);setStoredWidth(next);saveChatWidth(next);};
  const submit=async(again?:string)=>{
   if(mode==='council'&&again===undefined){councilReview.current?.();return;}
-  const question=(again??draft).trim();if(!question||!path||busy||pending||planCard)return;
+  const question=(again??draft).trim();if(!question||!path||busy||pending||planCard||nativeCard)return;
   if(blockedByRefusals(attach)){setNotice(refusalText('file_refused'));return;}
   const a=attachmentsOf(attach),id=newTurnId();setNotice('');setBusy(true);stickLog.follow();
+  const native=isNativeAnswerer(await loadAnswerer()); // the saved setting, read fresh: it may have changed in Settings since the panel opened
   let conv=conversation,route=routeOf(a,!!conv);
-  // Files or the repo need a conversation (the grant is kept on it): a one-off chat that carries them becomes one, named after this question.
-  if(route==='investigate'&&!conv){
-   try{const s=await api.harnessSessionCall('new',{mode:'chat',path,label:autoName(question)});justCreated.current=s.id;conv=s.id;setConversation(s.id,s);setCurrent(s);setListRefresh(n=>n+1);}
+  // Files or the repo need a conversation (the grant is kept on it): a one-off chat that carries them becomes one, named after this question. Codex and Kiro are approved per conversation, so they need one too.
+  if((route==='investigate'||native)&&!conv){
+   try{const s=await api.harnessSessionCall('new',{mode:'chat',path,label:autoName(question)});justCreated.current=s.id;conv=s.id;setConversation(s.id,s);setCurrent(s);setListRefresh(n=>n+1);if(route==='one-off')route=routeOf(a,true);}
    catch(e){setNotice(e instanceof ApiError?e.message:'A conversation could not be started. Nothing was sent.');setBusy(false);return;}
   }
 
@@ -327,6 +350,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
   try{
    const notes=noteIdsOf(a),fromMap=notes.length?[{moduleId:'other-notes' as const,ids:notes}]:[];
    const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...fromMap,...sessionChoices(pickedSessions)],...(selection?{selection}:{}),...(conv?{session:conv}:{}),...(info?{editor:info}:{})});
+   if(review.normalPlan&&review.needsPlan){setNativeCard({id,question,review,...(turns.some(x=>x.message?.overCap)?{notice:APPROVAL_NOTICE}:{})});setBusy(false);return;} // Codex or Kiro: its own approval card, never Claude's
    if(needsCard({route,review})){await showPlan({id,question,route,attachments:{...a,files:[],repo:false},review});return;}
    if(review.requiresConfirmation){setPending(review);setBusy(false);return;}
    await send(review,false);
@@ -358,7 +382,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
   setAttach(a=>addChip(a,item.kind==='note'?{kind:'note',path:item.path}:{kind:'file',path:item.path}));
  };
  const onDraft=(value:string)=>{setDraft(value);const m=/(?:^|\s)@([^\s@]*)$/.exec(value);setAt(m?{query:m[1],index:0}:null);};
- const composing=busy||!!pending||!!planCard;
+ const composing=busy||!!pending||!!planCard||!!nativeCard;
  // The composer is disabled while a review or a plan card is open or a reply streams; when it frees up, focus returns to it so the keyboard never gets stranded.
  useEffect(()=>{if(!composing&&!document.activeElement?.closest('.chat-review, .chat-plan'))input.current?.focus();},[composing]);
  const lastInv=[...turns].reverse().find(t=>t.inv);
@@ -366,7 +390,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  return <aside id="chat-panel" ref={panel} className="chat-panel" data-layout={layout} style={layout==="overlay"?({"--chat-w":width+"px"} as CSSProperties):undefined} aria-label="Aitiarch AI chat" onPointerDownCapture={pullEditor} onFocusCapture={pullEditor} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();onClose();}}}>
   {layout==="overlay"&&<div className="chat-resize" role="separator" aria-orientation="vertical" aria-label="Resize chat. Drag, or use the left and right arrow keys." aria-valuemin={CHAT_MIN_WIDTH} aria-valuemax={Math.floor(vw*0.9)} aria-valuenow={width} tabIndex={0} onPointerDown={startResize} onKeyDown={keyResize}/>}
   <header className="chat-head"><h2>{chatHeader(openPath)}</h2>{!sheet&&<button type="button" className="ghost chat-pin" aria-pressed={pinned} aria-label="Pin chat beside the note" title={pinned?"Unpin: let the chat float over the note":"Pin: dock the chat beside the note"} onClick={togglePin}>Pin</button>}<button type="button" className="ghost chat-close" aria-label="Close chat" onClick={onClose}>×</button></header>
-  {openPath&&<ChatSessions path={openPath} value={conversation} onChange={setConversation} disabled={composing} refresh={listRefresh+turns.filter(t=>t.status==='complete').length} onCurrent={setCurrent}/>}
+  {openPath&&<ChatSessions path={openPath} answerer={answerer} value={conversation} onChange={setConversation} disabled={composing} refresh={listRefresh+turns.filter(t=>t.status==='complete').length} onCurrent={setCurrent}/>}
   <div className="chat-context" role="group" aria-label="What the chat can see">
    <button type="button" className="chat-ctl chat-context-sum" aria-expanded={ctxOpen} aria-controls="chat-context-body" onClick={()=>setCtxOpen(v=>!v)}>
     <span className="chat-sum-label">Context</span>
@@ -399,6 +423,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
      <div className="chat-message chat-you" data-from="you"><span className="chat-who">You</span>{t.question?<p>{t.question}</p>:<p className="chat-gone">Question unavailable after reload.</p>}</div>
      {t.status==='review'&&planCard&&planCard.id===t.id&&<>{planCard.notice&&<p className="chat-notice chat-plan-notice" role="alert">{planCard.notice}</p>}
       <PlanCard plan={planCard.plan} resume={planCard.resume} busy={busy} onApprove={()=>void approvePlan()} onReplan={b=>void replanCard(b)} onCancel={cancelPlan}/></>}
+     {t.status==='review'&&nativeCard&&nativeCard.id===t.id&&nativeCard.review.normalPlan&&<NativePlanCard plan={nativeCard.review.normalPlan} safetyLabel={safety[nativeCard.review.normalPlan.providers[0]]??''} notice={nativeCard.notice} busy={busy} onApprove={()=>void approveNative()} onCancel={cancelNative}/>}
      {t.status==='review'&&pending&&pending.requestId===t.id&&<ReviewCard review={pending} stopAsking={stopAsking} setStopAsking={setStopAsking} onSend={()=>void send(pending,stopAsking)} onCancel={cancelReview}/>}
      {t.inv?<>
       <InvestigateTurnView turn={t.inv} onOpen={(p,l)=>void openExcerpt(p,l)} onRestore={()=>void restore()} restoring={restoring} onContinue={()=>void continueTurn(t)}/>
@@ -408,17 +433,19 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
       {!t.inv.running&&t.inv.message&&<p className="chat-turn-cost">{t.inv.message.steps.length} tool {t.inv.message.steps.length===1?'call':'calls'} · {t.inv.message.costUsd!==null?'This turn cost '+money(t.inv.message.costUsd):'cost not reported'}</p>}
      </>:<>
      {t.opened&&t.opened.length>0&&<OpenedRows opened={t.opened} running={t.status==='streaming'}/>}
-     {t.status==='streaming'&&<div className="chat-message chat-ai chat-streaming" data-from="ai" aria-busy="true"><span className="chat-who">AI</span>
+     {t.status==='streaming'&&<div className="chat-message chat-ai chat-streaming" data-from="ai" aria-busy="true"><span className="chat-who">{aiLabel(answerer)}</span>
       {t.text?<div className="chat-stream"><LiveMarkdown text={t.text} live/></div>:<div className="chat-thinking"><Thinking/><span className="chat-wait" role="status" data-wait>{waitText(now-(t.sentAt??now))}</span></div>}
       <div className="chat-message-tools"><button type="button" className="chat-stop" onClick={()=>stop(t)}>Stop</button></div></div>}
-     {t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span><ReplyMarkdown text={t.text}/>{t.message?.unstructured&&<p className="chat-unstructured">{UNSTRUCTURED_LABEL}</p>}{t.message?.echo&&<p className="chat-flag chat-echo">{ECHO_LABEL}</p>}
+     {t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai" data-provider={t.message?.provider}><span className="chat-who">{aiLabel(t.message?.provider)}</span><ReplyMarkdown text={t.text}/>{t.message?.unstructured&&<p className="chat-unstructured">{UNSTRUCTURED_LABEL}</p>}{t.message?.echo&&<p className="chat-flag chat-echo">{ECHO_LABEL}</p>}
       {t.message&&<ReplyNotes message={t.message} question={t.question} busy={composing} onAskAgain={q=>void submit(q)} note={asked(t.message)}/>}<UsedSkills names={t.message?.skills}/>{t.message?.costUsd!==undefined&&<p className="chat-turn-cost">{turnCostText(t.message.costUsd)}</p>}
+      {isNativeAnswerer(t.message?.provider)&&nativeUsageText(t.message?.nativeUsage)&&<p className="chat-turn-cost" data-usage="native">{nativeUsageText(t.message?.nativeUsage)}</p>}
+      {t.message?.overCap&&<p className="council-calm council-overcap" role="alert" data-notice="over-cap"><span aria-hidden="true">!</span> {t.message.warning??OVER_CAP_TEXT}</p>}
       {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
       <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}><i className="add-icon" aria-hidden="true"/></button></div></div>}
      {t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason,t.error.errorName,t.error)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button><details className="chat-why"><summary>Why?</summary><div className="chat-why-text">{whyText({ruleId:t.error.ruleId,detail:t.error.detail},t.error.code)}</div></details></div>}
      </>}
     </div>)}
-   <span className="chat-sr" role="status">{busy&&!pending&&!planCard?'Claude is replying…':''}</span>
+   <span className="chat-sr" role="status">{busy&&!pending&&!planCard&&!nativeCard?`${providerName(answerer)} is replying…`:''}</span>
   </div>
   {excerpt&&<aside className="inv-excerpt" aria-label={`Excerpt of ${excerpt.path}`} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();setExcerpt(null);}}}>
    <header><code>{excerpt.path}</code> <span className="inv-excerpt-note">read-only, secrets hidden</span><button ref={excerptClose} type="button" className="ghost" aria-label="Close excerpt" onClick={()=>setExcerpt(null)}>×</button></header>
@@ -449,7 +476,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
     {atItems.length===0?<p className="chat-at-none">Nothing matches “{at.query}”.</p>:atItems.map((it,i)=><button key={atItemKey(it)} type="button" role="option" aria-selected={i===at.index} tabIndex={-1} className="chat-at-opt" data-at={atItemKey(it)}
      onMouseDown={e=>e.preventDefault()} onClick={()=>pickAt(it)}><span className="chat-at-kind">{it.kind==='repo'?'Repo':it.kind==='note'?'Note':'File'}</span><span className="chat-at-name">{it.kind==='repo'?it.label:it.path}</span></button>)}
    </div>}
-   <textarea ref={input} aria-label="Message Aitiarch AI" rows={1} placeholder={pending||planCard?'Review above, then send…':mode==='council'?'Ask the Council… (Enter reviews it first)':'Ask about this note… (@ to attach)'} value={draft} disabled={composing} onChange={e=>onDraft(e.target.value)}
+   <textarea ref={input} aria-label="Message Aitiarch AI" rows={1} placeholder={pending||planCard||nativeCard?'Review above, then send…':mode==='council'?'Ask the Council… (Enter reviews it first)':'Ask about this note… (@ to attach)'} value={draft} disabled={composing} onChange={e=>onDraft(e.target.value)}
     aria-controls={at?'chat-at-list':undefined} aria-expanded={at?true:undefined}
     onKeyDown={e=>{
      if(at){

@@ -1569,3 +1569,22 @@ p.chat-wait { margin: 4px 0 0; }
 @supports (animation-timeline: scroll()) {
   .thought-rails .margin-card.thought-blob { animation: thought-edge-fade linear both; animation-timeline: scroll(self); }
 }
+/* Settings > Pipeline: who answers Normal chat. Same tokens as the rest of Settings. */
+.pipeline-field { display: grid; gap: 6px; max-width: 28rem; margin: 0 0 12px; }
+.pipeline-field label { color: var(--ink-text); font-size: var(--text-control); }
+.pipeline-field select { width: 100%; min-height: 36px; }
+.pipeline-providers { display: grid; gap: 8px; margin: 0 0 12px; padding: 0; list-style: none; }
+.pipeline-providers li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 8px 10px; border: 1px solid var(--rule); border-radius: var(--radius-small); }
+.pipeline-providers li[data-chosen] { border-color: var(--accent); }
+.pipeline-name { font-weight: 600; }
+.pipeline-status { color: var(--muted); font-size: var(--text-meta); }
+.pipeline-status[data-state="ok"] { color: var(--ink-text); }
+.pipeline-help { flex-basis: 100%; color: var(--muted); font-size: var(--text-meta); line-height: 1.45; }
+.pipeline-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.pipeline-done { color: var(--ink-text); }
+/* The longer Codex/Kiro memory line wraps to two lines instead of being cut off; Claude's stays one line. */
+.chat-sessions-note[data-answerer="codex"], .chat-sessions-note[data-answerer="kiro"] { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; }
+/* The Codex/Kiro approval card stacks its terms at phone width so nothing is squeezed. */
+.native-plan dl { grid-template-columns: 1fr; }
+.native-plan dt { margin-top: 4px; }
+@media (min-width: 420px) { .native-plan dl { grid-template-columns: max-content 1fr; } .native-plan dt { margin-top: 0; } }

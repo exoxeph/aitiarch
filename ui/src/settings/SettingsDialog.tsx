@@ -5,9 +5,10 @@ import {formatCount} from '../chat/chat-model.ts';
 import {unreportedText,usd} from '../chat/investigate-usage.ts';
 import {SkillsPane} from '../skills/SkillsPane.tsx';
 import {cliNotice,tokenMeter,type Meter} from './settings-model.ts';
+import {PipelinePane} from './PipelinePane.tsx';
 
-type Tab='usage'|'skills';
-const TABS:{id:Tab;label:string}[]=[{id:'usage',label:'Usage'},{id:'skills',label:'Skills'}];
+type Tab='usage'|'skills'|'pipeline';
+const TABS:{id:Tab;label:string}[]=[{id:'usage',label:'Usage'},{id:'skills',label:'Skills'},{id:'pipeline',label:'Pipeline'}];
 
 function MeterBar({meter,label}:{meter:Meter;label:string}){
  return <div className="meter-row"><div className="meter" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={meter.percent} data-tone={meter.tone}><i style={{transform:`scaleX(${meter.percent/100})`}}/></div><span className="meter-label">{meter.label}</span></div>;
@@ -58,7 +59,7 @@ export function SettingsDialog({onClose}:{onClose:()=>void}){
      {TABS.map(t=><button key={t.id} id={`settings-tab-${t.id}`} type="button" role="tab" aria-selected={tab===t.id} aria-controls={`settings-pane-${t.id}`} tabIndex={tab===t.id?0:-1} onClick={()=>setTab(t.id)}>{t.label}</button>)}
     </div>
     <div className="settings-pane" role="tabpanel" id={`settings-pane-${tab}`} aria-labelledby={`settings-tab-${tab}`}>
-     {tab==='skills'?<SkillsPane/>:<UsagePane/>}
+     {tab==='skills'?<SkillsPane/>:tab==='pipeline'?<PipelinePane/>:<UsagePane/>}
     </div>
    </div>
   </section>
