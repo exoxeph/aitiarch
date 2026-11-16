@@ -11,6 +11,7 @@ import {TESTED_CLI_VERSION} from '../shared/diagram-fence.ts';import {DiagramIma
 import {InsertionStore} from './insertion-store.ts';
 import {SKILL_DIAGRAM_CSP_HEADER,SKILL_DIAGRAM_SVG_CSP_HEADER} from '../shared/skill-diagram.ts';
 import { UiStateStore } from './ui-state-store.ts';
+import {isGitRepository} from './git-repository.ts';
 import {ThreadStore} from './thread-store.ts';
 import {ThreadRuntime,type ThreadRequest} from './thread-runtime.ts';
 import {validId} from '../shared/threads.ts';
@@ -249,7 +250,7 @@ export function createApp(opts: AppOptions) {
     if (url.pathname === "/api/session" && req.method === "GET") {
       if (!security.sessionAllowed(req.headers.cookie)) return json(res, 401, { error: "no_session", message: "Open Aitiarch from its launcher. This address alone does not start a session." });
       res.setHeader("Set-Cookie", `aitiarch=${token}; Path=/; HttpOnly; SameSite=Strict`);
-      return json(res, 200, { rootName: path.basename(path.dirname(store.rootReal)) || path.basename(store.rootReal), rootPath: store.rootReal, anchorCache: await (await inkReady).cache.status() });
+      return json(res, 200, { rootName: path.basename(path.dirname(store.rootReal)) || path.basename(store.rootReal), rootPath: store.rootReal, gitRepo: await isGitRepository(store.rootReal), anchorCache: await (await inkReady).cache.status() });
     }
     if (!tokenOk(req)) return json(res, 401, { error: "no_session" });
 

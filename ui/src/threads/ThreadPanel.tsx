@@ -42,7 +42,7 @@ export function ReplyStack({replies,question,cancel,onAdd}:{replies:ThreadReply[
 }
 // Survives hiding the panel or closing a note tab, but never a page reload.
 const humanDraftMemory=new Map<string,MemoryDraft>();
-interface Props {path:string;items:InkItem[];version:string|null;saved:(s:InkSnapshot)=>void;insert:(item:InkItem)=>Promise<void>;openId:string|null;onOpen:(id:string)=>void;visible?:boolean}
+interface Props {path:string;items:InkItem[];version:string|null;saved:(s:InkSnapshot)=>void;insert:(item:InkItem)=>Promise<void>;openId:string|null;onOpen:(id:string)=>void;visible?:boolean;showIgnoreNotice?:boolean}
 export function ThreadPanel(props:Props){
  const memory=useRef(humanDraftMemory);
  const generated=props.items.filter(i=>i.generation),item=generated.find(i=>i.id===props.openId)??generated.at(-1);
@@ -55,7 +55,7 @@ export function ThreadPanel(props:Props){
   {item&&<ThreadCard key={props.path+':'+item.id} {...props} item={item} memory={memory.current}/>}
  </section>;
 }
-function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{item:InkItem;memory:Map<string,MemoryDraft>}){
+function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgnoreNotice=true}:Props&{item:InkItem;memory:Map<string,MemoryDraft>}){
  const key=path+':'+item.id;let entry=memory.get(key);if(!entry){entry={text:'',revision:null,loaded:false,dirty:false,enabled:false,sequence:0,queue:Promise.resolve()};memory.set(key,entry);}const draft=entry;
  const [text,setText]=useState(draft.text),[draftNotice,setDraftNotice]=useState(false),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[confirmDelete,setConfirmDelete]=useState(false);
  const [question,setQuestion]=useState(''),[review,setReview]=useState<null|{purpose:'followup'|'summary';replyId:string;parentId:string;provider:string;required:boolean;from:string|null;description:string;packet:unknown;noteVersion:string;question:string;skills?:SkillsReview}>(null),[confirmed,setConfirmed]=useState(false);
@@ -119,7 +119,7 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true}:Props&{
   <ReplyStack replies={[initial,...t.followups]} question={id=>recalledQuestion(path,id)??questionPlaceholder} cancel={replyId=>void api.threadCall('cancel',{path,id:item.id,replyId})} onAdd={r=>card.current?.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id,...(r.id===item.id?{}:{replyId:r.id})}}))}/>
   {notice&&<p role="alert">{notice}</p>}
   {saveFailures.filter(id=>[...t.followups,...(t.summary.reply?[t.summary.reply]:[])].some(r=>r.id===id&&r.generation.status==='pending')).map(id=><p key={id} role="alert">{failureLabels.persistence}<button onClick={async()=>{try{update(await api.threadCall<InkSnapshot>('retry-save',{path,id:item.id,replyId:id}));setSaveFailures(all=>all.filter(x=>x!==id));}catch(e){fail(e);}}}>Retry saving reply (no new call)</button></p>)}
-  {draftNotice&&statusNotice(<span className="status-notice" role="note"><span className="status-notice-text" title="Drafts stay in memory until ignore coverage is verified. Add /ui-state.json* to the root .gitignore.">Drafts stay in memory until <code>/ui-state.json*</code> is ignored.</span>
+  {draftNotice&&showIgnoreNotice&&statusNotice(<span className="status-notice" role="note"><span className="status-notice-text" title="To save drafts privately, add /ui-state.json* to this folder's .gitignore.">Your draft stays in memory for now. To save it privately, add <code>/ui-state.json*</code> to this folder’s <code>.gitignore</code>.</span>
    <button aria-label="Add /ui-state.json* to root .gitignore" onClick={async()=>{try{const s=await api.enableThreadDrafts();draft.enabled=s.enabled;setDraftNotice(!s.enabled);if(s.enabled&&draft.dirty)persist(draft.text);}catch(e){fail(e);}}}>Add to .gitignore</button><button aria-label="Dismiss draft notice" onClick={()=>setDraftNotice(false)}>Dismiss</button></span>)}
   <TakeawayBox skippedAt={t.takeaway.state==='skipped'?t.takeaway.updatedAt:undefined} onReopen={()=>void act({type:'reopen'})} value={text} busy={busy} onChange={value=>{draft.text=value;draft.dirty=true;setText(value);persist(value);}} onSubmit={()=>void act({type:'submit',text})} onSkip={()=>void act({type:'skip'})}/>
   {t.takeaway.state==='submitted'&&<section><strong>Your submitted takeaway</strong><p className="human-text">{t.takeaway.text}</p><button disabled={busy||item.attachment.status!=='attached'} onClick={()=>void insert(item).catch(fail)}>Preview insertion</button></section>}

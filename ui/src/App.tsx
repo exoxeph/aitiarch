@@ -47,7 +47,7 @@ import {previewTakeawayInsertion} from '../shared/takeaway-insertion.ts';
 import {SLASH_ITEMS,slashInsert} from './editor/slash.ts';
 import {invokeSelection} from './editor/toolbar.ts';
 
-type Boot = { state: "loading" } | { state: "error"; message: string } | { state: "ready"; rootName: string; rootPath: string };
+type Boot = { state: "loading" } | { state: "error"; message: string } | { state: "ready"; rootName: string; rootPath: string; gitRepo: boolean };
 
 export default function App() {
   const [boot, setBoot] = useState<Boot>({ state: "loading" });
@@ -213,7 +213,7 @@ export default function App() {
     (async () => {
       try {
         const s = await api.session();
-        if (!s.anchorCache.enabled && !sessionStorage.getItem(`anchor-cache-notice:${s.rootPath}`)) {
+        if (s.gitRepo && !s.anchorCache.enabled && !sessionStorage.getItem(`anchor-cache-notice:${s.rootPath}`)) {
           setCacheNotice({ file: s.anchorCache.ignoreFile, line: s.anchorCache.ignoreLine });
           sessionStorage.setItem(`anchor-cache-notice:${s.rootPath}`, "shown");
         }
@@ -242,7 +242,7 @@ export default function App() {
         setInkFiles(loadedInk);
         setTabs(ok);
         setActive(ui.active && ok.includes(ui.active) ? ui.active : (ok[0] ?? null));
-        setBoot({ state: "ready", rootName: s.rootName, rootPath: s.rootPath });
+        setBoot({ state: "ready", rootName: s.rootName, rootPath: s.rootPath, gitRepo: s.gitRepo });
         loaded.current = true;
         off = connectEvents((e) => {
           if (e.type === "open") setOnline(true);
@@ -581,7 +581,7 @@ export default function App() {
       <NotesMenu menu={menu} burger={burgerRef} rootName={boot.rootName} rootPath={boot.rootPath} tree={tree} active={active} onOpen={(p) => void openNote(p)} onSearch={() => setOverlay("palette")} onSettings={() => setSettingsOpen(true)} usage={<UsagePanel />} settings={settingsPanel} onTreeChanged={() => refreshTree()} onMoved={m => void afterMove(m)} blocked={moveBlocked} />
       <main className="editor-col" data-note-path={active ?? undefined}>
         {cacheNotice && <div className="notice" role="alert">
-          Anchor snapshots are disabled. Add this exact line to <code>{cacheNotice.file}</code>: <code>{cacheNotice.line}</code>
+          To keep thoughts attached between visits, Aitiarch can save local text copies. Keep them out of Git by adding <code>{cacheNotice.line}</code> to this folder’s <code>.gitignore</code>.
           <button disabled={cacheBusy} onClick={async () => {
             setCacheBusy(true);
             try {
@@ -627,10 +627,10 @@ export default function App() {
       {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,toast.undo)}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
       {added&&<div className="thought-toast" role="status"><span>{added.text}<span className="toast-hint"> · Undo (Ctrl+Z)</span></span><details className="added-detail"><summary>What was added</summary><pre>{added.detail}</pre></details><button onClick={()=>{const h=active?panes.current.get(active):undefined;if(h){undo(h.view);h.view.focus();}setAdded(null);}}>Undo</button><button aria-label="Close notice" onClick={()=>setAdded(null)}>Close</button></div>}
       {showDismissed&&<DismissedThoughts items={activeItems} restore={id=>void thoughtAction(id,'restore')} close={()=>setShowDismissed(false)}/>}
-      {active&&thoughtChat&&<ThoughtChat id={thoughtChat} close={()=>setThoughtChat(null)}><ThreadPanel path={active} items={activeItems} version={currentInk?.version??null} saved={s=>onInkSaved(active,s)} insert={async item=>{await prepareInsert(item);setNoteMenuOpen(true);}} openId={thoughtChat} onOpen={id=>{setThoughtChat(id);setThreadId(id);}} visible/></ThoughtChat>}
+      {active&&thoughtChat&&<ThoughtChat id={thoughtChat} close={()=>setThoughtChat(null)}><ThreadPanel path={active} items={activeItems} version={currentInk?.version??null} saved={s=>onInkSaved(active,s)} insert={async item=>{await prepareInsert(item);setNoteMenuOpen(true);}} openId={thoughtChat} onOpen={id=>{setThoughtChat(id);setThreadId(id);}} showIgnoreNotice={boot.gitRepo} visible/></ThoughtChat>}
       {bringPreview&&<ThoughtInsertionPreview text={bringPreview.preview.changes.insert} insert={()=>void bringThought()} cancel={()=>setBringPreview(null)}/>}
       <footer className="statusbar">
-        <span id="status-notice-slot" className="status-notice-slot">{treeNotice&&<span className="status-notice" role="note"><span className="status-notice-text" title="File tree and theme preferences stay in memory until ignore coverage for /ui-state.json* is verified.">File tree and theme preferences stay in memory until <code>/ui-state.json*</code> is ignored.</span>
+        <span id="status-notice-slot" className="status-notice-slot">{treeNotice&&boot.gitRepo&&<span className="status-notice" role="note"><span className="status-notice-text" title="To save these preferences privately, add /ui-state.json* to this folder's .gitignore.">File tree and theme preferences stay in memory for now. To save them privately, add <code>/ui-state.json*</code> to this folder’s <code>.gitignore</code>.</span>
           <button aria-label="Add /ui-state.json* to root .gitignore" onClick={async()=>{try{const s=await api.enableThreadDrafts();setTreePersistence(s.enabled);setTreeNotice(!s.enabled);}catch{setNotice('Could not verify UI state ignore coverage. The file tree preference remains in memory.');}}}>Add to .gitignore</button>
           <button aria-label="Dismiss tree preference notice" onClick={()=>setTreeNotice(false)}>Dismiss</button></span>}</span>
         <StatusBar path={active} status={active ? status[active] : undefined} text={active ? (docs[active] ?? activeFile?.text) : undefined} eol={activeFile?.eol} bom={activeFile?.bom} online={online} rootPath={boot.rootPath} />

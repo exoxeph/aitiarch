@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {execFileSync} from 'node:child_process';
 import { chromium } from "playwright-core";
 import { InkStore } from "../server/ink-store.ts";
 import { Store } from "../server/store.ts";
@@ -13,6 +14,8 @@ import { createApp } from "../server/http.ts";
 import { captureAnchor } from "../shared/anchors.ts";
 const project = mkdtempSync(path.join(os.tmpdir(), "aitiarch-mapping-browser-"));
 const root = path.join(project, ".aitiarch"); mkdirSync(root);
+// The explicit Git-ignore setup button is meaningful only in a Git repository.
+execFileSync('git',['init','-q'],{cwd:project,stdio:'pipe'});
 const quote = "The release keeps a verified checkpoint.";
 const text = ["# Mapping fixture", "Typing paragraph.", "## First", quote, "## Second", quote, "End."].join("\n\n");
 const originalIgnore = "# Existing fixture rules\n/private/\n";

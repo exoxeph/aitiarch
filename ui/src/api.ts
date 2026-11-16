@@ -235,7 +235,7 @@ export const api = {
   retryInkSave: (id: string) => ok<unknown>("PUT", "/api/assistance/retry-save", { id }),
   inkEvent: (path: string, id: string, event: "shown" | "dismissed") => ok<unknown>("PUT", "/api/assistance/event", { path, id, event }),
   enableAnchorCache: () => ok<{ enabled: boolean }>("PUT", "/api/anchor-cache/enable", { action: "add-ignore-line" }),
-  session: () => ok<{ rootName: string; rootPath: string; anchorCache: { enabled: boolean; ignoreFile: string; ignoreLine: string } }>("GET", "/api/session"),
+  session: () => ok<{ rootName: string; rootPath: string; gitRepo: boolean; anchorCache: { enabled: boolean; ignoreFile: string; ignoreLine: string } }>("GET", "/api/session"),
   tree: () => ok<TreeNode>("GET", "/api/tree"),
   citations: () => ok<NoteSummary[]>("GET", "/api/citations"),
   // The Constellation: graph data with remembered star positions, the handoff order, and its explicit write.
