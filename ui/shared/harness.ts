@@ -71,17 +71,22 @@ export function harnessDenied(relPath:string):boolean{
  * What a REPO never gives out to an investigation. Matched on every path segment; nothing the notebook rules keep out applies to a repo.
  *  - environment files (.env*), private keys and key stores (*.pem, id_*, *.key, *.p12, *.pfx, *.jks, *.keystore), `.private.` files;
  *  - secret STORES: a file or folder named exactly secrets or credentials (also secret, credential, .secrets), or such a name with a .json, .yml, .yaml, .toml or .env
- *    extension. Source code is not a store: secrets.ts and credentials.py are ordinary files and are included;
+ *    extension. Source code named secrets.ts stays code; credentials* names are always excluded;
  *  - tool credential files: .npmrc, .netrc, .pypirc, .git-credentials, .aws/, .ssh/, .docker/config.json, kubeconfig, service-account*.json;
  *  - infrastructure state and variables (*.tfstate, *.tfvars);
  *  - tooling folders (.git, .claude, .codex, node_modules) and Aitiarch's own state (ui-state.json*).
  */
 const SECRET_STORE=/^\.?(?:secrets?|credentials?)$|^\.?(?:secrets?|credentials?)(?:\.[a-z0-9_-]+)?\.(?:json|ya?ml|toml|env)$/i;
-const SECRET_FILE=/^\.env|\.(?:pem|key|p12|pfx|jks|keystore)$|^id_|\.private\.|^\.(?:npmrc|netrc|pypirc|git-credentials)$|\.tfstate(?:\.backup)?$|\.tfvars$|^kubeconfig$|^service-account.*\.json$/i;
-const SECRET_FOLDER=/^(?:node_modules|\.git|\.claude|\.codex|\.aws|\.ssh)$/i;
+const SECRET_FILE=/^\.env|\.(?:pem|key|p12|pfx|jks|keystore)$|^id_|\.private\.|^\.?(?:credentials)|^\.(?:npmrc|netrc|pypirc|git-credentials|dockercfg|s3cfg|boto|authinfo(?:\.gpg)?)$|\.tfstate(?:\.backup)?$|\.tfvars$|^kubeconfig$|^service-account.*\.json$/i;
+const SECRET_FOLDER=/^(?:node_modules|\.git|\.claude|\.codex|\.aws|\.ssh|\.gnupg|\.password-store)$/i;
 export function repoDenied(relPath:string):boolean{
  const parts=relPath.replace(/\\/g,'/').split('/').filter(Boolean);
  if(!parts.length)return true;
- return parts.some((p,i)=>SECRET_STORE.test(p)||SECRET_FILE.test(p)||SECRET_FOLDER.test(p)||/^ui-state\.json/i.test(p)||(p.toLowerCase()==='.docker'&&parts[i+1]?.toLowerCase()==='config.json'));
+ return parts.some((p,i)=>SECRET_STORE.test(p)||SECRET_FILE.test(p)||SECRET_FOLDER.test(p)||/^ui-state\.json/i.test(p)||(p.toLowerCase()==='.docker'&&parts[i+1]?.toLowerCase()==='config.json')||(p.toLowerCase()==='.kube'&&parts[i+1]?.toLowerCase()==='config'));
+}
+/** Display-only names; never put these paths in the ledger or use them as a grant. */
+export interface CopyExclusions {paths:string[];more:number}
+export function copyExclusions(paths:readonly string[]):CopyExclusions {
+ const sorted=[...new Set(paths)].sort();return {paths:sorted.slice(0,10).map(p=>p.replace(/[\u0000-\u001f\u007f-\u009f]/g,'').slice(0,300)),more:Math.max(0,sorted.length-10)};
 }
 

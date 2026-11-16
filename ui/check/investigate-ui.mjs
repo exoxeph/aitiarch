@@ -54,6 +54,8 @@ try {
   await composer.fill('How does login work?'); await page.keyboard.press('Enter');
   const card = panel.getByRole('group', { name: 'Plan for this conversation' }); await card.waitFor();
   const cardText = await card.innerText();
+  assert.match(await card.locator('[data-plan="excluded"]').innerText(), /\.env/, 'the plan lists excluded file names');
+  assert.doesNotMatch(cardText, /CANARY-INVUI/, 'excluded file contents never reach the plan');
   for (const s of ['What Claude may do', 'Repo folder', repo, 'Cost cap per message', 'Read, Grep and Glob']) assert(cardText.includes(s), 'plan card shows ' + s);
   assert(!/turn limit|12 model turns|of 12/i.test(cardText), 'no turn limit is shown on the plan card');
   await page.waitForFunction(() => /How does login work\?/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
@@ -234,4 +236,4 @@ try {
   assert.deepEqual(external, [], 'no request left the machine');
   console.log(JSON.stringify({ passed: true, ...report }, null, 1));
   await context.close();
-} finally { await browser.close(); watcher.stop(); await app.close(); for (const d of [notebook, repo, harness, scratch]) await rm(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+} finally { await browser.close(); watcher.stop(); await app.close(); console.log('Cleanup targets (synthetic fixtures only):', [notebook, repo, harness, scratch]); for (const d of [notebook, repo, harness, scratch]) await rm(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }

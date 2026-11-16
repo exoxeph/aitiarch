@@ -56,7 +56,7 @@ export type InvestigateCode='not_investigation'|'invalid'|'repo'|'plan_required'
 // Display metadata only: never resolve this string or use it to decide permission.
 const displayPath=(raw:string)=>raw.replace(/[\u0000-\u001f\u007f-\u009f]/g,'').slice(0,300);
 export class InvestigateError extends Error {code:InvestigateCode;attemptedPath?:string;constructor(code:InvestigateCode,attemptedPath?:string){super(code);this.code=code;if(attemptedPath!==undefined)this.attemptedPath=displayPath(attemptedPath);}}
-export interface Plan {session:string;repo:string;files:number;bytes:number;skipped:Record<string,number>;excluded:string[];budgetUsd:number;turnLimit:number;snapshotHash:string;planHash:string}
+export interface Plan {session:string;repo:string;files:number;bytes:number;skipped:Record<string,number>;excluded:string[];excludedFromCopy?:import('../../shared/harness.ts').CopyExclusions;budgetUsd:number;turnLimit:number;snapshotHash:string;planHash:string}
 export interface ToolStep {tool:string;target:string;ok:boolean|null;/** Sanitised requested string, display only; never a read target. */attemptedPath?:string;/** Only a real permission denial by the CLI's rules. */denial?:string;/** Any other tool error (a path that does not exist, a directory read as a file...), cleaned of the copy's folder and redacted. */error?:string;/** The repo-relative path the call named, when it named one. */path?:string;/** Lines in the tool's result (the result itself never leaves the server). */lines?:number}
 /** What a turn had done when it was stopped. `text` is only what was written after the last tool call (the answer so far, often empty); the
  *  narration before the calls is in `trail`, in order. */
@@ -248,7 +248,7 @@ export class InvestigateService {
   const r=await syncSnapshot(s.repo,d.files,d.manifest,undefined,this.o.notebook),capped=Math.round(budget*100)/100;
   // The cost cap is part of the plan the user confirms, so changing it changes the hash. The backstop is kept in the plan but never shown.
   const core={repo:s.repo,files:r.files,excluded:EXCLUDED,budgetUsd:capped,turnLimit:this.limits.turns,snapshotHash:r.hash};
-  const plan:Plan={session:id,...core,bytes:r.bytes,skipped:r.skipped,planHash:sha(JSON.stringify(core))};this.plans.set(id,plan);return plan;
+  const plan:Plan={session:id,...core,bytes:r.bytes,skipped:r.skipped,excludedFromCopy:r.excludedFromCopy,planHash:sha(JSON.stringify(core))};this.plans.set(id,plan);return plan;
  }
  async confirm(id:string,planHash:unknown){const p=this.plans.get(id);if(!p||p.planHash!==planHash)throw new InvestigateError('plan_changed');await this.o.index.confirm(id,p.planHash,p.budgetUsd);return p;}
  /** Cancel can reach the server before the turn it is for (both are requests in flight): an early cancel is kept for a few seconds and honoured

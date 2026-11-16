@@ -1,5 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
 import type {ConversationPlan} from '../../server/harness/conversation.ts';
+import type {CopyExclusions} from '../../shared/harness.ts';
 import {reviewDiagramsText,withheldText} from './diagram-words.ts';
 import {CARRIED_TEXT,FILE_REFUSAL_TEXT,PROFILE_TEXT} from './conversation-model.ts';
 
@@ -7,7 +8,7 @@ import {CARRIED_TEXT,FILE_REFUSAL_TEXT,PROFILE_TEXT} from './conversation-model.
  * The scope and cost card of a conversation, in the Investigate card's look: what Claude may do, the repo and the files (each refused one with its reason), the diagrams that are withheld
  * and why, the cost cap (editable: changing it asks the server for the card again), and whether earlier context is carried over. Approve sends back exactly the card the server computed.
  */
-export function PlanCard({plan,resume,busy,onApprove,onReplan,onCancel}:{plan:ConversationPlan;resume?:boolean;busy:boolean;onApprove:()=>void;onReplan:(budgetUsd:number)=>void;onCancel:()=>void}){
+export function PlanCard({plan,resume,busy,onApprove,onReplan,onCancel}:{plan:ConversationPlan&{excludedFromCopy?:CopyExclusions};resume?:boolean;busy:boolean;onApprove:()=>void;onReplan:(budgetUsd:number)=>void;onCancel:()=>void}){
  const [cap,setCap]=useState(plan.budgetUsd.toFixed(2)),approve=useRef<HTMLButtonElement>(null);
  useEffect(()=>{setCap(plan.budgetUsd.toFixed(2));},[plan.hash]);
  useEffect(()=>{approve.current?.focus();},[plan.hash]);
@@ -20,6 +21,7 @@ export function PlanCard({plan,resume,busy,onApprove,onReplan,onCancel}:{plan:Co
   <dl>
    <dt>What Claude may do</dt><dd data-plan="profile">{PROFILE_TEXT[plan.profile]}</dd>
    {plan.repo&&<><dt>Repo folder</dt><dd><code>{plan.repo.path}</code>{plan.attachments.repo?' (all of it, as a read-only copy)':' (only the files below)'}</dd></>}
+   {plan.excludedFromCopy&&(plan.excludedFromCopy.paths.length>0||plan.excludedFromCopy.more>0)&&<><dt>Excluded from the copy</dt><dd data-plan="excluded">{plan.excludedFromCopy.paths.slice(0,10).map((name,i)=><span key={i}>{i>0?', ':''}<code>{name}</code></span>)}{plan.excludedFromCopy.more+Math.max(0,plan.excludedFromCopy.paths.length-10)>0?` and ${plan.excludedFromCopy.more+Math.max(0,plan.excludedFromCopy.paths.length-10)} more`:''}</dd></>}
    {plan.files.length>0&&<><dt>Files</dt><dd><ul className="chat-plan-files">{plan.files.map(f=><li key={f.path} data-file={f.path} data-status={f.ok?'ok':'refused'}><code>{f.path}</code>{f.ok?'':` refused: ${FILE_REFUSAL_TEXT[f.reason??'missing']}`}</li>)}</ul></dd></>}
    {plan.openDiagrams&&plan.openDiagrams.length>0&&<><dt>Diagrams</dt><dd className="chat-plan-diagrams" data-plan="diagrams">{reviewDiagramsText({diagrams:plan.openDiagrams,diagramCapUsd:plan.budgetUsd})}. It opens one only when your question needs it.</dd></>}
    {plan.withheldDiagrams&&plan.withheldDiagrams.items.length>0&&<><dt>Withheld</dt><dd><ul className="chat-plan-withheld">{plan.withheldDiagrams.items.map(d=><li key={d.n} data-diagram={d.n} data-status="withheld">{withheldText({n:d.n,title:d.title,why:d.why??plan.withheldDiagrams!.reason??'withheld'})}</li>)}</ul></dd></>}

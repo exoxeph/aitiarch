@@ -69,9 +69,10 @@ const copy=async(root:string,notebook?:string)=>{const dest=path.join(await temp
 describe('repo rules, not notebook rules',()=>{
  it('includes code in folders named chat, runs and backups, and leaves out secrets, keys, node_modules, tooling folders and state',async()=>{
   const {r,files,dest}=await copy(await codeRepo());
-  for(const f of ['src/chat/x.ts','runs/y.ts','backups/z.ts','measurements/m.ts','chat/log.json','src/app.ts','.github/workflows/ci.yml','src/secrets.ts','lib/credentials.py'])expect(files,f).toContain(f); // source files are code, whatever they are called
+  for(const f of ['src/chat/x.ts','runs/y.ts','backups/z.ts','measurements/m.ts','chat/log.json','src/app.ts','.github/workflows/ci.yml','src/secrets.ts'])expect(files,f).toContain(f); // ordinary source stays code; credentials* is now explicitly excluded
+  expect(files).not.toContain('lib/credentials.py');
   for(const f of ['.env','.env.local','id_rsa','keys/server.pem','node_modules/a.js','config/credentials.json','config/secrets.json','.npmrc','deploy.key','terraform.tfstate','.claude/settings.json','.codex/config.toml','ui-state.json'])expect(files,f).not.toContain(f);
-  expect(r.skipped.denied).toBe(13);for(const f of files)expect(await readFile(path.join(dest,f),'utf8'),f).not.toContain('CANARY-CODE-SNAP');
+  expect(r.skipped.denied).toBe(14);for(const f of files)expect(await readFile(path.join(dest,f),'utf8'),f).not.toContain('CANARY-CODE-SNAP');
  });
  it('when the repo is the notebook folder, the notebook rules keep chat, runs and the rest of its private folders out',async()=>{
   const root=await codeRepo(),{files}=await copy(root,root);

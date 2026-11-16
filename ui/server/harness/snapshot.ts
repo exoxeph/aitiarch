@@ -7,19 +7,25 @@ import {lstat,mkdir,readdir,readFile,realpath,rm,rmdir,writeFile} from 'node:fs/
 import path from 'node:path';
 import {promisify} from 'node:util';
 import {repoDeny} from './deny.ts';
+import {copyExclusions,type CopyExclusions} from '../../shared/harness.ts';
 import {safeTarget,safeWrite} from './tripwire.ts';
 const exec=promisify(execFile);
 export const SNAPSHOT_LIMITS=Object.freeze({fileBytes:262144,files:5000,totalBytes:50*1024*1024});
-export interface SnapshotResult {files:number;bytes:number;changed:number;hash:string;skipped:{denied:number;links:number;tooLarge:number;overCap:number;notFile:number}}
+export interface SnapshotResult {files:number;bytes:number;changed:number;hash:string;excludedFromCopy:CopyExclusions;skipped:{denied:number;links:number;tooLarge:number;overCap:number;notFile:number}}
 export interface Drift {changed:string[];added:string[];removed:string[]}
 const sha=(b:Buffer|string)=>createHash('sha256').update(b).digest('hex');
 // The repo's own git config must not be able to run anything while the app lists files: no system or global config, no fsmonitor hook.
 const gitEnv=()=>({...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',GIT_OPTIONAL_LOCKS:'0',GIT_TERMINAL_PROMPT:'0'});
 
 /** Tracked files plus untracked files that are not ignored, as forward-slash paths relative to the repo. */
-export async function repoFiles(repo:string):Promise<string[]>{
+export async function repoFiles(repo:string,includeIgnored=false):Promise<string[]>{
  const list=async(args:string[])=>(await exec('git',['-c','core.quotepath=false','-c','core.fsmonitor=false','-c','core.untrackedCache=false','-c','core.hooksPath=','ls-files','-z',...args],{cwd:repo,windowsHide:true,timeout:20000,maxBuffer:32*1024*1024,env:gitEnv()})).stdout.split('\0').filter(Boolean);
- return [...new Set([...await list(['--cached']),...await list(['--others','--exclude-standard'])])].sort();
+ return [...new Set([...await list(['--cached']),...await list(['--others','--exclude-standard']),...(includeIgnored?await list(['--others','--ignored','--exclude-standard']):[])])].sort();
+}
+/** Plan display only: names, including ignored secret names, without opening files or changing scope. */
+export async function excludedSnapshotPaths(repo:string,notebook?:string,only?:ReadonlySet<string>):Promise<CopyExclusions>{
+ const root=await realpath(repo),denied=repoDeny(root,notebook?await realpath(notebook).catch(()=>path.resolve(notebook)):undefined);
+ return copyExclusions((await repoFiles(root,true)).filter(rel=>(!only||only.has(rel))&&denied(rel)));
 }
 async function walk(root:string,rel=''):Promise<string[]>{
  const out:string[]=[];let entries;try{entries=await readdir(path.join(root,rel),{withFileTypes:true});}catch{return out;}
@@ -40,10 +46,10 @@ export async function syncSnapshot(repo:string,dest:string,manifestFile:string,l
   for(const p of rel.split('/').slice(0,-1)){cur=cur?cur+'/'+p:p;let known=linkedDir.get(cur);if(known===undefined){try{const s=await lstat(path.join(root,cur));known=s.isSymbolicLink()||!s.isDirectory();}catch{known=true;}linkedDir.set(cur,known);}if(known)return true;}
   return false;
  };
- let bytes=0;
+ let bytes=0;const excluded:string[]=[];
  for(const rel of await repoFiles(root)){
   if(only&&!only.has(rel))continue; // a copy of just the attached files: everything else is not in it, and not counted as skipped
-  if(denied(rel)||rel.split('/').some(p=>p==='..'||p===''||/[<>:"|?*\u0000-\u001f]/.test(p))){skipped.denied++;continue;}
+  if(denied(rel)||rel.split('/').some(p=>p==='..'||p===''||/[<>:"|?*\u0000-\u001f]/.test(p))){skipped.denied++;excluded.push(rel);continue;}
   if(await throughLink(rel)){skipped.links++;continue;}
   let s;try{s=await lstat(path.join(root,rel));}catch{skipped.notFile++;continue;}
   if(s.isSymbolicLink()){skipped.links++;continue;}
@@ -65,7 +71,7 @@ export async function syncSnapshot(repo:string,dest:string,manifestFile:string,l
   if(!same){if(!await safeWrite(dest,rel,data.get(rel)!))throw new Error('The snapshot folder contains a link.');changed++;}
  }
  await writeFile(manifestFile,JSON.stringify({v:1,files}));
- return {files:Object.keys(files).length,bytes,changed,hash:sha(JSON.stringify(Object.entries(files).sort())),skipped};
+ return {files:Object.keys(files).length,bytes,changed,hash:sha(JSON.stringify(Object.entries(files).sort())),skipped,excludedFromCopy:copyExclusions(excluded)};
 }
 
 /** What changed in the copy since the last sync (the agent has no write tools; this checks that it stayed that way). */

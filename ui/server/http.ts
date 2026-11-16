@@ -41,6 +41,7 @@ import { homedir } from "node:os";
 import {CouncilService} from './council.ts';
 import {PipelineConfigStore,PipelineConfigError,pipelineView,PIPELINE_CONFIG_MAX_BYTES} from './pipeline-config-store.ts';
 import {pipelinePreview,PreviewUnavailable} from './pipeline-preview.ts';
+import {excludedSnapshotPaths} from './harness/snapshot.ts';
 import {resolveConfigFolder} from './registry.ts';
 import {CouncilHistory} from './council-history.ts';
 import type {AvailabilityCheck} from './providers/council-availability.ts';
@@ -474,7 +475,11 @@ export function createApp(opts: AppOptions) {
           if(b?.editor!==undefined&&(!b.editor||typeof b.editor!=='object'||(note&&b.editor.path!==note)))throw new PathError(400,'invalid_note','The editor line is about another note than the open one.');
           const d=note?await runtime.openableDiagrams(note).catch(()=>{throw new PathError(400,'invalid_note','The open note is not a note of this project.');}):null;
           return {conversation:b?.conversationId,attachments:b?.attachments,hasDiagrams:!!d?.has,diagrams:d?.all??[],...(d?{diagramNote:d.note}:{})};
-        };        if(url.pathname==='/api/conversation/plan')return json(res,200,await h.gate.plan({...await base(),budgetUsd:b?.budgetUsd}));
+        };        if(url.pathname==='/api/conversation/plan'){
+          const plan=await h.gate.plan({...await base(),budgetUsd:b?.budgetUsd});
+          const excludedFromCopy=plan.profile==='investigate'&&plan.repo?await excludedSnapshotPaths(plan.repo.path,store.rootReal,plan.attachments.repo?undefined:new Set(plan.files.map(f=>f.path))):undefined;
+          return json(res,200,{...plan,...(excludedFromCopy?{excludedFromCopy}:{})});
+        }
         if(url.pathname==='/api/conversation/approve')return json(res,200,{grant:await h.gate.approve({...await base(),budgetUsd:b?.budgetUsd,hash:b?.hash})});
         // SEND PATH 2 of 2. This entry runs a conversation turn that carries files or the repo (profile "investigate") through plan, approve and turn; it also runs a notes or diagrams turn when the page uses it
         // (the page itself sends those through /api/chat/review + /api/chat/send, path 1). The two paths are NOT merged yet: both ask the same gate (ConversationGate.authorize) before anything starts.
