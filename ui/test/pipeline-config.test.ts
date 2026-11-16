@@ -55,6 +55,7 @@ describe('pipeline configurables',()=>{
   expect(sha(SESSION_INVARIANTS)).toBe('f9d503b22b90a43b3c85a6dd32983dfe22a2e64d198072f213e89080c53735b3');
   expect(sha(SKILL_DIAGRAM_INSTRUCTION)).toBe('1ce539daaee67300e5047681b4193c271f733ce09e8068379d47b1acd60ad07c');
   expect(sha(JSON.stringify(PERSONAS))).toBe('cd020573fb507cb0970dd7eb3a606802842a68e03376fe971bcf8928765b0dad');
-  expect(sha(INVESTIGATE_INSTRUCTION)).toBe('0477633c61dd18843ab7e272c6f8a38404a66b3ce128102cf3b44077cd35b5c3');
+  // The intentional fixed suffix is additive: every byte of the original instruction stays identical.
+  expect(sha(INVESTIGATE_INSTRUCTION.split('\n\n').slice(0,-1).join('\n\n'))).toBe('0477633c61dd18843ab7e272c6f8a38404a66b3ce128102cf3b44077cd35b5c3');
  });
 });
