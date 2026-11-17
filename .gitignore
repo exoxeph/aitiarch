@@ -31,3 +31,11 @@ aitiarch-trial/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Internal working documents remain local.
+/BRIEF.*
+/NOTES.*
+/ARCHIVE.*
+/JOURNEY.*
+/CLAUDE.*
+/AITIARCH-UI-SPEC.*
