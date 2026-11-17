@@ -66,8 +66,12 @@ export function Tabs({
   onSelect: (p: string) => void;
   onClose: (p: string) => void;
 }) {
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    list.current?.querySelector('.tab.on')?.scrollIntoView({inline:'nearest',block:'nearest'});
+  }, [active]);
   return (
-    <div className="tabs" role="tablist">
+    <div ref={list} className="tabs" role="tablist">
       {tabs.map((p) => {
         const s = status[p] ?? "saved";
         return (

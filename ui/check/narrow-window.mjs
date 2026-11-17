@@ -30,5 +30,12 @@ try{for(const width of [700,600,480,360,320]){
   assert(row.thread.bottom<=row.footer.top,`${width}: thread bottom ${row.thread.bottom} must stay above footer ${row.footer.top}`);
  }
  await page.close();
- }assert.equal(calls,0);assert.deepEqual(await readFile(path.join(root,'notebook.md')),bytes);await writeFile(path.join(out,'rects.json'),JSON.stringify(measurements,null,2));console.log('PASS: 700/600/480 header visibility and thread/footer clearance; 320/360 no overflow; byte identity; no calls');
+ }
+ await writeFile(path.join(root,'delivery-notes.md'),'# Delivery notes\n');await writeFile(path.join(root,'api.md'),'# API\n');await writeFile(path.join(root,'risks.md'),'# Risks\n');
+ const tabsPage=await browser.newPage({viewport:{width:640,height:800}});await tabsPage.goto(base+'/?debug');await tabsPage.locator('.cm-editor').waitFor();
+ for(const note of ['delivery-notes','api']){await tabsPage.getByRole('button',{name:'Notes menu',exact:true}).click();await tabsPage.locator('#note-tree').getByText(note,{exact:true}).click();}
+ await tabsPage.keyboard.press('Control+o');await tabsPage.getByPlaceholder('Open note…').fill('risks');await tabsPage.keyboard.press('Enter');await tabsPage.locator('.tab.on').filter({hasText:'risks'}).waitFor();
+ await tabsPage.waitForFunction(()=>{const tab=document.querySelector('.tab.on')?.getBoundingClientRect(),container=document.querySelector('.tabs')?.getBoundingClientRect();return tab&&container&&tab.left>=container.left-1&&tab.right<=container.right+1;},{},{timeout:3000});
+ await tabsPage.screenshot({path:path.join(out,'active-tab-640.png')});await tabsPage.close();
+ assert.equal(calls,0);assert.deepEqual(await readFile(path.join(root,'notebook.md')),bytes);await writeFile(path.join(out,'rects.json'),JSON.stringify(measurements,null,2));console.log('PASS: narrow headers, active tab at 640, thread/footer clearance, 320/360 no overflow, byte identity, no calls');
 }finally{await browser.close();watcher.stop();await app.close();console.log('Synthetic fixture retained: '+root);}
