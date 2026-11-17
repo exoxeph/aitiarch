@@ -44,7 +44,9 @@ function parseArgs(argv: string[]) {
   return o;
 }
 
-const args = parseArgs(process.argv.slice(2));
+/** Startup is explicit so the app command can preflight without starting a server. */
+export async function startServer(argv: string[] = process.argv.slice(2)) {
+const args = parseArgs(argv);
 await sweepStaleProviderTemps();
 // The registry and the running-instance file live in the user's config folder. AITIARCH_CONFIG_DIR points checks at a temp folder.
 const configFolder = resolveConfigFolder(); // throws under tests unless AITIARCH_CONFIG_DIR is set
@@ -148,3 +150,6 @@ const shutdown = async () => {
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await startServer();

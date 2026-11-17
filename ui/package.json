@@ -9,6 +9,7 @@
     "node": ">=24"
   },
   "scripts": {
+    "aitiarch": "node scripts/aitiarch.mjs",
     "dev": "node scripts/dev.mjs",
     "build": "vite build",
     "start": "node server/main.ts",
