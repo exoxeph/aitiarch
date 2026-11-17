@@ -33,9 +33,17 @@ try{for(const width of [700,600,480,360,320]){
  }
  await writeFile(path.join(root,'delivery-notes.md'),'# Delivery notes\n');await writeFile(path.join(root,'api.md'),'# API\n');await writeFile(path.join(root,'risks.md'),'# Risks\n');
  const tabsPage=await browser.newPage({viewport:{width:640,height:800}});await tabsPage.goto(base+'/?debug');await tabsPage.locator('.cm-editor').waitFor();
- for(const note of ['delivery-notes','api']){await tabsPage.getByRole('button',{name:'Notes menu',exact:true}).click();await tabsPage.locator('#note-tree').getByText(note,{exact:true}).click();}
+ for(const note of ['delivery-notes','api']){await tabsPage.getByRole('button',{name:'Notes menu',exact:true}).click();await tabsPage.locator('#note-tree').getByText(note,{exact:true}).click();await tabsPage.locator('.tab.on').filter({hasText:note}).waitFor();}
  await tabsPage.keyboard.press('Control+o');await tabsPage.getByPlaceholder('Open note…').fill('risks');await tabsPage.keyboard.press('Enter');await tabsPage.locator('.tab.on').filter({hasText:'risks'}).waitFor();
  await tabsPage.waitForFunction(()=>{const tab=document.querySelector('.tab.on')?.getBoundingClientRect(),container=document.querySelector('.tabs')?.getBoundingClientRect();return tab&&container&&tab.left>=container.left-1&&tab.right<=container.right+1;},{},{timeout:3000});
- await tabsPage.screenshot({path:path.join(out,'active-tab-640.png')});await tabsPage.close();
+ await tabsPage.screenshot({path:path.join(out,'active-tab-640.png')});
+ await tabsPage.setViewportSize({width:480,height:800});await tabsPage.getByRole('button',{name:/^Chat/}).click();
+ const hint=tabsPage.getByText('Type @ to attach the repo or files for an investigation.',{exact:true});await hint.waitFor({timeout:3000});
+ const hintRect=await hint.boundingBox();assert(hintRect.height<=18,'Investigation hint stays on one line');
+ const composer=tabsPage.getByRole('textbox',{name:'Message Aitiarch AI'}),before=(await composer.boundingBox()).y;
+ await tabsPage.route('**/api/conversation/files?*',route=>route.fulfill({json:{files:[],notes:['api.md']}}));
+ await composer.fill('@api');await tabsPage.locator('[role=listbox] [data-at="note:api.md"]').click();await hint.waitFor({state:'hidden'});
+ assert(Math.abs((await composer.boundingBox()).y-before)<1,'Adding context does not shift the composer when the hint hides');
+ assert.equal(await tabsPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'480px chat has no sideways overflow');await tabsPage.close();
  assert.equal(calls,0);assert.deepEqual(await readFile(path.join(root,'notebook.md')),bytes);await writeFile(path.join(out,'rects.json'),JSON.stringify(measurements,null,2));console.log('PASS: narrow headers, active tab at 640, thread/footer clearance, 320/360 no overflow, byte identity, no calls');
 }finally{await browser.close();watcher.stop();await app.close();console.log('Synthetic fixture retained: '+root);}

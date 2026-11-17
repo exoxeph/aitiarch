@@ -476,6 +476,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
   </div>}
   <CouncilPanel open={mode==='council'} onSelected={setCouncilProviders} reviewRef={councilReview} conversation={conversation} note={openPath} notes={[...otherNotes,...attach.filter(c=>c.kind==='note').map(c=>(c as {path:string}).path)]} question={draft} disabled={composing||busy} onConversation={(id,home)=>{onConversation(id,home);setListRefresh(n=>n+1);}} onSent={asked=>{setDraft(current=>current.trim()===asked?'':current);setListRefresh(n=>n+1);}} onHistory={setCouncilRuns} onBusy={setBusy}/>
   </div>
+  <p className="chat-investigate-hint" data-attached={attach.length>0||mode==='council'||undefined} title="Type @ to attach the repo or files for an investigation.">Type @ to attach the repo or files for an investigation.</p>
   <form className="chat-composer" onSubmit={e=>{e.preventDefault();if(at&&atItems.length){pickAt(atItems[Math.min(at.index,atItems.length-1)]);return;}void submit();}}>
    {at&&<div className="chat-at" role="listbox" aria-label="Attach a note, a file or the repo" id="chat-at-list">
     {atItems.length===0?<p className="chat-at-none">Nothing matches “{at.query}”.</p>:atItems.map((it,i)=><button key={atItemKey(it)} type="button" role="option" aria-selected={i===at.index} tabIndex={-1} className="chat-at-opt" data-at={atItemKey(it)}

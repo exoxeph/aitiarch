@@ -1415,6 +1415,8 @@ p.chat-wait { margin: 4px 0 0; }
 .chat-attach-why { color: var(--muted); }
 .chat-attach[data-refused] .chat-attach-why { color: var(--danger); }
 /* The "@" picker: a list just above the composer. */
+.chat-investigate-hint { margin: 0 16px 4px; min-height: 16px; line-height: 16px; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-investigate-hint[data-attached="true"] { visibility: hidden; }
 .chat-composer { position: relative; }
 .chat-at { position: absolute; z-index: 60; left: 0; right: 0; bottom: calc(100% + 4px); max-height: 40vh; overflow: auto; padding: 4px; background: var(--paper-2); border: 1px solid var(--control-border); border-radius: var(--radius-card); box-shadow: var(--shadow-page); }
 .chat-at-opt { display: flex; gap: 8px; width: 100%; box-sizing: border-box; padding: 6px 8px; border: 0; border-radius: var(--radius-small); background: transparent; color: var(--ink-text); font: 400 var(--text-control)/1.3 var(--font-ui); text-align: left; cursor: pointer; }
