@@ -13,12 +13,12 @@ export function createInvokedCodexBridge(options:{
  adapter:TurnAdapter;checkAvailability:Provider['checkAvailability'];cap:CouncilCap;
  onTurn:(metadata:InvokedTurnMetadata)=>Promise<void>;
  /** Revalidate the one-use review after metadata awaits, before any transport. */
- beforeTurn?:()=>Promise<void>;
+ beforeTurn?:(packet:ReturnType<typeof prepareRequest>)=>Promise<void>;
 }):Provider {
  if(options.adapter.id!=='codex'||options.cap.unit!=='tokens')throw new Error('Codex invoked bridge requires the Codex token-cap transport.');
  const cap=structuredClone(options.cap),maxOutputBytes=activePipelineConfig().council.outputBytes;
  return {name:'codex',checkAvailability:options.checkAvailability,async invoke(request,invokeOptions){
-  if(request.chat||request.render||request.turns.length)throw new ProviderError('unsupported_cli','This bridge supports text-only Think and Ask without session history.');
+  if(request.chat||request.render)throw new ProviderError('unsupported_cli','This bridge supports structured text-only requests without CLI session history.');
   const availability=await options.checkAvailability();
   if(!availability.available)throw new ProviderError(availability.code,availability.message);
   const packet=prepareRequest(request);
@@ -34,7 +34,7 @@ export function createInvokedCodexBridge(options:{
     yield event;
    }
   }};
-  await options.beforeTurn?.();
+  await options.beforeTurn?.(packet);
   const turn=await runTurn(transport,{question,notes:[],outputFormat:'invoked-json',cap:{unit:cap.unit,amount:cap.amount},
    deadlineMs:Math.min(cap.deadlineMs,invokeOptions?.timeoutMs??cap.deadlineMs),maxOutputBytes},invokeOptions?.signal);
   await options.onTurn({provider:turn.provider,status:turn.status,usage:turn.usage,durationMs:turn.durationMs,

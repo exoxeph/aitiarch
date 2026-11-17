@@ -1,7 +1,7 @@
 import {isDiagramIssue,readDiagram,type Diagram,type DiagramIssue} from './diagram.ts';
 import type {Generation,InkItem} from './ink.ts';
 export type ThreadProvider='claude'|'chatgpt-plan'|'codex';
-export const failureCodes=['unavailable','disabled','hourly_cap','usage_limit','validation','interrupted','protocol','timeout','cancelled','provider_error','persistence'] as const;
+export const failureCodes=['unavailable','disabled','hourly_cap','usage_limit','validation','interrupted','protocol','timeout','cancelled','provider_error','persistence','review_changed'] as const;
 export type ThreadFailure=typeof failureCodes[number];
 export interface ThreadReply {diagram?:Diagram;diagramIssue?:DiagramIssue;body:string;generation:Generation;id:string;parentId:string;failure?:{code:ThreadFailure}}
 export interface ThreadRecord {

@@ -213,7 +213,7 @@ export function createApp(opts: AppOptions) {
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
     name:'claude',checkAvailability:async()=>({available:false,code:'unsupported_cli',message:'Provider disabled. Enable it explicitly at server startup.'}),invoke:async()=>{throw new ProviderError('unsupported_cli');}
-  },path=>{for(const c of clients)c.write(`event: ink\ndata: ${JSON.stringify({type:'ink',path})}\n\n`);},node=>nodeSettings.extras(node)));
+  },path=>{for(const c of clients)c.write(`event: ink\ndata: ${JSON.stringify({type:'ink',path})}\n\n`);},node=>nodeSettings.extras(node),opts.provider?.name==='chatgpt-plan'?undefined:opts.council?.routing));
   async function readUiState(): Promise<UiState> {
     try { const {v,tabs,active,treeCollapsed,theme,confirmAdd,typingHelp,doubleSpacePeriod,smartCorrections,neverCorrect}=await uiStateStore.read();return {v,tabs,active,...(treeCollapsed!==undefined?{treeCollapsed}:{}),...(theme!==undefined?{theme}:{}),...(confirmAdd!==undefined?{confirmAdd}:{}),...(typingHelp!==undefined?{typingHelp}:{}),...(doubleSpacePeriod!==undefined?{doubleSpacePeriod}:{}),...(smartCorrections!==undefined?{smartCorrections}:{}),...(neverCorrect!==undefined?{neverCorrect}:{})}; }
     catch { return {v:1,tabs:[],active:null}; }
@@ -606,12 +606,12 @@ export function createApp(opts: AppOptions) {
         if(url.pathname==='/api/threads/brought'){if(typeof b.noteVersion!=='string')throw new Error('Missing note version.');await threads.brought(b.path,b.id,b.noteVersion);return json(res,200,{});}
         if(url.pathname==='/api/threads/action')return json(res,200,await threads.act(b.path,b.id,b.version,b.action));
         if(url.pathname==='/api/threads/notice'){
-          const a=await (await assistance).availability();return json(res,200,await threads.providerNotice(b.path,b.id,a.provider==='chatgpt-plan'?'chatgpt-plan':'claude'));
+          return json(res,200,await runtime.notice(b.path,b.id));
         }
         if(url.pathname==='/api/threads/preview')return json(res,200,await runtime.preview(b));
         if(url.pathname==='/api/threads/invoke')return json(res,202,await runtime.start(b as ThreadRequest));
         if(url.pathname==='/api/threads/shown')return json(res,200,await threads.shown(b.path,b.id,b.replyId));
-        if(url.pathname==='/api/threads/status')return json(res,200,{status:runtime.status(b.replyId)});
+        if(url.pathname==='/api/threads/status')return json(res,200,{status:runtime.status(b.replyId),...runtime.accounting(b.replyId)});
         if(url.pathname==='/api/threads/retry-save'){await runtime.retrySave(b.replyId);return json(res,200,await threads.read(b.path));}
         if(url.pathname==='/api/threads/cancel'){runtime.cancel(b.replyId);return json(res,200,{});}
       }catch(e){return json(res,409,{error:'thread_conflict',message:e instanceof Error?e.message:'Thread action failed. Original preserved.'});}

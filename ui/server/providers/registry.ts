@@ -20,6 +20,7 @@ export interface ProviderDescriptor {
  readonly models:()=>Promise<{source:'default';models:readonly {id:null;label:string}[];reason:string}>;
  readonly createToollessAdapter:()=>TurnAdapter;
  readonly createInvokedProvider?:InvokedBridgeFactory;
+ readonly createThreadProvider?:InvokedBridgeFactory;
 }
 export interface Unavailable {
  available:false;provider:SetupProvider|null;role:SetupRole;
@@ -48,16 +49,17 @@ function freeze<T>(v:T):T {
 }
 /** Wrap an existing tool-less instance; never constructs a harness or changes flags.
  * Bridges describe already wired legacy Claude paths, not grants to use read tools. */
-export function descriptorFromAdapter(adapter:TurnAdapter,options:{detect:()=>Promise<Detection>;invokedBridge?:InvokedBridgeFactory;bridges?:Partial<Record<'invoked'|'thread-reply'|'investigate-read'|'skill-diagram',boolean>>}):ProviderDescriptor {
+export function descriptorFromAdapter(adapter:TurnAdapter,options:{detect:()=>Promise<Detection>;invokedBridge?:InvokedBridgeFactory;threadReplyBridge?:InvokedBridgeFactory;bridges?:Partial<Record<'invoked'|'thread-reply'|'investigate-read'|'skill-diagram',boolean>>}):ProviderDescriptor {
  if(!SETUP_PROVIDERS.includes(adapter.id as SetupProvider))throw Error('Unknown registry provider');
  const id=adapter.id as SetupProvider;
  const capabilities:Record<SetupRole|'vision',boolean>={'normal-chat':true,council:true,invoked:false,'thread-reply':false,'investigate-read':false,'skill-diagram':false,vision:false};
  if(id==='claude')for(const role of ['invoked','thread-reply','investigate-read','skill-diagram'] as const)capabilities[role]=options.bridges?.[role]===true;
  if(id==='codex')capabilities.invoked=typeof options.invokedBridge==='function';
+ if(id==='codex')capabilities['thread-reply']=typeof options.threadReplyBridge==='function';
  return freeze({id,label:adapter.label,safetyLabel:adapter.safetyLabel,capabilities,
   vision:{available:false,reason:'Image input for this role, model and isolated transport is not verified.'},
   detect:options.detect,models:async()=>({source:'default' as const,models:[{id:null,label:'Default'}],reason:'Model catalog is not verified yet; use the CLI default.'}),
-  createToollessAdapter:()=>adapter,...(id==='codex'&&options.invokedBridge?{createInvokedProvider:options.invokedBridge}:{})});
+  createToollessAdapter:()=>adapter,...(id==='codex'&&options.invokedBridge?{createInvokedProvider:options.invokedBridge}:{}),...(id==='codex'&&options.threadReplyBridge?{createThreadProvider:options.threadReplyBridge}:{})});
 }
 /** Initial setup suggestion only, never applied over a stored choice. No discovery or fallback. */
 export function compatibleDefaults(providers:readonly ProviderDescriptor[]):MachineSetup {

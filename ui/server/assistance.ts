@@ -16,16 +16,12 @@ import { ProductValidationError, validateProductResult, validationCounts, type V
 import { privateValidationLog } from './providers/failure-metrics.ts';
 import type { ExtrasFor } from './node-settings.ts';
 import { nodeFor, SKILLS_ONLY_WITH_SKILL_RENDERER, type SkillsReview } from '../shared/node-settings.ts';
-import {activePipelineConfig} from '../shared/pipeline-config.ts';
 import type {CouncilCap} from '../shared/council.ts';
-import {invokedUsage,type InvokedUsage} from '../shared/invoked-usage.ts';
+import type {InvokedUsage} from '../shared/invoked-usage.ts';
 import type {RoleRouting} from './providers/routing.ts';
-import type {ProviderDescriptor} from './providers/registry.ts';
-import type {InvokedTurnMetadata} from './providers/invoked-bridge.ts';
+import {ProviderReviews,type ReviewedInvocation} from './providers/invoked-review.ts';
 
-interface ReviewedInvocation {created:number;fingerprint:string;packet:string;contextKey:string;provider:ProviderDescriptor;cap:CouncilCap|null}
 const invocationFingerprint=(v:Invocation)=>textHash(JSON.stringify([v.id,v.path,v.action,v.question,v.text,v.from,v.to,v.renderer,v.skill]));
-const staleReview=()=>new PathError(409,'stale_review','The request or selected provider changed. Review again before sending. No provider was called.');
 
 interface Job { path: string; controller: AbortController; done: Promise<void>; run: () => Promise<void>; status: 'queued' | 'pending' | 'complete' | 'error' | 'cancelled' | 'persistence_error'; retry?: () => Promise<void>;usage?:InvokedUsage;notice?:string }
 export class Assistance {
@@ -42,9 +38,10 @@ export class Assistance {
   private notify: (path: string) => void;
   private readonly validationLog:ValidationLog;
   private readonly routing?:RoleRouting;
-  private reviews=new Map<string,ReviewedInvocation>();
+  private reviews:ProviderReviews;
   constructor(store: Store, ink: InkStore, provider: Provider, notify: (path: string) => void = () => {}, validationLog:ValidationLog=privateValidationLog(), extras?: ExtrasFor,routing?:RoleRouting) {
     this.routing=routing;
+    this.reviews=new ProviderReviews('invoked',routing,provider);
     this.validationLog=validationLog;this.extras=extras;
     this.store = store; this.ink = ink; this.provider = provider; this.notify = notify;
     this.ledger = new LedgerStore(store.rootReal);
@@ -71,19 +68,10 @@ export class Assistance {
     return { body: skillDiagramFallbackBody(skills, svg.reason), model, skillDiagram: { ...await this.skillDiagrams.saveHtml(document), why: svg.reason } as SkillDiagramRef | undefined, diagramIssue: undefined as DiagramIssue | undefined };
   }
   private async selection(){
-    if(!this.routing)return undefined;
-    const snapshot=await this.routing(),provider=snapshot.resolveRole('invoked');
-    if('available' in provider)throw new PathError(409,provider.code,provider.reason);
-    if(provider.id==='kiro'||provider.id==='codex'&&!provider.createInvokedProvider)throw new PathError(409,'role-unavailable','This invoked provider has no verified bridge. No other provider was tried.');
-    if(provider.id==='claude'&&this.provider.name&&this.provider.name!=='claude')throw new PathError(409,'provider-unavailable','Claude is not configured for invoked requests. No other provider was tried.');
-    return {provider,contextKey:snapshot.contextKey('invoked'),currentContextKey:snapshot.currentContextKey};
+    return this.reviews.selection();
   }
   private async assertReviewed(review:ReviewedInvocation){
-    const current=await this.selection();
-    let freshKey:string|undefined;
-    try{freshKey=await current?.currentContextKey?.('invoked');}catch{throw staleReview();}
-    const cap=review.provider.id==='codex'?activePipelineConfig().council.caps.codex:null;
-    if(!current||Date.now()-review.created>600000||review.contextKey!==current.contextKey||review.contextKey!==freshKey||review.provider.id!==current.provider.id||JSON.stringify(review.cap)!==JSON.stringify(cap))throw staleReview();
+    return this.reviews.assert(review);
   }
   async availability() {
     try{const selection=await this.selection();
@@ -111,11 +99,7 @@ export class Assistance {
     // The instruction in the packet is the exact text; "skills" beside it says what was loaded, skipped or not installed.
     const prepared=review?{...packet,skills:review}:packet;
     if(!selected)return prepared;
-    const id=randomUUID(),cap=selected.provider.id==='codex'?structuredClone(activePipelineConfig().council.caps.codex):null;
-    for(const [key,value] of this.reviews)if(Date.now()-value.created>600000)this.reviews.delete(key);
-    if(this.reviews.size>=100)this.reviews.delete(this.reviews.keys().next().value!);
-    this.reviews.set(id,{created:Date.now(),fingerprint:invocationFingerprint(frozen),packet:JSON.stringify(packet),contextKey:selected.contextKey,provider:selected.provider,cap});
-    return {...prepared,review:{id,provider:selected.provider.id,cap}};
+    return {...prepared,review:this.reviews.issue(selected,invocationFingerprint(frozen),packet)};
   }
   private serial<T>(fn: () => Promise<T>): Promise<T> { const p = this.writes.catch(() => {}).then(fn); this.writes = p; return p; }
   private async mutate(path: string, before: string, change: (items: InkItem[], text: string | null) => InkItem[]): Promise<InkSnapshot> {
@@ -144,26 +128,10 @@ export class Assistance {
     // Transcript context stays none. Optional source selection is a later slice;
     // never discover a user's global sessions or transmit one implicitly.
     const packet = prepareRequest(request);
-    let provider=this.provider,accounted=false,reviewed:ReviewedInvocation|undefined;
+    let provider=this.provider,reviewed:ReviewedInvocation|undefined;
     if(this.routing){
-      const review=frozen.reviewId?this.reviews.get(frozen.reviewId):undefined;
-      if(!review||Date.now()-review.created>600000)throw staleReview();
-      await this.assertReviewed(review);
-      if(review.fingerprint!==invocationFingerprint(frozen)||review.packet!==JSON.stringify(packet))throw staleReview();
-      reviewed=review;
-      if(review.provider.id==='codex'){
-        provider=review.provider.createInvokedProvider!({cap:review.cap!,beforeTurn:()=>this.assertReviewed(review),onTurn:async(metadata:InvokedTurnMetadata)=>{
-          if(accounted)return;
-          const usage=invokedUsage(metadata.usage,review.cap!.amount);accounted=true;job.usage=usage;
-          const saved=await appendLedger(this.ledger,{id:textHash('invoked:'+frozen.id),inkId:frozen.id,requestId:frozen.id,note:path,event:'invoked_turn',at:new Date().toISOString(),
-            invoked:{...usage,status:metadata.status,durationMs:metadata.durationMs}});
-          if(!saved)job.notice='Usage ledger unavailable; the event is queued for retry. The answer is preserved.';
-        }});
-      }
-      // The check and consumption are synchronous, so two sends cannot spend one
-      // review twice. A missing/over-cap report never grants another run.
-      if(this.reviews.get(frozen.reviewId!)!==review)throw staleReview();
-      this.reviews.delete(frozen.reviewId!);
+      reviewed=await this.reviews.consume(frozen.reviewId,invocationFingerprint(frozen),packet);
+      provider=this.reviews.provider(reviewed,this.ledger,{id:frozen.id,requestId:frozen.id,note:path},(usage,notice)=>{job.usage=usage;if(notice)job.notice=notice;});
     }
     this.checkSkillRenderer(frozen.renderer,request,provider.name);
     const availability = await provider.checkAvailability();

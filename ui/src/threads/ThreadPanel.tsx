@@ -10,10 +10,12 @@ import {api,type InkSnapshot} from '../api.ts';
 import {rememberQuestion,recalledQuestion,forgetQuestion} from './questions.ts';
 import {SkillsReviewList} from '../skills/SkillsReviewList.tsx';
 import type {SkillsReview} from '../../shared/node-settings.ts';
+import {invokedUsageLabel,type InvokedUsage} from '../../shared/invoked-usage.ts';
 /** The persistence notice lives in the one status spot at the bottom of the app; if that is not mounted it renders in place. */
 const statusLabel=(s:string)=>({open:'Open',resolved:'Resolved',dismissed:'Dismissed',orphaned:'Needs re-attaching',has_takeaway:'Takeaway written',skipped:'Takeaway skipped'} as Record<string,string>)[s]??s;
 const statusNotice=(node:ReactNode)=>{const slot=document.getElementById('status-notice-slot');return slot?createPortal(node,slot):node;};
 export const failureLabels:Record<ThreadFailure,string>={
+ review_changed:'The request or selected provider changed. Review again before sending. No provider was called.',
  disabled:'Provider disabled. Enable it explicitly at server startup.',unavailable:'Provider unavailable. Check your CLI or connection.',
  hourly_cap:'Hourly cap reached. No request was sent.',usage_limit:'Plan usage limit reached. No automatic retry.',
  validation:'Answer rejected by validation. No partial answer was accepted.',interrupted:'Request interrupted. No automatic retry.',
@@ -58,13 +60,14 @@ export function ThreadPanel(props:Props){
 function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgnoreNotice=true}:Props&{item:InkItem;memory:Map<string,MemoryDraft>}){
  const key=path+':'+item.id;let entry=memory.get(key);if(!entry){entry={text:'',revision:null,loaded:false,dirty:false,enabled:false,sequence:0,queue:Promise.resolve()};memory.set(key,entry);}const draft=entry;
  const [text,setText]=useState(draft.text),[draftNotice,setDraftNotice]=useState(false),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[confirmDelete,setConfirmDelete]=useState(false);
- const [question,setQuestion]=useState(''),[review,setReview]=useState<null|{purpose:'followup'|'summary';replyId:string;parentId:string;provider:string;required:boolean;from:string|null;description:string;packet:unknown;noteVersion:string;question:string;skills?:SkillsReview}>(null),[confirmed,setConfirmed]=useState(false);
+ const [question,setQuestion]=useState(''),[review,setReview]=useState<null|{purpose:'followup'|'summary';replyId:string;parentId:string;provider:string;required:boolean;from:string|null;description:string;packet:unknown;noteVersion:string;question:string;skills?:SkillsReview;reviewId?:string;cap?:{amount:number;unit:string}|null}>(null),[confirmed,setConfirmed]=useState(false);
+ const [accounting,setAccounting]=useState<Record<string,{usage:InvokedUsage;notice?:string}>>({});
  const [saveFailures,setSaveFailures]=useState<string[]>([]);
  const mounted=useRef(true),card=useRef<HTMLElement|null>(null),seen=useRef(new Set<string>()),live=useRef({item,version,saved});live.current={item,version,saved};
  const t=item.thread??newThread(item),revealed=t.takeaway.state!=='untouched'||t.summary.revealedAt!==null;
  useEffect(()=>{let cancelled=false;const pending=[...t.followups,...(t.summary.reply?[t.summary.reply]:[])].filter(r=>r.generation.status==='pending');
-  const check=async()=>{for(const r of pending){try{const s=await api.threadCall<{status:string}>('status',{path,id:item.id,replyId:r.id});if(!cancelled&&s.status==='persistence')setSaveFailures(all=>all.includes(r.id)?all:[...all,r.id]);}catch{}}};
-  if(pending.length)void check();const timer=setInterval(()=>void check(),800);return()=>{cancelled=true;clearInterval(timer);};
+  const check=async()=>{for(const r of [...t.followups,...(t.summary.reply?[t.summary.reply]:[])]){try{const s=await api.threadCall<{status:string;usage?:InvokedUsage;notice?:string}>('status',{path,id:item.id,replyId:r.id});if(!cancelled){if(s.status==='persistence')setSaveFailures(all=>all.includes(r.id)?all:[...all,r.id]);if(s.usage)setAccounting(all=>({...all,[r.id]:{usage:s.usage!,notice:s.notice}}));}}catch{}}};
+  void check();const timer=pending.length?setInterval(()=>void check(),800):undefined;return()=>{cancelled=true;clearInterval(timer);};
  },[path,item.id,t.followups,t.summary.reply]);
  const update=(s:InkSnapshot)=>live.current.saved(s);
  const fail=(e:unknown)=>setNotice(e instanceof Error?e.message:'Action failed. Original preserved.');
@@ -103,13 +106,14 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgno
  const prepare=async(purpose:'followup'|'summary')=>{
   setBusy(true);setNotice('');try{
    const a=await api.assistance(),notice=await api.threadCall<{required:boolean;from:string|null;to:string;description:string}>('notice',{path,id:item.id});
-   const replyId=crypto.randomUUID(),response=await api.threadCall<{packet:unknown;noteVersion:string;skills?:SkillsReview}>('preview',{path,id:item.id,purpose,question,replyId});
    const replies=[initial,...t.followups,...(t.summary.reply?[t.summary.reply]:[])].filter(r=>r.generation.status==='complete');
-   setConfirmed(!notice.required);setReview({purpose,replyId,parentId:replies.at(-1)?.id??item.id,provider:a.provider??'claude',question,...notice,...response});
+   const replyId=crypto.randomUUID(),parentId=replies.at(-1)?.id??item.id,response=await api.threadCall<{packet:unknown;noteVersion:string;skills?:SkillsReview;review?:{id:string;provider:string;cap:{amount:number;unit:string}|null};notice?:typeof notice}>('preview',{path,id:item.id,purpose,question,replyId,parentId});
+   const pinnedNotice=response.notice??notice;
+   setConfirmed(!pinnedNotice.required);setReview({purpose,replyId,parentId,provider:response.review?.provider??a.provider??'claude',question,...pinnedNotice,...response,reviewId:response.review?.id,cap:response.review?.cap});
   }catch(e){fail(e);}finally{setBusy(false);}
  };
  const send=async()=>{if(!review||busy||!confirmed)return;setBusy(true);try{
-  const body={path,id:item.id,inkVersion:live.current.version,replyId:review.replyId,parentId:review.parentId,purpose:review.purpose,question:review.question,noteVersion:review.noteVersion,confirmed};
+  const body={path,id:item.id,inkVersion:live.current.version,replyId:review.replyId,parentId:review.parentId,purpose:review.purpose,question:review.question,noteVersion:review.noteVersion,confirmed,...(review.reviewId?{reviewId:review.reviewId}:{})};
   const s=await api.threadCall<InkSnapshot>('invoke',body);rememberQuestion(path,review.replyId,review.purpose==='summary'?'Closing summary':review.question);update(s);setQuestion('');setReview(null);
  }catch(e){fail(e);}finally{setBusy(false);}};
  if(t.dismissed)return <article className="thread-card"><p>Thread dismissed; replies and your work are preserved.</p><button disabled={busy} onClick={()=>void act({type:'restore'})}>Restore thread</button><button onClick={()=>setConfirmDelete(true)}>Delete thread…</button>{confirmDelete&&<DeleteConfirm busy={busy} cancel={()=>setConfirmDelete(false)} remove={()=>void act({type:'delete',confirmed:true})}/ >}</article>;
@@ -117,6 +121,7 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgno
   {quoteShown(item)&&<blockquote>{item.anchor.quote}</blockquote>}
   <p className="small muted">{statusLabel(threadStatus(item))}{item.attachment.status==='orphaned'?' · Re-attach using the orphan list above. Your takeaway is preserved.':''}</p>
   <ReplyStack replies={[initial,...t.followups]} question={id=>recalledQuestion(path,id)??questionPlaceholder} cancel={replyId=>void api.threadCall('cancel',{path,id:item.id,replyId})} onAdd={r=>card.current?.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id,...(r.id===item.id?{}:{replyId:r.id})}}))}/>
+  {Object.entries(accounting).map(([id,a])=><p className="small muted" key={id}>{invokedUsageLabel(a.usage)}{a.notice&&<span role="status">{a.notice}</span>}</p>)}
   {notice&&<p role="alert">{notice}</p>}
   {saveFailures.filter(id=>[...t.followups,...(t.summary.reply?[t.summary.reply]:[])].some(r=>r.id===id&&r.generation.status==='pending')).map(id=><p key={id} role="alert">{failureLabels.persistence}<button onClick={async()=>{try{update(await api.threadCall<InkSnapshot>('retry-save',{path,id:item.id,replyId:id}));setSaveFailures(all=>all.filter(x=>x!==id));}catch(e){fail(e);}}}>Retry saving reply (no new call)</button></p>)}
   {draftNotice&&showIgnoreNotice&&statusNotice(<span className="status-notice" role="note"><span className="status-notice-text" title="To save drafts privately, add /ui-state.json* to this folder's .gitignore.">Your draft stays in memory for now. To save it privately, add <code>/ui-state.json*</code> to this folder’s <code>.gitignore</code>.</span>
@@ -128,6 +133,7 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgno
   <div className="writeback"><input aria-label="Write back" placeholder="Write back…" value={question} disabled={!!review||busy} maxLength={8000} onChange={e=>setQuestion(e.target.value)}/>
   <button className="send-arrow" aria-label="Review reply" title="Review reply" disabled={busy||!question.trim()||item.attachment.status!=='attached'} onClick={()=>void prepare('followup')}><span aria-hidden="true"/></button></div>
   {review&&<section className="thread-request" aria-label="Review thread request"><p>Send to {providerLabel(review.provider)}. Note and selection frozen by version; changes require a new review.</p>
+   {review.cap&&<p className="small muted">Allowance for this request: {review.cap.amount.toLocaleString()} {review.cap.unit}. Reported after the turn; if unreported, the full allowance is charged conservatively. Another reply needs a new review.</p>}
    <SkillsReviewList review={review.skills}/>
    <details><summary>Exact redacted request</summary><pre>{JSON.stringify(review.packet,null,2)}</pre></details>
    {review.required&&<label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>Switch from {providerLabel(review.from??'claude')} to {providerLabel(review.provider)}: {review.description} Confirm this first change.</label>}

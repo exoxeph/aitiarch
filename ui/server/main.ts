@@ -85,7 +85,7 @@ const openProject = async (entry: ProjectEntry) => {
   const usage = new UsageLogs({ notebookRoot: store.rootReal });
   const provider = plan ?? (args.claude ? createProvider({ provider: defaults.roles.chat, command: args.claude, contract: "claude-canary-2.1.205", usageLog: usage }) : undefined);
   const adapters=councilAdapters(args.claude,args.codex),availabilityChecks=councilLocalChecks(args.claude,args.codex);
-  const routing=roleRouting({dir:configFolder,adapters,checks:availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!args.claude,codexInvokedBridge:createInvokedCodexBridge});
+  const routing=roleRouting({dir:configFolder,adapters,checks:availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!args.claude,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true});
   const app = createApp({ pipelineConfigDir: configFolder, store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, council:{adapters,availabilityChecks,routing}, harness: args.claude ? { command: args.claude } : undefined });
   return { handle: app.handle, close: async () => { watcher.stop(); await plan?.close(); await app.close(); } };
 };
