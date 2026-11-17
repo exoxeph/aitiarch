@@ -6,16 +6,25 @@ import {COUNCIL_DEFAULT_CAPS,validCouncilGrant,type CouncilGrant,type CouncilPro
 import {runTurn,type TurnAdapter,type TurnResult} from './providers/turn.ts';import {redact} from './providers/index.ts';import {parseClaimsBlock,finishReply} from './chat/reply.ts';import {secretKinds} from './chat/secrets.ts';
 import {CouncilHistory,type CouncilRun} from './council-history.ts';import type {CouncilStreamEvent} from '../shared/council-stream.ts';
 import {CouncilAvailability,type AvailabilityCheck} from './providers/council-availability.ts';
+import type {RoleRouting} from './providers/routing.ts';
+import type {RequestSettingsSnapshot} from './providers/registry.ts';
 interface CouncilInput {conversation:string;providers:CouncilProvider[];notes:string[];question:string;caps?:Partial<Record<CouncilProvider,CouncilCap>>;hash?:string}
 const sha=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const unsigned=(g:CouncilGrant)=>{const {confirmed,...rest}=g;return rest;};
-export interface CouncilOptions {store:Store;ink:InkStore;index:SessionIndex;ledger:LedgerStore;adapters:TurnAdapter[];availabilityChecks?:AvailabilityCheck[];history?:CouncilHistory}
+export interface CouncilOptions {store:Store;ink:InkStore;index:SessionIndex;ledger:LedgerStore;adapters:TurnAdapter[];availabilityChecks?:AvailabilityCheck[];history?:CouncilHistory;routing?:RoleRouting}
 export class CouncilService {
  private versionsLogged=new Set<string>();
  readonly availability:CouncilAvailability;
  history(id?:string){if(!this.o.history)throw Error('history_unavailable');return id===undefined?this.o.history.list():this.o.history.get(id);}
  private o:CouncilOptions;private project:string;private running=new Map<string,{id:string;controller:AbortController}>();private aborters=new Set<AbortController>();
  constructor(o:CouncilOptions){this.o=o;this.project=projectId(o.store.rootReal);this.availability=new CouncilAvailability(o.availabilityChecks??[]);}
+ async available(refresh=false){
+  const snapshot=await this.o.routing?.(),providers=await this.availability.get(refresh);
+  return {providers:providers.map(p=>{
+   const selected=snapshot?.resolveParticipant(p.id as CouncilProvider);
+   return selected&&'available' in selected?{...p,available:false,reason:selected.reason}:p;
+  }),...(snapshot?{reason:snapshot.council().reason}:{})};
+ }
  private async clean(raw:unknown){
   if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('notes_only');const b=raw as CouncilInput;
   if(Object.keys(b).some(k=>!['conversation','providers','notes','question','caps','hash'].includes(k)))throw Error('notes_only');
@@ -34,21 +43,24 @@ export class CouncilService {
   }
   return {b:structuredClone(b),session,grant,sources,question:redact(b.question)};
  }
- async plan(raw:unknown){const {session,grant}=await this.clean(raw);const have=session.councilGrant;
+ async plan(raw:unknown,snapshot?:RequestSettingsSnapshot){snapshot??=await this.o.routing?.();const {session,grant}=await this.clean(raw);const have=session.councilGrant;
   const verified=have&&validCouncilGrant(have)&&have.project===this.project&&have.session===session.id&&sha(unsigned(have))===have.confirmed;
   const covered=verified&&grant.providers.every(id=>have.providers.includes(id)&&have.caps[id]!.unit===grant.caps[id]!.unit&&have.caps[id]!.amount>=grant.caps[id]!.amount&&have.caps[id]!.deadlineMs>=grant.caps[id]!.deadlineMs);
-  return {profile:'council' as const,conversation:session.id,providers:grant.providers.map(id=>({id,safetyLabel:this.o.adapters.find(a=>a.id===id)?.safetyLabel??defaults.safetyLabels[id],cap:grant.caps[id],metering:'after-turn; deadline is hard'})),tools:[] as string[],notesOnly:true,needsApproval:!covered,...(!covered?{reason:'Re-approve the Council plan. A provider grant may have been revoked after reported usage exceeded its cap.'}:{}),hash:sha(unsigned(grant)),grant};
+  const eligibility=snapshot?.council();
+  return {profile:'council' as const,conversation:session.id,providers:grant.providers.map(id=>{const selected=snapshot?.resolveParticipant(id);return {id,safetyLabel:selected&&!('available' in selected)?selected.safetyLabel:this.o.adapters.find(a=>a.id===id)?.safetyLabel??defaults.safetyLabels[id],...(selected&&'available' in selected?{available:false,reason:selected.reason}:{}),cap:grant.caps[id],metering:'after-turn; deadline is hard'};}),tools:[] as string[],notesOnly:true,needsApproval:!covered,...(eligibility&&!eligibility.available?{reason:eligibility.reason}:!covered?{reason:'Re-approve the Council plan. A provider grant may have been revoked after reported usage exceeded its cap.'}:{}),hash:sha(unsigned(grant)),grant};
  }
  async approve(raw:unknown){const b=raw as CouncilInput,p=await this.plan(raw);if(typeof b.hash!=='string'||b.hash!==p.hash)throw Error('plan_changed');await this.o.index.setCouncilGrant(p.conversation,{...p.grant,confirmed:p.hash});return {approved:true};}
  cancel(conversation:unknown,runId:unknown){const active=typeof conversation==='string'?this.running.get(conversation):undefined;if(!active||active.id!==runId)throw Error('invalid_run');active.controller.abort();}
  async run(raw:unknown,signal?:AbortSignal,emit?:(event:CouncilStreamEvent)=>void){
-  const frozen=structuredClone(raw),{b,grant,sources,question}=await this.clean(frozen);if((await this.plan(frozen)).needsApproval)throw Error('plan_required');
+  const snapshot=await this.o.routing?.();
+  const frozen=structuredClone(raw),{b,grant,sources,question}=await this.clean(frozen);if((await this.plan(frozen,snapshot)).needsApproval)throw Error('plan_required');
   if(this.running.has(b.conversation))throw Error('already_running');const controller=new AbortController(),run:CouncilRun={id:randomUUID(),question,notes:b.notes,startedAt:new Date().toISOString(),finishedAt:'',providers:b.providers.map(id=>({id,safetyLabel:this.o.adapters.find(a=>a.id===id)?.safetyLabel??defaults.safetyLabels[id]})),results:[]};this.running.set(b.conversation,{id:run.id,controller});this.aborters.add(controller);const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   let ledgerUnavailable=false,historyUnavailable=false,pruned=0;
   const save=async()=>{try{if(this.o.history)pruned=(await this.o.history.saveRun(b.conversation,run)).pruned;}catch{historyUnavailable=true;}};
   try{await save();for(const provider of b.providers)emit?.({type:'provider_start',provider,run:structuredClone(run)});
   const results=await Promise.all(b.providers.map(async id=>{
-   const cap=grant.caps[id]!,adapter=this.o.adapters.find(a=>a.id===id);let result:TurnResult=adapter?await runTurn(adapter,{question,notes:sources,cap,deadlineMs:cap.deadlineMs,maxOutputBytes:activePipelineConfig().council.outputBytes},controller.signal):{provider:id,safetyLabel:defaults.safetyLabels[id],status:'unavailable',answer:'',usage:[],durationMs:0,code:'not_configured'};
+   const selected=snapshot?.resolveParticipant(id),denied=selected&&'available' in selected?selected:undefined;
+   const cap=grant.caps[id]!,adapter=selected&&!('available' in selected)?selected.createToollessAdapter():snapshot?undefined:this.o.adapters.find(a=>a.id===id);let result:TurnResult=adapter?await runTurn(adapter,{question,notes:sources,cap,deadlineMs:cap.deadlineMs,maxOutputBytes:activePipelineConfig().council.outputBytes},controller.signal):{provider:id,safetyLabel:defaults.safetyLabels[id],status:'unavailable',answer:'',usage:[],durationMs:0,code:denied?.code??'not_configured',...(denied?{message:denied.reason}:{})};
    if(result.status==='ok'){
     const block=parseClaimsBlock(result.answer);const reply=finishReply({text:result.answer,legacy:false},{note:sources[0]?.text??'',selection:'',decisions:sources.slice(1).map(s=>({id:s.id,text:s.text}))},text=>createHash('sha256').update(text).digest('hex'),redact);
     const invalid=block.block==='missing'||block.block==='malformed'||!reply.body.trim()||!!reply.citation||reply.claims.some(c=>c.status!=='found')||secretKinds(reply.body).length>0;

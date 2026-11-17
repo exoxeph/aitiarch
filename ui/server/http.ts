@@ -47,11 +47,12 @@ import {resolveConfigFolder} from './registry.ts';
 import {CouncilHistory} from './council-history.ts';
 import type {AvailabilityCheck} from './providers/council-availability.ts';
 import type {TurnAdapter} from './providers/turn.ts';
+import type {RoleRouting} from './providers/routing.ts';
 
 export interface AppOptions {
   /** The per-user folder for pipeline-config.json (the folder that holds the project list). Tests pass a temp folder; otherwise AITIARCH_CONFIG_DIR or the real config folder, which is refused under tests. */
   pipelineConfigDir?:string;
-  council?:{adapters:TurnAdapter[];index?:SessionIndex;availabilityChecks?:AvailabilityCheck[]};
+  council?:{adapters:TurnAdapter[];index?:SessionIndex;availabilityChecks?:AvailabilityCheck[];routing?:RoleRouting};
   sessionModules?:import('../shared/chat.ts').ContextModule[];
   store: Store;
   watcher: NoteWatcher;
@@ -203,8 +204,8 @@ export function createApp(opts: AppOptions) {
     investigate,gate,carried};}):Promise.resolve(null);
   // Council's app-owned conversation index needs no CLI or transcript access.
   const councilIndexReady=opts.council?harnessReady.then(async h=>opts.council!.index??h?.index??await SessionIndex.open(harnessDirectory(store.rootReal))):Promise.resolve(null);
-  const councilReady=opts.council?Promise.all([inkReady,councilIndexReady]).then(async([ink,index])=>new CouncilService({store,ink,index:index!,history:new CouncilHistory(index!,1024*1024,store.rootReal),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters})):Promise.resolve(null);
-  const normalReady=Promise.all([councilIndexReady,councilReady]).then(([index,council])=>index&&council?new NormalChat({index,questions:new QuestionStore(index.dir),council,adapters:opts.council!.adapters}):undefined);
+  const councilReady=opts.council?Promise.all([inkReady,councilIndexReady]).then(async([ink,index])=>new CouncilService({store,ink,index:index!,history:new CouncilHistory(index!,1024*1024,store.rootReal),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters,routing:opts.council!.routing})):Promise.resolve(null);
+  const normalReady=Promise.all([councilIndexReady,councilReady]).then(([index,council])=>index&&council?new NormalChat({index,questions:new QuestionStore(index.dir),council,adapters:opts.council!.adapters,routing:opts.council!.routing}):undefined);
   const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady,normalReady]).then(([ink,harness,normal])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages,normal);chatRef.resolve(runtime);return runtime;});
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const councilInsertion=insertionsReady.then(insertions=>new CouncilInsertion(store,insertions));
@@ -293,7 +294,7 @@ export function createApp(opts: AppOptions) {
         throw e;
       }
     }
-    if(url.pathname.startsWith('/api/council/')&&req.method==='GET'){const council=await councilReady;if(!council)return json(res,409,{error:'disabled'});try{if(url.pathname==='/api/council/availability')return json(res,200,{providers:await council.availability.get(url.searchParams.get('refresh')==='1')});if(url.pathname==='/api/council/history')return json(res,200,await council.history(url.searchParams.has('conversation')?url.searchParams.get('conversation')!:undefined));}catch{return json(res,409,{error:'invalid_conversation',message:'Council history could not be read for this conversation.'});}}
+    if(url.pathname.startsWith('/api/council/')&&req.method==='GET'){const council=await councilReady;if(!council)return json(res,409,{error:'disabled'});try{if(url.pathname==='/api/council/availability')return json(res,200,await council.available(url.searchParams.get('refresh')==='1'));if(url.pathname==='/api/council/history')return json(res,200,await council.history(url.searchParams.has('conversation')?url.searchParams.get('conversation')!:undefined));}catch{return json(res,409,{error:'invalid_conversation',message:'Council history could not be read for this conversation.'});}}
     if(url.pathname.startsWith('/api/council/')&&(req.method==='PUT'||req.method==='POST')){
       const council=await councilReady;if(!council)return json(res,409,{error:'disabled',message:'Council is not configured.'});
       const controller=new AbortController(),abort=()=>controller.abort();res.once('close',abort);

@@ -5,12 +5,33 @@ import {defaultMachineSetup} from '../shared/setup.ts';
 import {saveMachineSetup} from '../server/setup-store.ts';
 import {ProviderRegistry,descriptorFromAdapter,compatibleDefaults} from '../server/providers/registry.ts';
 import type {TurnAdapter} from '../server/providers/turn.ts';
+import {roleRouting} from '../server/providers/routing.ts';
 
 let dir:string;
 beforeEach(async()=>{dir=await mkdtemp(path.join(os.tmpdir(),'aitiarch-roles-'));vi.stubEnv('AITIARCH_CONFIG_DIR',dir);});
-afterEach(()=>vi.unstubAllEnvs());
+afterEach(()=>{vi.unstubAllEnvs();vi.restoreAllMocks();});
 const adapter=(id:'claude'|'codex'|'kiro',onRun=()=>{}):TurnAdapter=>({id,label:id,safetyLabel:id==='claude'?'fenced':id==='codex'?'contained':'host-gated',async *startTurn(){onRun();yield {type:'complete',answer:'Synthetic answer'};}});
 const descriptor=(id:'claude'|'codex'|'kiro')=>descriptorFromAdapter(adapter(id),{detect:async()=>({available:true,reason:null}),bridges:id==='claude'?{invoked:true,'thread-reply':true}:undefined});
+
+it('runtime routing initializes compatible single-provider roles but never overrides a saved choice',async()=>{
+ const d=adapter('codex'),snapshot=roleRouting({dir,adapters:[d],checks:[{...d,check:async()=>({available:true,reason:null})}],legacyAnswerer:()=> 'claude'});
+ const initial=await snapshot();expect(initial.resolveRole('normal-chat')).toMatchObject({id:'codex'});
+ expect(initial.resolveRole('invoked')).toMatchObject({available:false,code:'role-unavailable'});
+ expect(initial.council().reason).toMatch(/at least two/);
+ await saveMachineSetup(dir,defaultMachineSetup());
+ expect((await snapshot()).resolveRole('normal-chat')).toMatchObject({available:false,provider:'claude'});
+});
+it('absent setup preserves an explicit legacy answerer, including its unavailable reason',async()=>{
+ const d=adapter('claude'),snapshot=roleRouting({dir,adapters:[d],checks:[{...d,check:async()=>({available:true,reason:null})}],legacyAnswerer:()=> 'kiro'});
+ expect((await snapshot()).resolveRole('normal-chat')).toMatchObject({available:false,provider:'kiro'});
+});
+it('initial compatible defaults never become runtime fallback when availability later changes',async()=>{
+ let now=0,claude=true;vi.spyOn(Date,'now').mockImplementation(()=>now);
+ const adapters=[adapter('claude'),adapter('codex')],routing=roleRouting({dir,adapters,legacyAnswerer:()=> 'claude',checks:adapters.map(a=>({...a,check:async()=>({available:a.id!=='claude'||claude,reason:'Synthetic CLI unavailable.'})}))});
+ expect((await routing()).resolveRole('normal-chat')).toMatchObject({id:'claude'});
+ claude=false;now=31000;
+ expect((await routing()).resolveRole('normal-chat')).toMatchObject({available:false,provider:'claude',reason:'Synthetic CLI unavailable.'});
+});
 
 it('missing machine setup snapshots independent Claude defaults without starting an adapter',async()=>{
  let runs=0;const d=descriptorFromAdapter(adapter('claude',()=>runs++),{detect:async()=>({available:true,reason:null}),bridges:{invoked:true,'thread-reply':true}});

@@ -26,6 +26,7 @@ import {resultFault,usageFault,whyOfError} from './why.ts';
 import {activePipelineConfig} from '../../shared/pipeline-config.ts';
 import type {NormalAnswerer} from '../../shared/pipeline-config.ts';
 import {NormalChat,normalHistory} from './normal-answerer.ts';
+import type {RequestSettingsSnapshot} from '../providers/registry.ts';
 import type {ProductResult} from '../product-validation.ts';
 import type {TurnResult} from '../providers/turn.ts';
 import {cleanAttachments} from '../../shared/profile.ts';
@@ -38,7 +39,7 @@ import {finishReply} from './reply.ts';
 import {checkContract} from '../../shared/persona-contract.ts';
 import type {PersonaMode} from '../../shared/persona.ts';
 export class ChatError extends Error {code:ChatErrorCode;/** For budget_reached: the numbers the gate used. */budget?:BudgetDetail;/** Which rule said no, for the page's Why? line. Reporting only. */why?:ChatWhy;constructor(code:ChatErrorCode,budget?:BudgetDetail,why?:ChatWhy){super(code);this.code=code;if(budget)this.budget=budget;if(why)this.why=why;}}
-interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true;answerer:NormalAnswerer;normalReset?:boolean;
+interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true;answerer:NormalAnswerer;normalReset?:boolean;routing?:RequestSettingsSnapshot;
  /** A harness session turn: the session id and the exact file text the CLI gets (instruction, sources, rules last). */
  session?:{id:string};addendum?:string;
  /** What this turn may do (tool-less or Read in the diagram folder), as the gate saw it at review; and the cap the grant gives it, set at send. */
@@ -106,7 +107,9 @@ export class ChatRuntime {
  }
  async review(input:ChatInput):Promise<ChatReview>{
   if(this.closed||!input||!/^[\w-]{1,100}$/.test(input.id)||typeof input.question!=='string'||!input.question.trim()||input.question.length>CHAT_LIMITS.questionCharacters||typeof input.path!=='string'||input.selection!==undefined&&(typeof input.selection!=='string'||input.selection.length>8000)||!Array.isArray(input.context)||input.context.length>4)throw new ChatError('invalid_chat');
-  const answerer=activePipelineConfig().normalAnswerer,native=answerer!=='claude'&&!!this.normal;
+  const routing=await this.normal?.selection(),selected=routing?.resolveRole('normal-chat');
+  if(selected&&'available' in selected)throw new ChatError('disabled',undefined,{ruleId:selected.code,nodeId:'provider_contracts',detail:selected.reason});
+  const answerer=selected&&!('available' in selected)?selected.id:activePipelineConfig().normalAnswerer,native=answerer!=='claude'&&!!this.normal;
   if(answerer!=='claude'){
    const att=cleanAttachments(input.attachments);
    if(input.context.some(c=>!['this-note','other-notes'].includes(c?.moduleId))||!att.ok||att.value.files.length||att.value.repo)throw new ChatError('invalid_chat',undefined,{ruleId:'normal-notes-only',nodeId:'provider_contracts'});
@@ -196,7 +199,7 @@ export class ChatRuntime {
   if(extra?.review)review.skills=extra.review;
   if(privateContext)review.ephemeral=true;
   if(session)review.session={id:session.id,label:session.label,turns:session.turns};
-  if(native&&session){const plan=await this.normal!.plan(session.id,answerer,request.question);review.normalPlan=plan.input;profile='notes';needsPlan=plan.needsApproval;}
+  if(native&&session){const plan=await this.normal!.plan(session.id,answerer,request.question,routing);review.normalPlan=plan.input;profile='notes';needsPlan=plan.needsApproval;}
   if(profile){review.profile=profile;if(needsPlan)review.needsPlan=true;}
   if(excluded.length)review.excluded=excluded;
   review.manifest=manifest;if(editor)review.editor=editor;
@@ -204,12 +207,15 @@ export class ChatRuntime {
   if(prepared.withheld.length)review.diagramsWithheld=prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title),why:WITHHELD_WORDS[w.reason]}));
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');
-  this.reviews.set(review.reviewId,{answerer,review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(profile?{profile}:{}),...(privateContext?{privateContext:true as const}:{}),...(session&&native?{session:{id:session.id}}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
+  this.reviews.set(review.reviewId,{routing,answerer,review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(profile?{profile}:{}),...(privateContext?{privateContext:true as const}:{}),...(session&&native?{session:{id:session.id}}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
   return review;
  }
  async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
   const frozen=this.reviews.get(input.reviewId);if(!frozen)throw new ChatError('review_required');
-  if(frozen.answerer!==activePipelineConfig().normalAnswerer)throw new ChatError('stale_review',undefined,{ruleId:'stale_review',nodeId:'permission_gate'});
+  const current=await this.normal?.selection();
+  if(frozen.routing? !current||frozen.routing.contextKey('normal-chat')!==current.contextKey('normal-chat'):frozen.answerer!==activePipelineConfig().normalAnswerer)throw new ChatError('stale_review',undefined,{ruleId:'stale_review',nodeId:'permission_gate'});
+  const selected=current?.resolveRole('normal-chat');
+  if(selected&&'available' in selected)throw new ChatError('disabled',undefined,{ruleId:selected.code,nodeId:'provider_contracts',detail:selected.reason});
   if(this.closed||Date.now()-frozen.created>600000)throw new ChatError('stale_review');
   if(frozen.review.requiresConfirmation&&input.confirmed!==true)throw new ChatError('review_required');
   const {review,request}=frozen,s=this.state(review.path,frozen.session?.id);
@@ -218,7 +224,7 @@ export class ChatRuntime {
   const answerer=frozen.answerer,native=answerer!=='claude';
   if(native&&(!this.normal||!review.normalPlan))throw new ChatError('disabled',undefined,{ruleId:'provider-unavailable',nodeId:'provider_contracts'});
   if(!native&&(!this.provider||this.provider.name!=='claude'))throw new ChatError('disabled');
-  if(native&&!await this.normal!.authorized(review.normalPlan!))throw new ChatError('plan_required',undefined,{ruleId:'plan_required',nodeId:'permission_gate'});
+  if(native&&!await this.normal!.authorized(review.normalPlan!,frozen.routing))throw new ChatError('plan_required',undefined,{ruleId:'plan_required',nodeId:'permission_gate'});
   // The server decides what this conversation may do, again at send: a turn that needs more than the conversation was approved for is refused here, whatever the page showed or claimed.
   let authorized:Authorized|undefined;
   if(!native&&frozen.session&&this.harness?.gate){
@@ -256,7 +262,7 @@ export class ChatRuntime {
    };
    let nativeResult:TurnResult|undefined;
    if(native){
-    nativeResult=await this.normal!.run(request,review.normalPlan!,controller.signal,onTextDelta);
+    nativeResult=await this.normal!.run(request,review.normalPlan!,controller.signal,onTextDelta,frozen.routing);
     await appendLedger(this.ledger,{id:randomUUID(),inkId:frozen.session!.id,requestId:request.id,note:review.path,event:'council_turn',at:new Date().toISOString(),council:{provider:answerer,status:nativeResult.status,usage:nativeResult.usage,durationMs:Math.round(nativeResult.durationMs),...(nativeResult.overCap?{overCap:true}:{}),...(nativeResult.blockedAttempts?{blockedAttempts:nativeResult.blockedAttempts}:{})}});
     s.usage.nativeUsage??=[];
     for(const u of nativeResult.usage){const have=s.usage.nativeUsage.find(x=>x.provider===answerer&&x.unit===u.unit&&x.afterTurn===u.afterTurn);if(have)have.amount+=u.amount;else s.usage.nativeUsage.push({provider:answerer,...u});}

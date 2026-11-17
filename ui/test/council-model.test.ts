@@ -1,4 +1,30 @@
-import {expect,it} from 'vitest';import {selectCouncilProvider,runCouncil,applyCouncilEvent,replanCouncilCap} from '../src/chat/council-model.ts';
+import {expect,it,vi,afterEach} from 'vitest';import {selectCouncilProvider,runCouncil,applyCouncilEvent,replanCouncilCap} from '../src/chat/council-model.ts';
+import {mkdtemp} from 'node:fs/promises';
+import path from 'node:path';import os from 'node:os';
+import {CouncilService} from '../server/council.ts';
+import {SessionIndex} from '../server/harness/session-index.ts';
+import {ProviderRegistry,descriptorFromAdapter,compatibleDefaults} from '../server/providers/registry.ts';
+import {saveMachineSetup} from '../server/setup-store.ts';
+import type {TurnAdapter} from '../server/providers/turn.ts';
+import type {Store} from '../server/store.ts';
+import type {InkStore} from '../server/ink-store.ts';
+import type {LedgerStore} from '../server/ledger-store.ts';
+afterEach(()=>vi.unstubAllEnvs());
+
+it('Council selects only registry-approved participants, explains a single provider and freezes selection through execution',async()=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),'aitiarch-council-routing-'));vi.stubEnv('AITIARCH_CONFIG_DIR',dir);
+ const index=await SessionIndex.open(path.join(dir,'sessions')),session=await index.create({mode:'chat',label:'Synthetic'});let calls=0;
+ const a:TurnAdapter={id:'codex',label:'Codex',safetyLabel:'contained',async *startTurn(){calls++;yield {type:'complete',answer:'June.\n\n<claims>{"none":"no_context_used"}</claims>'};}};
+ const d=descriptorFromAdapter(a,{detect:async()=>({available:true,reason:null})}),registry=new ProviderRegistry([d]);await saveMachineSetup(dir,compatibleDefaults([d]));
+ const service=new CouncilService({store:{rootReal:path.join(dir,'synthetic')} as Store,ink:{} as InkStore,index,ledger:{append:async()=>{}} as unknown as LedgerStore,adapters:[],availabilityChecks:[{...a,check:async()=>({available:true,reason:null})}],routing:()=>registry.snapshot(dir)});
+ const input={conversation:session.id,providers:['codex'],notes:[],question:'When?'};
+ const plan=await service.plan(input);expect(plan.reason).toMatch(/at least two/i);expect(plan.providers[0].safetyLabel).toBe('contained');
+ await service.approve({...input,hash:plan.hash});expect((await service.run(input)).results[0]).toMatchObject({provider:'codex',status:'ok',answer:'June.'});expect(calls).toBe(1);
+ const disabled=compatibleDefaults([d]);disabled.providers.codex.enabled=false;await saveMachineSetup(dir,disabled);
+ expect((await service.available()).providers[0]).toMatchObject({id:'codex',available:false,reason:expect.stringContaining('disabled')});
+ expect((await service.plan(input)).providers[0]).toMatchObject({available:false,reason:expect.stringContaining('disabled')});
+ expect((await service.run(input)).results[0]).toMatchObject({status:'unavailable',code:'provider-disabled'});expect(calls).toBe(1);
+});
 it('announces reused approval before starting a fake provider, never for a new plan',async()=>{const order:string[]=[];let needsApproval=false;const io={plan:async()=>({hash:'x',needsApproval}),approve:async()=>{},onReuseApproval:()=>{order.push('notice');},run:async()=>{order.push('run');return 'ok';}};await runCouncil(io,{},false);expect(order).toEqual(['notice','run']);order.length=0;needsApproval=true;await runCouncil(io,{},false);expect(order).toEqual([]);});
 it('selection excludes unavailable providers and preserves at least one',()=>{const a=[{id:'codex',available:true},{id:'kiro',available:false}];expect(selectCouncilProvider(['codex'],'kiro',a)).toEqual(['codex']);expect(selectCouncilProvider(['codex'],'codex',a)).toEqual(['codex']);});
 it('a required card never sends a refused run; approval is bound to the current server plan',async()=>{let runs=0,approvals=0,needs=true;const io={plan:async()=>({hash:'current',needsApproval:needs}),approve:async()=>{approvals++;needs=false;},run:async()=>{runs++;return 'ok';}};expect((await runCouncil(io,{},false)).kind).toBe('plan');expect(runs).toBe(0);expect((await runCouncil(io,{},true)).kind).toBe('result');expect(approvals).toBe(1);expect(runs).toBe(1);await runCouncil(io,{},false);expect(approvals).toBe(1);needs=true;expect((await runCouncil(io,{},false)).kind).toBe('plan');expect(runs).toBe(2);});

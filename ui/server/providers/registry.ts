@@ -3,6 +3,9 @@
 import {createHash} from 'node:crypto';
 import {defaultMachineSetup,SETUP_PROVIDERS,SETUP_ROLES,type MachineSetup,type SetupRole,type SetupProvider} from '../../shared/setup.ts';
 import {loadMachineSetup} from '../setup-store.ts';
+import {SETUP_FILE} from '../setup-store.ts';
+import {lstat} from 'node:fs/promises';
+import path from 'node:path';
 import type {TurnAdapter,SafetyLabel} from './turn.ts';
 
 export interface Detection {available:boolean;reason:string|null}
@@ -22,6 +25,7 @@ export type RoleResolution=ProviderDescriptor|Unavailable;
 export interface RequestSettingsSnapshot {
  readonly settings:MachineSetup;
  resolveRole(role:SetupRole):RoleResolution;
+ resolveParticipant(id:SetupProvider):RoleResolution;
  council():{available:boolean;providers:readonly ProviderDescriptor[];reason:string|null};
  /** Runtime integration must reset provider sessions when this identity changes. */
  contextKey(role:SetupRole):string;
@@ -68,9 +72,13 @@ export class ProviderRegistry {
   if(!provider.capabilities[role])return unavailable(role,id,'role-unavailable',`${provider.label} is not available for ${role} through a verified bridge. No other provider was tried.`);
   return provider;
  }
- async snapshot(dir:string):Promise<RequestSettingsSnapshot>{
+ async snapshot(dir:string,initial?:()=>Promise<MachineSetup>):Promise<RequestSettingsSnapshot>{
   let settings:MachineSetup,fault=false;
-  try{settings=await loadMachineSetup(dir);}catch{settings=defaultMachineSetup();fault=true;}
+  try{
+   let missing=false;
+   if(initial)try{await lstat(path.join(dir,SETUP_FILE));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')missing=true;else throw e;}
+   settings=missing?await initial!():await loadMachineSetup(dir);
+  }catch{settings=defaultMachineSetup();fault=true;}
   // Capture before asynchronous metadata checks; later disk edits are a new request.
   const frozen=freeze(structuredClone(settings));
   const states=new Map<SetupProvider,Detection>();
@@ -78,9 +86,9 @@ export class ProviderRegistry {
    try{const d=await p.detect();states.set(p.id,d.available===true?{available:true,reason:null}:{available:false,reason:d.reason||'Provider metadata could not be verified.'});}
    catch{states.set(p.id,{available:false,reason:`${p.label} local availability check failed. Check its CLI configuration; no other provider was tried.`});}
   }));
-  const resolve=(role:SetupRole):RoleResolution=>{
+  const resolve=(role:SetupRole,setup=frozen):RoleResolution=>{
    if(fault)return unavailable(role,null,'settings-unavailable','Machine setup could not be read. Fix the saved settings; no provider was selected.');
-   const selected=this.resolveRole(role,frozen);if('available' in selected)return selected;
+   const selected=this.resolveRole(role,setup);if('available' in selected)return selected;
    const state=states.get(selected.id);
    return state?.available?selected:unavailable(role,selected.id,'provider-unavailable',state?.reason??'Provider metadata could not be verified.');
   };
@@ -90,7 +98,7 @@ export class ProviderRegistry {
    // approval service used by normal chat, or its grants/budget rules.
    return {available:providers.length>=2,providers:Object.freeze(providers),reason:providers.length>=2?null:fault?'Machine setup could not be read. No providers were selected.':'Council needs at least two enabled, available providers. Normal chat can use one compatible provider.'};
   };
-  return Object.freeze({settings:frozen,resolveRole:resolve,council,contextKey:(role:SetupRole)=>{
+  return Object.freeze({settings:frozen,resolveRole:resolve,resolveParticipant:(id:SetupProvider)=>resolve('council',{...frozen,roles:{...frozen.roles,council:id}}),council,contextKey:(role:SetupRole)=>{
    const id=frozen.roles[role],p=id===null?null:frozen.providers[id],selection=p?.roles[role]??p;
    return createHash('sha256').update(JSON.stringify({role,id,enabled:p?.enabled,executable:p?.executable,
     model:selection?.model,effort:selection?.effort,fault})).digest('hex');
