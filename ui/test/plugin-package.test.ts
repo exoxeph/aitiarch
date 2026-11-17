@@ -61,21 +61,29 @@ describe('experimental dual plugin package',()=>{
   const loadedSkill=path.join(process.env.AITIARCH_CONFIG_DIR!,'synthetic-cache','skills','aitiarch','SKILL.md');
   expect(path.resolve(path.dirname(loadedSkill),'../..')).toBe(path.join(process.env.AITIARCH_CONFIG_DIR!,'synthetic-cache'));
   expect(text).toContain('Do not assume PLUGIN_ROOT is exported');
-  expect(text).toContain('app-owned source checkout');
+  expect(text).toContain('appHome');
  });
  it('keeps source setup, consent and AI-off smoke boundaries explicit in the skill',async()=>{
   const text=await skill(),body=text.split('---')[2].trimStart();
   expect(body).toMatch(/^Experimental\. Source setup is required today/);
-  for(const required of ['Node >=24','npm ci','npm run build','explicit approval','Which project folder',
+  for(const required of ['Node >=24','npm ci','npm run build',"host's command-approval prompt",'current working directory',
    '/.aitiarch/','--yes-ignore','Shared mode is not ready','AI-off smoke check','Never call a provider',
    'never write notes or config inside the plugin cache','doctor','init','start'])expect(text).toContain(required);
-  const doctorCommand=text.search(/doctor\r?\n/);
-  expect(doctorCommand).toBeGreaterThan(0);
-  expect(doctorCommand).toBeLessThan(text.indexOf('init "$project"'));
+  const doctorCommand=text.search(/doctor\r?\n/);expect(doctorCommand).toBeGreaterThan(0);
+  expect(text.indexOf('init "$project"')).toBeLessThan(doctorCommand);
   expect(text.indexOf('init "$project"')).toBeLessThan(text.indexOf('start --project "$notebook"'));
   expect(text).not.toMatch(/(?:claude|codex|kiro)(?:\.exe)?\s+(?:-p|exec|chat|acp)\b/);
   expect(text).not.toMatch(/npm (?:install -g|exec)|npx aitiarch/);
   expect(text).toContain('No hooks, MCP server or automatic onboarding');
+ });
+ it('uses a broad trigger and one ordered discovery checklist without four chat questions',async()=>{
+  const text=await skill(),description=text.split(/\r?\n/).find(line=>line.startsWith('description:'))!;
+  for(const trigger of ['ANY request','install','set up','start','open','use this plugin','repo link','explicit command'])expect(description).toContain(trigger);
+  for(const step of ['1. Discover','2. Prepare','3. Initialize','4. Doctor and start','5. Report'])expect(text).toContain(step);
+  expect(text).not.toMatch(/(?:ask|confirm|request)\s+(?:the user|which|for|explicit)/i);
+  const blockers=text.match(/<!-- blockers:start -->([\s\S]*?)<!-- blockers:end -->/)![1].trim().split(/\r?\n/);
+  expect(blockers).toEqual(['- Node missing or below engines minimum.','- Build failure.','- Folder not writable.','- Unsafe project folder.']);
+  expect(text).toContain('build-version.json');expect(text).toContain('--yes-ignore');
  });
  it('runs doctor, init and start through the app install with isolated config and an explicit external project',async()=>{
   const base=path.join(process.env.AITIARCH_CONFIG_DIR!,'plugin-flow');
