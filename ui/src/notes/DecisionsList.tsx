@@ -13,7 +13,7 @@ export function DecisionsList({rows,onOpen,focus=false,loading=false,error=''}:{
   <h3 ref={heading} tabIndex={-1} className="cn-list-head">Decisions</h3>
   {loading?<p className="cn-list-head" role="status">Reading local decisions…</p>:error?<p className="cn-list-head" role="status">{error}</p>:!rows.length?<p className="cn-list-head">No decisions yet. Type /decision in a note.</p>:null}
   <ul>{rows.map(row=><li key={`${row.path}:${row.lineNumber}`}><button type="button" onKeyDown={move} onClick={()=>onOpen(row.path,row.lineNumber)}>
-   <span className="decision-copy"><strong>{row.decision||'Rejected option'}</strong>
+   <span className="decision-copy">{row.decision&&<strong>{row.decision}</strong>}
     {row.why&&<small>Why: {row.why}</small>}
     {!!row.rejected.length&&<span role="list" aria-label="Rejected options">{row.rejected.map((text,i)=><span role="listitem" key={i}>Rejected: {text}</span>)}</span>}
     <small>{row.noteName} · {row.path} · line {row.lineNumber}</small>

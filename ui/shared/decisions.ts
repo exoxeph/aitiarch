@@ -24,9 +24,10 @@ export function parseDecisions(markdown: string): NoteDecision[] {
       continue;
     }
     const field = /^\s*(?:-\s+)?(?:\*\*(Decision|Why|Rejected):\*\*|\*\*(Decision|Why|Rejected)\*\*:|(Decision|Why|Rejected):)[ \t]*(.*)$/i.exec(line);
-    if (!field) { current = undefined; continue; }
+    if (!field) { if (line.trim()) current = undefined; continue; }
     const kind = (field[1] ?? field[2] ?? field[3]).toLowerCase();
     const text = field[4].trim();
+    if (kind === 'rejected' && !text) continue;
     if (kind === 'decision' || (kind === 'rejected' && !current)) {
       current = {decision: kind === 'decision' ? text : '', why: '', rejected: [], lineNumber: index + 1};
       entries.push(current);

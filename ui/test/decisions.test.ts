@@ -20,10 +20,15 @@ it('ignores an unclosed fence',()=>expect(parseDecisions('```\nDecision: Hidden'
 it.each(['decision: Choice','- DECISION: Choice','**Decision:** Choice','**Decision**: Choice','- **Decision:** Choice'])('accepts keyword variant %s',line=>{
  expect(parseDecisions(line)[0]?.decision).toBe('Choice');
 });
-it('blank and unrelated lines end ownership; the next Decision starts a new entry',()=>{
+it('blank lines preserve ownership; unrelated text and the next Decision end it',()=>{
  expect(parseDecisions('Decision: One\n\nWhy: Unowned\nRejected: Separate\nOther text\nWhy: Unowned\nDecision: Two\nWhy: Human reason'))
- .toEqual([{decision:'One',why:'',rejected:[],lineNumber:1},{decision:'',why:'',rejected:['Separate'],lineNumber:4},{decision:'Two',why:'Human reason',rejected:[],lineNumber:7}]);
+ .toEqual([{decision:'One',why:'Unowned',rejected:['Separate'],lineNumber:1},{decision:'Two',why:'Human reason',rejected:[],lineNumber:7}]);
 });
+it('attaches reasons and rejected options across multiple whitespace-only lines',()=>{
+ expect(parseDecisions('Decision: Queue\r\n\r\n  \r\nWhy: Bursts\r\n\r\nRejected: Polling')[0])
+ .toEqual({decision:'Queue',why:'Bursts',rejected:['Polling'],lineNumber:1});
+});
+it('does not create an empty rejected-only row',()=>expect(parseDecisions('Rejected:   ')).toEqual([]));
 it('reads BOM and CRLF without changing the input bytes',()=>{
  const text='\ufeffDecision: Queue\r\nWhy: Human reason\r\n';const before=Buffer.from(text);
  expect(parseDecisions(text)[0]?.why).toBe('Human reason');expect(Buffer.from(text)).toEqual(before);

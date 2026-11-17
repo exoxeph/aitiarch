@@ -3,6 +3,12 @@ import {SLASH_ITEMS,slashPick,slashItems} from '../src/editor/slash.ts';
 import {slashInsert,slashSource} from '../src/editor/slash.ts';
 import {EditorState} from '@codemirror/state';
 import {CompletionContext} from '@codemirror/autocomplete';
+it('/rejected inserts no leading blank line next to an existing decision',()=>{
+ const doc='Decision: Queue\n/rejected';const from=doc.indexOf('/');
+ const state=EditorState.create({doc});const change=slashInsert(slashPick('rejected')!,from,doc.length);
+ expect(state.update({changes:change.changes}).state.doc.toString()).toBe('Decision: Queue\nRejected: ');
+ expect(change.caret).toBe(from+10);
+});
 it.each([['decision','Decision: \nWhy: ',10],['rejected','Rejected: ',10]] as const)('inserts /%s with the human entry caret and preserves surrounding BOM/CRLF bytes', (query,insert,caret)=>{
  const item=slashPick(query);expect(item?.shortcut).toBe('/'+query);
  const original='\ufeffBefore\r\n/'+query+'\r\nAfter\r\n';
