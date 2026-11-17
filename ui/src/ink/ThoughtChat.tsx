@@ -21,7 +21,7 @@ export function ThoughtChat({id,close,children}:{id:string;close:()=>void;childr
   if(host===undefined)return;
   const p=panel.current,width=()=>Math.min(380,innerWidth-24);
   // The floating panel sits at the right edge, clear of the writing column, and follows the window size.
-  const place=()=>{if(!p||host!==null)return;p.dataset.floating='true';p.style.width=width()+'px';p.style.left=Math.max(12,innerWidth-width()-12)+'px';p.style.top='72px';p.style.maxHeight=Math.max(140,innerHeight-84)+'px';};
+  const place=()=>{if(!p||host!==null)return;p.dataset.floating='true';p.style.width=width()+'px';p.style.left=Math.max(12,innerWidth-width()-12)+'px';p.style.top='72px';const bottom=document.querySelector('.statusbar')?.getBoundingClientRect().top??innerHeight;p.style.maxHeight=Math.max(140,bottom-84)+'px';};
   if(host===null){place();window.addEventListener('resize',place);}else if(p)delete p.dataset.floating;
   p?.querySelector<HTMLElement>('input,textarea,button')?.focus();window.dispatchEvent(new CustomEvent('thought-layout'));
   return()=>window.removeEventListener('resize',place);
