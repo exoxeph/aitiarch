@@ -20,9 +20,9 @@ describe('source app command wrapper',()=>{
  it('runs the source entry through native Node from a different cwd without starting anything',async()=>{
   const h=harness();await mkdir(h.cwd,{recursive:true});
   const {stdout}=await promisify(execFile)(process.execPath,[script,'--help'],{cwd:h.cwd,env:{...process.env,...h.deps.env},timeout:10000});
-  expect(stdout).toContain('doctor [--json] | init | start [--project <folder>]');
-  await expect(promisify(execFile)(process.execPath,[script,'init'],{cwd:h.cwd,env:{...process.env,...h.deps.env},timeout:10000}))
-   .rejects.toMatchObject({code:1,stderr:expect.stringContaining('not available yet (planned in a later release)')});
+  expect(stdout).toContain('doctor [--json] | init [project]');
+  const result=await promisify(execFile)(process.execPath,[script,'init'],{cwd:h.cwd,env:{...process.env,...h.deps.env},timeout:10000});
+  expect(result.stdout).toContain('Defaulting to private');expect(await readFile(path.join(h.cwd,'.aitiarch','local','.gitignore'),'utf8')).toBe('*\n');
  });
  it('doctor formats text and resolves the isolated config independently of cwd',async()=>{
   const h=harness();expect(await runCli(['doctor'],h.deps)).toBe(0);
@@ -52,9 +52,22 @@ describe('source app command wrapper',()=>{
   const h=harness({exitCode:1,checks:[{id,ok:false,code:id+'_unavailable',reason:'Required next step.'}],providers:[],notice:'AI-off'});
   expect(await runCli(['start'],h.deps)).toBe(1);expect(h.errors.join('\n')).toContain('Required next step.');expect(h.starts).toEqual([]);
  });
- it('init refuses without doctor, config writes, server or browser',async()=>{
-  const h=harness();expect(await runCli(['init'],h.deps)).not.toBe(0);
-  expect(h.errors.join('\n')).toContain('not available yet (planned in a later release)');expect(h.probes).toEqual([]);expect(h.starts).toEqual([]);
+ it('non-interactive init defaults private without doctor, server or browser',async()=>{
+  const h=harness();await mkdir(h.cwd,{recursive:true});expect(await runCli(['init'],{...h.deps,interactive:false})).toBe(0);
+  expect(h.output.join('\n')).toContain('Defaulting to private');expect(h.output.join('\n')).toContain('filesystem-private');expect(h.probes).toEqual([]);expect(h.starts).toEqual([]);
+ });
+ it('init resolves a target independently of install cwd and forwards explicit consent only',async()=>{
+  const h=harness(),calls:any[]=[];const deps={...h.deps,interactive:false,initProject:async(o:any)=>{calls.push(o);return {root:'synthetic',privatePersistence:true,messages:['Initialized.']};}};
+  expect(await runCli(['init','another','--private'],deps)).toBe(0);expect(calls[0]).toMatchObject({project:path.join(h.cwd,'another'),sharing:'private',confirmIgnore:false});
+  expect(await runCli(['init','--shared','--yes-ignore'],deps)).toBe(0);expect(calls[1]).toMatchObject({project:h.cwd,sharing:'shared',confirmIgnore:true});expect(h.probes).toEqual([]);
+ });
+ it('interactive sharing choice and separate ignore consent are explicit',async()=>{
+  const h=harness();await mkdir(path.join(h.cwd,'.git'),{recursive:true});const questions:string[]=[],answers=['shared','yes'];
+  const code=await runCli(['init'],{...h.deps,interactive:true,ask:async(q:string)=>{questions.push(q);return answers.shift();}});
+  expect(code).toBe(1);expect(questions).toHaveLength(2);expect(questions[1]).toContain('/.aitiarch/local/');expect(await readFile(path.join(h.cwd,'.gitignore'),'utf8')).toContain('/.aitiarch/local/');expect(h.output.join('\n')).toMatch(/not ready/i);
+ });
+ it.each([['init','--private','--shared'],['init','--yes'],['init','a','b'],['init','--private','--private']])('rejects malformed init %j',async(...argv)=>{
+  const h=harness();expect(await runCli(argv,h.deps)).toBe(2);expect(h.probes).toEqual([]);
  });
  it.each([[],['unknown'],['doctor','--project','x'],['start','--project'],['start','--project','--json'],['start','--json']].map(argv=>({argv})))('refuses malformed command $argv without starting',async({argv})=>{
   const h=harness();expect(await runCli(argv,h.deps)).toBe(2);expect(h.starts).toEqual([]);expect(h.probes).toEqual([]);

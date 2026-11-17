@@ -1,6 +1,6 @@
 // Source checkout (Node >=24, npm ci + npm run build required):
 // node scripts/aitiarch.mjs doctor [--json]
-// node scripts/aitiarch.mjs init
+// node scripts/aitiarch.mjs init [project] [--private|--shared] [--yes-ignore]
 // node scripts/aitiarch.mjs start [--project <folder>]
 // No published bin: this source tree is not a standalone installation artifact.
 import path from 'node:path';
@@ -8,7 +8,38 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {mkdir} from 'node:fs/promises';
 
 const installDir=fileURLToPath(new URL('../',import.meta.url));
-const usage='Usage: node scripts/aitiarch.mjs doctor [--json] | init | start [--project <folder>]';
+const usage='Usage: node scripts/aitiarch.mjs doctor [--json] | init [project] [--private|--shared] [--yes-ignore] | start [--project <folder>]';
+
+async function initialize(args,dependencies,out,err){
+ let target,sharing,consent=false;
+ for(const arg of args){
+  if(arg==='--private'||arg==='--shared'){if(sharing){err(usage);return 2;}sharing=arg.slice(2);}
+  else if(arg==='--yes-ignore'){if(consent){err(usage);return 2;}consent=true;}
+  else if(!arg.trim()||arg.startsWith('-')||target!==undefined){err(usage);return 2;}
+  else target=arg;
+ }
+ const interactive=dependencies.interactive??Boolean(process.stdin.isTTY&&process.stdout.isTTY);
+ let reader;
+ const ask=dependencies.ask??(async question=>{
+  reader??=(await import('node:readline/promises')).createInterface({input:process.stdin,output:process.stdout});
+  return reader.question(question);
+ });
+ try{
+  if(!sharing){
+   if(interactive){
+    const answer=(await ask('Create a private or shared notebook? [private/shared, default private] ')).trim().toLowerCase();
+    if(answer&&answer!=='private'&&answer!=='shared'){err('Choose private or shared. Nothing was initialized.');return 2;}
+    sharing=answer||'private';
+   }else{sharing='private';out('Defaulting to private (non-interactive).');}
+  }
+  const {initProject}=await import('../server/init.ts');
+  const result=await (dependencies.initProject??initProject)({project:path.resolve(dependencies.cwd??process.cwd(),target??'.'),sharing,
+   confirmIgnore:consent?true:interactive?async line=>(await ask(`May Aitiarch add ${line} to this project's .gitignore? [yes/no, default no] `)).trim().toLowerCase()==='yes':false});
+  out(`Notebook folder: ${result.root}`);for(const message of result.messages)out(message);
+  return result.privatePersistence?0:1;
+ }catch(error){err(`Init did not complete: ${error instanceof Error?error.message:'filesystem operation failed'}`);return 1;}
+ finally{reader?.close();}
+}
 
 /** Injectable boundary: tests never import the server entry, listen, or open a browser. */
 export async function runCli(argv, dependencies = {}) {
@@ -21,8 +52,8 @@ export async function runCli(argv, dependencies = {}) {
   project=path.resolve(dependencies.cwd??process.cwd(),args[1]??'.');
  }else if(command==='doctor'){
   if(args.length&&!(args.length===1&&args[0]==='--json')){err(usage);return 2;}
- }else if(command==='init'&&args.length===0){
-  err('Init is not available yet (planned in a later release).');return 1;
+ }else if(command==='init'){
+  return initialize(args,dependencies,out,err);
  }else{err(usage);return 2;}
 
  try{
