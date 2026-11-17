@@ -40,7 +40,7 @@ export class Assistance {
   /** The Skill renderer needs Claude, and a skill attached to Visualize that actually loaded. Refused before anything is sent. */
   private checkSkillRenderer(renderer: string | undefined, request: Request) {
     if (renderer !== 'skill') return;
-    if (this.provider.name === 'chatgpt-plan') throw new PathError(409, 'skill_renderer', 'The Skill renderer works with Claude only for now. Use the Built-in renderer.');
+    if (this.provider.name && this.provider.name !== 'claude') throw new PathError(409, 'skill_renderer', 'The Skill renderer works with Claude only for now. Use the Built-in renderer.');
     if (!request.skills) throw new PathError(409, 'skill_renderer', 'Attach a skill to Visualize in Settings first, then choose Skill.');
   }
   /** What the model's reply becomes: a saved document, or a fixed reason. None of the model's own words are kept. */
@@ -109,7 +109,7 @@ export class Assistance {
     const packet = prepareRequest(request);
     const pending: InkItem = { id: frozen.id, kind: 'answer', body: 'Thinking…', originalAnchor: frozen.anchor, anchor: frozen.anchor,
       attachment: { status: 'attached', from: frozen.from, to: frozen.to }, generation: { requestId: frozen.id, action: frozen.action,
-        provider: this.provider.name==='chatgpt-plan'?'chatgpt-plan':'claude', model: null, createdAt: new Date().toISOString(), status: 'pending', evidence: [], dismissed: false, ...(names.length ? { skills: names } : {}) } };
+        provider: this.provider.name??'claude', model: null, createdAt: new Date().toISOString(), status: 'pending', evidence: [], dismissed: false, ...(names.length ? { skills: names } : {}) } };
     // Map the newly captured item too if disk changed after the click.
     this.starting.add(frozen.id);
     const snapshot = await this.mutate(path, frozen.text, (items, text) => {

@@ -1,4 +1,5 @@
 import {transient} from '../transient.ts';
+import {savedProviderLabel} from '../../shared/threads.ts';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { EditorView } from '@codemirror/view';
 import { captureAnchor } from '../../shared/anchors.ts';
@@ -26,7 +27,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   saved: (snapshot: InkSnapshot) => void) {
   const [draft, setDraft] = useState<Draft | null>(null), [jobs, setJobs] = useState<Running[]>([]), [busy, setBusy] = useState(false);
   const [providerLabel,setProviderLabel]=useState('Claude');
-  useEffect(()=>{void api.assistance().then(a=>setProviderLabel(a.provider==='chatgpt-plan'?'ChatGPT plan':'Claude')).catch(()=>{});},[]);
+  useEffect(()=>{void api.assistance().then(a=>setProviderLabel(savedProviderLabel(a.provider??'claude'))).catch(()=>{});},[]);
   const mounted = useRef(true), liveSaved = useRef(saved); liveSaved.current = saved;
   const merge = (snapshot: InkSnapshot) => {
     if (!mounted.current || !view.current) return;
@@ -145,7 +146,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
     {persona.failed && <p role="alert" className="small">That choice could not be saved. Nothing was changed.</p>}
     {asking && <p className="small muted ask-hint">Enter to ask · Esc to cancel</p>}
     {hasPacket && <details className="what-is-sent"><summary>What will be sent</summary>
-      <p className="small muted">The selection is frozen: editing the note will not change this request. {providerLabel === 'Claude' ? 'Claude CLI' : 'ChatGPT plan'} · transcript context: none. Redaction can miss prose secrets, unfamiliar or encoded credentials, and indirect identifiers. Review before sending.</p>
+      <p className="small muted">The selection is frozen: editing the note will not change this request. {providerLabel === 'Claude' ? 'Claude CLI' : providerLabel} · transcript context: none. Redaction can miss prose secrets, unfamiliar or encoded credentials, and indirect identifiers. Review before sending.</p>
       <SkillsReviewList review={(draft.packet as { skills?: SkillsReview }).skills} />
       <details><summary>Exact redacted request</summary><pre>{JSON.stringify(exactRequest(draft.packet), null, 2)}</pre></details></details>}
     {hasPacket && <p className="small muted ask-hint">Enter to send · Esc to cancel</p>}

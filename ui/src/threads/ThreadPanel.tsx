@@ -5,7 +5,7 @@ import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import type {InkItem} from '../../shared/ink.ts';
 import {quoteShown} from '../../shared/thoughts.ts';
-import {newThread,questionPlaceholder,threadStatus,type ThreadFailure,type ThreadReply} from '../../shared/threads.ts';
+import {newThread,questionPlaceholder,threadStatus,savedProviderLabel,type ThreadFailure,type ThreadReply} from '../../shared/threads.ts';
 import {api,type InkSnapshot} from '../api.ts';
 import {rememberQuestion,recalledQuestion,forgetQuestion} from './questions.ts';
 import {SkillsReviewList} from '../skills/SkillsReviewList.tsx';
@@ -19,7 +19,7 @@ export const failureLabels:Record<ThreadFailure,string>={
  validation:'Answer rejected by validation. No partial answer was accepted.',interrupted:'Request interrupted. No automatic retry.',
  protocol:'Provider format changed or stream incomplete. No partial answer was accepted.',timeout:'Request timed out. No automatic retry.',
  cancelled:'Request cancelled. No partial answer was accepted.',provider_error:'Provider request failed. No automatic retry.',persistence:'Saving failed. Retry saving only; no new provider call.'};
-const providerLabel=(name:string)=>name==='chatgpt-plan'?'ChatGPT plan':'Claude';
+const providerLabel=savedProviderLabel;
 export function TakeawayBox({value,onChange,onSubmit,onSkip,busy,skippedAt,onReopen}:{value:string;onChange:(value:string)=>void;onSubmit:()=>void;onSkip:()=>void;busy:boolean;skippedAt?:string|null;onReopen?:()=>void}){
  if(skippedAt){const date=new Date(skippedAt);return <div className="skipped-takeaway">Skipped on {Number.isNaN(date.getTime())?'Unknown time':new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(date)} - <button disabled={busy} onClick={onReopen}>Reopen takeaway</button></div>;}
  return <section className="human-takeaway"><label><span className="takeaway-title">Your turn: write the conclusion (you write this)</span><textarea aria-label="Your takeaway" placeholder="Write your takeaway…" value={value} onChange={e=>onChange(e.target.value)} maxLength={100000} rows={4}/></label>

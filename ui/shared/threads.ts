@@ -1,6 +1,6 @@
 import {isDiagramIssue,readDiagram,type Diagram,type DiagramIssue} from './diagram.ts';
 import type {Generation,InkItem} from './ink.ts';
-export type ThreadProvider='claude'|'chatgpt-plan';
+export type ThreadProvider='claude'|'chatgpt-plan'|'codex';
 export const failureCodes=['unavailable','disabled','hourly_cap','usage_limit','validation','interrupted','protocol','timeout','cancelled','provider_error','persistence'] as const;
 export type ThreadFailure=typeof failureCodes[number];
 export interface ThreadReply {diagram?:Diagram;diagramIssue?:DiagramIssue;body:string;generation:Generation;id:string;parentId:string;failure?:{code:ThreadFailure}}
@@ -15,10 +15,13 @@ export interface ThreadRecord {
 export const exactKeys=(v:any,allowed:string[])=>!!v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join(',')===[...allowed].sort().join(',');
 export const validId=(v:unknown):v is string=>typeof v==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(v);
 export const validAt=(v:unknown):v is string=>typeof v==='string'&&Number.isFinite(Date.parse(v));
-export const validProvider=(v:unknown):v is ThreadProvider=>v==='claude'||v==='chatgpt-plan';
+export const validProvider=(v:unknown):v is ThreadProvider=>v==='claude'||v==='chatgpt-plan'||v==='codex';
+/** Never infer saved identity from active settings or fall back to Claude. */
+export const savedProviderLabel=(name:unknown):string=>name==='claude'?'Claude':name==='chatgpt-plan'?'ChatGPT plan':name==='codex'?'Codex':'Unsupported provider';
 /** Skill names recorded on an answer: short plain names only. Never a path, never any of the skill's text. */
 export const validSkillRefs=(v:unknown):v is string[]=>Array.isArray(v)&&v.length<=12&&new Set(v).size===v.length&&v.every(n=>typeof n==='string'&&/^[A-Za-z0-9][\w .:@-]{0,99}$/.test(n));
 export function validateGeneration(g:Generation,id:string){
+ if(g&&typeof g==='object'&&!validProvider(g.provider))throw new Error('Unknown saved AI provider. Ink was not loaded; no provider was substituted.');
  if(!exactKeys(g,['requestId','action','provider','model','createdAt','status','evidence','dismissed',...(g.skills===undefined?[]:['skills'])])||(g.skills!==undefined&&!validSkillRefs(g.skills))||g.requestId!==id||!validId(id)||!['think','ask'].includes(g.action)||!validProvider(g.provider)||
  !(g.model===null||typeof g.model==='string'&&/^[\w.:-]{1,100}$/.test(g.model))||!validAt(g.createdAt)||typeof g.dismissed!=='boolean'||!['pending','complete','error','cancelled'].includes(g.status)||!Array.isArray(g.evidence)||g.evidence.length>32||g.evidence.some(e=>!exactKeys(e,['sourceId','sourceHash','quote'])||!/^(?:N1|D[1-8])$/.test(e.sourceId)||!/^[a-f0-9]{64}$/.test(e.sourceHash)||typeof e.quote!=='string'||e.quote.length>240))throw new Error('Invalid generation metadata.');
 }

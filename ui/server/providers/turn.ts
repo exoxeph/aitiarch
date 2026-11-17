@@ -3,7 +3,7 @@ import {redact} from './index.ts';
 export type SafetyLabel='fenced'|'contained'|'host-gated';
 export type UsageUnit='usd'|'tokens'|'credits';
 export interface TurnUsage {unit:UsageUnit;amount:number;afterTurn:boolean}
-export interface TurnInput {question:string;notes:readonly {id:string;label:string;text:string}[];deadlineMs:number;maxOutputBytes:number;cap:{unit:UsageUnit;amount:number}}
+export interface TurnInput {question:string;notes:readonly {id:string;label:string;text:string}[];deadlineMs:number;maxOutputBytes:number;cap:{unit:UsageUnit;amount:number};/** Internal structured invocation contract, never a tool/permission profile. */outputFormat?:'invoked-json'}
 /** `blocked` is a running COUNT of host-blocked code attempts (Codex Code Mode failing closed). It carries no content. */
 export type TurnEvent={type:'start'}|{type:'delta';text:string}|{type:'complete';answer:string}|{type:'refusal';code:string}|{type:'error';code:string}|{type:'usage';usage:TurnUsage}|{type:'blocked';count:number};
 export const BLOCKED_NOTE='Codex tried to run code; blocked';

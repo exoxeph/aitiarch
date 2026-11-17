@@ -6,7 +6,7 @@ import { resolveAnchor, validateAnchor, type Anchor, type Attachment } from "./a
 export interface Generation {
   requestId: string;
   action: "think" | "ask";
-  provider: "claude" | "chatgpt-plan";
+  provider: "claude" | "chatgpt-plan" | "codex";
   model: string | null;
   createdAt: string;
   status: "pending" | "complete" | "error" | "cancelled";
