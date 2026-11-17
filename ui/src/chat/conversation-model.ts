@@ -3,6 +3,8 @@
 import type {Attachments,Profile} from '../../shared/profile.ts';
 import type {ConversationPlan,FileCheck,FileRefusal} from '../../server/harness/conversation.ts';
 import type {HarnessSession} from '../../shared/harness.ts';
+/** Display identity only; stored titles stay human-editable. */
+export const conversationLabel=(session:Pick<HarnessSession,'id'|'label'>)=>`${session.label} · ${session.id.slice(0,8)}`;
 
 /** One chip above the composer, picked with "@": another note, a repo file, or the repo itself. A file the server refused carries the reason. */
 export type AttachmentChip=

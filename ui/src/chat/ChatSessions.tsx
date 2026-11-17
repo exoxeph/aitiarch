@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState,type FormEvent,type KeyboardEvent} from 'react';
 import {api,ApiError} from '../api.ts';
 import type {HarnessSession} from '../../shared/harness.ts';
-import {mergeSessions} from './conversation-model.ts';
+import {mergeSessions,conversationLabel} from './conversation-model.ts';
 import {noteTitle} from './chat-stub.ts';
 import {deleteConversationText,type DeleteImpact} from './session-delete.ts';
 import {memoryText} from './normal-provider.ts';
@@ -38,14 +38,14 @@ function ConversationMenu({label,empty,value,list,disabled,canCreate,open:openNo
   <button ref={trigger} type="button" className="chat-ctl chat-pick-trigger" aria-haspopup="listbox" aria-expanded={open} data-session={value} disabled={disabled}
    onClick={()=>setOpen(v=>!v)} onKeyDown={e=>{if(e.key==='ArrowDown'&&!open){e.preventDefault();setOpen(true);}}}>
    <span className="chat-pick-label">{label}</span>
-   <span className="chat-pick-value">{current?`${current.label} · ${current.turns} ${current.turns===1?'message':'messages'}`:empty}</span><Caret/>
+   <span className="chat-pick-value">{current?`${conversationLabel(current)} · ${current.turns} ${current.turns===1?'message':'messages'}`:empty}</span><Caret/>
    {current?.note&&current.note!==openNote&&<span className="chat-pick-from">started on <span className="chat-pick-from-name" title={noteTitle(current.note)}>{noteTitle(current.note)}</span></span>}
   </button>
   {open&&<div className="chat-pick-pop" ref={pop} onKeyDown={onKey}>
    <div role="listbox" aria-label={label}>
     <button type="button" role="option" aria-selected={value===''} tabIndex={-1} data-nav="" data-value="" className="chat-pick-opt" onClick={act(()=>onPick(''))}>{empty}</button>
     {list.map(s=><button key={s.id} type="button" role="option" aria-selected={value===s.id} tabIndex={-1} data-nav="" data-value={s.id} className="chat-pick-opt" onClick={act(()=>onPick(s.id))}>
-     <span>{s.label}</span><span className="chat-pick-meta">{s.mode==='investigate'?'investigation · ':''}{s.turns} {s.turns===1?'message':'messages'}{s.note&&s.note!==openNote?` · ${noteTitle(s.note)}`:''}</span></button>)}
+     <span>{conversationLabel(s)}</span><span className="chat-pick-meta">{s.mode==='investigate'?'investigation · ':''}{s.turns} {s.turns===1?'message':'messages'}{s.note&&s.note!==openNote?` · ${noteTitle(s.note)}`:''}</span></button>)}
    </div>
    <div className="chat-pick-actions">
     <button type="button" tabIndex={-1} data-nav="" disabled={!canCreate} onClick={act(onNew)}>New</button>

@@ -3,6 +3,14 @@ import {addChip,attachmentsOf,autoName,blockedByRefusals,chipKey,isLegacyInvesti
 import type {HarnessSession} from '../shared/harness.ts';
 import {FILE_REFUSAL_WORDS} from '../server/harness/conversation.ts';
 import {FILE_REFUSAL_TEXT} from '../src/chat/conversation-model.ts';
+import {conversationLabel} from '../src/chat/conversation-model.ts';
+it('distinguishes conversations with identical titles without changing their stored names',()=>{
+ const first={label:'Orders plan',id:'11111111-1111-4111-8111-111111111111'};
+ const second={label:'Orders plan',id:'22222222-2222-4222-8222-222222222222'};
+ expect(conversationLabel(first)).toBe('Orders plan · 11111111');
+ expect(conversationLabel(second)).toBe('Orders plan · 22222222');
+ expect(first.label).toBe(second.label);
+});
 
 // The single chat box without a browser: what a turn carries, which way it goes, when the plan card is shown, and the names around it.
 describe('attachment chips',()=>{
