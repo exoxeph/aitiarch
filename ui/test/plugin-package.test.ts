@@ -2,6 +2,7 @@ import {describe,it,expect} from 'vitest';
 import path from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {readFile,mkdir,writeFile,rename,stat} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const json=async(file:string)=>JSON.parse(await readFile(path.join(root,file),'utf8'));
@@ -31,13 +32,30 @@ describe('experimental dual plugin package',()=>{
  it('validates the Claude and portable Codex manifests against their distinct documented contracts',async()=>{
   const claude=await json('.claude-plugin/plugin.json'),codex=await json('plugin.json');
   identity(claude);identity(codex,true);
-  const app=await json('ui/package.json');
   for(const manifest of [claude,codex]){
-   expect(manifest.name).toBe('aitiarch');expect(manifest.version).toBe(app.version);
+   expect(manifest.name).toBe('aitiarch');expect(manifest.version).toBe('0.0.2');
    expect(manifest.description).toMatch(/experimental/i);expect(manifest.description).toMatch(/source setup/i);
   }
   expect(claude).not.toHaveProperty('$schema');
   expect(()=>identity({...codex,hooks:{}},true)).toThrow();
+ });
+ it('binds the shared skill hash to equal release versions on both hosts',async()=>{
+  const releases=await json('skills/aitiarch/releases.json');
+  const manifests=await Promise.all(['.claude-plugin/plugin.json','plugin.json'].map(json));
+  const digest=(text:string)=>createHash('sha256').update(text.replace(/\r\n/g,'\n')).digest('hex');
+  const text=await skill();
+  for(const manifest of manifests){
+   expect(releases[manifest.version]).toBe(digest(text));
+   expect(releases[manifest.version]).not.toBe(digest(text+'\nChanged skill instructions.'));
+  }
+  expect(manifests[0].version).toBe(manifests[1].version);
+ });
+ it('requires sequential explicit absolute working directories and cwd-independent npm for both hosts',async()=>{
+  const text=await skill();
+  for(const required of ['Both Claude Code and Codex','strictly one at a time','never batch or parallelize',
+   'explicit absolute working directory','npm --prefix "$appHome/ui" ci','npm --prefix "$appHome/ui" run build',
+   '--copy-source','rebuild from scratch','never inside the project'])expect(text).toContain(required);
+  expect(text).not.toContain('sourceEntries');
  });
  it('validates both local marketplace contracts and resolves sources from the marketplace root',async()=>{
   const claude=await json('.claude-plugin/marketplace.json'),codex=await json('.agents/plugins/marketplace.json');

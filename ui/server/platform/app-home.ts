@@ -50,11 +50,6 @@ const filesystem:SetupFilesystem={canonical,
   if((e as NodeJS.ErrnoException).code==='ENOENT'){const parent=path.dirname(file);return parent!==file&&filesystem.writable(parent);}return false;}},
  readJson:async file=>JSON.parse(await readFile(file,'utf8'))};
 
-// Source-only allowlist: never copy .git, host settings, tests, node_modules,
-// user configuration, notebooks or arbitrary files from a local checkout.
-export const PLUGIN_SOURCE_ENTRIES=['LICENSE','THIRD_PARTY_NOTICES.md','ui/src','ui/server','ui/shared','ui/scripts','ui/public','ui/index.html',
- 'ui/package.json','ui/package-lock.json','ui/tsconfig.json','ui/tsconfig.server.json','ui/vite.config.ts','docs/guide.md'] as const;
-
 /** Metadata-only plan. It never copies, builds, initializes, starts or calls a provider. */
 export async function inspectPluginSetup(options:PluginSetupOptions){
  const platform=options.platform??process.platform,p=paths(platform),env=options.env??process.env,home=options.home??os.homedir();
@@ -101,7 +96,7 @@ export async function inspectPluginSetup(options:PluginSetupOptions){
  try{installedVersion=(await fs.readJson(p.join(appHome,'ui','package.json')))?.version;}catch{/* Missing source means rebuild. */}
  const buildRequired=builtVersion!==version||installedVersion!==version||!await fs.isFile(p.join(appHome,'ui','dist','index.html'))||!await fs.isDirectory(p.join(appHome,'ui','node_modules'));
  const initializeRequired=!await fs.isDirectory(notebook);
- return {appHome,project,notebook,configDir,version,buildRequired,initializeRequired,sourceEntries:PLUGIN_SOURCE_ENTRIES,
+ return {appHome,project,notebook,configDir,version,buildRequired,initializeRequired,
   buildMarker:p.join(appHome,'build-version.json'),buildMarkerContent:JSON.stringify({version})+'\n',
   steps:[...(buildRequired?['copy-source','build']:[]),...(initializeRequired?['init-private']:[]),'doctor','start']};
 }

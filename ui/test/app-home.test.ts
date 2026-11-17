@@ -36,9 +36,11 @@ describe('plugin appHome and zero-question setup plan',()=>{
   const plan=await inspectPluginSetup({...h.options,project:undefined});
   expect(plan).toMatchObject({project:'/cwd',appHome:'/app',notebook:'/cwd/.aitiarch',buildRequired:true,initializeRequired:true});
   expect(plan.steps).toEqual(['copy-source','build','init-private','doctor','start']);
-  expect(plan.sourceEntries).toContain('docs/guide.md');
-  expect(plan.sourceEntries).not.toContain('ui/node_modules');
-  expect(plan.sourceEntries).not.toContain('.git');
+  expect(plan).not.toHaveProperty('sourceEntries');
+ });
+ it('treats a null-version marker as a complete source recopy and rebuild without questions',async()=>{
+  const h=fixture();h.built();h.files.set('/app/build-version.json',{version:null});
+  expect(await inspectPluginSetup(h.options)).toMatchObject({buildRequired:true,steps:['copy-source','build','init-private','doctor','start']});
  });
  it('prefers an explicit project and reuses both a current build and an existing notebook',async()=>{
   const h=fixture();h.built();h.dirs.add('/project/.aitiarch');
