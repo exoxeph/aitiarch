@@ -27,10 +27,10 @@ try{
  const page=await browser.newPage({viewport:{width:1280,height:900}});page.setDefaultTimeout(12000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  const boot=async()=>{await page.goto(url+'/?debug=1');await page.waitForSelector('.cm-editor');};
  const dialog=page.getByRole('dialog',{name:'AI settings'}),panel=page.locator('#chat-panel');
- const openSettings=async()=>{await page.getByRole('button',{name:'Notes menu',exact:true}).click();await page.getByRole('button',{name:'AI settings'}).click();await dialog.waitFor();await dialog.getByRole('tab',{name:'Pipeline'}).click();};
+ const openSettings=async()=>{await page.getByRole('button',{name:'Notes menu',exact:true}).click();await page.getByRole('button',{name:'AI settings'}).click();await dialog.waitFor();await dialog.getByRole('tab',{name:'Pipeline'}).click();await page.waitForFunction(()=>{const select=document.querySelector('#pipeline-answerer');return select&&!select.disabled;});};
  const closeSettings=async()=>{await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});};
  const select=dialog.getByLabel('Normal chat is answered by'),save=dialog.getByRole('button',{name:'Save',exact:true});
- const openChat=async()=>{await page.getByRole('button',{name:/^Chat/}).first().click();await panel.waitFor();};
+ const openChat=async()=>{await page.getByRole('button',{name:/^Chat/}).first().click();await panel.waitFor();await panel.evaluate(el=>Promise.all(el.getAnimations().map(animation=>animation.finished.catch(()=>{}))));};
  const composer=()=>panel.getByRole('textbox',{name:'Message Aitiarch AI'});
  const sendThroughReview=async(provider='Codex')=>{const review=panel.getByRole('region',{name:'What will be sent'});await review.waitFor();await review.getByRole('button',{name:`Send to ${provider}`,exact:true}).click();};
  // 1. The section: the note, the three providers with safety label and availability, Save only when something changed.
