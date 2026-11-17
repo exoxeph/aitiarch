@@ -1,0 +1,12 @@
+{
+  "name": "aitiarch",
+  "interface": { "displayName": "Aitiarch (experimental)" },
+  "plugins": [
+    {
+      "name": "aitiarch",
+      "source": { "source": "local", "path": "./" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}

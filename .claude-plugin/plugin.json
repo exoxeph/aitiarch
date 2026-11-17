@@ -1,0 +1,7 @@
+{
+  "name": "aitiarch",
+  "version": "0.0.1",
+  "description": "Experimental Aitiarch notebook launcher; source setup required today.",
+  "author": { "name": "Imtiaz" },
+  "license": "MIT"
+}
