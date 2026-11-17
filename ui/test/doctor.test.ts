@@ -5,6 +5,20 @@ import path from 'node:path';
 const base=():DoctorOptions=>({nodeVersion:'24.1.0',nodeRange:'>=24',distDir:'/build',configDir:process.env.AITIARCH_CONFIG_DIR!,cwd:process.env.AITIARCH_CONFIG_DIR!,
  env:{},platform:'linux',discovery:{inspect:()=>undefined},filesystem:{buildPresent:async()=>true,configWritable:async()=>true}});
 describe('metadata-only doctor',()=>{
+ it('reports effort as not applicable for Codex and Kiro, including explicit JSON metadata',async()=>{
+  const r=await doctor(base());
+  for(const p of r.providers.filter(p=>p.id!=='claude')){
+   expect(p).toMatchObject({effort:null,effortCode:'not_applicable'});
+   expect(formatDoctor(r).split('\n').find(line=>line.startsWith(p.id+':'))).toContain('effort=n/a');
+  }
+  expect(r.providers[0]).toMatchObject({effort:false,effortCode:'unverified'});
+ });
+ it('keeps the login and entitlement words separated in the Codex report',async()=>{
+  const o=base();o.env={PATH:'/bin'};o.discovery={inspect:p=>p.endsWith('/codex')?{file:true,executable:true}:undefined};
+  o.runner=async(_f,a)=>a[0]==='--version'?'codex-cli 0.167.0':'  --json\n  --ephemeral\n  --ignore-user-config\n  --ignore-rules\n  --disable';
+  const text=formatDoctor(await doctor(o));expect(text).not.toContain('andentitlement');
+  expect(text.split('\n').find(line=>line.startsWith('codex:'))).toContain('login and entitlement');
+ });
  it('retains a known version when the later help probe fails',async()=>{
   const o=base();o.env={PATH:'/bin'};o.discovery={inspect:p=>p.endsWith('/codex')?{file:true,executable:true}:undefined};
   o.runner=async(_f,a)=>{if(a[0]==='--version')return 'codex-cli 0.167.0';throw Error('help failed');};

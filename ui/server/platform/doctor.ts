@@ -12,7 +12,7 @@ export interface DoctorOptions {
  filesystem?:{buildPresent:(dir:string)=>Promise<boolean>;configWritable:(dir:string)=>Promise<boolean>};
  runner?:(file:string,args:readonly string[],options:{signal:AbortSignal;cwd:string;env:NodeJS.ProcessEnv})=>Promise<string>;
 }
-export interface DoctorProvider {id:CliId;path:string|null;version:string|null;isolation:'unverified'|'metadata-compatible';code:string;reason:string;roles:string[];effort:boolean}
+export interface DoctorProvider {id:CliId;path:string|null;version:string|null;isolation:'unverified'|'metadata-compatible';code:string;reason:string;roles:string[];effort:boolean|null;effortCode:'unverified'|'help_flag_present'|'help_flag_absent'|'not_applicable'}
 export interface DoctorReport {exitCode:0|1;checks:{id:string;ok:boolean;code:string;reason:string}[];providers:DoctorProvider[];notice:string}
 const LIMIT=131072;
 const ids:CliId[]=['claude','codex','kiro'];
@@ -49,14 +49,14 @@ export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
  const providers:DoctorProvider[]=[];
  for(const id of ids){
   const found=resolveCli(id,options.env??process.env,options.platform??process.platform,{...options.discovery,override:options.overrides?.[id]});
-  const provider:DoctorProvider={id,path:found.path,version:null,isolation:'unverified',code:found.code,reason:found.reason,roles:[],effort:false};providers.push(provider);
+  const provider:DoctorProvider={id,path:found.path,version:null,isolation:'unverified',code:found.code,reason:found.reason,roles:[],effort:id==='claude'?false:null,effortCode:id==='claude'?'unverified':'not_applicable'};providers.push(provider);
   if(!found.path)continue;
   try{
    const version=await metadata(options,found.path,['--version']);
    const pattern=id==='claude'?/^(\d+\.\d+\.\d+) \(Claude Code\)\s*$/:id==='codex'?/^codex-cli ([0-9A-Za-z.+-]{1,50})\s*$/:/^kiro-cli (\d+\.\d+\.\d+)\s*$/;
    provider.version=pattern.exec(version.trim())?.[1]??null;
    const help=await metadata(options,found.path,id==='claude'?['--help']:[id==='codex'?'exec':'acp','--help']);
-   provider.effort=id==='claude'&&declared(help,'--effort');
+   if(id==='claude'){provider.effort=declared(help,'--effort');provider.effortCode=provider.effort?'help_flag_present':'help_flag_absent';}
    let compatible=false;
    if(id==='claude')compatible=assessCapabilities({provider:'claude',contract:'claude-canary-2.1.205'},version,help).available;
    else if(id==='codex')compatible=provider.version===CODEX_VERSION&&['--json','--ephemeral','--ignore-user-config','--ignore-rules','--disable'].every(f=>declared(help,f));
@@ -69,4 +69,4 @@ export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
  }
  return {exitCode:checks.every(c=>c.ok)?0:1,checks,providers,notice:'AI-off editing remains available when optional providers are missing. Login and entitlement were not checked.'};
 }
-export function formatDoctor(report:DoctorReport):string{return [...report.checks.map(c=>`${c.id}: ${c.code} — ${c.reason}`),...report.providers.map(p=>`${p.id}: ${p.code}; path=${p.path??'not found'}; version=${p.version??'unknown'}; isolation=${p.isolation}; roles=${p.roles.join(', ')||'none verified'}; effort=${p.effort} — ${p.reason}`),report.notice].join('\n');}
+export function formatDoctor(report:DoctorReport):string{return [...report.checks.map(c=>`${c.id}: ${c.code} — ${c.reason}`),...report.providers.map(p=>`${p.id}: ${p.code}; path=${p.path??'not found'}; version=${p.version??'unknown'}; isolation=${p.isolation}; roles=${p.roles.join(', ')||'none verified'}; effort=${p.effort===null?'n/a':p.effort} — ${p.reason}`),report.notice].join('\n');}
