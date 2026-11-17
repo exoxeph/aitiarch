@@ -79,6 +79,8 @@ export interface Provider {
   invoke(request: Request, options?: InvokeOptions): Promise<Result>;
 }
 export interface Configuration {
+  /** Already request-scoped machine selection; absent retains the exact legacy profile. */
+  selection?:Readonly<import('../../shared/setup.ts').ModelEffort>;
   provider: CLIProviderName;
   command: string;
   prefixArgs?: readonly string[];
@@ -137,8 +139,8 @@ export function prepareRequest(request: Request): { instruction: string; data: R
       decisions: request.decisions.map(d => ({ id: d.id, text: redact(d.text) })), turns } };
 }
 
-function argumentsFor(provider: ProviderName, hardening?: string[], stream = false, partial = false): string[] {
-  if (provider === 'claude') return claudeArguments({ hardening, stream, partial });
+function argumentsFor(provider: ProviderName, hardening?: string[], stream = false, partial = false,selection?:Configuration['selection'],effortSupported=false): string[] {
+  if (provider === 'claude') return claudeArguments({ hardening, stream, partial,selection,effortSupported });
   // Candidate contract exercised ONLY by fakes. These switches do not certify a
   // real Codex release as tool-free; every unverified production launch is blocked.
   return ['exec', '--json', '--ephemeral', '--ignore-user-config', '--sandbox', 'read-only', '--skip-git-repo-check',
@@ -214,7 +216,7 @@ function parseResult(provider: ProviderName, id: string, stdout: string, stream 
 }
 export function createProvider(configuration: Configuration): Provider {
   // Copy caller-owned configuration so concurrent mutations cannot change commands.
-  const config = { ...configuration, prefixArgs: [...(configuration.prefixArgs ?? [])] };
+  const config = { ...configuration, prefixArgs: [...(configuration.prefixArgs ?? [])],...(configuration.selection?{selection:Object.freeze({...configuration.selection})}:{}) };
   async function startup(): Promise<Availability> {
     // Explicit absolute executable only. Windows .cmd shell wrappers need a separate
     // verified launcher; never silently switch to shell:true for paths or prompts.
@@ -247,7 +249,7 @@ export function createProvider(configuration: Configuration): Provider {
         const partial=options.onTextDelta?new ClaudeChatStream(options.onTextDelta):undefined;
         const decoder=new StringDecoder('utf8');let pending='';
         const observe=(chunk?:Buffer)=>{if(!options.onStreamEvent||!stream)return;pending+=chunk?decoder.write(chunk):decoder.end();let n;while((n=pending.indexOf('\n'))>=0){const line=pending.slice(0,n);pending=pending.slice(n+1);if(line.trim())options.onStreamEvent(JSON.parse(line));}if(!chunk&&pending.trim()){options.onStreamEvent(JSON.parse(pending));pending='';}};
-        const child = spawnIsolated(config, argumentsFor(config.provider, availability.hardening, stream,!!partial),
+        const child = spawnIsolated(config, argumentsFor(config.provider, availability.hardening, stream,!!partial,config.selection,availability.effortSupported),
           { cwd:cwd!, env: environment(), shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: 'pipe' });
         let bytes = 0, failure: ProviderError | undefined;
         let killing: Promise<void> = Promise.resolve();

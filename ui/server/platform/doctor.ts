@@ -6,6 +6,7 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {assessCapabilities} from '../providers/capabilities.ts';
 import {CODEX_VERSION,codexVersionNotice} from '../providers/codex-command.ts';
+import {helpDeclaresEffort} from '../../shared/model-settings.ts';
 export interface DoctorOptions {
  nodeVersion?:string;nodeRange?:string;distDir?:string;configDir:string;cwd?:string;env?:NodeJS.ProcessEnv;platform?:NodeJS.Platform;discovery?:DiscoveryOptions;
  overrides?:Partial<Record<CliId,string>>;timeoutMs?:number;
@@ -56,7 +57,7 @@ export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
    const pattern=id==='claude'?/^(\d+\.\d+\.\d+) \(Claude Code\)\s*$/:id==='codex'?/^codex-cli ([0-9A-Za-z.+-]{1,50})\s*$/:/^kiro-cli (\d+\.\d+\.\d+)\s*$/;
    provider.version=pattern.exec(version.trim())?.[1]??null;
    const help=await metadata(options,found.path,id==='claude'?['--help']:[id==='codex'?'exec':'acp','--help']);
-   if(id==='claude'){provider.effort=declared(help,'--effort');provider.effortCode=provider.effort?'help_flag_present':'help_flag_absent';}
+   if(id==='claude'){provider.effort=helpDeclaresEffort(help);provider.effortCode=provider.effort?'help_flag_present':'help_flag_absent';}
    let compatible=false;
    if(id==='claude')compatible=assessCapabilities({provider:'claude',contract:'claude-canary-2.1.205'},version,help).available;
    else if(id==='codex')compatible=provider.version===CODEX_VERSION&&['--json','--ephemeral','--ignore-user-config','--ignore-rules','--disable'].every(f=>declared(help,f));

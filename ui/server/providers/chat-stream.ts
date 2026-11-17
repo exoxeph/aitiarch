@@ -3,7 +3,7 @@ import {IsolationMonitor,normalizeClaudeEvent} from './claude-events.ts';
 /** Bounded incremental view of the SAME isolated stream, never a second CLI/session. Event meaning comes from claude-events.ts. */
 export class ClaudeChatStream {
  private decoder=new StringDecoder('utf8');private pending='';private text='';private thinkingChars=0;private emit:(text:string)=>void;
- private monitor=new IsolationMonitor();private result:{text:string;usage:Record<string,unknown>|null;cost:number|null}|null=null;private onInit?:()=>void;
+ private monitor=new IsolationMonitor();private result:{text:string;usage:Record<string,unknown>|null;cost:number|null;model:string|null}|null=null;private onInit?:()=>void;
  /** Set when the final result text differs from the joined deltas. The result wins. */
  mismatch=false;
  /** `onInit` runs once the CLI has started its session (sessions use it to know the id is now taken). */
@@ -12,6 +12,8 @@ export class ClaudeChatStream {
  get usage(){return this.result?.usage??null;}
  /** What the CLI said the turn cost, in dollars; null when it did not say. */
  get cost(){return this.result?.cost??null;}
+ /** Final result metadata only; never infer the resolved model from init or argv. */
+ get model(){return this.result?.model??null;}
  /** Names (type words only) of events this version does not know. Counted, not fatal. */
  get unknown(){return [...this.monitor.unknown];}
  /** The final reply text: the result event's text. */
@@ -37,7 +39,7 @@ export class ClaudeChatStream {
    case 'result':
     if(this.result)this.fail('the CLI sent a second result');
     if(!e.ok||typeof e.text!=='string'||!e.text.trim())this.fail('the final result was not a success');
-    this.result={text:e.text,usage:e.usage,cost:e.cost};this.mismatch=e.text!==this.text;break;
+    this.result={text:e.text,usage:e.usage,cost:e.cost,model:e.model};this.mismatch=e.text!==this.text;break;
   }
  }
 }

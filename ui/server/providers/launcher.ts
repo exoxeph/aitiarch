@@ -6,34 +6,37 @@ import path from 'node:path';
 import { chatSessionArguments,claudeArguments,investigateSessionArguments } from './claude-arguments.ts';
 import type { Configuration, ProviderName } from './index.ts';
 import {CODEX_FLAGS,TOOLLESS_AGENT} from './tool-less-arguments.ts';
+import type {ModelEffort} from '../../shared/setup.ts';
+import {modelArguments} from '../../shared/model-settings.ts';
 
 /** Separate notes-only profiles. Never shares or alters the Claude/Investigate/diagram profiles below.
  * The host builds every argument; prompts go to stdin only. No shell or native prefix arguments. */
-export function spawnToolless(config:{id:'codex'|'kiro';command:string;prefixArgs?:string[]},mode:'version'|'metadata'|'isolated',options:SpawnOptionsWithoutStdio&{cwd:string}){
+export function spawnToolless(config:{id:'codex'|'kiro';command:string;prefixArgs?:string[];selection?:Readonly<ModelEffort>},mode:'version'|'metadata'|'isolated',options:SpawnOptionsWithoutStdio&{cwd:string}){
   const reject=()=>{throw new Error('Provider launch rejected: invalid tool-less profile.');};
   if(config.id!=='codex'&&config.id!=='kiro')reject();
   if(config.prefixArgs?.length&&config.command!==process.execPath)reject();
   if(!path.isAbsolute(config.command)||/\.(cmd|bat|ps1)$/i.test(config.command)||/(?:^|[\\/])claude(?:\.exe)?$/i.test(config.command))reject();
   if(mode!=='version'&&mode!=='metadata'&&mode!=='isolated')reject();
-  const args=mode==='version'?['--version']:mode==='metadata'?(config.id==='kiro'?['acp','--help']:['exec','--help']):config.id==='kiro'?['acp','--agent-engine','v2','--agent',TOOLLESS_AGENT]:[...CODEX_FLAGS,'-C',options.cwd,'-'];
+  const selectionArgs=mode==='isolated'?modelArguments(config.id,config.selection):[];
+  const args=mode==='version'?['--version']:mode==='metadata'?(config.id==='kiro'?['acp','--help']:['exec','--help']):config.id==='kiro'?['acp','--agent-engine','v2','--agent',TOOLLESS_AGENT]:[...CODEX_FLAGS,...selectionArgs,'-C',options.cwd,'-'];
   // Reuse the existing empty, real OS-temp folder check; do not accept a repo or a linked folder.
   assertLaunch('codex','isolated',args,options.cwd);
   return spawn(config.command,[...(config.prefixArgs??[]),...args],{...options,shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:'pipe'});
 }
 
-export function assertLaunch(provider: ProviderName, mode: 'metadata' | 'isolated', args: readonly string[], cwd?: string): void {
+export function assertLaunch(provider: ProviderName, mode: 'metadata' | 'isolated', args: readonly string[], cwd?: string,selection?:Readonly<ModelEffort>): void {
   const reject = () => { throw new Error('Provider launch rejected: only exact metadata or the isolated provider profile is allowed.'); };
   if (mode === 'metadata') {
     if (JSON.stringify(args) !== '["--version"]' && JSON.stringify(args) !== (provider === 'claude' ? '["--help"]' : '["exec","--help"]')) reject();
     return;
   }
   if (provider === 'claude' && ![false, true].some(stream => [false,true].some(partial=>(!partial||stream)&&[[], ['--max-turns', '1']].some(hardening =>
-    JSON.stringify(args) === JSON.stringify(claudeArguments({ stream, hardening, partial })))))) reject();
+    JSON.stringify(args) === JSON.stringify(claudeArguments({ stream, hardening, partial,selection,effortSupported:true })))))) reject();
   if (!cwd || !path.isAbsolute(cwd)) reject();
   const actual = realpathSync(cwd!), temp = realpathSync(os.tmpdir()), rel = path.relative(temp, actual);
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel) || readdirSync(actual).length) reject();
 }
-type Target = Pick<Configuration, 'provider' | 'command' | 'prefixArgs'>;
+type Target = Pick<Configuration, 'provider' | 'command' | 'prefixArgs'|'selection'>;
 function assertTarget(config: Target): void {
   // Explicit Node fixture/entrypoint arguments are separate from native CLI argv.
   if ((config.prefixArgs?.length && config.command !== process.execPath) ||
@@ -52,12 +55,12 @@ export function metadataOutput(config: Target, args: string[], cwd: string, env:
 }
 export function spawnIsolated(config: Target, args: string[], options: SpawnOptionsWithoutStdio & { cwd: string }) {
   assertTarget(config);
-  assertLaunch(config.provider, 'isolated', args, options.cwd);
+  assertLaunch(config.provider, 'isolated', args, options.cwd,config.selection);
   return spawn(config.command, [...(config.prefixArgs ?? []), ...args], { ...options, shell: false, windowsHide: true, stdio: 'pipe' });
 }
 /** A chat harness session turn. The arguments are built here from the profile (never passed in), the working folder must be the project's
  *  registered, empty session folder, and the instruction file must live outside it. */
-export function spawnChatSession(config:Target,profile:{id:string;resume:boolean;addendumFile:string;model?:string;diagrams?:{budgetUsd:number;files:readonly string[]}},options:SpawnOptionsWithoutStdio&{cwd:string},registeredCwd:string){
+export function spawnChatSession(config:Target,profile:{id:string;resume:boolean;addendumFile:string;model?:string;diagrams?:{budgetUsd:number;files:readonly string[]}}&import('./claude-arguments.ts').ClaudeSelection,options:SpawnOptionsWithoutStdio&{cwd:string},registeredCwd:string){
  assertTarget(config);
  const reject=()=>{throw new Error('Session launch rejected.');};
  if(config.provider!=='claude')reject();
@@ -74,7 +77,7 @@ export function spawnChatSession(config:Target,profile:{id:string;resume:boolean
  return spawn(config.command,[...(config.prefixArgs??[]),...chatSessionArguments({...rest,...(diagrams?{diagrams:{budgetUsd:diagrams.budgetUsd}}:{})})],{...options,cwd,shell:false,windowsHide:true,stdio:'pipe'});
 }
 /** An investigation turn: arguments built here, cwd must be the registered snapshot folder (not empty: it holds the copy), the instruction file outside it. */
-export function spawnInvestigateSession(config:Target,profile:{id:string;resume:boolean;addendumFile:string;model?:string;budgetUsd:number},options:SpawnOptionsWithoutStdio&{cwd:string},registeredCwd:string){
+export function spawnInvestigateSession(config:Target,profile:{id:string;resume:boolean;addendumFile:string;model?:string;budgetUsd:number}&import('./claude-arguments.ts').ClaudeSelection,options:SpawnOptionsWithoutStdio&{cwd:string},registeredCwd:string){
  assertTarget(config);
  const reject=()=>{throw new Error('Investigation launch rejected.');};
  if(config.provider!=='claude')reject();
