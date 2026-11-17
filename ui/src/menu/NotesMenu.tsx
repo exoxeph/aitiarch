@@ -7,9 +7,9 @@ import type {EdgeMenu} from './useEdgeMenu.ts';
  * The left menu: an 8 px hot zone at the window edge, a soft scrim, and a floating panel that overlays the note (it never reflows it).
  * It opens from the edge after a short dwell, pins from the hamburger, and closes on Escape or after the pointer leaves it.
  */
-export function NotesMenu({menu,burger,rootName,rootPath,tree,active,onOpen,onSearch,onSettings,usage,settings,onTreeChanged,onMoved,blocked}:{
+export function NotesMenu({menu,burger,rootName,rootPath,tree,active,onOpen,onSearch,onDecisions,onSettings,usage,settings,onTreeChanged,onMoved,blocked}:{
  menu:EdgeMenu;burger:RefObject<HTMLElement|null>;rootName:string;rootPath:string;tree:TreeNode|null;active:string|null;
- onOpen:(path:string)=>void;onSearch:()=>void;onSettings:()=>void;usage:ReactNode;settings:ReactNode;
+ onOpen:(path:string)=>void;onSearch:()=>void;onDecisions:()=>void;onSettings:()=>void;usage:ReactNode;settings:ReactNode;
  onTreeChanged:()=>void|Promise<unknown>;onMoved:(moves:MovePlan['moves'])=>void;blocked:(paths:string[])=>string|null;
 }){
  const el=useRef<HTMLElement>(null),{open,pinned,controller:c}=menu;
@@ -33,6 +33,7 @@ export function NotesMenu({menu,burger,rootName,rootPath,tree,active,onOpen,onSe
    <div className="side-title" title={rootPath}>{rootName}</div>
    <div className="menu-actions">
     <button type="button" className="menu-row" data-menu-first onClick={()=>{c.close();onSearch();}}><span>Search</span><kbd>Ctrl K</kbd></button>
+    <button type="button" className="menu-row" onClick={()=>{c.close();onDecisions();}}><span>Decisions</span></button>
     <a className="menu-row" href="/?home=1"><span>All projects</span></a>
    </div>
    <nav className="menu-tree" aria-label="Notes explorer"><Explorer tree={tree} active={active} onOpen={p=>{onOpen(p);c.close();}} onTreeChanged={onTreeChanged} onMoved={onMoved} blocked={blocked} onHold={hold}/></nav>

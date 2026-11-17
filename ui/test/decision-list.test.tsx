@@ -1,6 +1,9 @@
 import {it,expect} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {DecisionsList} from '../src/notes/DecisionsList.tsx';
+it('labels the decision section as spanning all notes',()=>{
+ expect(renderToStaticMarkup(<DecisionsList rows={[]} onOpen={()=>{}}/>)).toContain('Decisions across all notes</h3>');
+});
 it('renders a rejected-only row without a decision heading',()=>{
  const out=renderToStaticMarkup(<DecisionsList rows={[{path:'p.md',noteName:'Plan',decision:'',why:'',rejected:['Polling'],lineNumber:1,mtimeMs:1}]} onOpen={()=>{}}/>);
  expect(out).toContain('Rejected: Polling');expect(out).not.toContain('<strong>');

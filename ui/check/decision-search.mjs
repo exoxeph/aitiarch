@@ -18,10 +18,14 @@ const browser=await chromium.launch({channel:'msedge',headless:true});
 try{
  const page=await browser.newPage();await page.goto(`http://127.0.0.1:${await app.listen(0)}/?debug=1`);await page.getByRole('button',{name:'Commands',exact:true}).waitFor();
  const palette=async query=>{await page.getByRole('button',{name:'Commands',exact:true}).click();await page.getByPlaceholder('Type a command…').fill(query);};
+ await page.getByRole('button',{name:'Notes menu',exact:true}).click();
+ await page.locator('#note-tree').getByRole('button',{name:'Decisions',exact:true}).click();
+ await page.getByRole('heading',{name:'Decisions across all notes',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Close the constellation'}).click();
  await palette('Show decisions');await page.keyboard.press('Enter');const section=page.getByRole('region',{name:'Decisions',exact:true});
  await section.getByRole('button').first().waitFor();assert.match(await section.getByRole('button').first().textContent(),/Use a queue/);
  assert.match(await section.textContent(),/Why: Handle bursts/);assert.match(await section.textContent(),/Rejected: Blocking/);
- assert.equal(await page.locator(':focus').textContent(),'Decisions');await page.keyboard.press('Tab');assert.match(await page.locator(':focus').textContent(),/Use a queue/);
+ assert.equal(await page.locator(':focus').textContent(),'Decisions across all notes');await page.keyboard.press('Tab');assert.match(await page.locator(':focus').textContent(),/Use a queue/);
  await page.keyboard.press('ArrowDown');assert.match(await page.locator(':focus').textContent(),/Use polling/);await page.keyboard.press('Enter');
  await page.waitForFunction(()=>window.__aitiarch?.['a.md']?.view.state.doc.lineAt(window.__aitiarch['a.md'].view.state.selection.main.head).number===2);
  await page.setViewportSize({width:360,height:780});await palette('Show decisions');await page.keyboard.press('Enter');await section.getByRole('button').first().click();
