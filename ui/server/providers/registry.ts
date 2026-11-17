@@ -9,10 +9,13 @@ import path from 'node:path';
 import type {TurnAdapter,SafetyLabel} from './turn.ts';
 import type {createInvokedCodexBridge} from './invoked-bridge.ts';
 import type {Provider} from './index.ts';
-export type InvokedBridgeFactory=(options:Pick<Parameters<typeof createInvokedCodexBridge>[0],'cap'|'onTurn'|'beforeTurn'>)=>Provider;
+import {modelSelection} from '../../shared/model-settings.ts';
+import type {ModelEffort} from '../../shared/setup.ts';
+export type InvokedBridgeFactory=(options:Pick<Parameters<typeof createInvokedCodexBridge>[0],'cap'|'onTurn'|'beforeTurn'|'selection'>)=>Provider;
 
 export interface Detection {available:boolean;reason:string|null}
 export interface ProviderDescriptor {
+ readonly selection?:Readonly<ModelEffort>;
  readonly id:SetupProvider;readonly label:string;readonly safetyLabel:SafetyLabel;
  readonly capabilities:Readonly<Record<SetupRole|'vision',boolean>>;
  readonly vision:Readonly<{available:boolean;reason:string}>;
@@ -37,6 +40,9 @@ export interface RequestSettingsSnapshot {
  /** Optional for older consumers; approval-sensitive callers must require it.
   * Rereads settings only, without another asynchronous provider detection. */
  currentContextKey?(role:SetupRole):Promise<string>;
+ /** Approval identity for every role override of one Council participant. */
+ providerKey?(id:SetupProvider):string;
+ currentProviderKey?(id:SetupProvider):Promise<string>;
 }
 function settingsKey(settings:MachineSetup,role:SetupRole,fault=false):string {
  const id=settings.roles[role],p=id===null?null:settings.providers[id],selection=p?.roles[role]??p;
@@ -108,7 +114,14 @@ export class ProviderRegistry {
    if(fault)return unavailable(role,null,'settings-unavailable','Machine setup could not be read. Fix the saved settings; no provider was selected.');
    const selected=this.resolveRole(role,setup);if('available' in selected)return selected;
    const state=states.get(selected.id);
-   return state?.available?selected:unavailable(role,selected.id,'provider-unavailable',state?.reason??'Provider metadata could not be verified.');
+   if(!state?.available)return unavailable(role,selected.id,'provider-unavailable',state?.reason??'Provider metadata could not be verified.');
+   const selection=modelSelection(setup,role,selected.id);
+   // Keep the legacy Default descriptor and exact transport input unchanged.
+   if(selection.model===null&&selection.effort===null)return selected;
+   const bind=(factory:InvokedBridgeFactory):InvokedBridgeFactory=>options=>factory({...options,selection});
+   return Object.freeze({...selected,selection,createToollessAdapter:()=>{
+    const adapter=selected.createToollessAdapter();return {...adapter,startTurn:(input:Parameters<TurnAdapter['startTurn']>[0],signal:AbortSignal)=>adapter.startTurn({...input,selection},signal)};
+   },...(selected.createInvokedProvider?{createInvokedProvider:bind(selected.createInvokedProvider)}:{}),...(selected.createThreadProvider?{createThreadProvider:bind(selected.createThreadProvider)}:{})});
   };
   const council=()=>{
    const providers=fault?[]:this.providers.filter(p=>frozen.providers[p.id].enabled&&p.capabilities.council&&states.get(p.id)?.available);
@@ -117,6 +130,8 @@ export class ProviderRegistry {
    return {available:providers.length>=2,providers:Object.freeze(providers),reason:providers.length>=2?null:fault?'Machine setup could not be read. No providers were selected.':'Council needs at least two enabled, available providers. Normal chat can use one compatible provider.'};
   };
   return Object.freeze({settings:frozen,resolveRole:resolve,resolveParticipant:(id:SetupProvider)=>resolve('council',{...frozen,roles:{...frozen.roles,council:id}}),council,
-   contextKey:(role:SetupRole)=>settingsKey(frozen,role,fault),currentContextKey:async(role:SetupRole)=>settingsKey(await readSettings(),role)});
+   contextKey:(role:SetupRole)=>settingsKey(frozen,role,fault),currentContextKey:async(role:SetupRole)=>settingsKey(await readSettings(),role),
+   providerKey:(id:SetupProvider)=>createHash('sha256').update(JSON.stringify(frozen.providers[id])).digest('hex'),
+   currentProviderKey:async(id:SetupProvider)=>createHash('sha256').update(JSON.stringify((await readSettings()).providers[id])).digest('hex')});
  }
 }

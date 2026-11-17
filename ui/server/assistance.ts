@@ -89,7 +89,7 @@ export class Assistance {
       review: e.review ? { loaded: [], skipped: [], missing: [], note: SKILLS_ONLY_WITH_SKILL_RENDERER } : null };
     return { request: { ...base, persona: e.persona, ...(e.skills.loaded.length ? { skills: e.skills } : {}) }, names: e.names, review: e.review };
   }
-  async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview;review?:{id:string;provider:string;cap:CouncilCap|null} }> {
+  async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview;review?:{id:string;provider:string;cap:CouncilCap|null;modelSettings:import('../shared/setup.ts').ModelEffort} }> {
     const frozen = freezeInvocation(input);
     const selected=await this.selection();
     const { request, review } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question,

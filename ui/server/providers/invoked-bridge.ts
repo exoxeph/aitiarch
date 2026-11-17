@@ -5,12 +5,14 @@ import type {CouncilCap} from '../../shared/council.ts';
 import {parseAnswerJson} from './answer-json.ts';
 import {prepareRequest,ProviderError,validateProviderResponse,type Provider} from './index.ts';
 import {runTurn,type TurnAdapter,type TurnResult} from './turn.ts';
+import type {ModelEffort} from '../../shared/setup.ts';
 
 /** Content-free transport facts, including usage on rejected/invalid answers.
  * Total Codex tokens must never be invented as an input/output split. */
 export type InvokedTurnMetadata=Pick<TurnResult,'provider'|'status'|'usage'|'durationMs'|'code'|'blockedAttempts'|'overCap'>;
 export function createInvokedCodexBridge(options:{
  adapter:TurnAdapter;checkAvailability:Provider['checkAvailability'];cap:CouncilCap;
+ selection?:Readonly<ModelEffort>;
  onTurn:(metadata:InvokedTurnMetadata)=>Promise<void>;
  /** Revalidate the one-use review after metadata awaits, before any transport. */
  beforeTurn?:(packet:ReturnType<typeof prepareRequest>)=>Promise<void>;
@@ -35,7 +37,7 @@ export function createInvokedCodexBridge(options:{
    }
   }};
   await options.beforeTurn?.(packet);
-  const turn=await runTurn(transport,{question,notes:[],outputFormat:'invoked-json',cap:{unit:cap.unit,amount:cap.amount},
+  const turn=await runTurn(transport,{question,notes:[],outputFormat:'invoked-json',...(options.selection?{selection:options.selection}:{}),cap:{unit:cap.unit,amount:cap.amount},
    deadlineMs:Math.min(cap.deadlineMs,invokeOptions?.timeoutMs??cap.deadlineMs),maxOutputBytes},invokeOptions?.signal);
   await options.onTurn({provider:turn.provider,status:turn.status,usage:turn.usage,durationMs:turn.durationMs,
    ...(turn.code?{code:turn.code}:{}),...(turn.blockedAttempts===undefined?{}:{blockedAttempts:turn.blockedAttempts}),...(turn.overCap?{overCap:true}:{})});

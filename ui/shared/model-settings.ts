@@ -28,3 +28,5 @@ export function modelArguments(id:SetupProvider,selection:Readonly<ModelEffort>=
 /** Only CLI help declarations count; prose mentions must never enable a flag. */
 export const helpDeclaresEffort=(help:string)=>help.split(/\r?\n/).some(line=>/^\s*(?:-[A-Za-z],\s*)?--effort(?=[\s=,]|$)/.test(line));
 export const reportedModelLabel=(model:unknown)=>typeof model==='string'&&model.trim()?model:'model not reported';
+/** Requested settings are labels, never a claim about the resolved model. */
+export const selectionLabel=(selection?:Readonly<ModelEffort>)=>`Requested model: ${selection?.model??'Default'} · effort: ${selection?.effort??'Default'}`;

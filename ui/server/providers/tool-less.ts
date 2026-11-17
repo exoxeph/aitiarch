@@ -85,8 +85,9 @@ async function verifyCapabilities(config:CliTurnConfig,cwd:string,env:NodeJS.Pro
 }
 export function createCliAdapter(config:CliTurnConfig):TurnAdapter{
  config={...config,prefixArgs:config.prefixArgs?[...config.prefixArgs]:undefined,...(config.selection?{selection:Object.freeze({...config.selection})}:{})};
- const state:{version?:string;message?:string}={};
+ const baseConfig=config,state:{version?:string;message?:string}={};
  return {id:config.id,label:config.id==='kiro'?'Kiro':'Codex',status:()=>({...state}),safetyLabel:defaults.safetyLabels[config.id],async *startTurn(input,signal){
+  const config={...baseConfig,...(input.selection?{selection:Object.freeze({...input.selection})}:{})};
   try{modelArguments(config.id,config.selection);}catch(e){throw new TurnFailure('invalid_model_settings','unavailable',(e as Error).message);}
   if((config.prefixArgs?.length||config.startupTimeoutMs!==undefined)&&config.command!==process.execPath)throw new TurnFailure('invalid_command','unavailable');
   const cwd=await mkdtemp(path.join(os.tmpdir(),'aitiarch-headless-'));config.onScratch?.(cwd);

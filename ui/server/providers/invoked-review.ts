@@ -33,7 +33,7 @@ export class ProviderReviews {
   for(const [key,value] of this.reviews)if(Date.now()-value.created>600000)this.reviews.delete(key);
   if(this.reviews.size>=100)this.reviews.delete(this.reviews.keys().next().value!);
   this.reviews.set(id,{created:Date.now(),fingerprint,packet:JSON.stringify(packet),contextKey:selected.contextKey,provider:selected.provider,cap});
-  return {id,provider:selected.provider.id,cap};
+  return {id,provider:selected.provider.id,cap,modelSettings:selected.provider.selection??{model:null,effort:null}};
  }
  async consume(id:string|undefined,fingerprint:string,packet:unknown){
   const review=id?this.reviews.get(id):undefined;if(!review)throw staleReview();
@@ -42,7 +42,10 @@ export class ProviderReviews {
   this.reviews.delete(id!);return review;
  }
  provider(review:ReviewedInvocation,ledger:LedgerStore,target:{id:string;requestId:string;note:string},report:(usage:InvokedUsage,notice?:string)=>void):Provider {
-  if(review.provider.id!=='codex')return this.legacy;
+  if(review.provider.id!=='codex')return {...this.legacy,invoke:async(request,options)=>{
+   await this.assert(review);
+   return this.legacy.invoke(request,{...options,...(review.provider.selection?{selection:review.provider.selection}:{})});
+  }};
   let accounted=false;
   const factory=this.role==='invoked'?review.provider.createInvokedProvider:review.provider.createThreadProvider;
   return factory!({cap:review.cap!,beforeTurn:async(packet)=>{

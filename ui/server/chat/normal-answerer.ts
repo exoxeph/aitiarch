@@ -35,13 +35,20 @@ export class NormalChat {
  private o:{index:SessionIndex;questions:QuestionStore;council:Pick<CouncilService,'plan'>;adapters:TurnAdapter[];routing?:RoleRouting};
  constructor(o:NormalChat['o']){this.o=o;this.index=o.index;this.questions=o.questions;}
  async selection(){return this.o.routing?.();}
+ private approvalSnapshot(snapshot?:RequestSettingsSnapshot):RequestSettingsSnapshot|undefined{
+  if(!snapshot)return undefined;
+  return {...snapshot,resolveParticipant:id=>{
+   const selected=snapshot.resolveRole('normal-chat');
+   return 'available' in selected||selected.id===id?selected:{available:false,provider:id,role:'normal-chat',code:'provider-unavailable',reason:'The reviewed normal-chat provider changed. Review again; no other provider was tried.'};
+  }};
+ }
  async plan(conversation:string,provider:'codex'|'kiro',question:string,snapshot?:RequestSettingsSnapshot){
   const caps={[provider]:{...activePipelineConfig().council.caps[provider]}};
-  const input={conversation,providers:[provider],notes:[] as string[],question,caps};
-  const plan=await this.o.council.plan(input,snapshot);
+  const input={conversation,providers:[provider],notes:[] as string[],question,caps,...(snapshot?{role:'normal-chat' as const}:{})};
+  const plan=await this.o.council.plan(input,this.approvalSnapshot(snapshot));
   return {input:{...input,hash:plan.hash} as NonNullable<ChatReview['normalPlan']>,cap:plan.grant.caps[provider]!,needsApproval:plan.needsApproval};
  }
- async authorized(plan:NonNullable<ChatReview['normalPlan']>,snapshot?:RequestSettingsSnapshot){return !(await this.o.council.plan(plan,snapshot)).needsApproval;}
+ async authorized(plan:NonNullable<ChatReview['normalPlan']>,snapshot?:RequestSettingsSnapshot){return !(await this.o.council.plan(plan,this.approvalSnapshot(snapshot))).needsApproval;}
  async run(request:Request,plan:NonNullable<ChatReview['normalPlan']>,signal:AbortSignal,onTextDelta:(text:string)=>void,snapshot?:RequestSettingsSnapshot){
   const provider=plan.providers[0],cap=plan.caps[provider]!;
   const result=await normalChatTurn(request,this.o.adapters,signal,{answerer:provider,cap,onTextDelta,snapshot});

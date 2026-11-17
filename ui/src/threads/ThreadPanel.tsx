@@ -1,4 +1,5 @@
 import {DiagramSlot} from '../diagrams/DiagramSlot.tsx';
+import {selectionLabel,reportedModelLabel} from '../../shared/model-settings.ts';
 import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
 import {DiagramReveal,Streamed,Thinking} from '../ink/streaming.tsx';
 import {useEffect,useRef,useState,type ReactNode} from 'react';
@@ -32,7 +33,7 @@ export function ReplyView({reply,onAdd}:{reply:ThreadReply;onAdd?:(r:ThreadReply
  const waited=useRef(reply.generation.status==='pending');if(reply.generation.status==='pending')waited.current=true;
  const fresh=waited.current&&reply.generation.status==='complete';
  return <article className="thread-reply" data-reply-id={reply.id} data-generated-complete={reply.generation.status==='complete'?'true':undefined}>
-  <div className="small muted">AI · {providerLabel(reply.generation.provider)} · {reply.generation.status}</div>
+  <div className="small muted">AI · {providerLabel(reply.generation.provider)} · {reportedModelLabel(reply.generation.model)} · {reply.generation.status}</div>
   {reply.generation.status==='complete'?<div className="ai-answer"><Streamed text={reply.body} fresh={fresh}><ReplyMarkdown text={reply.body}/></Streamed><DiagramReveal fresh={fresh}><DiagramSlot diagram={reply.diagram} invalid={reply.diagramIssue}/></DiagramReveal></div>:reply.generation.status==='pending'&&!reply.failure?<p><Thinking/></p>:<p role="status">{reply.failure?failureLabels[reply.failure.code]:'Answer unavailable. No partial answer was accepted.'}</p>}
   {onAdd&&reply.generation.status==='complete'&&<button type="button" className="add-to-note" aria-label={'Add to note: '+reply.body.replace(/\s+/g,' ').slice(0,48)} onClick={()=>onAdd(reply)}>Add to note</button>}
  </article>;
@@ -60,7 +61,7 @@ export function ThreadPanel(props:Props){
 function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgnoreNotice=true}:Props&{item:InkItem;memory:Map<string,MemoryDraft>}){
  const key=path+':'+item.id;let entry=memory.get(key);if(!entry){entry={text:'',revision:null,loaded:false,dirty:false,enabled:false,sequence:0,queue:Promise.resolve()};memory.set(key,entry);}const draft=entry;
  const [text,setText]=useState(draft.text),[draftNotice,setDraftNotice]=useState(false),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[confirmDelete,setConfirmDelete]=useState(false);
- const [question,setQuestion]=useState(''),[review,setReview]=useState<null|{purpose:'followup'|'summary';replyId:string;parentId:string;provider:string;required:boolean;from:string|null;description:string;packet:unknown;noteVersion:string;question:string;skills?:SkillsReview;reviewId?:string;cap?:{amount:number;unit:string}|null}>(null),[confirmed,setConfirmed]=useState(false);
+ const [question,setQuestion]=useState(''),[review,setReview]=useState<null|{purpose:'followup'|'summary';replyId:string;parentId:string;provider:string;required:boolean;from:string|null;description:string;packet:unknown;noteVersion:string;question:string;skills?:SkillsReview;modelSettings?:import('../../shared/setup.ts').ModelEffort;reviewId?:string;cap?:{amount:number;unit:string}|null}>(null),[confirmed,setConfirmed]=useState(false);
  const [accounting,setAccounting]=useState<Record<string,{usage:InvokedUsage;notice?:string}>>({});
  const [saveFailures,setSaveFailures]=useState<string[]>([]);
  const mounted=useRef(true),card=useRef<HTMLElement|null>(null),seen=useRef(new Set<string>()),live=useRef({item,version,saved});live.current={item,version,saved};
@@ -107,9 +108,9 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgno
   setBusy(true);setNotice('');try{
    const a=await api.assistance(),notice=await api.threadCall<{required:boolean;from:string|null;to:string;description:string}>('notice',{path,id:item.id});
    const replies=[initial,...t.followups,...(t.summary.reply?[t.summary.reply]:[])].filter(r=>r.generation.status==='complete');
-   const replyId=crypto.randomUUID(),parentId=replies.at(-1)?.id??item.id,response=await api.threadCall<{packet:unknown;noteVersion:string;skills?:SkillsReview;review?:{id:string;provider:string;cap:{amount:number;unit:string}|null};notice?:typeof notice}>('preview',{path,id:item.id,purpose,question,replyId,parentId});
+   const replyId=crypto.randomUUID(),parentId=replies.at(-1)?.id??item.id,response=await api.threadCall<{packet:unknown;noteVersion:string;skills?:SkillsReview;review?:{id:string;provider:string;modelSettings?:import('../../shared/setup.ts').ModelEffort;cap:{amount:number;unit:string}|null};notice?:typeof notice}>('preview',{path,id:item.id,purpose,question,replyId,parentId});
    const pinnedNotice=response.notice??notice;
-   setConfirmed(!pinnedNotice.required);setReview({purpose,replyId,parentId,provider:response.review?.provider??a.provider??'claude',question,...pinnedNotice,...response,reviewId:response.review?.id,cap:response.review?.cap});
+   setConfirmed(!pinnedNotice.required);setReview({purpose,replyId,parentId,provider:response.review?.provider??a.provider??'claude',question,...pinnedNotice,...response,modelSettings:response.review?.modelSettings,reviewId:response.review?.id,cap:response.review?.cap});
   }catch(e){fail(e);}finally{setBusy(false);}
  };
  const send=async()=>{if(!review||busy||!confirmed)return;setBusy(true);try{
@@ -133,6 +134,7 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgno
   <div className="writeback"><input aria-label="Write back" placeholder="Write back…" value={question} disabled={!!review||busy} maxLength={8000} onChange={e=>setQuestion(e.target.value)}/>
   <button className="send-arrow" aria-label="Review reply" title="Review reply" disabled={busy||!question.trim()||item.attachment.status!=='attached'} onClick={()=>void prepare('followup')}><span aria-hidden="true"/></button></div>
   {review&&<section className="thread-request" aria-label="Review thread request"><p>Send to {providerLabel(review.provider)}. Note and selection frozen by version; changes require a new review.</p>
+   <p className="small muted">{selectionLabel(review.modelSettings)}. Each reply uses a fresh CLI context with only the reviewed app-kept history.</p>
    {review.cap&&<p className="small muted">Allowance for this request: {review.cap.amount.toLocaleString()} {review.cap.unit}. Reported after the turn; if unreported, the full allowance is charged conservatively. Another reply needs a new review.</p>}
    <SkillsReviewList review={review.skills}/>
    <details><summary>Exact redacted request</summary><pre>{JSON.stringify(review.packet,null,2)}</pre></details>

@@ -1,6 +1,44 @@
 import {expect,it,afterEach,vi} from 'vitest';import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';
 import {CouncilService} from '../server/council.ts';import {SessionIndex} from '../server/harness/session-index.ts';import {Store} from '../server/store.ts';import {InkStore} from '../server/ink-store.ts';import {LedgerStore} from '../server/ledger-store.ts';import type {TurnAdapter} from '../server/providers/turn.ts';
 import {COUNCIL_DEFAULT_CAPS} from '../shared/council.ts';
+import {defaultMachineSetup} from '../shared/setup.ts';
+import {saveMachineSetup} from '../server/setup-store.ts';
+import {ProviderRegistry,descriptorFromAdapter} from '../server/providers/registry.ts';
+import {NormalChat} from '../server/chat/normal-answerer.ts';
+import {QuestionStore} from '../server/harness/questions.ts';
+it('a normal-chat model approval cannot authorize a different Council model',async()=>{
+ const f=await setup(),dir=path.join(f.root,'config');await mkdir(dir);const previous=process.env.AITIARCH_CONFIG_DIR;process.env.AITIARCH_CONFIG_DIR=dir;
+ try{
+  const adapter:TurnAdapter={id:'codex',label:'Codex',safetyLabel:'contained',async *startTurn(){}};
+  const settings=defaultMachineSetup();settings.providers.codex.enabled=true;settings.roles['normal-chat']='codex';settings.providers.codex.roles['normal-chat']={model:'normal-model',effort:null};settings.providers.codex.roles.council={model:'council-model',effort:null};await saveMachineSetup(dir,settings);
+  const registry=new ProviderRegistry([descriptorFromAdapter(adapter,{detect:async()=>({available:true,reason:null})})]),routing=()=>registry.snapshot(dir);
+  const service=new CouncilService({...f,store:await Store.open(f.root),ink:await InkStore.open(f.root),adapters:[adapter],routing});
+  const normal=new NormalChat({index:f.index,questions:new QuestionStore(f.index.dir),council:service,adapters:[adapter],routing});
+  const n=await normal.plan(f.session.id,'codex','Synthetic?',await routing()),input={conversation:f.session.id,providers:['codex'],notes:[],question:'Synthetic?',caps:n.input.caps};
+  expect(n.input.hash).not.toBe((await service.plan(input)).hash);
+  await service.approve(n.input);expect(await normal.authorized(n.input,await routing())).toBe(true);expect((await service.plan(input)).needsApproval).toBe(true);
+ }finally{if(previous===undefined)delete process.env.AITIARCH_CONFIG_DIR;else process.env.AITIARCH_CONFIG_DIR=previous;}
+});
+it('revoking one provider removes its setting key while retaining the other approval',async()=>{
+ const f=await setup(),plan=await f.service.plan({conversation:f.session.id,providers:['codex','kiro'],notes:[],question:'Synthetic?'});
+ const grant={...plan.grant,settingsKeys:{codex:'a'.repeat(64),kiro:'b'.repeat(64)}};
+ await f.index.setCouncilGrant(f.session.id,grant);await f.index.clearCouncilProvider(f.session.id,'codex');
+ const saved=(await f.index.get(f.session.id))!.councilGrant;expect(saved?.providers).toEqual(['kiro']);expect(saved?.settingsKeys).toEqual({kiro:'b'.repeat(64)});
+});
+it('Council pins requested model settings in approval and rejects changed settings before a run',async()=>{
+ const f=await setup(),dir=path.join(f.root,'config');await mkdir(dir);const previous=process.env.AITIARCH_CONFIG_DIR;process.env.AITIARCH_CONFIG_DIR=dir;
+ try{
+  const seen:any[]=[];const adapter:TurnAdapter={id:'codex',label:'Codex',safetyLabel:'contained',async *startTurn(input){seen.push(input);yield {type:'complete',answer:'June.\n<claims>[{"source":"N1","quote":"Launch in June."}]</claims>'};}};
+  const settings=defaultMachineSetup();settings.providers.codex.enabled=true;settings.providers.codex.model='selected-model';await saveMachineSetup(dir,settings);
+  const registry=new ProviderRegistry([descriptorFromAdapter(adapter,{detect:async()=>({available:true,reason:null})})]);
+  const service=new CouncilService({...f,store:await Store.open(f.root),ink:await InkStore.open(f.root),adapters:[adapter],routing:()=>registry.snapshot(dir)});
+  const input={conversation:f.session.id,providers:['codex'],notes:['plan.md'],question:'Month?'};
+  const p=await service.plan(input);expect(p.providers[0].selection).toEqual({model:'selected-model',effort:null});await service.approve({...input,hash:p.hash});
+  await service.run(input);expect(seen[0].selection.model).toBe('selected-model');
+  settings.providers.codex.model='changed-model';await saveMachineSetup(dir,settings);
+  expect((await service.plan(input)).needsApproval).toBe(true);await expect(service.run(input)).rejects.toThrow('plan_required');expect(seen).toHaveLength(1);
+ }finally{if(previous===undefined)delete process.env.AITIARCH_CONFIG_DIR;else process.env.AITIARCH_CONFIG_DIR=previous;}
+});
 it('defaults Codex to 40000 tokens',()=>expect(COUNCIL_DEFAULT_CAPS.codex.amount).toBe(40000));
 it('explains a protected note without reading or sending it and keeps other context denials',async()=>{
  const f=await setup();const input={conversation:f.session.id,providers:['codex'],notes:['notebook.md'],question:'Synthetic?'};

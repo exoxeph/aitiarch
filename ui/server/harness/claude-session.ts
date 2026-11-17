@@ -15,13 +15,15 @@ import {FenceStop} from './diagram-fence.ts';
 import {sweepOwnCopies,syncDiagramFolder,verifyDiagramFolder,type FolderCopy,type WantedCopy} from './diagram-folder.ts';
 import {DiagramTurnWatcher} from './diagram-watch.ts';
 import {activeTurnDirs} from './sweep.ts';
+import {helpDeclaresEffort,modelArguments} from '../../shared/model-settings.ts';
+import type {ModelEffort} from '../../shared/setup.ts';
 
 export interface SessionRunnerConfig {command:string;prefixArgs?:string[];
  /** The project's harness folder (outside the repo). The session working folder and per-turn files live under it. */
  dir:string;model?:string;timeoutMs?:number}
 /** A turn that may open diagrams: the pictures to copy into the folder (already checked by the picture store, checked again) and the dollar cap for the turn. */
 export interface TurnDiagrams {copies:WantedCopy[];budgetUsd:number}
-export interface ChatTurn {id:string;resume:boolean;addendum:string;question:string;diagrams?:TurnDiagrams;signal?:AbortSignal;onTextDelta:(text:string)=>void;
+export interface ChatTurn {selection?:Readonly<ModelEffort>;id:string;resume:boolean;addendum:string;question:string;diagrams?:TurnDiagrams;signal?:AbortSignal;onTextDelta:(text:string)=>void;
  /** Called once the CLI has started (or resumed) the session, so a failed first turn still marks the id as taken. */
  onStarted?:()=>void;
  /** A Read of one of the copies was accepted (it is about to run). */
@@ -30,7 +32,7 @@ export interface ChatTurn {id:string;resume:boolean;addendum:string;question:str
  onDiagramUnavailable?:(n:number)=>void;
  /** The Read's result came back: whether it worked. */
  onDiagramReadResult?:(copy:FolderCopy,ok:boolean)=>void}
-export interface TurnResult {answer:string;usage:{inputTokens:number;outputTokens:number;cachedTokens?:number}|null;unknownEvents:string[];
+export interface TurnResult {model?:string|null;answer:string;usage:{inputTokens:number;outputTokens:number;cachedTokens?:number}|null;unknownEvents:string[];
  /** What the CLI said the turn cost, in dollars. Null when it did not say. */
  costUsd:number|null;
  /** Every Read of a copy that the watcher accepted, in order (a diagram read twice is listed twice). */
@@ -51,6 +53,7 @@ export class ClaudeSessionRunner {
  /** The fixed, empty working folder for chat sessions. The CLI files its transcripts by working folder, so it must stay the same to resume. */
  async chatCwd(){const d=path.join(this.cfg.dir,'chat-cwd');await mkdir(d,{recursive:true});return realpath(d);}
  private versionCache?:{at:number;version:string|null};
+ private effortCheck?:Promise<boolean>;
  /** The CLI's version (`claude --version`), for the ledger and for Settings: the diagram fence was verified on one version. Asked at most once in ten minutes. Null when it cannot be read. */
  async version():Promise<string|null>{
   if(this.versionCache&&Date.now()-this.versionCache.at<600000)return this.versionCache.version;
@@ -71,12 +74,19 @@ export class ClaudeSessionRunner {
   }finally{release();}
  }
  chatTurn(t:ChatTurn):Promise<TurnResult>{
+  t={...t,...(t.selection?{selection:Object.freeze({...t.selection})}:{})};
   if(!validSessionId(t.id)||typeof t.question!=='string'||!t.question.trim()||typeof t.addendum!=='string'||!t.addendum)return Promise.reject(new ProviderError('provider_error'));
   if(t.signal?.aborted)return Promise.reject(new ProviderError('cancelled'));
   return this.exclusive(t.signal,()=>this.turn(t));
  }
  private async turn(t:ChatTurn):Promise<TurnResult>{
   const cwd=await this.chatCwd();let copies:FolderCopy[]=[];
+  let effortSupported=false;
+  if(t.selection?.effort!=null){
+   this.effortCheck??=metadataOutput({provider:'claude',command:this.cfg.command,prefixArgs:this.cfg.prefixArgs},['--help'],cwd,env()).then(helpDeclaresEffort).catch(()=>false);
+   effortSupported=await this.effortCheck;
+  }
+  modelArguments('claude',t.selection,effortSupported);
   const turnDir=await mkdtemp(path.join(this.cfg.dir,'turn-')),file=path.join(turnDir,'system.md');activeTurnDirs.add(path.resolve(turnDir));
   try{
    if(t.diagrams)copies=await syncDiagramFolder(cwd,t.diagrams.copies);
@@ -84,7 +94,7 @@ export class ClaudeSessionRunner {
    await writeFile(file,t.addendum,{mode:0o600});
    const stream=new ClaudeChatStream(t.onTextDelta,t.onStarted);let watcher=null as DiagramTurnWatcher|null;
    await new Promise<void>((resolve,reject)=>{
-    const child=spawnChatSession({provider:t.diagrams?DEFAULT_PIPELINE_CONFIG.roles.diagram:DEFAULT_PIPELINE_CONFIG.roles.chat,command:this.cfg.command,prefixArgs:this.cfg.prefixArgs},{id:t.id,resume:t.resume,addendumFile:file,...(t.diagrams?{diagrams:{budgetUsd:t.diagrams.budgetUsd,files:copies.map(c=>c.file)}}:{}),...(this.cfg.model?{model:this.cfg.model}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
+    const child=spawnChatSession({provider:t.diagrams?DEFAULT_PIPELINE_CONFIG.roles.diagram:DEFAULT_PIPELINE_CONFIG.roles.chat,command:this.cfg.command,prefixArgs:this.cfg.prefixArgs},{id:t.id,resume:t.resume,addendumFile:file,...(t.diagrams?{diagrams:{budgetUsd:t.diagrams.budgetUsd,files:copies.map(c=>c.file)}}:{}),...(this.cfg.model?{model:this.cfg.model}:{}),...(t.selection?{selection:t.selection,effortSupported}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
     let failure:ProviderError|undefined,killing:Promise<void>=Promise.resolve(),bytes=0,checks:Promise<void>=Promise.resolve();const stderr:Buffer[]=[];
     const stopWith=(e:ProviderError)=>{if(failure)return;failure=e;if(child.pid)killing=killTree(child.pid);};
     const stop=(code:'timeout'|'cancelled'|'output_limit'|'invalid_response',detail?:string)=>{const e=new ProviderError(code);if(detail)e.reason={kind:'unparseable',detail};stopWith(e);};
@@ -120,7 +130,7 @@ export class ClaudeSessionRunner {
    });
    if(copies.length)await verifyDiagramFolder(cwd,copies); // nothing was added, changed, removed or linked during the turn
    else if((await readdir(cwd)).length)throw new ProviderError('invalid_response','The session wrote into its working folder.');
-   return {answer:stream.finalText,usage:sessionUsage(stream.usage),unknownEvents:stream.unknown,costUsd:stream.cost??watcher?.cost??null,reads:[...(watcher?.reads??[])]};
+   return {model:stream.model,answer:stream.finalText,usage:sessionUsage(stream.usage),unknownEvents:stream.unknown,costUsd:stream.cost??watcher?.cost??null,reads:[...(watcher?.reads??[])]};
   }finally{await rm(turnDir,{recursive:true,force:true});activeTurnDirs.delete(path.resolve(turnDir));await sweepOwnCopies(cwd).catch(()=>{});}
  }
 }

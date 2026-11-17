@@ -1,5 +1,6 @@
 import {transient} from '../transient.ts';
 import {savedProviderLabel} from '../../shared/threads.ts';
+import {selectionLabel} from '../../shared/model-settings.ts';
 import {invokedUsageLabel,type InvokedUsage} from '../../shared/invoked-usage.ts';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { EditorView } from '@codemirror/view';
@@ -153,6 +154,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       <p className="small muted">The selection is frozen: editing the note will not change this request. {providerLabel === 'Claude' ? 'Claude CLI' : providerLabel} · transcript context: none. Redaction can miss prose secrets, unfamiliar or encoded credentials, and indirect identifiers. Review before sending.</p>
       <SkillsReviewList review={(draft.packet as { skills?: SkillsReview }).skills} />
       <details><summary>Exact redacted request</summary><pre>{JSON.stringify(exactRequest(draft.packet), null, 2)}</pre></details></details>}
+    {hasPacket && <p className="small muted">{providerLabel} · {selectionLabel((draft.packet as {review?:{modelSettings?:import('../../shared/setup.ts').ModelEffort}}).review?.modelSettings)}. This request uses a fresh CLI context.</p>}
     {hasPacket && <p className="small muted ask-hint">Enter to send · Esc to cancel</p>}
     {hasPacket&&reviewedCap&&<p className="small muted">{providerLabel} allowance for this request: {reviewedCap.amount.toLocaleString()} {reviewedCap.unit}. Usage is reported after the turn; if it is not reported, the full allowance is charged conservatively. Another request needs a new review.</p>}
     {draft.error && <p role="alert">{draft.error}</p>}

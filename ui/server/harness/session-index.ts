@@ -46,16 +46,19 @@ export class SessionIndex {
   const now=new Date().toISOString(),s:HarnessSession={id:randomUUID(),mode:'chat',label:'Note chat',note,created:now,lastUsed:now,turns:0,normalOneOff:true};all.push(s);return {...s};
  });}
  /** Provider switches cannot resume a CLI's hidden history. Past ids remain available to Delete. */
- async selectNormalAnswerer(id:string,answerer:'claude'|'codex'|'kiro'){
+ async selectNormalAnswerer(id:string,answerer:'claude'|'codex'|'kiro',settingsKey?:string,defaultSelection=false){
+  if(settingsKey!==undefined&&!/^[a-f0-9]{64}$/.test(settingsKey))throw new SessionIndexError('Invalid settings identity.');
   if(!['claude','codex','kiro'].includes(answerer))throw new SessionIndexError('Invalid answerer.');
   const previous=await this.get(id);if(!previous||previous.mode!=='chat')throw new SessionIndexError('No such chat.');
-  if((previous.normalAnswerer??'claude')===answerer)return false;
+  if((previous.normalAnswerer??'claude')===answerer&&(!settingsKey||previous.normalSettingsKey===settingsKey))return false;
   return this.change(all=>{
    const s=all.find(x=>x.id===id);if(!s||s.mode!=='chat')throw new SessionIndexError('No such chat.');
-   if((s.normalAnswerer??'claude')===answerer)return false;
+   if((s.normalAnswerer??'claude')===answerer&&(!settingsKey||s.normalSettingsKey===settingsKey))return false;
+   // Migrate legacy Default contexts without resetting their unchanged argv.
+   if((s.normalAnswerer??'claude')===answerer&&!s.normalSettingsKey&&(defaultSelection||!s.turns&&!s.cli)){if(settingsKey)s.normalSettingsKey=settingsKey;return false;}
    if(s.cli)(s.past??=[]).push({id:s.cli.id,...(s.cli.cwd?{cwd:s.cli.cwd}:{})});else if(s.turns>0&&!s.normalAnswerer)(s.past??=[]).push({id:s.id});
    if(s.past&&s.past.length>50)s.past.splice(0,s.past.length-50);
-   delete s.cli;s.normalAnswerer=answerer;
+   delete s.cli;s.normalAnswerer=answerer;if(settingsKey)s.normalSettingsKey=settingsKey;else delete s.normalSettingsKey;
    if(answerer==='claude')s.cli={id:randomUUID(),profile:'notes',turns:0,cwd:'chat'};
    return true;
   });
@@ -87,7 +90,7 @@ export class SessionIndex {
   return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');s.grant={...grant,files:[...grant.files]};return {...s};});
  }
  /** Reduce an approved grant after after-turn usage exceeds its cap. Other providers retain only their already-approved rights. */
- clearCouncilProvider(id:string,provider:string){return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');const g=s.councilGrant;if(g){g.providers=g.providers.filter(p=>p!==provider);delete g.caps[provider as keyof typeof g.caps];if(!g.providers.length)delete s.councilGrant;else{const {confirmed,...rest}=g;g.confirmed=createHash('sha256').update(JSON.stringify(rest)).digest('hex');}}return {...s};});}
+ clearCouncilProvider(id:string,provider:string){return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');const g=s.councilGrant;if(g){g.providers=g.providers.filter(p=>p!==provider);delete g.caps[provider as keyof typeof g.caps];if(g.settingsKeys)delete g.settingsKeys[provider as keyof typeof g.settingsKeys];if(!g.providers.length)delete s.councilGrant;else{const {confirmed,...rest}=g;g.confirmed=createHash('sha256').update(JSON.stringify(rest)).digest('hex');}}return {...s};});}
  setCouncilGrant(id:string,grant:CouncilGrant){
   if(!validCouncilGrant(grant))return Promise.reject(new SessionIndexError('Invalid council grant.'));
   return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');s.councilGrant=structuredClone(grant);return {...s};});

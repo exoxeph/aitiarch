@@ -190,12 +190,21 @@ export class ChatRuntime {
   if(!session||native)request.editor=manifest;
   const packet=prepareRequest(request);
   const sessionText=!native&&session?chatSessionInstruction(request,sessionSources,{diagrams:diagramRefs.length>0,canOpen}):null;
+  const settingsChanged=session?.normalSettingsKey?session.normalSettingsKey!==routing?.contextKey('normal-chat'):!!(selected&&!('available' in selected)&&selected.selection);
+  const switching=!!(session&&routing&&(session.cli||session.turns>0)&&((session.normalAnswerer??'claude')!==answerer||settingsChanged));
+  let carriedHistory:string|undefined;
+  if(switching&&sessionText&&session){
+   carriedHistory=buildCarriedHistory(await this.harness?.carried?.(session).catch(()=>[])??[]);
+   if(carriedHistory){const i=sessionText.addendum.lastIndexOf(CHAT_HARD_RULES);sessionText.addendum=i>=0?sessionText.addendum.slice(0,i)+carriedHistory+'\n\n'+sessionText.addendum.slice(i):sessionText.addendum+'\n\n'+carriedHistory;}
+  }
   const sent=sessionText?estimateTokens(sessionText.addendum+turnMessage(manifest,request.question)):estimateTokens(JSON.stringify(packet));
   // The next message's cost, the same number the review shows and the gate uses: what is sent now in full, the conversation already in a session at the cache weight, room for the reply.
   const estimate=nextTurnEstimate(sent,!native&&session?this.replay.get(session.id)??0:0).total;
   const privateContext=!!s.privateContext||sources.some(x=>x.ephemeral);
   const review:ChatReview={reviewId:randomUUID(),requestId:input.id,path:input.path,question:request.question,selection:request.selection,sources:sources.map(x=>({id:x.id,label:x.label,text:x.text,characters:x.text.length,estimatedTokens:estimateTokens(x.text)})),historyPairs:history.length,omittedPairs:session?0:s.omittedPairs+sameMode.length-history.length,...(otherModePairs&&!session?{otherModePairs}:{}),instruction:sessionText?.instruction??packet.instruction,history:structuredClone(packet.data.turns),estimatedTokens:estimate,budget:{spent:s.usage.spent,next:estimate,budget:s.usage.tokenBudget},requiresConfirmation:privateContext||!this.dontAsk};
-  review.provider=answerer;if(!native&&!session&&this.provider?.demo===true)review.demo=true;
+  review.provider=answerer;if(selected&&!('available' in selected))review.modelSettings=selected.selection??{model:null,effort:null};if(!native&&!session&&this.provider?.demo===true)review.demo=true;
+  if(switching)review.continuityNotice='Provider, model or effort changed. A fresh CLI context will be used; only the reviewed app-kept history is carried over.';
+  if(carriedHistory!==undefined)review.carriedHistory=carriedHistory;
   if(extra?.review)review.skills=extra.review;
   if(privateContext)review.ephemeral=true;
   if(session)review.session={id:session.id,label:session.label,turns:session.turns};
@@ -213,6 +222,7 @@ export class ChatRuntime {
  async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
   const frozen=this.reviews.get(input.reviewId);if(!frozen)throw new ChatError('review_required');
   const current=await this.normal?.selection();
+  if(frozen.routing&&current?.currentContextKey&&frozen.routing.contextKey('normal-chat')!==await current.currentContextKey('normal-chat'))throw new ChatError('stale_review',undefined,{ruleId:'stale_review',nodeId:'permission_gate'});
   if(frozen.routing? !current||frozen.routing.contextKey('normal-chat')!==current.contextKey('normal-chat'):frozen.answerer!==activePipelineConfig().normalAnswerer)throw new ChatError('stale_review',undefined,{ruleId:'stale_review',nodeId:'permission_gate'});
   const selected=current?.resolveRole('normal-chat');
   if(selected&&'available' in selected)throw new ChatError('disabled',undefined,{ruleId:selected.code,nodeId:'provider_contracts',detail:selected.reason});
@@ -246,7 +256,7 @@ export class ChatRuntime {
   let called=false,charged=false,stage:'run'|'save'='run';const facts:TurnFacts={costUsd:null,reads:[],misses:[]};
   try{
    if(!native){const available=await this.provider!.checkAvailability();if(!available.available||available.textStreaming===false)throw new ChatError('disabled');}
-   if(this.normal&&frozen.session)frozen.normalReset=await this.normal.index.selectNormalAnswerer(frozen.session.id,answerer);
+   if(this.normal&&frozen.session)frozen.normalReset=await this.normal.index.selectNormalAnswerer(frozen.session.id,answerer,frozen.routing?.contextKey('normal-chat'),!frozen.routing||!('selection' in frozen.routing.resolveRole('normal-chat')));
    if(controller.signal.aborted)throw new ChatError('cancelled');
    await this.audit(review.path,request.id,'chat_started');
    if(input.dontAskAgain===true&&!frozen.privateContext)this.dontAsk=true;
@@ -271,7 +281,7 @@ export class ChatRuntime {
     if(controller.signal.aborted)throw new ChatError('cancelled');
     if(nativeResult.status!=='ok')throw new ChatError(nativeResult.status==='unavailable'?'disabled':'provider_failed',undefined,{ruleId:nativeResult.status==='unavailable'?'provider-unavailable':nativeResult.status==='refused'?'provider-refused':nativeResult.status==='timeout'?'provider-timeout':'provider-error',nodeId:'provider_contracts',detail:`${answerer}: ${safeName(nativeResult.code)}`});
    }
-   const reply:ProductResult=nativeResult?{id:request.id,provider:answerer,model:null,answer:nativeResult.answer,claims:[],usage:null,rawReply:true}:frozen.session?await this.sessionTurn(frozen,request,controller.signal,onTextDelta,facts,emit):await this.provider!.invoke(request,{signal:controller.signal,onTextDelta});
+   const reply:ProductResult=nativeResult?{id:request.id,provider:answerer,model:nativeResult.model??null,answer:nativeResult.answer,claims:[],usage:null,rawReply:true}:frozen.session?await this.sessionTurn(frozen,request,controller.signal,onTextDelta,facts,emit):await this.provider!.invoke(request,{signal:controller.signal,onTextDelta,...(review.modelSettings?{selection:review.modelSettings}:{})});
    const result:ProductResult={...reply,answer:dropManifestEcho(reply.answer)}; // the editor line is the app's, never part of a reply, in a conversation or a one-off chat
    if(controller.signal.aborted)throw new ChatError('cancelled');
    if(result.usage){for(const n of Object.values(result.usage))if(typeof n!=='number'||!Number.isFinite(n)||n<0)throw new ChatError('validation',undefined,usageFault(result.usage));
@@ -348,15 +358,15 @@ export class ChatRuntime {
    const copies=frozen.diagrams?await this.copiesFor(frozen.diagrams):undefined;
    // Which CLI session this turn runs in: only one that already ran at exactly this profile is resumed; any change starts a fresh one and the app's own questions and final answers are carried over.
    const profile:Profile=copies?.length?'diagrams':'notes';
-   const cli=h.gate?await h.index.ensureCli(session.id,profile,'chat'):{id:session.id,resume:session.turns>0,fresh:false};
+   const cli=h.gate||session.cli?await h.index.ensureCli(session.id,profile,'chat'):{id:session.id,resume:session.turns>0,fresh:false};
    let addendum=frozen.addendum;
-   if((cli.fresh||frozen.normalReset)&&h.carried){
+   if((cli.fresh||frozen.normalReset)&&h.carried&&frozen.review.carriedHistory===undefined){
     const text=buildCarriedHistory(await h.carried(session).catch(()=>[]));
     if(text){const i=addendum.lastIndexOf(CHAT_HARD_RULES);addendum=i>=0?addendum.slice(0,i)+text+'\n\n'+addendum.slice(i):addendum+'\n\n'+text;} // the rules stay last
    }
    if(h.gate)audits.push(appendLedger(this.ledger,{id:randomUUID(),inkId,requestId:request.id,note,event:'conversation_turn',at:at(),conv:{session:session.id,profile,files:0,notes:frozen.review.sources.filter(x=>x.id.startsWith('O')).length,repo:false,diagrams:copies?.length??0,fresh:cli.fresh,budgetUsd:frozen.capUsd??DIAGRAM_TURN_CAP_USD}}));
    if(session.turns===0&&h.version){const version=await h.version().catch(()=>null);if(version)audits.push(appendLedger(this.ledger,{id:randomUUID(),inkId,requestId:request.id,note,event:'cli_version',at:at(),cli:{version,session:session.id}}));}
-   const r=await h.runner.chatTurn({id:cli.id,resume:cli.resume,addendum,question:turnMessage(frozen.manifest,request.question),...(copies?.length?{diagrams:{copies,budgetUsd:frozen.capUsd??DIAGRAM_TURN_CAP_USD}}:{}),signal,onTextDelta,onStarted:()=>{started=true;},
+   const r=await h.runner.chatTurn({id:cli.id,resume:cli.resume,addendum,question:turnMessage(frozen.manifest,request.question),...(frozen.review.modelSettings?{selection:frozen.review.modelSettings}:{}),...(copies?.length?{diagrams:{copies,budgetUsd:frozen.capUsd??DIAGRAM_TURN_CAP_USD}}:{}),signal,onTextDelta,onStarted:()=>{started=true;},
     onDiagramUnavailable:n=>{const w=frozen.diagrams?.withheld.find(x=>x.n===n),title=(w?.title??'').slice(0,80),why=w?.why??'not in this note';if(!facts.misses.some(x=>x.n===n))facts.misses.push({n,title,why});emit({type:'diagram_unavailable',id:request.id,n,title:w?.title??'',why});},
     onDiagramRead:copy=>{
      const ref=frozen.diagrams?.open.find(o=>o.n===copy.n);if(!ref)return;
@@ -366,7 +376,7 @@ export class ChatRuntime {
     }});
    facts.costUsd=typeof r.costUsd==='number'&&Number.isFinite(r.costUsd)&&r.costUsd>=0?r.costUsd:null; // a runner that does not say leaves no cost on the reply
    await h.questions?.add(session.id,request.id,request.question).catch(()=>{}); // a failed save must not lose the answer
-   return {id:request.id,provider:'claude',model:null,answer:dropManifestEcho(r.answer),claims:[],usage:r.usage,rawReply:true};
+   return {id:request.id,provider:'claude',model:r.model??null,answer:dropManifestEcho(r.answer),claims:[],usage:r.usage,rawReply:true};
   }finally{await Promise.allSettled(audits);if(started)await h.index.touch(session.id).catch(()=>{});} // the CLI now knows this id: the next turn must resume it
  }
  private audit(note:string,id:string,event:'chat_started'|'chat_completed'|'chat_failed',cause?:AbortCause){return appendLedger(this.ledger,{id:randomUUID(),inkId:'chat-'+hash(note),requestId:id,note,event,at:new Date().toISOString(),...(cause?{cause}:{})});}

@@ -67,7 +67,7 @@ export interface Result {
   /** Chat only: `answer` is the model's raw reply (Markdown and its claims block), read by the chat's output gate. */
   rawReply?:true;
 }
-export interface InvokeOptions { signal?: AbortSignal; timeoutMs?: number; retry503?:boolean; onTextDelta?:(text:string)=>void;
+export interface InvokeOptions { selection?:Configuration['selection'];signal?: AbortSignal; timeoutMs?: number; retry503?:boolean; onTextDelta?:(text:string)=>void;
   /** Optional in-memory protocol observer. It cannot bypass the existing isolation/completion checks. Never persist these events. */
   onStreamEvent?:(event:unknown)=>void;
 }
@@ -231,6 +231,7 @@ export function createProvider(configuration: Configuration): Provider {
   const ready = startup().catch((): Availability => ({ available: false, code: 'unsupported_cli', message: 'Provider disabled: capability startup failed.' }));
   const checkAvailability = () => ready;
   return { name:config.provider,checkAvailability, async invoke(request, options = {}) {
+    const launchConfig={...config,...(options.selection?{selection:Object.freeze({...options.selection})}:{})};
     const start=performance.now(), stdout:Buffer[]=[], stderr:Buffer[]=[];
     let exitCode:number|null=null, signal:string|null=null, stdoutBytes=0, cwd:string|undefined, fileCount:number|undefined;
     let productValidation:ValidationRecord|undefined;
@@ -249,7 +250,7 @@ export function createProvider(configuration: Configuration): Provider {
         const partial=options.onTextDelta?new ClaudeChatStream(options.onTextDelta):undefined;
         const decoder=new StringDecoder('utf8');let pending='';
         const observe=(chunk?:Buffer)=>{if(!options.onStreamEvent||!stream)return;pending+=chunk?decoder.write(chunk):decoder.end();let n;while((n=pending.indexOf('\n'))>=0){const line=pending.slice(0,n);pending=pending.slice(n+1);if(line.trim())options.onStreamEvent(JSON.parse(line));}if(!chunk&&pending.trim()){options.onStreamEvent(JSON.parse(pending));pending='';}};
-        const child = spawnIsolated(config, argumentsFor(config.provider, availability.hardening, stream,!!partial,config.selection,availability.effortSupported),
+        const child = spawnIsolated(launchConfig, argumentsFor(config.provider, availability.hardening, stream,!!partial,launchConfig.selection,availability.effortSupported),
           { cwd:cwd!, env: environment(), shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: 'pipe' });
         let bytes = 0, failure: ProviderError | undefined;
         let killing: Promise<void> = Promise.resolve();

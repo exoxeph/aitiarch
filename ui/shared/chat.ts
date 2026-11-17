@@ -141,10 +141,14 @@ export interface ChatInput {id:string;path:string;question:string;selection?:str
  editor?:EditorInfo}
 
 export interface ChatReview {
+ modelSettings?:import('./setup.ts').ModelEffort;
+ continuityNotice?:string;
+ /** Exact bounded/redacted app-kept history included in a fresh Claude context. */
+ carriedHistory?:string;
  /** Display-only recipient, frozen with the request; never changes provider routing. */
  provider?:'claude'|'codex'|'kiro';demo?:true;
  /** Normal Codex/Kiro chat uses the existing Council approval endpoint, bound to this conversation/provider. */
- normalPlan?:{conversation:string;providers:('codex'|'kiro')[];notes:string[];question:string;caps:Partial<Record<'codex'|'kiro',import('./council.ts').CouncilCap>>;hash:string};
+ normalPlan?:{conversation:string;providers:('codex'|'kiro')[];notes:string[];question:string;caps:Partial<Record<'codex'|'kiro',import('./council.ts').CouncilCap>>;hash:string;role?:'normal-chat'};
  reviewId:string;requestId:string;path:string;question:string;selection:string;
  sources:(ContextPreview&{text:string})[];historyPairs:number;omittedPairs:number;
  instruction:string;history:{id:string;user:string;assistant:string}[];

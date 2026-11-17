@@ -1,5 +1,6 @@
 import type {CouncilViewRun as CouncilRun} from './council-model.ts';
 import {CouncilPanel,CouncilResults} from './CouncilPanel.tsx';
+import {selectionLabel,reportedModelLabel} from '../../shared/model-settings.ts';
 import {ChatModeMenu,type ChatMode} from './ChatMode.tsx';
 import {useEffect,useMemo,useRef,useState,type CSSProperties,type FormEvent,type KeyboardEvent as ReactKeyboardEvent,type PointerEvent as ReactPointerEvent} from 'react';
 import {api,ApiError,streamChat,streamConversation,type ConversationBody} from '../api.ts';
@@ -79,6 +80,9 @@ export function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{re
  useEffect(()=>{send.current?.focus();},[]);
  return <section className="chat-review" aria-label="What will be sent">
   <h3>Review — nothing sent yet</h3>
+  <p className="small muted">{recipient} · {selectionLabel(review.modelSettings)}</p>
+  {review.continuityNotice&&<p role="note">{review.continuityNotice}</p>}
+  {review.carriedHistory&&<details><summary>Reviewed history for the fresh context</summary><pre>{review.carriedHistory}</pre></details>}
   <p className="chat-review-lead">{review.demo?'Demo mode: no model is called':`Nothing has been sent to ${recipient} yet.`} Review the context and instructions below before sending.</p>
   <dl>
    <dt>Your question</dt><dd>{review.question}</dd>
@@ -441,7 +445,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
      {t.status==='streaming'&&<div className="chat-message chat-ai chat-streaming" data-from="ai" aria-busy="true"><span className="chat-who">{aiLabel(answerer)}</span>
       {t.text?<div className="chat-stream"><LiveMarkdown text={t.text} live/></div>:<div className="chat-thinking"><Thinking/><span className="chat-wait" role="status" data-wait>{waitText(now-(t.sentAt??now))}</span></div>}
       <div className="chat-message-tools"><button type="button" className="chat-stop" onClick={()=>stop(t)}>Stop</button></div></div>}
-     {t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai" data-provider={t.message?.provider}><span className="chat-who">{aiLabel(t.message?.provider)}</span><ReplyMarkdown text={t.text}/>{t.message?.unstructured&&<p className="chat-unstructured">{UNSTRUCTURED_LABEL}</p>}{t.message?.echo&&<p className="chat-flag chat-echo">{ECHO_LABEL}</p>}
+     {t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai" data-provider={t.message?.provider}><span className="chat-who">{aiLabel(t.message?.provider)} · {reportedModelLabel(t.message?.model)}</span><ReplyMarkdown text={t.text}/>{t.message?.unstructured&&<p className="chat-unstructured">{UNSTRUCTURED_LABEL}</p>}{t.message?.echo&&<p className="chat-flag chat-echo">{ECHO_LABEL}</p>}
       {t.message&&<ReplyNotes message={t.message} question={t.question} busy={composing} onAskAgain={q=>void submit(q)} note={asked(t.message)}/>}<UsedSkills names={t.message?.skills}/>{t.message?.costUsd!==undefined&&<p className="chat-turn-cost">{turnCostText(t.message.costUsd)}</p>}
       {isNativeAnswerer(t.message?.provider)&&nativeUsageText(t.message?.nativeUsage)&&<p className="chat-turn-cost" data-usage="native">{nativeUsageText(t.message?.nativeUsage)}</p>}
       {t.message?.overCap&&<p className="council-calm council-overcap" role="alert" data-notice="over-cap"><span aria-hidden="true">!</span> {t.message.warning??OVER_CAP_TEXT}</p>}
