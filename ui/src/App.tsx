@@ -199,6 +199,8 @@ export default function App() {
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   // The Constellation view, and the notes it hands to the chat ("Use as chat context").
   const [mapOpen, setMapOpen] = useState(false), [mapNotes, setMapNotes] = useState<string[]>([]), mapButtonRef = useRef<HTMLButtonElement>(null);
+  // The Studio is a full-area overlay, so Constellation or Chat opening behind it would look like a dead button: opening either closes the Studio.
+  useEffect(() => { if (mapOpen || chatOpen) setStudio(null); }, [mapOpen, chatOpen]);
   const [decisionsFocus,setDecisionsFocus]=useState(false);
   const noteIndex=useNoteIndex(mapOpen||overlay==='palette',subscribe);
   const indexedNotes=useMemo(()=>noteIndex.notes.map(n=>({...n,text:docs[n.path]??n.text})),[noteIndex.notes,docs]);
