@@ -33,10 +33,22 @@ describe('filtered plugin source copy',()=>{
   const paths=['node_modules/x.js','ui/node_modules/x.js','ui/dist/index.html','.git/config','ui/check/out/result.json',
    'test-results/result.json','coverage/index.html','ui/test/private.txt','.aitiarch/private.md','.codex/config.toml',
    'prototype/private.txt','spike/private.txt','CLEANUP-AUDIT.md','future plan.md','docs/provider-hardening-plan.md',
-   'docs/plan/SLICES.md','.env.local','run.log','build-version.json','nested/NOTEBOOK.md'];
+   'docs/plan/SLICES.md','.env.local','run.log','build-version.json','NOTEBOOK.md'];
   for(const file of paths)await f.put(file);
   const result=await copyPluginSource(f.source,f.target);
   for(const file of paths){expect(excludedSource(file)).toBe(true);expect(result.copied).not.toContain(file);}
+ });
+ it('anchors every exclusion to known root-relative paths, never production names',async()=>{
+  const f=await fixture();
+  const names=['notes','runs','backups','measurements','out','cache','test','tests','dist','node_modules',
+   '.git','.aitiarch','credentials','secrets','coverage','__snapshots__'];
+  const files=names.flatMap(name=>['ui/src/'+name+'/module.ts','ui/server/'+name+'/module.ts']);
+  files.push('ui/server/chat/secrets.ts','ui/src/notes/use-note-index.ts','ui/src/example.key','ui/server/nested/NOTEBOOK.md');
+  for(const file of files){expect(excludedSource(file),file).toBe(false);await f.put(file);}
+  const copied=(await copyPluginSource(f.source,f.target)).copied;
+  for(const file of files)expect(copied).toContain(file);
+  for(const file of ['.aitiarch/note.md','ui/check/out/result.json','ui/dist/index.html','ui/node_modules/package/index.js'])
+   expect(excludedSource(file),file).toBe(true);
  });
  it('refuses linked build/dependency directories before copying or marking the build',async()=>{
   for(const directory of ['node_modules','dist']){

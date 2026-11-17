@@ -1,6 +1,6 @@
 {
   "name": "aitiarch",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Experimental Aitiarch notebook launcher; source setup required today.",
   "author": { "name": "Imtiaz" },
   "license": "MIT"

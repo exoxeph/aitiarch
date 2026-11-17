@@ -33,7 +33,7 @@ describe('experimental dual plugin package',()=>{
   const claude=await json('.claude-plugin/plugin.json'),codex=await json('plugin.json');
   identity(claude);identity(codex,true);
   for(const manifest of [claude,codex]){
-   expect(manifest.name).toBe('aitiarch');expect(manifest.version).toBe('0.0.2');
+   expect(manifest.name).toBe('aitiarch');expect(manifest.version).toBe('0.0.3');
    expect(manifest.description).toMatch(/experimental/i);expect(manifest.description).toMatch(/source setup/i);
   }
   expect(claude).not.toHaveProperty('$schema');

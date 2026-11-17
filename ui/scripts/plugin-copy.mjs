@@ -7,14 +7,16 @@ import {constants} from 'node:fs';
 
 const requiredFiles=['ui/package.json','ui/package-lock.json','ui/scripts/aitiarch.mjs','docs/guide.md'];
 const requiredDirectories=['ui/server','ui/shared'];
-const excludedDirectories=new Set(['node_modules','dist','.git','.aitiarch','.claude','.codex','.kiro','.agents-private',
- '.superpowers','prototype','spike','test','tests','test-results','playwright-report','coverage','__snapshots__']);
+const excludedRoots=['node_modules','ui/node_modules','dist','ui/dist','.git','.aitiarch','.claude','.codex','.kiro','.agents-private',
+ '.superpowers','.impeccable','ui/.impeccable','.debug-diagrams','ui/.debug-diagrams','prototype','spike','slice-screenshots','aitiarch-trial',
+ 'test','tests','ui/test','test-results','ui/test-results','playwright-report','ui/playwright-report','coverage','ui/coverage','__snapshots__',
+ 'ui/check/out','ui/check/screenshots','ui/check/manual','docs/plan'];
 export function excludedSource(relative){
- const parts=relative.replaceAll('\\','/').toLowerCase().split('/'),name=parts.at(-1);
- return parts.some(part=>excludedDirectories.has(part))||
-  /^(?:ui\/check\/(?:out|screenshots)|docs\/plan)(?:\/|$)/.test(parts.join('/'))||
-  /^(?:cleanup-.*\.md|future plan\.md|provider-hardening-plan\.md|(?:brief|notes|archive|journey|aitiarch-ui-spec)(?:\.md)?|notebook\.md|build-version\.json|\.env.*|credentials.*|secrets.*)$/.test(name)||
-  /\.(?:log|zip|pem|key|p12|pfx|stackdump)$/.test(name);
+ const rel=relative.replaceAll('\\','/').toLowerCase();
+ return excludedRoots.some(root=>rel===root||rel.startsWith(root+'/'))||
+  /^(?:cleanup-[^/]*\.md|future plan\.md|(?:brief|notes|archive|journey|claude|aitiarch-ui-spec)(?:\.[^/]*)?|onboarding-brief\.md|slices\.md|notebook\.md|build-version\.json|\.env[^/]*|credentials[^/]*|secrets[^/]*)$/.test(rel)||
+  /^(?:ui\/)?[^/]*\.(?:log|zip|pem|key|p12|pfx|stackdump)$/.test(rel)||
+  /^(?:ui\/)?\.env[^/]*$/.test(rel)||rel==='docs/provider-hardening-plan.md';
 }
 async function stat(file){
  try{return await lstat(file);}catch(e){if(e.code==='ENOENT')return undefined;throw e;}
