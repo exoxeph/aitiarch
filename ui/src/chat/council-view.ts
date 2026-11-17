@@ -34,7 +34,7 @@ export function plainReason(r:{status:string;code?:string;message?:string}):{pla
  const raw=[r.code,r.message&&r.message!==r.code?r.message:undefined].filter(Boolean).join(': ');
  return {plain,...(raw?{raw}:{})};
 }
-const NOTICES:Readonly<Record<string,string>>=Object.freeze({plan_required:'This Council plan needs your approval first.',plan_changed:'The plan changed. Review it again before sending.',already_running:'This conversation already has a Council run in progress.',notes_only:'Council only takes your question and attached notes.',invalid_cap:'That cap is not allowed. Pick a smaller one.'});
+const NOTICES:Readonly<Record<string,string>>=Object.freeze({protected_note:"This note is protected and can't be sent to providers.",plan_required:'This Council plan needs your approval first.',plan_changed:'The plan changed. Review it again before sending.',already_running:'This conversation already has a Council run in progress.',notes_only:'Council only takes your question and attached notes.',invalid_cap:'That cap is not allowed. Pick a smaller one.'});
 /** Turns a thrown error text into a plain notice; the raw text is kept for the details toggle when it was rewritten. */
 export function plainNotice(raw:string):{plain:string;raw?:string}{
  if(/abort/i.test(raw))return {plain:'Stopped before it finished. Answers that already arrived are kept.',raw};

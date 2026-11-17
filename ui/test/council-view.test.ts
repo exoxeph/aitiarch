@@ -1,5 +1,8 @@
 import {expect,it} from 'vitest';
 import {byCouncilOrder,formatUsage,plainNotice,plainReason,providerName,safetyHelp,statusWord} from '../src/chat/council-view.ts';
+it('explains a protected Council note in plain words',()=>{
+ expect(plainNotice('protected_note').plain).toBe("This note is protected and can't be sent to providers.");
+});
 it('orders providers the same way everywhere, whatever order they arrive in',()=>{expect(byCouncilOrder([{id:'kiro'},{id:'claude'},{id:'codex'}]).map(p=>p.id)).toEqual(['claude','codex','kiro']);expect(byCouncilOrder([{id:'zzz'},{id:'codex'}]).map(p=>p.id)).toEqual(['codex','zzz']);});
 it('shows usage in the provider\'s own unit',()=>{expect(formatUsage({unit:'tokens',amount:14404})).toBe('14,404 tokens');expect(formatUsage({unit:'credits',amount:0.02})).toBe('0.02 credits');expect(formatUsage({unit:'credits',amount:1})).toBe('1 credit');expect(formatUsage({unit:'usd',amount:0.0123})).toBe('$0.012');expect(formatUsage({unit:'usd',amount:1.5})).toBe('$1.50');});
 it('explains each safety label and names each provider',()=>{for(const l of ['fenced','contained','host-gated'])expect(safetyHelp(l).toLowerCase()).toContain(l);expect(safetyHelp('nope')).toBe('');expect(providerName('codex')).toBe('Codex');expect(statusWord('timeout')).toBe('Timed out');});

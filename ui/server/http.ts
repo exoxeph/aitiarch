@@ -308,7 +308,7 @@ export function createApp(opts: AppOptions) {
         if(url.pathname==='/api/council/run'&&req.method==='POST'){
           await council.run(body,controller.signal,event=>{if(res.destroyed){controller.abort();return;}if(!res.headersSent)res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'});res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);});return res.end();
         }
-      }catch(e){const code=e instanceof Error&&['plan_required','plan_changed','invalid_conversation','invalid_run','notes_only','invalid_cap','already_running','invalid_bring','stale_review','no_answer','secrets_blocked'].includes(e.message)?e.message:'council_error';if(res.headersSent){if(!res.destroyed)res.write(`event: error\ndata: ${JSON.stringify({type:'error',code})}\n\n`);return res.end();}return json(res,409,{error:code,message:'Council: '+code.replace(/_/g,' ')+'.'});}
+      }catch(e){const code=e instanceof Error&&['plan_required','plan_changed','invalid_conversation','invalid_run','notes_only','protected_note','invalid_cap','already_running','invalid_bring','stale_review','no_answer','secrets_blocked'].includes(e.message)?e.message:'council_error';if(res.headersSent){if(!res.destroyed)res.write(`event: error\ndata: ${JSON.stringify({type:'error',code})}\n\n`);return res.end();}return json(res,409,{error:code,message:code==='protected_note'?"This note is protected and can't be sent to providers.":'Council: '+code.replace(/_/g,' ')+'.'});}
       finally{res.removeListener('close',abort);}
     }
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await (await explorerReady).tree());

@@ -7,6 +7,8 @@ it('Council HTTP requires auth and explicit plan approval; POST returns independ
   expect((await fetch(base+'/api/council/plan',{method:'PUT',body:JSON.stringify(b)})).status).toBe(401);
   const login=await fetch(base+'/api/session'),cookie=login.headers.get('set-cookie')!.split(';')[0],headers={cookie,origin:base,'content-type':'application/json','x-aitiarch':'1'};
   const call=(route:string,body:any,method='PUT')=>fetch(base+route,{method,headers,body:JSON.stringify(body)});
+  const protectedNote=await call('/api/council/plan',{...b,notes:['notebook.md']});expect(protectedNote.status).toBe(409);
+  expect(await protectedNote.json()).toEqual({error:'protected_note',message:"This note is protected and can't be sent to providers."});
   const created=await call('/api/harness/sessions/new',{mode:'chat',path:'plan.md',label:'Council without Claude'});expect(created.status).toBe(200);const own=await created.json();
   const listed=await(await fetch(base+'/api/harness/sessions?all=1',{headers})).json();expect(listed.enabled).toBe(true);expect(listed.sessions.some((x:any)=>x.id===own.id)).toBe(true);
   expect((await fetch(base+'/api/harness/sessions/history?id='+own.id,{headers})).status).toBe(200);

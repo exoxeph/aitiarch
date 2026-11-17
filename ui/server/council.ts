@@ -20,7 +20,8 @@ export class CouncilService {
   if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('notes_only');const b=raw as CouncilInput;
   if(Object.keys(b).some(k=>!['conversation','providers','notes','question','caps','hash'].includes(k)))throw Error('notes_only');
   const session=await this.o.index.get(b.conversation);if(!session)throw Error('invalid_conversation');
-  if(typeof b.question!=='string'||!b.question.trim()||b.question.length>2000||!Array.isArray(b.providers)||!b.providers.length||b.providers.length>3||new Set(b.providers).size!==b.providers.length||b.providers.some(id=>!['claude','codex','kiro'].includes(id))||!Array.isArray(b.notes)||b.notes.length>8||b.notes.some(n=>!normalizeAttachedPath(n)||harnessDenied(n)||!n.endsWith('.md')))throw Error('notes_only');
+  if(typeof b.question!=='string'||!b.question.trim()||b.question.length>2000||!Array.isArray(b.providers)||!b.providers.length||b.providers.length>3||new Set(b.providers).size!==b.providers.length||b.providers.some(id=>!['claude','codex','kiro'].includes(id))||!Array.isArray(b.notes)||b.notes.length>8||b.notes.some(n=>!normalizeAttachedPath(n)||!n.endsWith('.md')))throw Error('notes_only');
+  if(b.notes.some(n=>harnessDenied(n)))throw Error('protected_note');
   const caps=Object.fromEntries(b.providers.slice().sort().map(id=>[id,b.caps?.[id]??COUNCIL_DEFAULT_CAPS[id]]));
   if(b.caps&&Object.keys(b.caps).some(k=>!b.providers.includes(k as CouncilProvider)))throw Error('invalid_cap');
   const grant:CouncilGrant={v:1,profile:'council',project:this.project,session:session.id,providers:b.providers.slice().sort(),caps,confirmed:'0'.repeat(64)};
