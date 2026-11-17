@@ -63,7 +63,7 @@ try {
     assert.equal(await plan.count() > 0, card, `"${q}": the plan card ${card ? 'is' : 'is not'} shown`);
     return { plan, review, before,
       approve: async () => { await plan.getByRole('button', { name: 'Approve and send' }).click(); await page.waitForFunction(() => !document.querySelector('#chat-panel .chat-plan')); },
-      send: async () => { if (await review.count()) { if (!reviewed) { await review.getByRole('checkbox').check(); reviewed = true; } await review.getByRole('button', { name: 'Send to Claude', exact: true }).click(); } await settled(before); } };
+      send: async () => { if (await review.count()) { if (!reviewed) { await review.getByRole('checkbox').check(); reviewed = true; } await review.getByRole('button', { name: await reviewSendName(review), exact: true }).click(); } await settled(before); } };
   };
   const put = (u, b) => page.evaluate(async ([x, body]) => { const r = await fetch(x, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Aitiarch': '1' }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json().catch(() => null) }; }, [u, b]);
   const diagramsLine = (t) => text(t.plan.locator('[data-plan="diagrams"]'));
@@ -127,3 +127,5 @@ try {
   console.log('conversation-open-note: ok');
   await context.close();
 } finally { watcher.stop(); await app.close(); await browser.close(); for (const d of [notebook, harness, scratch]) await rm(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+
+async function reviewSendName(review){return (await review.locator('.chat-review-lead').innerText()).includes('Demo mode: no model is called')?'Send (demo, no model)':'Send to Claude';}

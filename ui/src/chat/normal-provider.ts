@@ -21,6 +21,10 @@ export function memoryText(answerer:string|undefined|null):string{
   ?'This provider keeps no session. Your notes and recent exchanges are sent fresh with each message.'
   :'Claude remembers this conversation, also after Aitiarch is reopened. Your notes are sent fresh with every message.';
 }
+/** Council has independent providers, not the Normal chat answerer's CLI session. */
+export function councilMemoryText(providers:readonly string[]):string{
+ return providers.length?`Selected providers: ${providers.map(providerName).join(', ')}. Only your question and attached notes are sent.`:'Choose who answers this Council question.';
+}
 
 /** What this turn used, in the provider's own unit (tokens for Codex, credits for Kiro, dollars for Claude). Empty when nothing was reported. */
 export function nativeUsageText(usage:readonly NativeChatUsage[]|undefined,costUsd?:number):string{

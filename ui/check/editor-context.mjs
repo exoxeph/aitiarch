@@ -58,7 +58,7 @@ try {
   const chipWords = async (loc) => ({ label: (await loc.locator('.claim-label').textContent()).trim(), state: (await loc.locator('.claim-state').textContent()).replace(/^\s*·\s*/, '').trim() });
   const footer = async () => text(panel.locator('.chat-usage'));
   const ask = async (question) => { const c = panel.getByRole('textbox', { name: 'Message Aitiarch AI' }); await c.fill(question); await c.press('Enter'); const review = panel.getByRole('region', { name: 'What will be sent' }); await review.waitFor(); return review; };
-  const sendReview = async (review) => { const done = panel.locator('.chat-ai:not(.chat-streaming) .chat-add').last(); const before = await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').count(); await review.getByRole('button', { name: 'Send to Claude', exact: true }).click(); await page.waitForFunction((n) => document.querySelectorAll('#chat-panel .chat-ai:not(.chat-streaming) .chat-add').length > n, before); return done; };
+  const sendReview = async (review) => { const done = panel.locator('.chat-ai:not(.chat-streaming) .chat-add').last(); const before = await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').count(); await review.getByRole('button', { name: await reviewSendName(review), exact: true }).click(); await page.waitForFunction((n) => document.querySelectorAll('#chat-panel .chat-ai:not(.chat-streaming) .chat-add').length > n, before); return done; };
 
   await page.goto(url); await page.waitForSelector('.cm-editor');
   await openNote('plan.md');
@@ -139,7 +139,7 @@ try {
   assert.equal(await text(chip('switched')), 'Open note changed: Plan -> Ideas ×', 'the notice names both notes');
   assert.equal(await chip('switched').getAttribute('role'), 'status');
   assert.equal(await text(chip('note')), 'Open note · Ideas ×', 'the open note chip follows');
-  assert.match(await text(panel.locator('.chat-pick-trigger .chat-pick-value')), /^What does this paragraph mean\? · 2 messages$/, 'the conversation is still selected'); assert.equal(await text(panel.locator('.chat-pick-trigger .chat-pick-from')), 'started on plan', 'and says where it was started');
+  assert.match(await text(panel.locator('.chat-pick-trigger .chat-pick-value')), /^What does this paragraph mean\? · [0-9a-f]{8} · 2 messages$/, 'the conversation is still selected'); assert.equal(await text(panel.locator('.chat-pick-trigger .chat-pick-from')), 'started on plan', 'and says where it was started');
   assert.equal(await panel.locator('.chat-turn').count(), 2, 'its earlier messages are still there');
   assert.deepEqual(await chipWords(chipOf(1)), { label: 'plan', state: 'Found' }, 'the earlier reply\'s chip still names the note it was asked on, with the same state, now that another note is open');
   assert.match(await text(panel.locator('.chat-head h2')), /On ideas$/, 'the header names the open note');
@@ -229,7 +229,7 @@ try {
   assert.equal(await said(), 'Delete “What does this paragraph mean?”? It was started on plan. 3 saved replies in that note’s chat are removed. Claude’s own record of the conversation and its questions are removed too.', 'the confirmation names the note and the number of saved replies');
   assert.equal(await del.isEnabled(), true);
   await confirm.getByRole('button', { name: 'Keep' }).click(); await confirm.waitFor({ state: 'detached' }); await page.unroute('**/api/harness/sessions/replies*');
-  assert.match(await text(panel.locator('.chat-pick-trigger .chat-pick-value')), /^What does this paragraph mean\? · 3 messages$/, 'Keep removed nothing'); assert.match(await footer(), /^This conversation · 3 calls · /);
+  assert.match(await text(panel.locator('.chat-pick-trigger .chat-pick-value')), /^What does this paragraph mean\? · [0-9a-f]{8} · 3 messages$/, 'Keep removed nothing'); assert.match(await footer(), /^This conversation · 3 calls · /);
   await openNote('plan.md'); await chip('switched').waitFor();
 
   // 9. Removing the note for a message: the line says it was not sent, and no note source goes.
@@ -244,7 +244,7 @@ try {
   // 10. A conversation started on a note with a very long name, then another note opened: the picker says "started on <name>", cut with an ellipsis and the full name in a tooltip; nothing overflows in the narrow sheet.
   await openNote(LONG + '.md');
   await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('#chat-panel .chat-pick-trigger [data-x]') === null && /Conversation \d+ · 0 messages/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? '')); // a new, empty conversation
+  await page.waitForFunction(() => document.querySelector('#chat-panel .chat-pick-trigger [data-x]') === null && /Conversation \d+ · [0-9a-f]{8} · 0 messages/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? '')); // a new, empty conversation
   await openNote('ideas.md'); await chip('switched').waitFor();
   const from = panel.locator('.chat-pick-trigger .chat-pick-from'); await from.waitFor();
   assert.match(await text(from), /^started on a-very-long-note-name/);
@@ -269,3 +269,5 @@ try {
   console.log('editor-context: ok');
   await context.close();
 } finally { watcher.stop(); await app.close(); await browser.close(); }
+
+async function reviewSendName(review){return (await review.locator('.chat-review-lead').innerText()).includes('Demo mode: no model is called')?'Send (demo, no model)':'Send to Claude';}

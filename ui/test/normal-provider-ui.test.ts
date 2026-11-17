@@ -1,5 +1,13 @@
 import {expect,it} from 'vitest';
 import {ANSWERERS,isNativeAnswerer,memoryText,nativeUsageText,overridesFor,saveErrorText,approvalTitle} from '../src/chat/normal-provider.ts';
+import {councilMemoryText} from '../src/chat/normal-provider.ts';
+it('names only the providers actually selected for Council, without a Claude memory claim',()=>{
+ expect(councilMemoryText([])).toBe('Choose who answers this Council question.');
+ expect(councilMemoryText(['codex'])).toBe('Selected providers: Codex. Only your question and attached notes are sent.');
+ expect(councilMemoryText(['kiro'])).toContain('Selected providers: Kiro.');
+ expect(councilMemoryText(['codex','kiro'])).not.toContain('Claude');
+ expect(councilMemoryText(['claude','kiro'])).toContain('Claude, Kiro');
+});
 
 it('says what carries the conversation for each provider',()=>{
  expect(memoryText('claude')).toMatch(/^Claude remembers this conversation/);

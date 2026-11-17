@@ -64,7 +64,7 @@ try {
     await page.waitForFunction((k) => document.querySelector('#chat-panel .chat-plan') || document.querySelector('#chat-panel .chat-review') || document.querySelector('#chat-panel .chat-turn[data-status="streaming"]') || document.querySelectorAll('#chat-panel .chat-turn[data-status="complete"]').length > k, before);
     const showedCard = await card.count() > 0;
     assert.equal(showedCard, expectCard, `"${q}": the plan card ${expectCard ? 'is' : 'is not'} shown`);
-    return { card, review, finish: async () => { if (await review.count()) { if (!reviewed) { await review.getByRole('checkbox').check(); reviewed = true; } await review.getByRole('button', { name: 'Send to Claude', exact: true }).click(); } await settled(before); } };
+    return { card, review, finish: async () => { if (await review.count()) { if (!reviewed) { await review.getByRole('checkbox').check(); reviewed = true; } await review.getByRole('button', { name: await reviewSendName(review), exact: true }).click(); } await settled(before); } };
   };
 
   await page.goto(url); await page.waitForSelector('.cm-editor'); await openNote('plan.md');
@@ -91,13 +91,13 @@ try {
   await scenario('slow-start');
   let t = await ask('What do the plan and the ideas say together?');
   // 6. The wait line: from send until the first text, in whole seconds.
-  if (await t.review.count()) { await t.review.getByRole('checkbox').check(); reviewed = true; const before = await done(); await t.review.getByRole('button', { name: 'Send to Claude', exact: true }).click();
+  if (await t.review.count()) { await t.review.getByRole('checkbox').check(); reviewed = true; const before = await done(); await t.review.getByRole('button', { name: await reviewSendName(t.review), exact: true }).click();
     const wait = panel.locator('[data-wait]'); await wait.waitFor(); await page.waitForFunction(() => /Sent, waiting for the answer... · [12]s/.test(document.querySelector('#chat-panel [data-wait]')?.textContent ?? ''));
     report.wait = await wait.innerText(); await panel.screenshot({ path: path.join(output, 'box-wait.png') }); await settled(before); }
   assert.equal(await panel.locator('[data-wait]').count(), 0, 'the wait line goes when the text comes');
   let c = (await calls()).at(-1); assert.equal(arg(c, '--tools'), '', 'tool-less'); assert(c.addendum.includes('# Ideas'), 'the picked note went with it');
   await page.waitForFunction(() => /What do the plan and the ideas say/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
-  assert.match(await text(panel.locator('.chat-pick-trigger .chat-pick-value')), /^What do the plan and the ideas say… · 1 message$/, 'named after its first question, about 40 characters');
+  assert.match(await text(panel.locator('.chat-pick-trigger .chat-pick-value')), /^What do the plan and the ideas say… · [0-9a-f]{8} · 1 message$/, 'named after its first question, about 40 characters');
   await scenario('ok'); t = await ask('And a second question?'); await t.finish(); assert.equal(await panel.locator('.chat-plan').count(), 0);
 
   // 3. A refused file: the server says why on its chip and on the card; Approve is not possible, nothing is sent; removing it lets the turn go.
@@ -120,7 +120,7 @@ try {
   assert.equal(await text(t.card.locator('[data-plan="diagrams"]')), "Claude may open this diagram: D1 'pipeline' (up to $0.50). It opens one only when your question needs it.", 'the card lists the diagrams of the open note, as the review does');
   await panel.screenshot({ path: path.join(output, 'box-diagram-card.png') });
   let before4 = await done(); await t.card.getByRole('button', { name: 'Approve and send' }).click();
-  if (await t.review.count()) await t.review.getByRole('button', { name: 'Send to Claude', exact: true }).click();
+  if (await t.review.count()) await t.review.getByRole('button', { name: await reviewSendName(t.review), exact: true }).click();
   await settled(before4); c = (await calls()).at(-1); assert.equal(arg(c, '--tools'), 'Read', 'the diagram turn ran with Read');
   assert.match(await text(panel.locator('.chat-turn').last().locator('.chat-opened')), /Opened D1 'pipeline'/);
   t = await ask('And again?'); await t.finish(); c = (await calls()).at(-1); assert.equal(arg(c, '--tools'), 'Read', 'no card the second time: the grant covers it');
@@ -162,9 +162,9 @@ try {
   await panel.locator('.chat-pick-trigger').click();
   const opts = await panel.locator('.chat-pick-opt').evaluateAll((els) => els.map((e) => e.innerText.replace(/\s+/g, ' ').trim()));
   report.list = opts;
-  assert(opts.some((o) => /^What does the diagram show\? \d+ messages/.test(o)), 'the diagram conversation is named after its first question: ' + opts.join(' | '));
-  assert(opts.some((o) => /^What do the plan and the ideas say… \d+ messages/.test(o)));
-  assert(opts.some((o) => /^Old investigation investigation · 0 messages/.test(o)), 'the investigation is in the same list, marked as one');
+  assert(opts.some((o) => /^What does the diagram show\? · [0-9a-f]{8} \d+ messages/.test(o)), 'the diagram conversation is named after its first question: ' + opts.join(' | '));
+  assert(opts.some((o) => /^What do the plan and the ideas say… · [0-9a-f]{8} \d+ messages/.test(o)));
+  assert(opts.some((o) => /^Old investigation · [0-9a-f]{8} investigation · 0 messages/.test(o)), 'the investigation is in the same list, marked as one');
   await panel.screenshot({ path: path.join(output, 'box-list.png') });
   await panel.locator('.chat-pick-opt', { hasText: 'Old investigation' }).click(); await panel.locator('[data-chip="repo"]').waitFor();
   assert.match(await text(panel.locator('[data-chip="repo"]')), /an investigation always reads it/); assert.equal(await panel.locator('[data-chip="repo"] button').count(), 0, 'its repo chip cannot be removed');
@@ -189,3 +189,5 @@ try {
   console.log(JSON.stringify({ pass: true, ...report }, null, 1));
   await context.close();
 } finally { watcher.stop(); await app.close(); await browser.close(); for (const d of [notebook, repo, harness, scratch]) await rm(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
+
+async function reviewSendName(review){return (await review.locator('.chat-review-lead').innerText()).includes('Demo mode: no model is called')?'Send (demo, no model)':'Send to Claude';}

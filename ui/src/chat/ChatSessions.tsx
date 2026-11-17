@@ -61,7 +61,7 @@ function ConversationMenu({label,empty,value,list,disabled,canCreate,open:openNo
  * question) or an investigation made before the single box. One list for both, newest first. What a turn may do is not chosen here: it follows from what it carries. Shown only when the
  * Claude Code CLI is configured.
  */
-export function ChatSessions({path,answerer,value,onChange,disabled,refresh,onCurrent}:{path:string;/** Who answers Normal chat now: the memory line below says what that provider actually keeps. */answerer?:string;value:string;onChange:(id:string,session?:HarnessSession)=>void;disabled:boolean;refresh:number;
+export function ChatSessions({path,answerer,memory,value,onChange,disabled,refresh,onCurrent}:{path:string;/** Who answers Normal chat now: the memory line below says what that provider actually keeps. */answerer?:string;memory?:string;value:string;onChange:(id:string,session?:HarnessSession)=>void;disabled:boolean;refresh:number;
  /** The selected conversation as the list knows it (its label, turns and mode), whenever the list is read. */onCurrent?:(s:HarnessSession|null)=>void}){
  const [enabled,setEnabled]=useState(false),[list,setList]=useState<HarnessSession[]>([]),[naming,setNaming]=useState<string|null>(null),[notice,setNotice]=useState(''),[deleting,setDeleting]=useState(false);
  const field=useRef<HTMLInputElement>(null),keepButton=useRef<HTMLButtonElement>(null);
@@ -94,7 +94,7 @@ export function ChatSessions({path,answerer,value,onChange,disabled,refresh,onCu
    <button type="button" className="chat-ctl" disabled={current.mode==='chat'&&impact===null} onClick={async()=>{setNotice('');try{await api.harnessSessionDelete(current.id);setList(l=>l.filter(x=>x.id!==current.id));setDeleting(false);onChange('');}catch(e){fail(e);}}}>Delete</button>
    <button type="button" className="chat-ctl chat-ctl-quiet" ref={keepButton} onClick={()=>setDeleting(false)}>Keep</button>
   </span>}
-  {current&&<p className="chat-sessions-note" data-answerer={answerer??'claude'} title={memoryText(answerer)}>{memoryText(answerer)}</p>}
+  {current&&<p className="chat-sessions-note" data-answerer={answerer??'claude'} title={memory??memoryText(answerer)}>{memory??memoryText(answerer)}</p>}
   {notice&&<p className="chat-sessions-note" role="alert">{notice}</p>}
  </div>;
 }

@@ -47,7 +47,7 @@ try {
   const turns = () => panel.locator('.chat-turn').count();
   const picker = () => text(panel.locator('.chat-pick-trigger .chat-pick-value'));
   const waitTurns = (n) => page.waitForFunction((k) => document.querySelectorAll('#chat-panel .chat-turn').length === k, n);
-  const ask = async (question) => { const c = panel.getByRole('textbox', { name: 'Message Aitiarch AI' }); await c.fill(question); await c.press('Enter'); const review = panel.getByRole('region', { name: 'What will be sent' }); await review.waitFor(); const before = await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').count(); await review.getByRole('button', { name: 'Send to Claude', exact: true }).click(); await page.waitForFunction((n) => document.querySelectorAll('#chat-panel .chat-ai:not(.chat-streaming) .chat-add').length > n, before); };
+  const ask = async (question) => { const c = panel.getByRole('textbox', { name: 'Message Aitiarch AI' }); await c.fill(question); await c.press('Enter'); const review = panel.getByRole('region', { name: 'What will be sent' }); await review.waitFor(); const before = await panel.locator('.chat-ai:not(.chat-streaming) .chat-add').count(); await review.getByRole('button', { name: await reviewSendName(review), exact: true }).click(); await page.waitForFunction((n) => document.querySelectorAll('#chat-panel .chat-ai:not(.chat-streaming) .chat-add').length > n, before); };
   const choose = async (name) => { await panel.locator('.chat-pick-trigger').click(); await panel.locator('.chat-pick-opt', { hasText: name }).click(); };
   const newConversation = async () => { await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click(); };
   const openChat = async () => { await page.getByRole('button', { name: /^Chat/ }).click(); await panel.waitFor(); await page.waitForFunction(() => { const t = document.querySelector('.chat-composer textarea'); return t && !t.disabled; }); };
@@ -91,7 +91,7 @@ try {
   assert.deepEqual(await asked(), []);
   await choose('First question on plan'); await waitTurns(3);
   assert.deepEqual(await asked(), ['First question on plan', 'Second question on plan', 'Question on ideas'], 'the first conversation\'s whole history returns, in order, from another note');
-  assert.match(await picker(), /^First question on plan · 3 messages/);
+  assert.match(await picker(), /^First question on plan · [0-9a-f]{8} · 3 messages/);
   await choose('Conversation 2'); await waitTurns(0);
   await ask('Only question in two'); assert.deepEqual(await asked(), ['Only question in two']);
   // A third conversation on the same note as the second: the panel changes to its empty history at once, and the second one's message returns when it is chosen again.
@@ -130,3 +130,5 @@ try {
   console.log('conversation-history: ok');
   await context.close();
 } finally { watcher.stop(); await app.close(); await browser.close(); }
+
+async function reviewSendName(review){return (await review.locator('.chat-review-lead').innerText()).includes('Demo mode: no model is called')?'Send (demo, no model)':'Send to Claude';}

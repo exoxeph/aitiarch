@@ -80,7 +80,7 @@ try {
     if (await plan.count()) { cards++; await plan.getByRole('button', { name: 'Approve and send' }).click(); } await review.waitFor(); return review; };
   const settled = (n) => page.waitForFunction((k) => document.querySelectorAll('#chat-panel .chat-turn[data-status="complete"], #chat-panel .chat-turn[data-status="error"]').length > k, n);
   const done = () => page.evaluate(() => document.querySelectorAll('#chat-panel .chat-turn[data-status="complete"], #chat-panel .chat-turn[data-status="error"]').length);
-  const ask = async (scenario, question) => { await writeFile(scenarioFile, scenario); const before = await done(), review = await submit(question); await review.getByRole('button', { name: 'Send to Claude', exact: true }).click(); await settled(before); return panel.locator('.chat-turn').last(); };
+  const ask = async (scenario, question) => { await writeFile(scenarioFile, scenario); const before = await done(), review = await submit(question); await review.getByRole('button', { name: await reviewSendName(review), exact: true }).click(); await settled(before); return panel.locator('.chat-turn').last(); };
   const pictureThere = {};
   const info = async (base) => (await page.evaluate((n) => fetch('/api/diagram-images?names=' + n + '.png').then((r) => r.json()), base)).images[0] ?? null;
 
@@ -111,7 +111,7 @@ try {
   assert.equal(await review.locator('img').count(), 0, 'no thumbnails');
   assert.equal(await text(review.locator('.chat-review-manifest')), `Open note: Plan (${NOTE.length} chars). Cursor section: Plan. Diagrams: D1 'alpha-skill', D2 'bravo-skill', D3 'charlie-skill'. D4 'broken-skill' withheld: no picture yet.`);
   await panel.screenshot({ path: path.join(output, 'diagram-read-review.png') });
-  let before = await done(); await review.getByRole('button', { name: 'Send to Claude', exact: true }).click(); await settled(before);
+  let before = await done(); await review.getByRole('button', { name: await reviewSendName(review), exact: true }).click(); await settled(before);
 
   // 4. The CLI got Read and the copies; the trail row, the cost and the claim are shown.
   const [first] = await calls();
@@ -157,7 +157,7 @@ try {
   assert.deepEqual(await review.locator('.chat-review-block[data-status="withheld"]').allInnerTexts(), ["D4 'keys' withheld: looks like a secret (it holds text that looks like a secret)."]);
   assert.match(await text(review.locator('.chat-review-manifest')), /Diagrams: D1 'Diagram 1 under Three', D2 'no-picture', D3 'oversize'\. D4 'keys' withheld: looks like a secret/);
   await panel.screenshot({ path: path.join(output, 'diagram-three-review.png') });
-  before = await done(); await writeFile(scenarioFile, 'dg-unavailable|4'); await review.getByRole('button', { name: 'Send to Claude', exact: true }).click(); await settled(before);
+  before = await done(); await writeFile(scenarioFile, 'dg-unavailable|4'); await review.getByRole('button', { name: await reviewSendName(review), exact: true }).click(); await settled(before);
   turn = panel.locator('.chat-turn').last();
   assert.deepEqual(await turn.locator('.chat-opened .inv-row').allInnerTexts().then((l) => l.map((x) => x.trim())), ["Could not open D4 'keys': looks like a secret (it holds text that looks like a secret)"]);
   assert.equal(await turn.locator('.chat-opened .inv-row').first().getAttribute('data-state'), 'error');
@@ -168,7 +168,7 @@ try {
   await openNote('plain.md'); await page.waitForTimeout(300);
   await panel.locator('.chat-pick-trigger').click(); await panel.getByRole('button', { name: 'New', exact: true }).click(); await page.waitForFunction(() => /Conversation 3/.test(document.querySelector('#chat-panel .chat-pick-trigger')?.textContent ?? ''));
   review = await submit('What is this note about?'); assert.equal(await review.locator('.chat-review-diagrams').count(), 0); assert.doesNotMatch(await text(review.locator('.chat-review-manifest')), /Diagrams/);
-  before = await done(); await writeFile(scenarioFile, 'ok'); await review.getByRole('button', { name: 'Send to Claude', exact: true }).click(); await settled(before);
+  before = await done(); await writeFile(scenarioFile, 'ok'); await review.getByRole('button', { name: await reviewSendName(review), exact: true }).click(); await settled(before);
   const last = (await calls()).at(-1); assert.equal(last.args[last.args.indexOf('--tools') + 1], '', 'tool-less'); assert(!last.args.includes('--permission-mode')); assert.deepEqual(last.cwdFiles, [], 'an empty folder');
   await openNote('plan.md'); await page.waitForTimeout(500); assert.equal(listings.filter((l) => l.includes(D4.base)).length, listedNow, 'the diagram that cannot be drawn is not looked up again'); assert.equal(puts.length, putsNow, 'no picture was made twice'); assert(listed >= 1);
 
@@ -179,3 +179,5 @@ try {
   console.log('diagram-chat: ok');
   await context.close();
 } finally { watcher.stop(); await app.close(); await browser.close(); }
+
+async function reviewSendName(review){return (await review.locator('.chat-review-lead').innerText()).includes('Demo mode: no model is called')?'Send (demo, no model)':'Send to Claude';}

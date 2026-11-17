@@ -1,9 +1,10 @@
 import {useEffect,useRef,useState} from 'react';import {api} from '../api.ts';import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';import {COUNCIL_DEFAULT_CAPS,type CouncilProvider} from '../../shared/council.ts';import type {Availability} from '../../server/providers/council-availability.ts';import type {CouncilService} from '../../server/council.ts';import {runCouncil,selectCouncilProvider,applyCouncilEvent,replanCouncilCap,type CouncilViewRun} from './council-model.ts';
 import {byCouncilOrder,formatSeconds,formatUsage,plainNotice,plainReason,providerName,safetyHelp,SAFETY_HELP,statusWord} from './council-view.ts';
 type Plan=Awaited<ReturnType<CouncilService['plan']>>;
-export function CouncilPanel({open,reviewRef,conversation,note,notes,question,disabled,onConversation,onSent,onHistory,onBusy}:{open:boolean;reviewRef:{current:(()=>void)|null};conversation:string;note:string|null;notes:string[];question:string;disabled:boolean;onConversation:(id:string,home:string)=>void;onSent:(question:string)=>void;onHistory:(runs:CouncilViewRun[])=>void;onBusy:(busy:boolean)=>void}){
+export function CouncilPanel({open,reviewRef,conversation,note,notes,question,disabled,onConversation,onSent,onHistory,onBusy,onSelected}:{open:boolean;reviewRef:{current:(()=>void)|null};conversation:string;note:string|null;notes:string[];question:string;disabled:boolean;onConversation:(id:string,home:string)=>void;onSent:(question:string)=>void;onHistory:(runs:CouncilViewRun[])=>void;onBusy:(busy:boolean)=>void;onSelected?:(providers:string[])=>void}){
  const [available,setAvailable]=useState<Availability[]>([]),[selected,setSelected]=useState<string[]>([]),[cap,setCap]=useState(40000),[pending,setPending]=useState<{body:any;plan:Plan}|null>(null),[runs,setRuns]=useState<CouncilViewRun[]>([]),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[capDraft,setCapDraft]=useState('40000');
  useEffect(()=>{onHistory(runs);},[runs]);
+ useEffect(()=>{onSelected?.(selected);},[selected,onSelected]);
  useEffect(()=>{onBusy(busy);},[busy]);
  const abort=useRef<AbortController|null>(null),started=useRef(0),active=useRef<{conversation:string;runId:string}|null>(null);
  useEffect(()=>()=>abort.current?.abort(),[]);

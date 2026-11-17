@@ -31,7 +31,7 @@ import {CONTINUE_QUESTION,InvestigateTurnView,money} from './InvestigateView.tsx
 import {PlanCard} from './PlanCard.tsx';
 import {NativePlanCard} from './NativePlanCard.tsx';
 import {providerName} from './council-view.ts';
-import {APPROVAL_NOTICE,OVER_CAP_TEXT,isAnswerer,isNativeAnswerer,nativeUsageText,type Answerer} from './normal-provider.ts';
+import {APPROVAL_NOTICE,OVER_CAP_TEXT,isAnswerer,isNativeAnswerer,nativeUsageText,councilMemoryText,type Answerer} from './normal-provider.ts';
 import {FILE_REFUSAL_TEXT,addChip,chipsFromGrant,attachmentsOf,autoName,blockedByRefusals,chipKey,isLegacyInvestigation,isPlaceholder,markRefused,needsCard,refusalText,routeOf,waitText,type AttachmentChip,type Route} from './conversation-model.ts';
 import {applyInvestigate,formatElapsed,fromStoredTurn,startTurn,toolCalls} from './investigate-model.ts';
 import type {InvestigateEvent} from '../../server/harness/investigate.ts';
@@ -98,7 +98,7 @@ export function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{re
   <p className="chat-review-total">About {formatCount(review.estimatedTokens)} tokens in all</p>
   {review.budget&&<p className="chat-review-budget">Budget: {formatCount(review.budget.spent)} used + about {formatCount(review.budget.next)} for this message of {formatCount(review.budget.budget)}{review.budget.spent+review.budget.next>review.budget.budget?'. This will not fit; the send will be refused.':'.'}</p>}
   {review.ephemeral?<><p>{SESSION_NOTICES.privacy}</p><details><summary>Recent messages included</summary>{review.history.map(t=><div key={t.id}><pre>{t.user}</pre><pre>{t.assistant}</pre></div>)}</details></>:<label className="chat-review-ask"><input type="checkbox" checked={stopAsking} onChange={e=>setStopAsking(e.target.checked)}/> Don’t ask again this session</label>}
-  <div className="chat-review-actions"><button ref={send} type="button" className="chat-review-send" onClick={onSend}>Send to {recipient}</button><button type="button" className="ghost" onClick={onCancel}>Cancel</button></div>
+  <div className="chat-review-actions"><button ref={send} type="button" className="chat-review-send" onClick={onSend}>{review.demo?'Send (demo, no model)':`Send to ${recipient}`}</button><button type="button" className="ghost" onClick={onCancel}>Cancel</button></div>
  </section>;
 }
 
@@ -133,6 +133,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  const [chips,setChips]=useState<ContextChip[]>(()=>DEFAULT_CONTEXT.map(c=>({...c}))),[turns,setTurns]=useState<Turn[]>([]),[draft,setDraft]=useState('');
  const [pending,setPending]=useState<ChatReview|null>(null),[stopAsking,setStopAsking]=useState(false),[busy,setBusy]=useState(false),[peek,setPeek]=useState<ContextChip['id']|null>(null);
  const [councilRuns,setCouncilRuns]=useState<CouncilRun[]>([]);
+ const [councilProviders,setCouncilProviders]=useState<string[]>([]);
  const persona=useNodeSettings('chat');
  const [usage,setUsage]=useState<ChatUsage|null>(null),[persistence,setPersistence]=useState<'private'|'memory'>('memory'),[notice,setNotice]=useState(''),[adding,setAdding]=useState<string|null>(null);
  const sentAt=useRef(0),input=useRef<HTMLTextAreaElement>(null),log=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),alive=useRef(true);
@@ -394,7 +395,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  return <aside id="chat-panel" ref={panel} className="chat-panel" data-layout={layout} style={layout==="overlay"?({"--chat-w":width+"px"} as CSSProperties):undefined} aria-label="Aitiarch AI chat" onPointerDownCapture={pullEditor} onFocusCapture={pullEditor} onKeyDown={e=>{if(e.key==='Escape'){e.stopPropagation();onClose();}}}>
   {layout==="overlay"&&<div className="chat-resize" role="separator" aria-orientation="vertical" aria-label="Resize chat. Drag, or use the left and right arrow keys." aria-valuemin={CHAT_MIN_WIDTH} aria-valuemax={Math.floor(vw*0.9)} aria-valuenow={width} tabIndex={0} onPointerDown={startResize} onKeyDown={keyResize}/>}
   <header className="chat-head"><h2>{chatHeader(openPath)}</h2>{!sheet&&<button type="button" className="ghost chat-pin" aria-pressed={pinned} aria-label="Pin chat beside the note" title={pinned?"Unpin: let the chat float over the note":"Pin: dock the chat beside the note"} onClick={togglePin}>Pin</button>}<button type="button" className="ghost chat-close" aria-label="Close chat" onClick={onClose}>×</button></header>
-  {openPath&&<ChatSessions path={openPath} answerer={answerer} value={conversation} onChange={setConversation} disabled={composing} refresh={listRefresh+turns.filter(t=>t.status==='complete').length} onCurrent={setCurrent}/>}
+  {openPath&&<ChatSessions path={openPath} answerer={answerer} memory={mode==='council'?councilMemoryText(councilProviders):undefined} value={conversation} onChange={setConversation} disabled={composing} refresh={listRefresh+turns.filter(t=>t.status==='complete').length} onCurrent={setCurrent}/>}
   <div className="chat-context" role="group" aria-label="What the chat can see">
    <button type="button" className="chat-ctl chat-context-sum" aria-expanded={ctxOpen} aria-controls="chat-context-body" onClick={()=>setCtxOpen(v=>!v)}>
     <span className="chat-sum-label">Context</span>
@@ -473,7 +474,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
      {!(c.kind==='repo'&&c.fixed)&&<button type="button" aria-label={`Remove ${label} from the next message`} onClick={()=>setAttach(a=>a.filter(x=>chipKey(x)!==chipKey(c)))}>×</button>}</span>;})}
    {switched&&<span className="chat-send-chip chat-switched" data-chip="switched" role="status"><span>{noteChangedText(switched.from,openTitle)}</span><button type="button" aria-label="Dismiss this notice" onClick={()=>setSwitched(null)}>×</button></span>}
   </div>}
-  <CouncilPanel open={mode==='council'} reviewRef={councilReview} conversation={conversation} note={openPath} notes={[...otherNotes,...attach.filter(c=>c.kind==='note').map(c=>(c as {path:string}).path)]} question={draft} disabled={composing||busy} onConversation={(id,home)=>{onConversation(id,home);setListRefresh(n=>n+1);}} onSent={asked=>{setDraft(current=>current.trim()===asked?'':current);setListRefresh(n=>n+1);}} onHistory={setCouncilRuns} onBusy={setBusy}/>
+  <CouncilPanel open={mode==='council'} onSelected={setCouncilProviders} reviewRef={councilReview} conversation={conversation} note={openPath} notes={[...otherNotes,...attach.filter(c=>c.kind==='note').map(c=>(c as {path:string}).path)]} question={draft} disabled={composing||busy} onConversation={(id,home)=>{onConversation(id,home);setListRefresh(n=>n+1);}} onSent={asked=>{setDraft(current=>current.trim()===asked?'':current);setListRefresh(n=>n+1);}} onHistory={setCouncilRuns} onBusy={setBusy}/>
   </div>
   <form className="chat-composer" onSubmit={e=>{e.preventDefault();if(at&&atItems.length){pickAt(atItems[Math.min(at.index,atItems.length-1)]);return;}void submit();}}>
    {at&&<div className="chat-at" role="listbox" aria-label="Attach a note, a file or the repo" id="chat-at-list">
