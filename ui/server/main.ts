@@ -15,6 +15,7 @@ import { Registry, RegistryError, resolveConfigFolder, type ProjectEntry } from 
 import { DEFAULT_PORT, clearInstance, listenOrReuse, readInstance, writeInstance } from "./launch.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {readFile} from 'node:fs/promises';
 import { createApp } from "./http.ts";
 import { Store } from "./store.ts";
 import { NoteWatcher } from "./watch.ts";
@@ -65,6 +66,9 @@ try {
 const rootArg = path.resolve(args.root ?? path.join(process.cwd(), ".aitiarch"));
 const projectFolder = path.basename(rootArg).toLowerCase() === ".aitiarch" ? path.dirname(rootArg) : rootArg;
 const distDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
+const appFolder=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+const {version}=JSON.parse(await readFile(path.join(appFolder,'ui','package.json'),'utf8'));
+const identity={version,appFolder,notebookRoot:path.join(projectFolder,'.aitiarch')};
 const { UsageLogs } = await import("./providers/usage.ts");
 if (args.claude) {
   const probe = createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205" });
@@ -89,7 +93,7 @@ const openProject = async (entry: ProjectEntry) => {
   const app = createApp({ pipelineConfigDir: configFolder, store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, council:{adapters,availabilityChecks,routing}, harness: args.claude ? { command: args.claude } : undefined });
   return { handle: app.handle, close: async () => { watcher.stop(); await plan?.close(); await app.close(); } };
 };
-const host = createHost({ registry: registry!, security, distDir, openProject, defaultProject: () => defaultId });
+const host = createHost({ registry: registry!, security, distDir, openProject, identity, defaultProject: () => defaultId });
 
 const openBrowser = (target: string) => {
   const [cmd, a] = process.platform === "win32" ? ["cmd", ["/c", "start", "", target.replace(/&/g, "^&")]] : process.platform === "darwin" ? ["open", [target]] : ["xdg-open", [target]];
@@ -102,7 +106,7 @@ const notebookMissing = () => {
 
 let choice: Awaited<ReturnType<typeof listenOrReuse>>;
 try {
-  choice = await listenOrReuse((p) => host.listen(p), args.port ?? DEFAULT_PORT);
+  choice = await listenOrReuse((p) => host.listen(p), args.port ?? DEFAULT_PORT, undefined, {expected:identity});
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));
   process.exit(1);

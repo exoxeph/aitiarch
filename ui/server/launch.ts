@@ -5,23 +5,42 @@ import {mkdir,readFile,rename,rm,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 
 export const DEFAULT_PORT=4317;
+export interface ServerIdentity {version:string;appFolder:string;notebookRoot:string}
+async function health(port:number,timeoutMs=1500):Promise<any>{
+ return new Promise(resolve=>{
+  const req=http.get({host:'127.0.0.1',port,path:'/api/health',headers:{host:`127.0.0.1:${port}`},timeout:timeoutMs},res=>{
+   let body='';res.setEncoding('utf8');res.on('data',c=>{body+=c;if(body.length>8192)req.destroy();});
+   res.on('end',()=>{try{const d=JSON.parse(body);resolve(res.statusCode===200&&d?.app==='aitiarch'?d:null);}catch{resolve(null);}});
+   res.on('error',()=>resolve(null));
+  });
+  req.on('timeout',()=>{req.destroy();resolve(null);});req.on('error',()=>resolve(null));
+ });
+}
+export async function readServerIdentity(port:number):Promise<ServerIdentity|null>{
+ const d=await health(port);
+ return d&&['version','appFolder','notebookRoot'].every(key=>typeof d[key]==='string'&&d[key].length>0)?
+  {version:d.version,appFolder:d.appFolder,notebookRoot:d.notebookRoot}:null;
+}
 
 /** True only when the port answers our health probe. Anything else (another program, silence) is not Aitiarch. */
 export function probeHealth(port:number,timeoutMs=1500):Promise<boolean>{
- return new Promise(resolve=>{
-  const req=http.get({host:'127.0.0.1',port,path:'/api/health',headers:{host:`127.0.0.1:${port}`},timeout:timeoutMs},res=>{
-   let body='';res.setEncoding('utf8');res.on('data',c=>{body+=c;if(body.length>200)req.destroy();});
-   res.on('end',()=>{try{const d=JSON.parse(body);resolve(res.statusCode===200&&d?.app==='aitiarch');}catch{resolve(false);}});
-  });
-  req.on('timeout',()=>{req.destroy();resolve(false);});req.on('error',()=>resolve(false));
- });
+ return health(port,timeoutMs).then(Boolean);
 }
 export type PortChoice={kind:'listening';port:number}|{kind:'reuse';port:number};
 /** Listen on the port; if it is busy and Aitiarch answers there, reuse it; if anything else holds it, say so plainly. */
-export async function listenOrReuse(listen:(port:number)=>Promise<number>,port:number,probe=probeHealth):Promise<PortChoice>{
+export async function listenOrReuse(listen:(port:number)=>Promise<number>,port:number,probe=probeHealth,
+ identity?:{expected:ServerIdentity;readIdentity?:(port:number)=>Promise<ServerIdentity|null>}):Promise<PortChoice>{
  try{return {kind:'listening',port:await listen(port)};}
  catch(e){
   if((e as NodeJS.ErrnoException).code!=='EADDRINUSE')throw e;
+  if(identity){
+   const actual=await (identity.readIdentity??readServerIdentity)(port),expected=identity.expected;
+   if(!actual)throw new Error(`Port ${port} is occupied; Aitiarch server identity is unavailable. Close it or choose another port; it will not be reused.`);
+   const samePath=(a:string,b:string)=>process.platform==='win32'?path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase():path.resolve(a)===path.resolve(b);
+   if(actual.version!==expected.version||!samePath(actual.appFolder,expected.appFolder)||!samePath(actual.notebookRoot,expected.notebookRoot))
+    throw new Error(`Server identity mismatch on port ${port}: running version ${actual.version}, app folder ${actual.appFolder}, notebook root ${actual.notebookRoot}; requested version ${expected.version}, app folder ${expected.appFolder}, notebook root ${expected.notebookRoot}. Close the running server or use --port <number>.`);
+   return {kind:'reuse',port};
+  }
   if(await probe(port))return {kind:'reuse',port};
   throw new Error(`Port ${port} is in use by another program. Close it, or start Aitiarch with --port <number>.`);
  }

@@ -5,9 +5,38 @@ import {mkdir,stat,readFile} from 'node:fs/promises';
 import {doctor,type DoctorOptions,type DoctorReport} from '../server/platform/doctor.ts';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import {listenOrReuse,readServerIdentity,type ServerIdentity} from '../server/launch.ts';
+import {createHost} from '../server/host.ts';
+import {createSecurity} from '../server/security.ts';
+import type {Registry} from '../server/registry.ts';
 
 const script=fileURLToPath(new URL('../scripts/aitiarch.mjs',import.meta.url));
 const {runCli}=await import(pathToFileURL(script).href);
+describe('running server identity',()=>{
+ const expected:ServerIdentity={version:'0.0.1',appFolder:path.resolve('synthetic-app'),notebookRoot:path.resolve('synthetic-project/.aitiarch')};
+ const busy=async()=>{throw Object.assign(Error('busy'),{code:'EADDRINUSE'});};
+ it('reuses only a full version, app folder and notebook match',async()=>{
+  expect(await listenOrReuse(busy,4317,async()=>true,{expected,readIdentity:async()=>expected})).toEqual({kind:'reuse',port:4317});
+ });
+ it.each(['version','appFolder','notebookRoot'] as const)('refuses a %s mismatch and names what is running',async field=>{
+  const actual={...expected,[field]:'different'};
+  await expect(listenOrReuse(busy,4317,async()=>true,{expected,readIdentity:async()=>actual})).rejects.toThrow(/Server identity mismatch.*version.*app folder.*notebook root/);
+ });
+ it('refuses older servers with missing identity',async()=>{
+  await expect(listenOrReuse(busy,4317,async()=>true,{expected,readIdentity:async()=>null})).rejects.toThrow(/identity.*unavailable/i);
+ });
+ it('publishes and checks all three fields on the real local health route before reuse',async()=>{
+  let port=0;
+  const host=createHost({registry:{} as Registry,security:createSecurity({port:()=>port}),distDir:process.env.AITIARCH_CONFIG_DIR!,
+   identity:expected,openProject:async()=>{throw Error('No project may be opened by a health check');}});
+  try{
+   port=await host.listen(0);
+   expect(await readServerIdentity(port)).toEqual(expected);
+   expect(await listenOrReuse(busy,port,undefined,{expected})).toEqual({kind:'reuse',port});
+   await expect(listenOrReuse(busy,port,undefined,{expected:{...expected,notebookRoot:path.resolve('another/.aitiarch')}})).rejects.toThrow(/Server identity mismatch/);
+  }finally{await host.close();}
+ });
+});
 function harness(report:DoctorReport={exitCode:0,checks:[],providers:[],notice:'AI-off available'}){
  const output:string[]=[],errors:string[]=[],starts:any[]=[],probes:DoctorOptions[]=[];
  const cwd=path.join(process.env.AITIARCH_CONFIG_DIR!,'synthetic-project');

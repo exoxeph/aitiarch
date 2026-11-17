@@ -33,11 +33,17 @@ describe('experimental dual plugin package',()=>{
   const claude=await json('.claude-plugin/plugin.json'),codex=await json('plugin.json');
   identity(claude);identity(codex,true);
   for(const manifest of [claude,codex]){
-   expect(manifest.name).toBe('aitiarch');expect(manifest.version).toBe('0.0.3');
+   expect(manifest.name).toBe('aitiarch');expect(manifest.version).toBe('0.0.4');
    expect(manifest.description).toMatch(/experimental/i);expect(manifest.description).toMatch(/source setup/i);
   }
   expect(claude).not.toHaveProperty('$schema');
   expect(()=>identity({...codex,hooks:{}},true)).toThrow();
+ });
+ it('distinguishes sandbox blocks from refusal and supplies one complete terminal fallback',async()=>{
+  const text=await skill();
+  for(const required of ['EPERM/EACCES','once per step','user declines','no approval path','normal terminal',
+   'tell me to continue','never hand-copy','never write into the plugin cache',
+   'plugin-setup.mjs" run --project "$project" --yes-ignore'])expect(text).toContain(required);
  });
  it('binds the shared skill hash to equal release versions on both hosts',async()=>{
   const releases=await json('skills/aitiarch/releases.json');

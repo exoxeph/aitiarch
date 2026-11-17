@@ -11,6 +11,18 @@ Use this same discovery-first checklist after every trigger, whatever the wordin
 
 Both Claude Code and Codex must run setup steps strictly one at a time, each to completion: never batch or parallelize copy, npm, init, doctor or start. Give EVERY command an explicit absolute working directory in the host shell tool, including the read-only planner. Use the absolute project folder for discovery/copy; after copying use the absolute appHome for all remaining commands. Check each exit code before starting the next command. Commands below are separate tool calls, not a batch. appHome comes only from the planner, never inside the project or plugin cache. No chat questions for these defaults; the host's own approval prompts supply consent.
 
+### Sandbox blocks and the single terminal fallback
+
+Distinguish an EPERM/EACCES host sandbox block on writing outside the workspace from a user refusal. On a sandbox block, request the host's normal command approval once per step, for exactly the same command and absolute working directory. Never retry with another technique or silently choose another location; never hand-copy source and never write into the plugin cache. If the user declines, STOP; do not work around that decision. If there is no approval path, STOP without executing further commands. Print ONE complete command with the actual absolute paths substituted (no unresolved variables), explaining that it copies source if needed, runs npm ci/build if needed, initializes private mode and merges `/.aitiarch/` into this project's `.gitignore` if needed, then runs doctor and start:
+
+Resolve the Node executable that passed discovery to its absolute path (`$nodeExecutable` below). Use the host shell's invocation syntax; for PowerShell print:
+
+```powershell
+& "$nodeExecutable" "$pluginRoot/ui/scripts/plugin-setup.mjs" run --project "$project" --yes-ignore
+```
+
+Tell the user: run this in a normal terminal, or allow outside-sandbox commands, then tell me to continue. The user's own execution consents to the displayed private-ignore merge. Never execute this fallback without the host's approval where required. The helper executes the sequence serially with explicit absolute working directories and no shell strings. On continuation, run discovery again: reuse a complete version-stamped build and an existing notebook, never repeat completed copy/build/init steps. Never treat a failed or null build marker as completed. Report any planner `skippedChecks` (ancestor inspection denied by host sandbox); final targets and deepest existing components still require strict inspection.
+
 1. Discover. Preserve the original current working directory. Project = the path the user named, otherwise that original cwd. Claude package root is `${CLAUDE_PLUGIN_ROOT}` (host substitution in this body, not an assumed shell variable). Codex supplies the loaded SKILL.md file path in its skill listing: resolve `../..` from its directory. Do not assume PLUGIN_ROOT is exported to a skill shell; it is documented for hooks only. Never search private host directories. Check `node --version` first; missing/too-old Node is a prerequisite error, never permission to install a replacement. Run the read-only planner from the original cwd with quoted separate arguments:
 
    ```powershell
@@ -55,6 +67,6 @@ Stop and explain an actual blocker with its folder or prerequisite; never solici
 
 Unsafe projects include the user's home itself, a drive/filesystem root, system folders, and anything inside a plugin cache or the app install. Use a dedicated writable project folder outside those locations. A missing/unverifiable host package path is a build-source blocker. Read-only or missing project directories are write blockers. Never create a project somewhere else as fallback.
 
-Never call a provider during setup or after installation. Never enable a provider, sign in, read credentials or send Think/Ask/chat/Council/Investigate/diagram requests. No hooks, MCP server or automatic onboarding is bundled. Never generate human-owned takeaway, Why or failed-reason text. Keep source immutable; never write notes or config inside the plugin cache. No new shell execution is added to app code; commands above run in the host shell with quoted arguments.
+Never call a provider during setup or after installation. Never enable a provider, sign in, read credentials or send Think/Ask/chat/Council/Investigate/diagram requests. No hooks, MCP server or automatic onboarding is bundled. Never generate human-owned takeaway, Why or failed-reason text. Keep source immutable; never write notes or config inside the plugin cache. Host commands use quoted separate arguments; the explicit run helper spawns Node/npm with shell:false. A server is reused only when version, app folder and notebook root all match; stop and report a mismatch, never silently show another notebook.
 
 Host path references: [Claude](https://code.claude.com/docs/en/plugins/manifest-reference), [Codex](https://learn.chatgpt.com/docs/build-skills). Actual host activation, command approval and installation require owner testing; static skill checks cannot prove a host will follow every instruction.

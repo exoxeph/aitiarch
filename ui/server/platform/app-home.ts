@@ -6,6 +6,8 @@ import {resolveConfigFolder} from '../registry.ts';
 
 export interface SetupFilesystem {
  canonical:(file:string)=>Promise<string>;
+ /** lstat only, never follows a target link. Optional for legacy test adapters. */
+ entry?:(file:string)=>Promise<{isSymbolicLink():boolean}>;
  isDirectory:(file:string)=>Promise<boolean>;
  isFile:(file:string)=>Promise<boolean>;
  writable:(file:string)=>Promise<boolean>;
@@ -43,7 +45,7 @@ async function canonical(file:string):Promise<string>{
   return path.join(await canonical(parent),path.basename(file));
  }
 }
-const filesystem:SetupFilesystem={canonical,
+const filesystem:SetupFilesystem={canonical,entry:lstat,
  isDirectory:async file=>{try{const s=await lstat(file);return s.isDirectory()&&!s.isSymbolicLink();}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return false;throw e;}},
  isFile:async file=>{try{const s=await lstat(file);return s.isFile()&&!s.isSymbolicLink();}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return false;throw e;}},
  writable:async file=>{try{await access(file,constants.W_OK);return true;}catch(e){
@@ -67,7 +69,6 @@ export async function inspectPluginSetup(options:PluginSetupOptions){
  const equal=(a:string,b:string)=>normalize(a)===normalize(b);
  const inside=(file:string,root:string)=>{const relative=p.relative(normalize(root),normalize(file));return !relative||(!relative.startsWith('..'+p.sep)&&relative!=='..'&&!p.isAbsolute(relative));};
  const caches=options.cacheRoots??[p.join(home,'.claude','plugins','cache'),p.join(home,'.codex','plugins','cache'),p.join(home,'.agents','plugins','cache')];
- const [actualProject,actualApp,actualConfig,actualHome,...actualCaches]=await Promise.all([project,appHome,configDir,home,...caches].map(file=>fs.canonical(file)));
  const systemRoots=platform==='win32'?[env.SystemRoot||p.join(p.parse(project).root,'Windows'),env.ProgramFiles||p.join(p.parse(project).root,'Program Files'),
   env['ProgramFiles(x86)']||p.join(p.parse(project).root,'Program Files (x86)'),env.ProgramData||p.join(p.parse(project).root,'ProgramData')]:
   ['/etc','/usr','/bin','/sbin','/var','/run','/lib','/lib64','/System','/Library','/Applications','/dev','/proc','/sys','/boot'];
@@ -75,19 +76,47 @@ export async function inspectPluginSetup(options:PluginSetupOptions){
   ...(platform==='win32'?[env.APPDATA,env.LOCALAPPDATA].filter((v):v is string=>Boolean(v)):[])];
  // macOS aliases /var and /etc through /private; compare real roots to real
  // targets on every platform rather than assuming lexical prefixes survive.
- const actualSystemRoots=await Promise.all(systemRoots.map(root=>fs.canonical(root)));
- const actualProjectSystemRoots=await Promise.all(projectSystemRoots.map(root=>fs.canonical(root)));
- const unsafe=equal(actualProject,p.parse(actualProject).root)||equal(actualProject,actualHome)||inside(actualProject,actualApp)||inside(actualApp,actualProject)||
-  actualProjectSystemRoots.some(root=>inside(actualProject,root))||actualCaches.some(cache=>inside(actualProject,cache)||inside(actualApp,cache)||inside(actualConfig,cache))||
-  inside(actualConfig,actualProject)||inside(actualConfig,actualApp)||equal(actualApp,actualHome)||equal(actualApp,p.parse(actualApp).root)||
-  actualSystemRoots.some(root=>inside(actualApp,root));
- if(unsafe)throw new SetupBlocker('unsafe_project',`Unsafe setup folder: ${project}. Use a dedicated writable project such as ${p.join(home,'Projects','aitiarch-project')}, outside home/root, system folders, the plugin cache and app install; keep app and config separate.`);
+ const unsafe=(project:string,app:string,config:string,home:string,caches:string[],systems:string[],projectSystems:string[])=>
+  equal(project,p.parse(project).root)||equal(project,home)||inside(project,app)||inside(app,project)||
+  projectSystems.some(root=>inside(project,root))||caches.some(cache=>inside(project,cache)||inside(app,cache)||inside(config,cache))||
+  inside(config,project)||inside(config,app)||equal(app,home)||equal(app,p.parse(app).root)||systems.some(root=>inside(app,root));
+ const refuseUnsafe=()=>{throw new SetupBlocker('unsafe_project',`Unsafe setup folder: ${project}. Use a dedicated writable project such as ${p.join(home,'Projects','aitiarch-project')}, outside home/root, system folders, the plugin cache and app install; keep app and config separate.`);};
+ // Lexical rules always apply, including when the sandbox denies reference-root
+ // inspection. They cannot prove a final target safe: that inspection stays strict.
+ if(unsafe(project,appHome,configDir,home,caches,systemRoots,projectSystemRoots))refuseUnsafe();
+ const skippedChecks:string[]=[];
+ const denied=(error:unknown)=>['EPERM','EACCES'].includes((error as NodeJS.ErrnoException).code??'');
+ const noteDenied=()=>{if(!skippedChecks.length)skippedChecks.push('ancestor inspection denied by host sandbox');};
+ const reference=async(file:string)=>{try{return await fs.canonical(file);}catch(e){if(!denied(e))throw e;noteDenied();return p.normalize(file);}};
+ const target=async(file:string)=>{
+  let existing=file;
+  if(fs.entry){
+   // Missing tails are allowed, but neither the final entry nor its deepest
+   // existing component may be unreadable or linked. Never turn their denial
+   // into a lexical-only safety claim.
+   for(;;){try{if((await fs.entry(existing)).isSymbolicLink())throw new SetupBlocker('unsafe_project',`Linked setup target: ${existing}. Use a real directory.`);break;}
+    catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;const parent=p.dirname(existing);if(parent===existing)throw e;existing=parent;}}
+  }
+  const resolved=await fs.canonical(existing);
+  // Higher ancestors are advisory only; their permission errors do not invalidate
+  // the strict lstat/realpath checks just completed on the target/component.
+  if(fs.entry)for(let ancestor=p.dirname(existing);ancestor!==existing;){
+   try{await fs.entry(ancestor);await fs.canonical(ancestor);}catch(e){if(!denied(e))throw e;noteDenied();}
+   const parent=p.dirname(ancestor);if(parent===ancestor)break;ancestor=parent;
+  }
+  return p.join(resolved,p.relative(existing,file));
+ };
+ const [actualProject,actualApp,actualConfig]=await Promise.all([project,appHome,configDir].map(target));
+ const [actualHome,...actualCaches]=await Promise.all([home,...caches].map(reference));
+ const actualSystemRoots=await Promise.all(systemRoots.map(reference));
+ const actualProjectSystemRoots=await Promise.all(projectSystemRoots.map(reference));
+ if(unsafe(actualProject,actualApp,actualConfig,actualHome,actualCaches,actualSystemRoots,actualProjectSystemRoots))refuseUnsafe();
  if(!await fs.isDirectory(project))throw new SetupBlocker('not_writable',`Project folder is missing or unavailable: ${project}. Use an existing writable project folder.`);
  const notebook=p.join(project,'.aitiarch');
  if(await fs.isFile(notebook))throw new SetupBlocker('unsafe_project',`Not a notebook directory: ${notebook}. Use a project with a real .aitiarch directory or no .aitiarch yet.`);
  // A canonicalized alias is not an acceptable init target, even when it points
  // into a safe directory: init's own no-symlink guarantee must remain intact.
- const actualNotebook=await fs.canonical(notebook);
+ const actualNotebook=await target(notebook);
  if(!equal(actualNotebook,p.join(actualProject,'.aitiarch')))throw new SetupBlocker('unsafe_project',`Unsafe notebook alias: ${notebook}. Use a project without a linked .aitiarch.`);
  for(const file of [project,appHome,configDir])if(!await fs.writable(file))throw new SetupBlocker('not_writable',`Folder not writable: ${file}. Use a writable project/app/config folder.`);
  const version=metadata.version;
@@ -96,7 +125,7 @@ export async function inspectPluginSetup(options:PluginSetupOptions){
  try{installedVersion=(await fs.readJson(p.join(appHome,'ui','package.json')))?.version;}catch{/* Missing source means rebuild. */}
  const buildRequired=builtVersion!==version||installedVersion!==version||!await fs.isFile(p.join(appHome,'ui','dist','index.html'))||!await fs.isDirectory(p.join(appHome,'ui','node_modules'));
  const initializeRequired=!await fs.isDirectory(notebook);
- return {appHome,project,notebook,configDir,version,buildRequired,initializeRequired,
+ return {appHome,project,notebook,configDir,version,buildRequired,initializeRequired,skippedChecks,
   buildMarker:p.join(appHome,'build-version.json'),buildMarkerContent:JSON.stringify({version})+'\n',
   steps:[...(buildRequired?['copy-source','build']:[]),...(initializeRequired?['init-private']:[]),'doctor','start']};
 }

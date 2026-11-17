@@ -2,10 +2,105 @@ import {describe,it,expect} from 'vitest';
 import path from 'node:path';
 import {mkdir,writeFile,readFile,lstat,symlink} from 'node:fs/promises';
 import {fileURLToPath,pathToFileURL} from 'node:url';
+import {inspectPluginSetup,type SetupFilesystem} from '../server/platform/app-home.ts';
 
 const script=(name:string)=>pathToFileURL(fileURLToPath(new URL('../scripts/'+name,import.meta.url))).href;
 const {copyPluginSource,excludedSource}=await import(script('plugin-copy.mjs'));
 const {pluginSetup}=await import(script('plugin-setup.mjs'));
+function plannerFixture(){
+ const fs:SetupFilesystem={canonical:async p=>p,isDirectory:async()=>true,isFile:async()=>false,writable:async()=>true,
+  readJson:async p=>{if(p==='/package/ui/package.json')return {version:'0.0.1',engines:{node:'>=24'}};throw Error('missing');}};
+ return {fs,options:{pluginRoot:'/package',project:'/projects/demo',home:'/people/synthetic',platform:'linux' as const,
+  env:{AITIARCH_HOME:'/apps/aitiarch',AITIARCH_CONFIG_DIR:'/config'},nodeVersion:'24.1.0',filesystem:fs}};
+}
+describe('sandbox-safe plugin planning',()=>{
+ it('reports denied ancestor inspection while keeping final and deepest targets strict',async()=>{
+  const {fs,options}=plannerFixture();
+  fs.canonical=async p=>{if(p==='/people/synthetic')throw Object.assign(Error('sandbox'),{code:'EPERM',path:p});return p;};
+  const plan=await inspectPluginSetup(options);
+  expect(plan.skippedChecks).toContain('ancestor inspection denied by host sandbox');
+  expect(plan.appHome).toBe('/apps/aitiarch');
+ });
+ it.each(['/people/synthetic','/','/etc/project'])('still rejects the unsafe lexical project %s',async project=>{
+  const {fs,options}=plannerFixture();fs.canonical=async p=>{throw Object.assign(Error('sandbox'),{code:'EACCES',path:p});};
+  await expect(inspectPluginSetup({...options,project})).rejects.toMatchObject({code:'unsafe_project'});
+ });
+ it('never suppresses a denied final or deepest existing target',async()=>{
+  const {fs,options}=plannerFixture();fs.canonical=async p=>{if(p==='/apps/aitiarch')throw Object.assign(Error('denied'),{code:'EPERM',path:p});return p;};
+  await expect(inspectPluginSetup(options)).rejects.toMatchObject({code:'EPERM'});
+ });
+ it('refuses a detectable final target symlink',async()=>{
+  const {fs,options}=plannerFixture();
+  Object.assign(fs,{entry:async(p:string)=>({isSymbolicLink:()=>p==='/apps/aitiarch'})});
+  await expect(inspectPluginSetup(options)).rejects.toMatchObject({code:'unsafe_project'});
+ });
+ it('allows lstat and realpath denial only above verified targets/components',async()=>{
+  const {fs,options}=plannerFixture(),visited:string[]=[];
+  Object.assign(fs,{entry:async(p:string)=>{visited.push(p);if(p==='/apps')throw Object.assign(Error('sandbox'),{code:'EACCES'});return {isSymbolicLink:()=>false};}});
+  fs.canonical=async p=>{if(p==='/projects')throw Object.assign(Error('sandbox'),{code:'EPERM'});return p;};
+  expect((await inspectPluginSetup(options)).skippedChecks).toContain('ancestor inspection denied by host sandbox');
+  expect(visited).toContain('/apps/aitiarch');expect(visited).toContain('/projects/demo');
+ });
+ it('does not skip lstat denial of the deepest existing component of a missing app',async()=>{
+  const {fs,options}=plannerFixture();
+  Object.assign(fs,{entry:async(p:string)=>{
+   if(p==='/apps/aitiarch')throw Object.assign(Error('missing'),{code:'ENOENT'});
+   if(p==='/apps')throw Object.assign(Error('sandbox'),{code:'EPERM'});
+   return {isSymbolicLink:()=>false};}});
+  await expect(inspectPluginSetup(options)).rejects.toMatchObject({code:'EPERM'});
+ });
+});
+
+describe('single-command resumable setup',()=>{
+ it('runs ordered explicit-cwd steps and resumes without recopy, reinstall, build or init',async()=>{
+  const f=await fixture(),calls:any[]=[],output:string[]=[];
+  let built=false,initialized=false;
+  const inspect=async()=>({appHome:f.target,project:f.base,notebook:path.join(f.base,'.aitiarch'),configDir:path.join(f.base,'config'),
+   version:'0.0.1',buildRequired:!built,initializeRequired:!initialized,buildMarker:path.join(f.target,'build-version.json'),buildMarkerContent:'{"version":"0.0.1"}\n'});
+  const deps={nodeVersion:'24.1.0',inspect,out:(s:string)=>output.push(s),err:(s:string)=>{throw Error(s);},
+   copySource:async()=>{calls.push({id:'copy-source',cwd:f.base});return {};},
+   runStep:async(step:any)=>{calls.push(step);if(step.id==='build')built=true;if(step.id==='init-private')initialized=true;return step.id==='start'?{url:'http://127.0.0.1:4999/'}:{};},
+   stamp:async()=>{calls.push({id:'stamp',cwd:f.target});}};
+  expect(await pluginSetup(['run','--project',f.base,'--yes-ignore'],deps)).toBe(0);
+  expect(calls.map(c=>c.id)).toEqual(['copy-source','npm-ci','build','stamp','init-private','doctor','start']);
+  for(const c of calls.slice(1))expect(c.cwd).toBe(f.target);
+  expect(calls.find(c=>c.id==='init-private').args).toEqual([path.join(f.target,'ui/scripts/aitiarch.mjs'),'init',f.base,'--private','--yes-ignore']);
+  expect(JSON.parse(output.at(-1)!)).toMatchObject({buildRequired:false,initializeRequired:false,status:'ready',url:'http://127.0.0.1:4999/'});
+  calls.length=0;
+  expect(await pluginSetup(['run','--project',f.base,'--yes-ignore'],deps)).toBe(0);
+  expect(calls.map(c=>c.id)).toEqual(['doctor','start']);
+ });
+ it('requires explicit ignore consent and stops before later steps on failure',async()=>{
+  const f=await fixture(),errors:string[]=[],calls:string[]=[];
+  const plan={appHome:f.target,project:f.base,notebook:path.join(f.base,'.aitiarch'),buildRequired:false,initializeRequired:true};
+  const deps={nodeVersion:'24.1.0',inspect:async()=>plan,out:()=>{},err:(s:string)=>errors.push(s),runStep:async(s:any)=>{calls.push(s.id);throw Error('failed step');}};
+  expect(await pluginSetup(['run','--project',f.base],deps)).toBe(1);expect(calls).toEqual([]);
+  expect(await pluginSetup(['run','--project',f.base,'--yes-ignore'],deps)).toBe(1);expect(calls).toEqual(['init-private']);
+ });
+ it('runs fake commands through native Node with the explicit cwd and reports readiness',async()=>{
+  const f=await fixture();await mkdir(f.target,{recursive:true});
+  const cli=path.join(f.target,'fake-cli.mjs');
+  await writeFile(cli,`if(process.cwd()!==process.argv[2])process.exit(9);\nconsole.log('AITIARCH_READY '+JSON.stringify({url:'http://127.0.0.1:4999/'}));\n`);
+  const {runSetupStep}=await import(script('plugin-run.mjs'));
+  expect(await runSetupStep({id:'doctor',args:[cli,f.target],cwd:f.target,env:process.env})).toEqual({});
+  expect(await runSetupStep({id:'start',args:[cli,f.target],cwd:f.target,env:process.env})).toEqual({url:'http://127.0.0.1:4999/'});
+  await expect(runSetupStep({id:'doctor',args:[cli,f.base],cwd:f.target,env:process.env})).rejects.toThrow(/exit 9/);
+ });
+ it('keeps a failed start identity diagnosis visible instead of only its exit code',async()=>{
+  const f=await fixture();await mkdir(f.target,{recursive:true});const cli=path.join(f.target,'failed-start.mjs');
+  const reason='Server identity mismatch: running version 0.0.0, app folder /old-app, notebook root /old-project/.aitiarch. Close it or use --port.';
+  await writeFile(cli,`console.error(${JSON.stringify(reason)});process.exit(1);`);
+  const {runSetupStep}=await import(script('plugin-run.mjs'));
+  await expect(runSetupStep({id:'start',args:[cli],cwd:f.target,env:process.env})).rejects.toThrow(reason);
+ });
+ it('runs a synthetic npm CLI with absolute prefix and cwd without a shell or install',async()=>{
+  const f=await fixture();await mkdir(f.target,{recursive:true});const cli=path.join(f.target,'npm-cli.js');
+  await writeFile(cli,`if(process.cwd()!==process.env.EXPECTED_CWD||JSON.stringify(process.argv.slice(2))!==JSON.stringify(['--prefix',process.env.EXPECTED_CWD,'ci']))process.exit(7);`);
+  const {runSetupStep}=await import(script('plugin-run.mjs'));
+  expect(await runSetupStep({id:'npm-ci',npm:true,args:['--prefix',f.target,'ci'],cwd:f.target,
+   env:{...process.env,npm_execpath:cli,EXPECTED_CWD:f.target}})).toEqual({});
+ });
+});
 const required=['ui/package.json','ui/package-lock.json','ui/scripts/aitiarch.mjs','ui/server/main.ts','ui/shared/types.ts','docs/guide.md'];
 let sequence=0;
 async function fixture(){
