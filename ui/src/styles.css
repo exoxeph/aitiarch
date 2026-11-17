@@ -717,7 +717,7 @@ dialog.thought-insert-preview::backdrop {background:var(--scrim);}
 .menu-scrim { position: fixed; inset: 0; z-index: 30; background: var(--canvas); opacity: 0; pointer-events: none; transition: opacity 200ms ease; }
 .menu-scrim[data-open="true"] { opacity: .5; }
 .menu-scrim[data-open="true"][data-pinned="true"] { pointer-events: auto; }
-.sidebar { position: fixed; z-index: 40; left: 8px; top: 52px; bottom: 36px; width: min(288px, 88vw); display: flex; flex-direction: column; padding: var(--space-3) var(--space-2); overflow: hidden;
+.sidebar { position: fixed; z-index: 42; left: 8px; top: 52px; bottom: 36px; width: min(288px, 88vw); display: flex; flex-direction: column; padding: var(--space-3) var(--space-2); overflow: hidden;
   background: var(--paper-2); border: 1px solid var(--rule); border-radius: var(--radius-page); box-shadow: var(--shadow-page);
   transform: translateX(calc(-100% - 24px)); visibility: hidden; transition: transform 220ms cubic-bezier(.2, .8, .2, 1), visibility 0s linear 220ms; }
 .sidebar[data-state="open"] { transform: none; visibility: visible; transition: transform 220ms cubic-bezier(.2, .8, .2, 1), visibility 0s; }
@@ -1318,6 +1318,12 @@ a.menu-row { text-decoration: none; }
 .map-pill:hover, .map-pill[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .map-pill:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .chat-from-map .chat-chip { border-color: var(--accent); }
+/* Chat opened over the map: it paints above the map (z-index only, so each layout keeps its own position), and a pinned chat column gets its width back from the map so the two sit side by side. */
+.constellation ~ .chat-panel[data-layout]:not([data-layout="sheet"]) { z-index: 41; }
+/* The Pipeline Studio (z-index 45) comes after both in the page, so Chat and the Notes menu step above it while it is open. */
+.chat-panel[data-layout]:not([data-layout="sheet"]):has(~ .studio) { z-index: 46; }
+.sidebar:has(~ .studio) { z-index: 47; }
+@media (min-width: 901px) { .constellation:has(~ .chat-panel[data-layout="pinned"]) { right: calc(clamp(380px, 36vw, 620px) + var(--gutter)); } }
 .constellation { position: fixed; inset: 48px 0 30px 0; z-index: 40; display: flex; flex-direction: column; background: var(--canvas); border-top: 1px solid var(--rule); outline: none; }
 .constellation :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .cn-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: 10px var(--space-4); border-bottom: 1px solid var(--rule); background: var(--paper); }
