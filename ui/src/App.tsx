@@ -199,9 +199,9 @@ export default function App() {
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
   // The Constellation view, and the notes it hands to the chat ("Use as chat context").
   const [mapOpen, setMapOpen] = useState(false), [mapNotes, setMapNotes] = useState<string[]>([]), mapButtonRef = useRef<HTMLButtonElement>(null);
-  // The Studio is a full-area overlay, so Constellation or Chat opening behind it would look like a dead button: opening either closes the Studio.
-  useEffect(() => { if (mapOpen || chatOpen) setStudio(null); }, [mapOpen, chatOpen]);
-  const [decisionsFocus,setDecisionsFocus]=useState(false);
+  // Constellation and the Pipeline Studio are both full-area views, so they take turns: opening one closes the other (the pill with the orange border is the one on screen). Chat and the Notes menu sit on top of either.
+  useEffect(() => { if (mapOpen) setStudio(null); }, [mapOpen]);
+  useEffect(() => { if (studio) setMapOpen(false); }, [studio]);  const [decisionsFocus,setDecisionsFocus]=useState(false);
   const noteIndex=useNoteIndex(mapOpen||overlay==='palette',subscribe);
   const indexedNotes=useMemo(()=>noteIndex.notes.map(n=>({...n,text:docs[n.path]??n.text})),[noteIndex.notes,docs]);
   const decisions=useMemo(()=>decisionRows(indexedNotes),[indexedNotes]);
@@ -629,7 +629,7 @@ export default function App() {
         <Constellation active={active} subscribe={subscribe} decisions={decisions} decisionsLoading={noteIndex.loading} decisionsError={noteIndex.error} focusDecisions={decisionsFocus} onDecision={openLine}
           onClose={() => { setMapOpen(false);setDecisionsFocus(false); mapButtonRef.current?.focus(); }}
           onOpen={p => { setMapOpen(false); void openNote(p); }}
-          onUseAsContext={ps => { setMapNotes(ps); setMapOpen(false); setChatOpen(true); }} />
+          onUseAsContext={ps => { setMapNotes(ps); setChatOpen(true); }} />
       </Suspense>}
       {chatOpen && <ChatPanel extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} editor={chatEditor} onShowOnPipeline={(nodeId) => setStudio({ highlight: nodeId })} onAdd={addChatMessage} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onCiteClaim={(heading) => { const h = active ? panes.current.get(active) : undefined; return !!h && !!active && citeAtCursor(h.view, active, { path: active, title: titleOf(h.view.state.doc.toString(), active), ...(heading ? { heading } : {}) }); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
       {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); burgerRef.current?.focus(); }} onOpenStudio={() => { setSettingsOpen(false); setStudio({}); }} />}
