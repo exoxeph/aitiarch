@@ -3,6 +3,12 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import {isAbortCause,type AbortCause} from '../shared/chat.ts';
 import type {TurnUsage,TurnStatus} from './providers/turn.ts';
+import {validInvokedUsage,type InvokedUsage} from '../shared/invoked-usage.ts';
+export interface InvokedAudit extends InvokedUsage {status:TurnStatus;durationMs:number}
+export function validInvokedAudit(v:unknown):v is InvokedAudit {
+ if(!validInvokedUsage(v))return false;const x=v as InvokedAudit;
+ return Object.keys(x).sort().join()==='amount,budgetCharge,cap,durationMs,overCap,provider,status,unit'&&['ok','refused','unavailable','timeout','error'].includes(x.status)&&typeof x.durationMs==='number'&&Number.isFinite(x.durationMs)&&x.durationMs>=0;
+}
 export interface CouncilAudit {provider:'claude'|'codex'|'kiro';status:TurnStatus;usage:TurnUsage[];durationMs:number;/** How many code attempts the host blocked. A count only, never content. */blockedAttempts?:number;overCap?:boolean}
 export function validCouncilAudit(v:unknown):v is CouncilAudit{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;const c=v as CouncilAudit;
@@ -43,7 +49,7 @@ export function validContextFields(e:LedgerEvent):boolean{
 }
 /** A context_read as a whole: a known module, the hash of what was asked for, and the optional note, size and selection fields. */
 export const validContextRead=(e:LedgerEvent)=>['this-note','other-notes','claude-sessions','codex-sessions'].includes(e.moduleId??'')&&/^[a-f0-9]{64}$/.test(e.sourceHash??'')&&validContextFields(e);
-export interface LedgerEvent { id: string; inkId: string; requestId: string; note: string; event: 'shown' | 'dismissed' | 'inserted' | 'resolved' | 'reopened' | 'adopted' | 'context_read' | 'chat_started' | 'chat_completed' | 'chat_failed'|'investigation'|'investigate_turn'|'diagram_read'|'cli_version'|'conversation_turn'|'council_turn'; at: string; council?:CouncilAudit; authorship?: 'ai'; insertedBy?: 'human'; moduleId?:'this-note'|'other-notes'|'claude-sessions'|'codex-sessions';sourceHash?:string;investigation?:InvestigationAudit;turn?:InvestigateTurnAudit;/** diagram_read only. */diagram?:DiagramReadAudit;/** cli_version only. */cli?:CliVersionAudit;/** conversation_turn only: what the turn was allowed to do and what it carried, by counts. Never a path or any text. */conv?:ConversationTurnAudit;
+export interface LedgerEvent { id: string; inkId: string; requestId: string; note: string; event: 'shown' | 'dismissed' | 'inserted' | 'resolved' | 'reopened' | 'adopted' | 'context_read' | 'chat_started' | 'chat_completed' | 'chat_failed'|'investigation'|'investigate_turn'|'diagram_read'|'cli_version'|'conversation_turn'|'council_turn'|'invoked_turn'; at: string; invoked?:InvokedAudit; council?:CouncilAudit; authorship?: 'ai'; insertedBy?: 'human'; moduleId?:'this-note'|'other-notes'|'claude-sessions'|'codex-sessions';sourceHash?:string;investigation?:InvestigationAudit;turn?:InvestigateTurnAudit;/** diagram_read only. */diagram?:DiagramReadAudit;/** cli_version only. */cli?:CliVersionAudit;/** conversation_turn only: what the turn was allowed to do and what it carried, by counts. Never a path or any text. */conv?:ConversationTurnAudit;
   /** context_read only, all optional (older lines have none). `path` is the note whose text was read, which in a conversation can differ from `note` (the chat's note); `chars` is the size of the source as sent;
    *  `selection` is the selection that went with the request. A context_read without `chars` is the attempt written before the read; the one with `chars` is written after it. */
   path?:string;chars?:number;selection?:ContextSelectionAudit;
@@ -101,7 +107,14 @@ export class LedgerStore {
     try { text = await retried(() => readFile(this.file, 'utf8')); }
     catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { v: 1, events: [] }; throw e; }
     const d = JSON.parse(text);
-    if (d.v !== 1 || !Array.isArray(d.events) || Object.keys(d).sort().join() !== 'events,v' || d.events.some((e: LedgerEvent) =>
+    // Additive invoked audit branch; the exact-key legacy validators below stay
+    // unchanged. Do not disguise an invoked turn as Council or Claude dollars.
+    const checked=Array.isArray(d.events)?d.events.filter((e:LedgerEvent)=>{
+      if(e?.event!=='invoked_turn')return true;
+      if(Object.keys(e).sort().join()!=='at,event,id,inkId,invoked,note,requestId'||![e.id,e.inkId,e.requestId,e.note,e.at].every(v=>typeof v==='string')||!validInvokedAudit(e.invoked))throw new Error('Invalid ledger; original preserved.');
+      return false;
+    }):[];
+    if (d.v !== 1 || !Array.isArray(d.events) || Object.keys(d).sort().join() !== 'events,v' || checked.some((e: LedgerEvent) =>
       Object.keys(e).sort().join() !== (e.event==='council_turn'?'at,council,event,id,inkId,note,requestId':e.event==='investigation'?'at,event,id,inkId,investigation,note,requestId':e.event==='investigate_turn'?'at,event,id,inkId,note,requestId,turn':e.event==='diagram_read'?'at,diagram,event,id,inkId,note,requestId':e.event==='cli_version'?'at,cli,event,id,inkId,note,requestId':e.event==='conversation_turn'?'at,conv,event,id,inkId,note,requestId':e.event==='context_read'?contextReadKeys(e):e.event==='inserted'?'at,authorship,event,id,inkId,insertedBy,note,requestId':e.event==='chat_failed'&&Object.hasOwn(e,'cause')?'at,cause,event,id,inkId,note,requestId':'at,event,id,inkId,note,requestId') || !['shown', 'dismissed', 'inserted', 'resolved', 'reopened', 'adopted','context_read','chat_started','chat_completed','chat_failed','investigation','investigate_turn','diagram_read','cli_version','conversation_turn','council_turn'].includes(e.event) ||(e.event==='council_turn'&&!validCouncilAudit(e.council))||(e.event==='conversation_turn'&&!validConversationTurn(e.conv))||(e.event==='diagram_read'&&!validDiagramReadAudit(e.diagram))||(e.event==='cli_version'&&!validCliVersionAudit(e.cli))||(e.event==='investigation'&&!validInvestigation(e.investigation))||(e.event==='investigate_turn'&&!validInvestigateTurn(e.turn))||(Object.hasOwn(e,'cause')&&!isAbortCause(e.cause))|| (e.event==='inserted'&&(e.authorship!=='ai'||e.insertedBy!=='human')) || (e.event==='context_read'&&!validContextRead(e)) ||
       ![e.id, e.inkId, e.requestId, e.note, e.at].every(v => typeof v === 'string'))) throw new Error('Invalid ledger; original preserved.');
     return d;
@@ -160,6 +173,7 @@ export class LedgerStore {
     try { return await retried(() => readFile(lockPath, 'utf8')) === mine; } catch { return false; }
   }
   append(event: LedgerEvent): Promise<void> {
+    if(event.event==='invoked_turn'&&!validInvokedAudit(event.invoked))return Promise.reject(new Error('Invalid invoked metadata.'));
     if(event.event==='council_turn'&&!validCouncilAudit(event.council))return Promise.reject(new Error('Invalid council metadata.'));
     if(event.event==='investigation'&&!validInvestigation(event.investigation))return Promise.reject(new Error('Invalid investigation metadata.'));
     if(event.event==='investigate_turn'&&!validInvestigateTurn(event.turn))return Promise.reject(new Error('Invalid Investigate turn metadata.'));

@@ -1,5 +1,6 @@
 import {transient} from '../transient.ts';
 import {savedProviderLabel} from '../../shared/threads.ts';
+import {invokedUsageLabel,type InvokedUsage} from '../../shared/invoked-usage.ts';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { EditorView } from '@codemirror/view';
 import { captureAnchor } from '../../shared/anchors.ts';
@@ -19,14 +20,15 @@ import {NODE_LABEL} from '../skills/skills-model.ts';
 import {nodeFor} from '../../shared/node-settings.ts';
 import type {SkillsReview} from '../../shared/node-settings.ts';
 /** The packet the server sends back has a "skills" entry beside the request; the request itself is everything else. */
-const exactRequest=(packet:unknown)=>{const {skills:_skills,...rest}=packet as Record<string,unknown>;return rest;};
+const exactRequest=(packet:unknown)=>{const {skills:_skills,review:_review,...rest}=packet as Record<string,unknown>;return rest;};
 
-interface Draft { input: Invocation; packet?: unknown; error?: string; warnings?: string[] }
-interface Running { id: string; status: string; error?: string }
+interface Draft { input: Invocation; packet?: unknown; error?: string; warnings?: string[];providerLabel?:string }
+interface Running { id: string; status: string; error?: string;usage?:InvokedUsage;notice?:string }
 export function useInvocations(path: string, view: RefObject<EditorView | null>, session: RefObject<NoteSession | null>,
   saved: (snapshot: InkSnapshot) => void) {
   const [draft, setDraft] = useState<Draft | null>(null), [jobs, setJobs] = useState<Running[]>([]), [busy, setBusy] = useState(false);
-  const [providerLabel,setProviderLabel]=useState('Claude');
+  const [availableProviderLabel,setProviderLabel]=useState('Claude');
+  const providerLabel=draft?.providerLabel??availableProviderLabel;
   useEffect(()=>{void api.assistance().then(a=>setProviderLabel(savedProviderLabel(a.provider??'claude'))).catch(()=>{});},[]);
   const mounted = useRef(true), liveSaved = useRef(saved); liveSaved.current = saved;
   const merge = (snapshot: InkSnapshot) => {
@@ -56,7 +58,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
           try {
             const result = await api.requestStatus(job.id);
             if (cancelled) return;
-            setJobs(all => all.map(j => j.id === job.id ? { ...j, status: result.status } : j));
+            setJobs(all => all.map(j => j.id === job.id ? { ...j, status: result.status,usage:result.usage,notice:result.notice } : j));
             if (['complete', 'error', 'cancelled'].includes(result.status)) merge(await api.ink(path));
           } catch (e) { if (!cancelled) setJobs(all => all.map(j => j.id === job.id ? { ...j,
             status: e instanceof ApiError && e.status === 404 ? 'interrupted' : j.status,
@@ -72,7 +74,8 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       const availability = await api.assistance();
       if (!availability.available) throw new Error(availability.message ?? 'Claude is unavailable.');
       const packet = await api.previewInvocation(input);
-      if (mounted.current) setDraft({ input, packet, warnings: availability.warnings });
+      const reviewed=(packet as {review?:{id:string;provider:string}}).review;
+      if (mounted.current){setDraft({ input:{...input,...(reviewed?{reviewId:reviewed.id}:{})}, packet, warnings: availability.warnings,providerLabel:savedProviderLabel(reviewed?.provider??availability.provider??'claude') });}
     } catch (e) { if (mounted.current) setDraft({ input, error: e instanceof Error ? e.message : 'Context preview failed.' }); }
     finally { if (mounted.current) setBusy(false); }
   };
@@ -104,12 +107,13 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       const snapshot = await api.invoke(input);
       rememberQuestion(path,input.id,input.question||'Think on this');
       merge(snapshot); setJobs(all => [...all, { id: input.id, status: 'pending' }]); setDraft(null);
-    } catch (e) { setDraft({ ...draft, error: e instanceof Error ? e.message : 'Invocation failed. No automatic retry.' }); }
+    } catch (e) { setDraft({ input:draft.input, error: e instanceof Error ? e.message : 'Invocation failed. No automatic retry.' }); }
     finally { setBusy(false); }
   };
   // The ask/review form lives in the margin blob of the frozen selection (Enter to ask or send, Esc to cancel). The top panel
   // only shows it as a fallback when that blob is not on screen (narrow layout), plus the job status lines.
   const sendRef = useRef<HTMLButtonElement>(null), hasPacket = draft?.packet !== undefined;
+  const reviewedCap=(draft?.packet as {review?:{cap?:{unit:string;amount:number}|null}}|undefined)?.review?.cap;
   const stepNode = draft ? nodeFor(draft.input.action, draft.input.question) : 'ask', persona = useNodeSettings(stepNode);
   // Visualize only: who draws the diagram. Skill needs a skill attached to the Visualize step (Settings); Built-in is always there and the default.
   const isVisualize = !!draft && draft.input.question === VISUALIZE_QUESTION, renderer = draft?.input.renderer ?? 'builtin';
@@ -150,6 +154,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       <SkillsReviewList review={(draft.packet as { skills?: SkillsReview }).skills} />
       <details><summary>Exact redacted request</summary><pre>{JSON.stringify(exactRequest(draft.packet), null, 2)}</pre></details></details>}
     {hasPacket && <p className="small muted ask-hint">Enter to send · Esc to cancel</p>}
+    {hasPacket&&reviewedCap&&<p className="small muted">{providerLabel} allowance for this request: {reviewedCap.amount.toLocaleString()} {reviewedCap.unit}. Usage is reported after the turn; if it is not reported, the full allowance is charged conservatively. Another request needs a new review.</p>}
     {draft.error && <p role="alert">{draft.error}</p>}
     {draft.warnings?.map(warning => <p role="note" key={warning}>{warning}</p>)}
     <div className="attach-actions">{hasPacket
@@ -163,6 +168,8 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       {j.error && <span role="alert">{j.error}</span>}
       {['pending', 'queued'].includes(j.status) && <button onClick={() => void api.cancelRequest(j.id).catch(() => setJobs(all => all.map(k => k.id === j.id ? { ...k, error: 'Cancellation could not be confirmed.' } : k)))}>Cancel request</button>}
       {j.status === 'persistence_error' && <button onClick={() => void api.retryInkSave(j.id).then(async () => { merge(await api.ink(path)); setJobs(all => all.map(k => k.id === j.id ? { ...k, status: 'complete' } : k)); }).catch(() => {})}>Retry saving answer (no new call)</button>}
+      {j.usage&&<span className="small muted">{invokedUsageLabel(j.usage)}</span>}
+      {j.notice&&<span role="status">{j.notice}</span>}
     </div>)}
   </div>;
   return { begin, panel, draftId: draft?.input.id ?? null, draftSection };

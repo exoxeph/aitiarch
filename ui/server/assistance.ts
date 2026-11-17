@@ -16,8 +16,18 @@ import { ProductValidationError, validateProductResult, validationCounts, type V
 import { privateValidationLog } from './providers/failure-metrics.ts';
 import type { ExtrasFor } from './node-settings.ts';
 import { nodeFor, SKILLS_ONLY_WITH_SKILL_RENDERER, type SkillsReview } from '../shared/node-settings.ts';
+import {activePipelineConfig} from '../shared/pipeline-config.ts';
+import type {CouncilCap} from '../shared/council.ts';
+import {invokedUsage,type InvokedUsage} from '../shared/invoked-usage.ts';
+import type {RoleRouting} from './providers/routing.ts';
+import type {ProviderDescriptor} from './providers/registry.ts';
+import type {InvokedTurnMetadata} from './providers/invoked-bridge.ts';
 
-interface Job { path: string; controller: AbortController; done: Promise<void>; run: () => Promise<void>; status: 'queued' | 'pending' | 'complete' | 'error' | 'cancelled' | 'persistence_error'; retry?: () => Promise<void> }
+interface ReviewedInvocation {created:number;fingerprint:string;packet:string;contextKey:string;provider:ProviderDescriptor;cap:CouncilCap|null}
+const invocationFingerprint=(v:Invocation)=>textHash(JSON.stringify([v.id,v.path,v.action,v.question,v.text,v.from,v.to,v.renderer,v.skill]));
+const staleReview=()=>new PathError(409,'stale_review','The request or selected provider changed. Review again before sending. No provider was called.');
+
+interface Job { path: string; controller: AbortController; done: Promise<void>; run: () => Promise<void>; status: 'queued' | 'pending' | 'complete' | 'error' | 'cancelled' | 'persistence_error'; retry?: () => Promise<void>;usage?:InvokedUsage;notice?:string }
 export class Assistance {
   readonly ledger: LedgerStore;
   /** Saved skill diagrams (the Skill renderer). */
@@ -31,16 +41,19 @@ export class Assistance {
   private provider: Provider;
   private notify: (path: string) => void;
   private readonly validationLog:ValidationLog;
-  constructor(store: Store, ink: InkStore, provider: Provider, notify: (path: string) => void = () => {}, validationLog:ValidationLog=privateValidationLog(), extras?: ExtrasFor) {
+  private readonly routing?:RoleRouting;
+  private reviews=new Map<string,ReviewedInvocation>();
+  constructor(store: Store, ink: InkStore, provider: Provider, notify: (path: string) => void = () => {}, validationLog:ValidationLog=privateValidationLog(), extras?: ExtrasFor,routing?:RoleRouting) {
+    this.routing=routing;
     this.validationLog=validationLog;this.extras=extras;
     this.store = store; this.ink = ink; this.provider = provider; this.notify = notify;
     this.ledger = new LedgerStore(store.rootReal);
     this.skillDiagrams = new SkillDiagramStore(store.rootReal);
   }
   /** The Skill renderer needs Claude, and a skill attached to Visualize that actually loaded. Refused before anything is sent. */
-  private checkSkillRenderer(renderer: string | undefined, request: Request) {
+  private checkSkillRenderer(renderer: string | undefined, request: Request,providerName=this.provider.name) {
     if (renderer !== 'skill') return;
-    if (this.provider.name && this.provider.name !== 'claude') throw new PathError(409, 'skill_renderer', 'The Skill renderer works with Claude only for now. Use the Built-in renderer.');
+    if (providerName && providerName !== 'claude') throw new PathError(409, 'skill_renderer', 'The Skill renderer works with Claude only for now. Use the Built-in renderer.');
     if (!request.skills) throw new PathError(409, 'skill_renderer', 'Attach a skill to Visualize in Settings first, then choose Skill.');
   }
   /** What the model's reply becomes: a saved document, or a fixed reason. None of the model's own words are kept. */
@@ -57,7 +70,27 @@ export class Assistance {
     if (Buffer.byteLength(document) > SKILL_DIAGRAM_MAX_BYTES) return failed('skill_too_large');
     return { body: skillDiagramFallbackBody(skills, svg.reason), model, skillDiagram: { ...await this.skillDiagrams.saveHtml(document), why: svg.reason } as SkillDiagramRef | undefined, diagramIssue: undefined as DiagramIssue | undefined };
   }
-  async availability() { return { ...await this.provider.checkAvailability(), provider:this.provider.name??'claude' }; }
+  private async selection(){
+    if(!this.routing)return undefined;
+    const snapshot=await this.routing(),provider=snapshot.resolveRole('invoked');
+    if('available' in provider)throw new PathError(409,provider.code,provider.reason);
+    if(provider.id==='kiro'||provider.id==='codex'&&!provider.createInvokedProvider)throw new PathError(409,'role-unavailable','This invoked provider has no verified bridge. No other provider was tried.');
+    if(provider.id==='claude'&&this.provider.name&&this.provider.name!=='claude')throw new PathError(409,'provider-unavailable','Claude is not configured for invoked requests. No other provider was tried.');
+    return {provider,contextKey:snapshot.contextKey('invoked'),currentContextKey:snapshot.currentContextKey};
+  }
+  private async assertReviewed(review:ReviewedInvocation){
+    const current=await this.selection();
+    let freshKey:string|undefined;
+    try{freshKey=await current?.currentContextKey?.('invoked');}catch{throw staleReview();}
+    const cap=review.provider.id==='codex'?activePipelineConfig().council.caps.codex:null;
+    if(!current||Date.now()-review.created>600000||review.contextKey!==current.contextKey||review.contextKey!==freshKey||review.provider.id!==current.provider.id||JSON.stringify(review.cap)!==JSON.stringify(cap))throw staleReview();
+  }
+  async availability() {
+    try{const selection=await this.selection();
+      if(selection?.provider.id==='codex')return {available:true,provider:'codex'};
+      return { ...await this.provider.checkAvailability(), provider:this.provider.name??'claude' };
+    }catch(e){return {available:false,provider:'unavailable',code:'unsupported_cli',message:e instanceof PathError?e.message:'Provider settings could not be verified. No provider was selected.'};}
+  }
   private extras?: ExtrasFor;
   /** The node's persona goes on every request; its skills only when something loaded. Names are what gets recorded on the answer. */
   private async withExtras(base: Request, pick?: string): Promise<{ request: Request; names: string[]; review: SkillsReview | null }> {
@@ -68,14 +101,21 @@ export class Assistance {
       review: e.review ? { loaded: [], skipped: [], missing: [], note: SKILLS_ONLY_WITH_SKILL_RENDERER } : null };
     return { request: { ...base, persona: e.persona, ...(e.skills.loaded.length ? { skills: e.skills } : {}) }, names: e.names, review: e.review };
   }
-  async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview }> {
+  async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview;review?:{id:string;provider:string;cap:CouncilCap|null} }> {
     const frozen = freezeInvocation(input);
+    const selected=await this.selection();
     const { request, review } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question,
       selection: frozen.selection, note: frozen.text, decisions: [], turns: [], ...(frozen.renderer === 'skill' ? { render: 'skill' as const } : {}) }, frozen.skill);
-    this.checkSkillRenderer(frozen.renderer, request);
+    this.checkSkillRenderer(frozen.renderer, request,selected?.provider.id==='codex'?'codex':this.provider.name);
     const packet = prepareRequest(request);
     // The instruction in the packet is the exact text; "skills" beside it says what was loaded, skipped or not installed.
-    return review ? { ...packet, skills: review } : packet;
+    const prepared=review?{...packet,skills:review}:packet;
+    if(!selected)return prepared;
+    const id=randomUUID(),cap=selected.provider.id==='codex'?structuredClone(activePipelineConfig().council.caps.codex):null;
+    for(const [key,value] of this.reviews)if(Date.now()-value.created>600000)this.reviews.delete(key);
+    if(this.reviews.size>=100)this.reviews.delete(this.reviews.keys().next().value!);
+    this.reviews.set(id,{created:Date.now(),fingerprint:invocationFingerprint(frozen),packet:JSON.stringify(packet),contextKey:selected.contextKey,provider:selected.provider,cap});
+    return {...prepared,review:{id,provider:selected.provider.id,cap}};
   }
   private serial<T>(fn: () => Promise<T>): Promise<T> { const p = this.writes.catch(() => {}).then(fn); this.writes = p; return p; }
   private async mutate(path: string, before: string, change: (items: InkItem[], text: string | null) => InkItem[]): Promise<InkSnapshot> {
@@ -99,18 +139,40 @@ export class Assistance {
   async start(input: Invocation): Promise<InkSnapshot> {
     const frozen = freezeInvocation(input), path = normalizeRel(frozen.path);
     if (this.jobs.has(frozen.id)||this.starting.has(frozen.id)) throw new Error('Request ID already exists.');
-    const availability = await this.provider.checkAvailability();
-    if (!availability.available) throw new ProviderError(availability.code, availability.message);
     const { request, names } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question, selection: frozen.selection,
       note: frozen.text, decisions: [], turns: [], ...(frozen.renderer === 'skill' ? { render: 'skill' as const } : {}) }, frozen.skill);
-    this.checkSkillRenderer(frozen.renderer, request);
     // Transcript context stays none. Optional source selection is a later slice;
     // never discover a user's global sessions or transmit one implicitly.
     const packet = prepareRequest(request);
+    let provider=this.provider,accounted=false,reviewed:ReviewedInvocation|undefined;
+    if(this.routing){
+      const review=frozen.reviewId?this.reviews.get(frozen.reviewId):undefined;
+      if(!review||Date.now()-review.created>600000)throw staleReview();
+      await this.assertReviewed(review);
+      if(review.fingerprint!==invocationFingerprint(frozen)||review.packet!==JSON.stringify(packet))throw staleReview();
+      reviewed=review;
+      if(review.provider.id==='codex'){
+        provider=review.provider.createInvokedProvider!({cap:review.cap!,beforeTurn:()=>this.assertReviewed(review),onTurn:async(metadata:InvokedTurnMetadata)=>{
+          if(accounted)return;
+          const usage=invokedUsage(metadata.usage,review.cap!.amount);accounted=true;job.usage=usage;
+          const saved=await appendLedger(this.ledger,{id:textHash('invoked:'+frozen.id),inkId:frozen.id,requestId:frozen.id,note:path,event:'invoked_turn',at:new Date().toISOString(),
+            invoked:{...usage,status:metadata.status,durationMs:metadata.durationMs}});
+          if(!saved)job.notice='Usage ledger unavailable; the event is queued for retry. The answer is preserved.';
+        }});
+      }
+      // The check and consumption are synchronous, so two sends cannot spend one
+      // review twice. A missing/over-cap report never grants another run.
+      if(this.reviews.get(frozen.reviewId!)!==review)throw staleReview();
+      this.reviews.delete(frozen.reviewId!);
+    }
+    this.checkSkillRenderer(frozen.renderer,request,provider.name);
+    const availability = await provider.checkAvailability();
+    if (!availability.available) throw new ProviderError(availability.code, availability.message);
     const pending: InkItem = { id: frozen.id, kind: 'answer', body: 'Thinking…', originalAnchor: frozen.anchor, anchor: frozen.anchor,
       attachment: { status: 'attached', from: frozen.from, to: frozen.to }, generation: { requestId: frozen.id, action: frozen.action,
-        provider: this.provider.name??'claude', model: null, createdAt: new Date().toISOString(), status: 'pending', evidence: [], dismissed: false, ...(names.length ? { skills: names } : {}) } };
+        provider: provider.name??'claude', model: null, createdAt: new Date().toISOString(), status: 'pending', evidence: [], dismissed: false, ...(names.length ? { skills: names } : {}) } };
     // Map the newly captured item too if disk changed after the click.
+    if(this.jobs.has(frozen.id)||this.starting.has(frozen.id))throw new Error('Request ID already exists.');
     this.starting.add(frozen.id);
     const snapshot = await this.mutate(path, frozen.text, (items, text) => {
       if (items.some(i => i.id === frozen.id)) throw new Error('Request ID already exists.');
@@ -128,16 +190,17 @@ export class Assistance {
       const record=async(row:ValidationRecord)=>{try{await this.validationLog.write(row);}catch{/* Metrics never change acceptance or persistence. */}};
       try {
         if (controller.signal.aborted) throw new ProviderError('cancelled');
-        result = await this.provider.invoke(request, { signal: controller.signal });resultReceived=true;
+        if(reviewed)await this.assertReviewed(reviewed);
+        result = await provider.invoke(request, { signal: controller.signal });resultReceived=true;
         if (controller.signal.aborted) throw new ProviderError('cancelled');
         if (request.render === 'skill') ({ body, model, skillDiagram, diagramIssue } = await this.acceptSkillDiagram(result, frozen.id, names));
-        else ({body,model,evidence,diagram,diagramIssue}=validateProductResult(result,frozen.id,packet.data,redact,textHash,this.provider.name??'claude'));
+        else ({body,model,evidence,diagram,diagramIssue}=validateProductResult(result,frozen.id,packet.data,redact,textHash,provider.name??'claude'));
       } catch (e) {
         if(e instanceof ProductValidationError)await record(e.record);
         else if(e instanceof ProviderError&&e.validation)await record(e.validation);
         else if(resultReceived&&!controller.signal.aborted)await record({rule:'product_processing',counts:validationCounts(result)});
         status = controller.signal.aborted ? 'cancelled' : 'error';
-        body = status === 'cancelled' ? 'Request cancelled. No automatic retry.' : e instanceof ProviderError||e instanceof ProductValidationError ? e.message : 'Request failed. No automatic retry.';
+        body = status === 'cancelled' ? 'Request cancelled. No automatic retry.' : e instanceof ProviderError||e instanceof ProductValidationError||e instanceof PathError ? e.message : 'Request failed. No automatic retry.';
         evidence = []; model = null;
       }
       const persist = async () => {
@@ -158,7 +221,7 @@ export class Assistance {
       void job.run().finally(() => { this.active--; this.pump(); });
     }
   }
-  status(id: string) { const j = this.jobs.get(id); if (!j) throw new Error('Request not found or interrupted by server restart.'); return { id, path: j.path, status: j.status }; }
+  status(id: string) { const j = this.jobs.get(id); if (!j) throw new Error('Request not found or interrupted by server restart.'); return { id, path: j.path, status: j.status,...(j.usage?{usage:j.usage}:{}),...(j.notice?{notice:j.notice}:{}) }; }
   activeIds() { return new Set([...this.starting,...[...this.jobs].filter(([,j])=>['queued','pending','persistence_error'].includes(j.status)).map(([id])=>id)]); }
   async close() {for(const id of this.activeIds())await this.cancel(id);await Promise.allSettled([...this.jobs.values()].map(j=>j.done));}
   wait(id: string) { return this.jobs.get(id)?.done ?? Promise.reject(new Error('Request not found.')); }

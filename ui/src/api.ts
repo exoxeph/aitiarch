@@ -230,7 +230,7 @@ export const api = {
   planAction:<T,>(action:string,body:unknown={})=>ok<T>('PUT','/api/chatgpt-plan/'+action,body),
   previewInvocation: (body: Invocation) => ok<unknown>("PUT", "/api/assistance/preview", body),
   invoke: (body: Invocation) => ok<InkSnapshot>("PUT", "/api/assistance/invoke", body),
-  requestStatus: (id: string) => ok<{ status: string }>("GET", `/api/assistance/status?id=${encodeURIComponent(id)}`),
+  requestStatus: (id: string) => ok<{ status: string;usage?:import('../shared/invoked-usage.ts').InvokedUsage;notice?:string }>("GET", `/api/assistance/status?id=${encodeURIComponent(id)}`),
   cancelRequest: (id: string) => ok<unknown>("PUT", "/api/assistance/cancel", { id }),
   retryInkSave: (id: string) => ok<unknown>("PUT", "/api/assistance/retry-save", { id }),
   inkEvent: (path: string, id: string, event: "shown" | "dismissed") => ok<unknown>("PUT", "/api/assistance/event", { path, id, event }),

@@ -7,6 +7,9 @@ import {SETUP_FILE} from '../setup-store.ts';
 import {lstat} from 'node:fs/promises';
 import path from 'node:path';
 import type {TurnAdapter,SafetyLabel} from './turn.ts';
+import type {createInvokedCodexBridge} from './invoked-bridge.ts';
+import type {Provider} from './index.ts';
+export type InvokedBridgeFactory=(options:Pick<Parameters<typeof createInvokedCodexBridge>[0],'cap'|'onTurn'|'beforeTurn'>)=>Provider;
 
 export interface Detection {available:boolean;reason:string|null}
 export interface ProviderDescriptor {
@@ -16,6 +19,7 @@ export interface ProviderDescriptor {
  readonly detect:()=>Promise<Detection>;
  readonly models:()=>Promise<{source:'default';models:readonly {id:null;label:string}[];reason:string}>;
  readonly createToollessAdapter:()=>TurnAdapter;
+ readonly createInvokedProvider?:InvokedBridgeFactory;
 }
 export interface Unavailable {
  available:false;provider:SetupProvider|null;role:SetupRole;
@@ -29,6 +33,14 @@ export interface RequestSettingsSnapshot {
  council():{available:boolean;providers:readonly ProviderDescriptor[];reason:string|null};
  /** Runtime integration must reset provider sessions when this identity changes. */
  contextKey(role:SetupRole):string;
+ /** Optional for older consumers; approval-sensitive callers must require it.
+  * Rereads settings only, without another asynchronous provider detection. */
+ currentContextKey?(role:SetupRole):Promise<string>;
+}
+function settingsKey(settings:MachineSetup,role:SetupRole,fault=false):string {
+ const id=settings.roles[role],p=id===null?null:settings.providers[id],selection=p?.roles[role]??p;
+ return createHash('sha256').update(JSON.stringify({role,id,enabled:p?.enabled,executable:p?.executable,
+  model:selection?.model,effort:selection?.effort,fault})).digest('hex');
 }
 const unavailable=(role:SetupRole,provider:SetupProvider|null,code:Unavailable['code'],reason:string):Unavailable=>({available:false,role,provider,code,reason});
 function freeze<T>(v:T):T {
@@ -36,15 +48,16 @@ function freeze<T>(v:T):T {
 }
 /** Wrap an existing tool-less instance; never constructs a harness or changes flags.
  * Bridges describe already wired legacy Claude paths, not grants to use read tools. */
-export function descriptorFromAdapter(adapter:TurnAdapter,options:{detect:()=>Promise<Detection>;bridges?:Partial<Record<'invoked'|'thread-reply'|'investigate-read'|'skill-diagram',boolean>>}):ProviderDescriptor {
+export function descriptorFromAdapter(adapter:TurnAdapter,options:{detect:()=>Promise<Detection>;invokedBridge?:InvokedBridgeFactory;bridges?:Partial<Record<'invoked'|'thread-reply'|'investigate-read'|'skill-diagram',boolean>>}):ProviderDescriptor {
  if(!SETUP_PROVIDERS.includes(adapter.id as SetupProvider))throw Error('Unknown registry provider');
  const id=adapter.id as SetupProvider;
  const capabilities:Record<SetupRole|'vision',boolean>={'normal-chat':true,council:true,invoked:false,'thread-reply':false,'investigate-read':false,'skill-diagram':false,vision:false};
  if(id==='claude')for(const role of ['invoked','thread-reply','investigate-read','skill-diagram'] as const)capabilities[role]=options.bridges?.[role]===true;
+ if(id==='codex')capabilities.invoked=typeof options.invokedBridge==='function';
  return freeze({id,label:adapter.label,safetyLabel:adapter.safetyLabel,capabilities,
   vision:{available:false,reason:'Image input for this role, model and isolated transport is not verified.'},
   detect:options.detect,models:async()=>({source:'default' as const,models:[{id:null,label:'Default'}],reason:'Model catalog is not verified yet; use the CLI default.'}),
-  createToollessAdapter:()=>adapter});
+  createToollessAdapter:()=>adapter,...(id==='codex'&&options.invokedBridge?{createInvokedProvider:options.invokedBridge}:{})});
 }
 /** Initial setup suggestion only, never applied over a stored choice. No discovery or fallback. */
 export function compatibleDefaults(providers:readonly ProviderDescriptor[]):MachineSetup {
@@ -73,11 +86,14 @@ export class ProviderRegistry {
   return provider;
  }
  async snapshot(dir:string,initial?:()=>Promise<MachineSetup>):Promise<RequestSettingsSnapshot>{
-  let settings:MachineSetup,fault=false;
-  try{
+  const readSettings=async()=>{
    let missing=false;
    if(initial)try{await lstat(path.join(dir,SETUP_FILE));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')missing=true;else throw e;}
-   settings=missing?await initial!():await loadMachineSetup(dir);
+   return missing?await initial!():await loadMachineSetup(dir);
+  };
+  let settings:MachineSetup,fault=false;
+  try{
+   settings=await readSettings();
   }catch{settings=defaultMachineSetup();fault=true;}
   // Capture before asynchronous metadata checks; later disk edits are a new request.
   const frozen=freeze(structuredClone(settings));
@@ -98,10 +114,7 @@ export class ProviderRegistry {
    // approval service used by normal chat, or its grants/budget rules.
    return {available:providers.length>=2,providers:Object.freeze(providers),reason:providers.length>=2?null:fault?'Machine setup could not be read. No providers were selected.':'Council needs at least two enabled, available providers. Normal chat can use one compatible provider.'};
   };
-  return Object.freeze({settings:frozen,resolveRole:resolve,resolveParticipant:(id:SetupProvider)=>resolve('council',{...frozen,roles:{...frozen.roles,council:id}}),council,contextKey:(role:SetupRole)=>{
-   const id=frozen.roles[role],p=id===null?null:frozen.providers[id],selection=p?.roles[role]??p;
-   return createHash('sha256').update(JSON.stringify({role,id,enabled:p?.enabled,executable:p?.executable,
-    model:selection?.model,effort:selection?.effort,fault})).digest('hex');
-  }});
+  return Object.freeze({settings:frozen,resolveRole:resolve,resolveParticipant:(id:SetupProvider)=>resolve('council',{...frozen,roles:{...frozen.roles,council:id}}),council,
+   contextKey:(role:SetupRole)=>settingsKey(frozen,role,fault),currentContextKey:async(role:SetupRole)=>settingsKey(await readSettings(),role)});
  }
 }

@@ -147,7 +147,7 @@ export function createApp(opts: AppOptions) {
   const assistance = inkReady.then(ink => new Assistance(store, ink, opts.provider ?? {
     checkAvailability: async () => ({ available: false, code: "unsupported_cli", message: "Claude is not configured. Start with --claude and an absolute executable path. Codex is disabled." }),
     invoke: async () => { throw new ProviderError("unsupported_cli"); },
-  }, path => { for (const c of clients) c.write(`event: ink\ndata: ${JSON.stringify({ type: "ink", path })}\n\n`); }, undefined, (node, one) => nodeSettings.extras(node, one)));
+  }, path => { for (const c of clients) c.write(`event: ink\ndata: ${JSON.stringify({ type: "ink", path })}\n\n`); }, undefined, (node, one) => nodeSettings.extras(node, one),opts.provider?.name==='chatgpt-plan'?undefined:opts.council?.routing));
   let port = 0;
   // Shared with the multi-project host when it embeds this app; otherwise this app is its own front door.
   const security = opts.security ?? createSecurity({ port: () => port, extraOrigins: opts.allowOrigins, requireLaunch: opts.requireLaunch });
@@ -642,7 +642,7 @@ export function createApp(opts: AppOptions) {
     if (url.pathname.startsWith("/api/assistance/") && req.method === "PUT") {
       const b = await readBody(req) as Record<string, unknown>, service = await assistance;
       if (url.pathname === "/api/assistance/preview" || url.pathname === "/api/assistance/invoke") {
-        const input = { id: b.id, path: b.path, action: b.action, question: b.question, text: b.text, from: b.from, to: b.to, ...(b.renderer === undefined ? {} : { renderer: b.renderer }), ...(b.skill === undefined ? {} : { skill: b.skill }) } as Invocation;
+        const input = { id: b.id, path: b.path, action: b.action, question: b.question, text: b.text, from: b.from, to: b.to, ...(b.reviewId===undefined?{}:{reviewId:b.reviewId}), ...(b.renderer === undefined ? {} : { renderer: b.renderer }), ...(b.skill === undefined ? {} : { skill: b.skill }) } as Invocation;
         if (url.pathname.endsWith("preview")) return json(res, 200, await service.preview(input));
         return json(res, 202, await service.start(input));
       }

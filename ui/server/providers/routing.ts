@@ -4,14 +4,18 @@ import type {MachineSetup} from '../../shared/setup.ts';
 import type {TurnAdapter} from './turn.ts';
 import {ProviderRegistry,descriptorFromAdapter,compatibleDefaults,type RequestSettingsSnapshot} from './registry.ts';
 import {CouncilAvailability,type AvailabilityCheck} from './council-availability.ts';
+import type {createInvokedCodexBridge} from './invoked-bridge.ts';
 
 export type RoleRouting=()=>Promise<RequestSettingsSnapshot>;
-export function roleRouting(o:{dir:string;adapters:TurnAdapter[];checks:AvailabilityCheck[];legacyAnswerer:()=>SetupProvider;claudeBridge?:boolean}):RoleRouting {
+export function roleRouting(o:{dir:string;adapters:TurnAdapter[];checks:AvailabilityCheck[];legacyAnswerer:()=>SetupProvider;claudeBridge?:boolean;codexInvokedBridge?:typeof createInvokedCodexBridge}):RoleRouting {
  const availability=new CouncilAvailability(o.checks);
  const descriptors=o.adapters.map(a=>descriptorFromAdapter(a,{detect:async()=>{
   const state=(await availability.get()).find(p=>p.id===a.id);
   return state?{available:state.available,reason:state.reason}:{available:false,reason:'Provider local metadata could not be verified. No other provider was tried.'};
- },bridges:a.id==='claude'&&o.claudeBridge?{invoked:true,'thread-reply':true,'investigate-read':true,'skill-diagram':true}:undefined}));
+ },invokedBridge:a.id==='codex'&&o.codexInvokedBridge?options=>o.codexInvokedBridge!({...options,adapter:a,checkAvailability:async()=>{
+  const state=(await availability.get()).find(p=>p.id==='codex');
+  return state?.available?{available:true}:{available:false,code:'unsupported_cli',message:state?.reason??'Codex local availability could not be verified. No other provider was tried.'};
+ }}):undefined,bridges:a.id==='claude'&&o.claudeBridge?{invoked:true,'thread-reply':true,'investigate-read':true,'skill-diagram':true}:undefined}));
  const registry=new ProviderRegistry(descriptors);
  let initial:Promise<MachineSetup>|undefined;
  return ()=>registry.snapshot(o.dir,async()=>{

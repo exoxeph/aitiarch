@@ -8,8 +8,11 @@ export interface Invocation {
   renderer?: Renderer;
   /** Skill renderer only: which attached skill draws it (a skill id). Absent means the first one attached. */
   skill?: string;
+  /** One-use server review. Required when machine-role routing is enabled. */
+  reviewId?:string;
 }
 export function freezeInvocation(input: Invocation) {
+  if(input?.reviewId!==undefined&&(typeof input.reviewId!=='string'||!/^[a-f0-9-]{36}$/.test(input.reviewId)))throw new Error('Review again before sending.');
   if (!input || typeof input.id !== 'string' || !/^[\w-]{1,100}$/.test(input.id) || !['think', 'ask'].includes(input.action) ||
       typeof input.path !== 'string' || typeof input.text !== 'string' || typeof input.question !== 'string' ||
       input.question.length > 8000 || new TextEncoder().encode(input.text).length > 65536 ||

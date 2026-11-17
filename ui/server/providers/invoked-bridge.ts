@@ -12,6 +12,8 @@ export type InvokedTurnMetadata=Pick<TurnResult,'provider'|'status'|'usage'|'dur
 export function createInvokedCodexBridge(options:{
  adapter:TurnAdapter;checkAvailability:Provider['checkAvailability'];cap:CouncilCap;
  onTurn:(metadata:InvokedTurnMetadata)=>Promise<void>;
+ /** Revalidate the one-use review after metadata awaits, before any transport. */
+ beforeTurn?:()=>Promise<void>;
 }):Provider {
  if(options.adapter.id!=='codex'||options.cap.unit!=='tokens')throw new Error('Codex invoked bridge requires the Codex token-cap transport.');
  const cap=structuredClone(options.cap),maxOutputBytes=activePipelineConfig().council.outputBytes;
@@ -32,6 +34,7 @@ export function createInvokedCodexBridge(options:{
     yield event;
    }
   }};
+  await options.beforeTurn?.();
   const turn=await runTurn(transport,{question,notes:[],outputFormat:'invoked-json',cap:{unit:cap.unit,amount:cap.amount},
    deadlineMs:Math.min(cap.deadlineMs,invokeOptions?.timeoutMs??cap.deadlineMs),maxOutputBytes},invokeOptions?.signal);
   await options.onTurn({provider:turn.provider,status:turn.status,usage:turn.usage,durationMs:turn.durationMs,
