@@ -33,7 +33,7 @@ let browser;
 try {
  const url = 'http://127.0.0.1:'+await app.listen(0);
  browser = await chromium.launch({channel:'msedge',headless:true});
- const page = await browser.newPage({viewport:{width:1024,height:800}});
+ const page = await browser.newPage({viewport:{width:1280,height:800}});
  page.setDefaultTimeout(10000);
  const external = [], writes = [];
  await page.route('**/*',route=>{
@@ -42,6 +42,11 @@ try {
   if(request.method()!=='GET' && request.method()!=='HEAD') writes.push([request.method(),new URL(request.url()).pathname]);
   return route.continue();
  });
+ const shot = (name) => page.screenshot({path:path.join(output,name)});
+ const atWidths = async (name) => {
+  for(const width of [1280,640]){await page.setViewportSize({width,height:800});await shot(`${name}-${width}.png`);}
+  await page.setViewportSize({width:1280,height:800});
+ };
  assert.equal((await fetch(url+'/api/setup')).status,401);
  // Ordinary editor boot persists the initial tab selection. Warm it up
  // before taking the baseline for opening setup.
@@ -54,53 +59,107 @@ try {
  const baseline = await readdir(project,{recursive:true});
  ready = true;
  await page.reload();
+
+ // First run with zero providers: one small card, AI off, no model/effort controls, no writes.
  await dialog.getByText(/AI is off/).waitFor();
  await dialog.getByText(/filesystem-private/).waitFor();
- assert.equal(await dialog.getByRole('radio',{name:/Shared/}).isDisabled(),true);
+ assert.equal(await dialog.getByRole('combobox').count(),0);
+ assert.equal(await dialog.getByText(/Effort|Models and effort|Save model/).count(),0);
  assert.deepEqual(await readdir(project,{recursive:true}),baseline);
  assert.equal(writes.some(([,route])=>route.startsWith('/api/setup')),false);
- await page.screenshot({path:path.join(output,'setup-ai-off.png')});
- const font = dialog.getByRole('spinbutton',{name:'Font size (px)'});
- const saveFont = dialog.getByRole('button',{name:'Save font size'});
- const priorWrites = writes.length;
- await font.fill('25');
- await saveFont.click();
- await dialog.getByRole('status').filter({hasText:'14 to 24 px'}).waitFor();
- assert.equal(writes.slice(priorWrites).some(([,route])=>route==='/api/setup'),false);
- await font.fill('24');
- await saveFont.click();
- await page.waitForFunction(()=>getComputedStyle(document.querySelector('.cm-scroller')).fontSize==='24px');
+ await atWidths('first-run-ai-off');
  await dialog.getByRole('button',{name:'Skip',exact:true}).click();
  await dialog.waitFor({state:'detached'});
  assert.equal((await setup.get()).seen,true);
+
+ // A compatible Claude appears. Settings holds only the text size and a pointer; the model is chosen in the chat box.
  providers.push({id:'claude',path:'C:/synthetic/claude.exe',version:'2.1.205',isolation:'metadata-compatible',
   reason:'Synthetic startup metadata',effort:true,effortCode:'help_flag_present'});
  await page.reload();
  await page.getByRole('button',{name:'Notes menu',exact:true}).click();
  assert.equal(await dialog.count(),0);
  await page.getByRole('button',{name:'AI settings',exact:true}).click();
- await page.getByRole('tab',{name:'Models and text size'}).click();
+ await page.getByRole('tab',{name:'Text size'}).click();
  const settings = page.getByRole('dialog',{name:'AI settings'});
- const normal = settings.getByRole('group',{name:'Normal chat · Claude',exact:true});
- await normal.getByRole('combobox').filter({has:page.getByRole('option',{name:'sonnet (CLI alias)',exact:true})}).selectOption('sonnet');
- await normal.getByRole('combobox').filter({has:page.getByRole('option',{name:'xhigh',exact:true})}).selectOption('low');
- await normal.getByRole('button',{name:'Save model and effort'}).click();
- await normal.getByText(/Requested model: sonnet.*effort: low/).waitFor();
- assert.equal(await settings.getByRole('spinbutton',{name:'Font size (px)'}).inputValue(),'24');
- await settings.getByRole('spinbutton',{name:'Font size (px)'}).fill('14');
- await settings.getByRole('button',{name:'Save font size'}).click();
+ await settings.getByText('Choose the model in the chat box.').waitFor();
+ assert.equal(await settings.getByText(/Models and effort|Save model|Inherit provider/).count(),0);
+ const font = settings.getByRole('spinbutton',{name:'Font size (px)'});
+ const saveFont = settings.getByRole('button',{name:'Save font size'});
+ const priorWrites = writes.length;
+ await font.fill('25');
+ await saveFont.click();
+ await settings.getByRole('status').filter({hasText:'14 to 24 px'}).waitFor();
+ assert.equal(writes.slice(priorWrites).some(([,route])=>route==='/api/setup'),false);
+ await font.fill('24');
+ await saveFont.click();
+ await page.waitForFunction(()=>getComputedStyle(document.querySelector('.cm-scroller')).fontSize==='24px');
+ await font.fill('14');
+ await saveFont.click();
  await page.waitForFunction(()=>getComputedStyle(document.querySelector('.cm-scroller')).fontSize==='14px');
- await page.getByRole('button',{name:'Open setup',exact:true}).click();
- assert.equal(await font.inputValue(),'14');
- await dialog.getByRole('group',{name:'Normal chat · Claude',exact:true}).getByText(/Requested model: sonnet.*effort: low/).waitFor();
- await dialog.getByRole('button',{name:'Looks good, continue'}).click();
+
+ // Replay of the first-run card with a provider: tools found, one default-AI select, Continue.
+ await settings.getByRole('button',{name:'Open setup',exact:true}).click();
+ await dialog.getByText('Claude').first().waitFor();
+ assert.equal(await dialog.getByRole('combobox').count(),1);
+ assert.equal(await dialog.getByText(/Effort|Models and effort|Save model|Custom ID/).count(),0);
+ await atWidths('first-run-card');
+ await dialog.getByRole('button',{name:'Continue',exact:true}).click();
  await dialog.waitFor({state:'detached'});
- await page.locator('.cm-editor').waitFor();
+
+ // The composer chip: the model and effort are chosen where the person types.
+ await page.getByRole('button',{name:'Chat',exact:true}).click();
+ const input = page.getByRole('textbox',{name:'Message Aitiarch AI'});
+ const chip = page.getByRole('button',{name:/^Model: /});
+ await chip.waitFor();
+ await atWidths('composer-chip');
+ const menu = page.getByRole('menu',{name:'Model and effort'});
+ const claude = () => menu.getByRole('group',{name:'Claude',exact:true});
+ const setupWrites = () => writes.filter(([,route])=>route==='/api/setup').length;
+ await chip.click();
+ await menu.waitFor();
+ assert.equal(await menu.getByText(/starts a fresh conversation/).count(),1);
+ // Claude is the default answerer and its CLI declares --effort, so the Effort section is offered; it is the only provider group with one.
+ assert.equal(await menu.getByRole('group',{name:'Effort'}).count(),1);
+ assert.equal(await menu.getByRole('group').count(),2);
+ await atWidths('composer-popover');
+
+ // An invalid custom ID is refused with a notice and no write.
+ const before = setupWrites();
+ await claude().getByRole('textbox',{name:'Custom model ID for Claude'}).fill('--model x');
+ await claude().getByRole('button',{name:'Use'}).click();
+ await menu.getByRole('status').filter({hasText:'model ID'}).waitFor();
+ assert.equal(setupWrites(),before);
+
+ // Picking an alias writes the provider then the selection; the popover closes and focus returns to the input.
+ await claude().getByRole('menuitemradio',{name:'sonnet',exact:true}).click();
+ await menu.waitFor({state:'detached'});
+ assert.equal(await input.evaluate(el=>el===document.activeElement),true);
+ await page.getByRole('button',{name:'Model: Claude · Sonnet'}).waitFor();
+ // Effort appears only because the CLI declares --effort; keyboard: open, arrow, Enter.
+ await chip.focus();
+ await page.keyboard.press('Enter');
+ await menu.waitFor();
+ await menu.getByRole('group',{name:'Effort'}).waitFor();
+ await menu.getByRole('group',{name:'Effort'}).getByRole('menuitemradio',{name:'low',exact:true}).focus();
+ await page.keyboard.press('Enter');
+ await page.getByRole('button',{name:'Model: Claude · Sonnet · Low'}).waitFor();
+ assert.equal(await input.evaluate(el=>el===document.activeElement),true);
+ // Escape closes and returns focus to the input.
+ await chip.click();
+ await menu.waitFor();
+ await page.keyboard.press('Escape');
+ await menu.waitFor({state:'detached'});
+ assert.equal(await input.evaluate(el=>el===document.activeElement),true);
+
+ // What the machine store now holds: provider assigned, explicit override, nothing else touched.
+ const saved = await setup.get();
+ assert.equal(saved.roles.find(r=>r.role==='normal-chat').provider,'claude');
+ assert.deepEqual(saved.models.find(m=>m.role==='normal-chat').selection,{model:'sonnet',effort:'low'});
  assert.deepEqual(await readFile(note),original);
  assert.deepEqual(await readdir(project,{recursive:true}),baseline);
  assert.deepEqual(external,[]);
  assert.equal(writes.some(([,route])=>/\/(chat|assistance|council|investigate)\b/.test(route)),false);
- console.log('Setup passed: AI-off, private-only, Skip/reload/replay, editor reachable, unchanged project, local requests only.');
+ console.log('Setup passed: AI-off card, Settings text size only, composer chip and popover (invalid ID refused, alias+effort saved, focus returns), unchanged project, local requests only.');
 } finally {
  await browser?.close();
  watcher.stop();

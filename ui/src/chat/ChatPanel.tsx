@@ -2,6 +2,7 @@ import type {CouncilViewRun as CouncilRun} from './council-model.ts';
 import {CouncilPanel,CouncilResults} from './CouncilPanel.tsx';
 import {selectionLabel,reportedModelLabel} from '../../shared/model-settings.ts';
 import {ChatModeMenu,type ChatMode} from './ChatMode.tsx';
+import {ModelPicker} from './ModelPicker.tsx';
 import {useEffect,useMemo,useRef,useState,type CSSProperties,type FormEvent,type KeyboardEvent as ReactKeyboardEvent,type PointerEvent as ReactPointerEvent} from 'react';
 import {api,ApiError,streamChat,streamConversation,type ConversationBody} from '../api.ts';
 import type {InvestigateUsage} from '../../shared/usage.ts';
@@ -368,6 +369,8 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  /** After a stop on the cost cap the conversation can go on, after a new card (a new cap). */
  const continueTurn=async(t:Turn)=>{if(busy||planCard)return;const a=attachmentsOf(attach),id=newTurnId();setBusy(true);setTurns(l=>[...l,{id,question:CONTINUE_QUESTION,status:'review',text:''}]);
   await showPlan({id,question:CONTINUE_QUESTION,route:'investigate',attachments:a.repo||a.files.length?a:{...a,repo:true},resume:true});void t;};
+ // What the last finished answer says it ran on: the chip shows the CLI's reported model, or "model not reported". Never an inferred alias.
+ const lastDone=[...turns].reverse().find(t=>t.status==='complete'&&t.message),lastAnswer=lastDone?.message?{model:lastDone.message.model}:null;
  const cancelReview=()=>{
   if(!pending)return;const id=pending.requestId,q=questions.get(id)??'';
   setTurns(t=>t.filter(x=>x.id!==id));questions.delete(id);setDraft(q);setPending(null);input.current?.focus();
@@ -498,9 +501,12 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
      if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void submit();}}}/>
    <div className="chat-composer-bar">
     <ChatModeMenu value={mode} onChange={setMode} disabled={composing||busy}/>
-    <button type="submit" className="chat-send" aria-label="Send message" title={mode==='council'?'Review the Council question':undefined} disabled={!draft.trim()||composing}>
-     <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 16V4M5 9l5-5 5 5"/></svg>
-    </button>
+    <div className="compose-right">
+     {mode==='chat'&&<ModelPicker lastAnswer={lastAnswer} disabled={composing||busy} returnFocus={()=>input.current?.focus()} onChanged={()=>{if(pending)cancelReview();}}/>}
+     <button type="submit" className="chat-send" aria-label="Send message" title={mode==='council'?'Review the Council question':undefined} disabled={!draft.trim()||composing}>
+      <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 16V4M5 9l5-5 5 5"/></svg>
+     </button>
+    </div>
    </div>
   </form>
   <footer className="chat-foot">

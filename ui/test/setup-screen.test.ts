@@ -9,27 +9,35 @@ const empty: SetupView = {
  privacy:{mode:'private', sharedReady:false, notice:'filesystem-private'},
 };
 const render = (data: SetupView) => renderToStaticMarkup(createElement(Setup, {data, onClose:() => {}}));
+const one: SetupView = {...empty,
+ providers:[{id:'codex', label:'Codex', path:'/fake/codex', version:'0.167.1', notices:['untested version'], compatible:true, source:'default', reason:'Metadata only'}],
+ roles:[{role:'normal-chat', provider:'codex', capableProviders:['codex'], reason:null, source:'saved choice'}],
+};
 
-it('offers AI-off setup, Skip and private-only privacy with no providers', () => {
+it('works with zero providers: AI-off message, Continue and Skip, private note', () => {
  const html = render(empty);
  expect(html).toContain('AI is off');
- expect(html).toContain('Looks good, continue');
+ expect(html).toContain('Continue');
  expect(html).toContain('Skip');
- expect(html).toContain('needs the private-storage slice');
  expect(html).toContain('filesystem-private');
  expect(html).toContain('verified on first use');
+ expect(html).not.toContain('<select');
 });
 
-it('only offers server-listed capable providers and selects the saved choice', () => {
- const html = render({...empty,
-  providers:[{id:'codex', label:'Codex', path:'/fake/codex', version:'0.167.1', notices:['untested version'], compatible:true, source:'default', reason:'Metadata only'}],
-  roles:[
-   {role:'invoked', provider:'codex', capableProviders:['codex'], reason:null, source:'saved choice'},
-   {role:'investigate-read', provider:null, capableProviders:[], reason:'No compatible provider', source:'default'},
-  ],
- });
+it('is one small card: tools found with version and untested notice, and one default-AI select of compatible providers', () => {
+ const html = render({...one, providers:[...one.providers, {id:'kiro', label:'Kiro', path:null, version:null, notices:[], compatible:false, source:'default', reason:'Not compatible'}]});
+ expect(html).toContain('Codex');
+ expect(html).toContain('0.167.1');
+ expect(html).toContain('untested version');
+ expect(html.match(/<select/g)).toHaveLength(1);
  expect(html.match(/<option value="codex"/g)).toHaveLength(1);
  expect(html).toContain('value="codex" selected');
- expect(html).toContain('No compatible provider');
- expect(html).toContain('untested version');
+ expect(html).not.toContain('<option value="kiro"');
+ expect(html.match(/role="dialog"/g)).toHaveLength(1);
+});
+
+it('has no model or effort controls and none of the old per-role selects', () => {
+ const html = render(one);
+ for (const word of ['Effort', 'Models and effort', 'Save model', 'Custom ID', 'Inherit provider', 'Thread replies', 'Skill diagrams']) expect(html).not.toContain(word);
+ expect(html).not.toContain('type="number"');
 });

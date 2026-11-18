@@ -1,14 +1,8 @@
 import {useEffect, useRef, useState} from 'react';
 import {applyPrivateSetup, fetchSetup, saveSetup} from '../api.ts';
 import type {SetupProvider, SetupView} from '../../shared/setup.ts';
-import {SetupPreferences} from './SetupPreferences.tsx';
 
-const roleLabels = {
- 'normal-chat':'Normal chat', invoked:'Think and Ask', 'thread-reply':'Thread replies',
- council:'Council', 'investigate-read':'Investigate', 'skill-diagram':'Skill diagrams',
-};
-const names = {claude:'Claude',codex:'Codex',kiro:'Kiro'};
-
+/** First run: one small card. Which tools were found, which AI answers by default, how the notebook stays private. No model or effort here: that lives in the chat box. */
 export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(notice?:string)=>void;onPreferences?:(view:SetupView)=>void}) {
  const [view,setView] = useState(data);
  const [message,setMessage] = useState('');
@@ -32,8 +26,10 @@ export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(n
   try {await saveSetup({seen:true}); onClose();}
   catch {onClose('Setup was skipped. The app could not remember that choice.');}
  });
+ const chat = view.roles.find(role => role.role==='normal-chat');
+ const choices = view.providers.filter(provider => provider.compatible && (chat?.capableProviders.includes(provider.id) ?? false));
  return <div className="settings-scrim">
-  <section ref={dialog} tabIndex={-1} className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="setup-title"
+  <section ref={dialog} tabIndex={-1} className="settings-dialog setup-card" role="dialog" aria-modal="true" aria-labelledby="setup-title"
    onKeyDown={event=>{
     if(event.key==='Escape' && !busy){event.stopPropagation();onClose();}
     if(event.key!=='Tab') return;
@@ -48,44 +44,31 @@ export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(n
    <header className="settings-head"><h2 id="setup-title">Set up Aitiarch</h2></header>
    <div className="settings-pane" aria-busy={busy}>
     <div className="settings-section">
-     <h3>Detected providers</h3>
+     <h3>Tools found</h3>
      <p className="settings-lead">Login and entitlement are verified on first use.</p>
-     {!view.providers.some(provider=>provider.compatible) && <p>AI is off. You can still open and edit your notes.</p>}
+     {choices.length===0 && <p>AI is off. You can still open and edit your notes.</p>}
      <ul>{view.providers.map(provider=><li key={provider.id}>
-      <strong>{provider.label}</strong> · {provider.version??'Version unavailable'} · {provider.source}
-      {provider.path && <div className="setup-path">{provider.path}</div>}
-      <p className="settings-lead">{provider.reason}</p>
-      {provider.notices.filter(notice=>!provider.reason.includes(notice)).map(notice=><p key={notice}>{notice}</p>)}
+      <strong>{provider.label}</strong> · {provider.version??'Version unavailable'}
+      {!provider.compatible && <span className="settings-lead"> · {provider.reason}</span>}
+      {provider.notices.map(notice=><p key={notice} className="settings-lead">{notice}</p>)}
      </li>)}</ul>
+     {choices.length>0 && <label>Answers by default{' '}
+      <select value={chat?.provider??''} disabled={busy} onChange={event=>{
+       const provider=event.currentTarget.value as SetupProvider;
+       void perform(async()=>{
+        const next=await saveSetup({role:'normal-chat',provider});
+        setView(next);
+        onPreferences?.(next);
+       });
+      }}>
+       {chat?.provider===null && <option value="" disabled>Choose one</option>}
+       {choices.map(provider=><option value={provider.id} key={provider.id}>{provider.label}</option>)}
+      </select>
+     </label>}
+     {choices.length>0 && <p className="settings-lead">Choose the model in the chat box.</p>}
     </div>
     <div className="settings-section">
-     <h3>Who answers</h3>
-     <p className="settings-lead">Role choices apply to this computer. Council can use every enabled compatible provider.</p>
-     {view.roles.map(role=><div key={role.role}>
-      <label>{roleLabels[role.role]}{' '}
-       <select value={role.provider??''} disabled={busy||!role.capableProviders.length||!!role.routingNote} onChange={event=>{
-        const provider=event.currentTarget.value as SetupProvider;
-        void perform(async()=>{
-         const next=await saveSetup({role:role.role,provider});
-         setView(next);
-         onPreferences?.(next);
-        });
-       }}>
-        {role.provider===null && <option value="" disabled>Unset</option>}
-        {role.provider && !role.capableProviders.includes(role.provider) &&
-         <option value={role.provider} disabled>{names[role.provider]} (unavailable)</option>}
-        {role.capableProviders.map(id=><option value={id} key={id}>{names[id]}</option>)}
-       </select>
-      </label>{' '}<span className="settings-lead">{role.source}</span>
-      {role.reason && <p className="settings-lead">{role.reason}</p>}
-      {role.routingNote && <p className="settings-lead">{role.routingNote}</p>}
-     </div>)}
-    </div>
-    <SetupPreferences view={view} disabled={busy} onChange={next=>{setView(next);onPreferences?.(next);}}/>
-    <div className="settings-section">
-     <h3>Notebook privacy</h3>
-     <p>Private (default)</p>
-     <label><input type="radio" disabled/> Shared (needs the private-storage slice)</label>
+     <h3>Your notebook stays private</h3>
      <p className="settings-lead">{view.privacy.notice}</p>
      {view.privacy.notice==='No Git ignore protection verified.' &&
       <button type="button" disabled={busy} onClick={()=>void perform(async()=>{
@@ -98,7 +81,7 @@ export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(n
    </div>
    <footer className="settings-head">
     <button type="button" className="ghost" disabled={busy} onClick={skip}>Skip</button>
-    <button type="button" className="setup-primary" disabled={busy} onClick={finish}>Looks good, continue</button>
+    <button type="button" className="setup-primary" disabled={busy} onClick={finish}>Continue</button>
    </footer>
   </section>
  </div>;

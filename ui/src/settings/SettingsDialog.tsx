@@ -38,7 +38,7 @@ export function SettingsDialog({onClose,onOpenStudio,onOpenSetup,setupError,pref
  preferences?:SetupView|null;onPreferences?:(view:SetupView)=>void;
 }){
  const [tab,setTab]=useState<Tab>('usage');
- const tabs=preferences&&onPreferences?[...TABS,{id:'preferences' as const,label:'Models and text size'}]:TABS;
+ const tabs=preferences&&onPreferences?[...TABS,{id:'preferences' as const,label:'Text size'}]:TABS;
  const dialog=useRef<HTMLElement>(null);
  // Focus lands on the tabs; Tab stays inside the dialog; Escape closes it and nothing underneath also hears it.
  useEffect(()=>{

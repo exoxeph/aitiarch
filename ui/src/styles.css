@@ -1458,6 +1458,25 @@ p.chat-wait { margin: 4px 0 0; }
 .compose-mode-item[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
 .compose-mode-name { font: 600 var(--text-control) var(--font-ui); }
 .compose-mode-help { color: var(--muted); font: var(--text-meta)/1.4 var(--font-ui); }
+/* The model chip sits beside the send arrow; its popover opens upward like the chat-mode menu, from the right edge. */
+.compose-right { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.compose-model { min-width: 0; }
+.compose-model-btn { max-width: min(15rem, 42vw); }
+.compose-model-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compose-model-menu { left: auto; right: 0; width: min(21rem, 86vw); max-height: min(74vh, 34rem); overflow-y: auto; overscroll-behavior: contain; }
+.compose-model-item { padding: var(--space-1) var(--space-3); }
+.compose-model-hint, .compose-model-notice { margin: 0; padding: var(--space-2) var(--space-3); color: var(--muted); font: var(--text-meta)/1.4 var(--font-ui); }
+.compose-model-notice { color: var(--ink-text); }
+.compose-model-group { display: grid; gap: 2px; }
+.compose-model-title { margin: var(--space-2) 0 0; padding: 0 var(--space-3); color: var(--muted); font: 600 var(--text-meta) var(--font-ui); }
+.compose-model-item[aria-disabled="true"] { opacity: .6; cursor: not-allowed; }
+.compose-model-item:disabled { opacity: .55; cursor: default; }
+.compose-model-custom { display: flex; gap: var(--space-2); padding: var(--space-1) var(--space-3) var(--space-2); }
+.compose-model-custom input { flex: 1 1 auto; min-width: 0; min-height: 28px; padding: 0 var(--space-2); border: 1px solid var(--control-border); border-radius: var(--radius-small); background: var(--paper); color: var(--ink-text); font: var(--text-control) var(--font-ui); }
+.compose-model-custom button { min-height: 28px; padding: 0 var(--space-3); border: 1px solid var(--control-border); border-radius: 999px; background: transparent; color: var(--ink-text); font: 500 var(--text-control) var(--font-ui); cursor: pointer; }
+.compose-model-custom button:hover:not(:disabled) { background: var(--accent-soft); }
+.compose-model-custom :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.settings-dialog.setup-card { width: min(30rem, 100%); }
 .chat-dock { flex: 0 1 auto; min-height: 0; max-height: 52%; overflow-y: auto; display: flex; flex-direction: column; padding-top: var(--space-3); border-top: 1px solid var(--rule); overscroll-behavior: contain; }
 .chat-dock > * { flex-shrink: 0; }
 .chat-dock .persona-switch { margin: 0 16px var(--space-2); }
