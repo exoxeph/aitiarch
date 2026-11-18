@@ -1,7 +1,9 @@
-import { renderMermaidSvg } from '../ink/rich-render.ts';
+import { MAX_MATH_SOURCE, renderMath, renderMermaidSvg } from '../ink/rich-render.ts';
+import { mathRanges, type MathRange } from '../../shared/math-ranges.ts';
 // Live preview: decorations only. The document text is never altered; markup is hidden (replace
 // decorations). Inline source reveals in the selected span; block source on the active line.
 import { syntaxTree } from "@codemirror/language";
+import type {Tree} from "@lezer/common";
 import DOMPurify from "dompurify";
 import { EditorState, Facet, StateField, type Range, type Text } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
@@ -146,6 +148,84 @@ class MermaidWidget extends WidgetType {
     return true;
   }
   destroy(dom: HTMLElement) { const el = dom.firstElementChild as HTMLElement | null; if (el) { mermaidCleanup.get(el)?.(); mermaidCleanup.delete(el); } }
+}
+
+const mathByTree = new WeakMap<Tree, {doc: Text; inline: MathRange[]; display: MathRange[]}>();
+function documentMath(doc: Text, tree: Tree) {
+  const saved = mathByTree.get(tree);
+  if (saved?.doc === doc) return saved;
+  // Reuse the incremental Markdown parse. Unparsed regions stay visible as source.
+  const value = {doc,inline: [] as MathRange[],display: [] as MathRange[]};
+  for (const range of mathRanges(doc.sliceString(0, tree.length), tree)) {
+    if (range.source.length <= MAX_MATH_SOURCE) value[range.display ? "display" : "inline"].push(range);
+  }
+  mathByTree.set(tree, value);
+  return value;
+}
+
+function visibleMath(ranges: readonly MathRange[], windows: readonly (readonly [number, number])[]) {
+  const visible: MathRange[] = [];
+  let last = -1;
+  for (const [from,to] of windows) {
+    let left = last + 1, right = ranges.length;
+    while (left < right) {
+      const middle = (left + right) >>> 1;
+      if (ranges[middle].to <= from) left = middle + 1;
+      else right = middle;
+    }
+    for (; left < ranges.length && ranges[left].from < to; left++) {
+      visible.push(ranges[left]);
+      last = left;
+    }
+  }
+  return visible;
+}
+
+const mountedMath = new WeakSet<HTMLElement>();
+class MathWidget extends WidgetType {
+  constructor(readonly range: MathRange, readonly raw: string) { super(); }
+  eq(other: MathWidget) {
+    return this.range.source === other.range.source && this.range.display === other.range.display && this.raw === other.raw;
+  }
+  toDOM() {
+    const wrap = document.createElement(this.range.display ? "div" : "span");
+    wrap.className = this.range.display ? "cm-math-display" : "cm-math-inline";
+    if (!this.range.display) wrap.style.inlineSize = Math.min(24, this.raw.length) + "ch";
+    const source = document.createElement("code");
+    source.textContent = this.raw;
+    wrap.append(source);
+    mountedMath.add(wrap);
+    // Keep the box stable while the lazy renderer loads so later text and
+    // scroll anchors stay in place.
+    void renderMath(this.range.source, this.range.display).then(result => {
+      if (!mountedMath.delete(wrap)) return;
+      if (result.status === "rendered") wrap.replaceChildren(result.node);
+      else {
+        wrap.dataset.mathFallback = "";
+        const notice = document.createElement("span");
+        notice.textContent = result.notice;
+        notice.className = "cm-math-notice";
+        wrap.append(notice);
+      }
+    });
+    return wrap;
+  }
+  ignoreEvent() { return false; }
+  destroy(dom: HTMLElement) { mountedMath.delete(dom); }
+}
+
+const mathStyles = EditorView.baseTheme({
+  ".cm-math-inline": {display:"inline-block",boxSizing:"border-box",height:"1.5em",lineHeight:"1.4",overflow:"auto",verticalAlign:"middle",whiteSpace:"nowrap",textAlign:"center"},
+  ".cm-math-display": {boxSizing:"border-box",height:"5em",padding:".45em",overflow:"auto",whiteSpace:"pre-wrap",textAlign:"center"},
+  ".cm-math-notice": {display:"block",fontSize:".85em",color:"var(--muted)"},
+  ".cm-math-inline .cm-math-notice": {display:"inline",paddingInlineStart:".4em"},
+});
+
+function mathDecorations(state: EditorState, tree: Tree, display: boolean, visible?: readonly (readonly [number, number])[]) {
+  const spans = state.selection.ranges;
+  const ranges = documentMath(state.doc, tree)[display ? "display" : "inline"];
+  return (visible ? visibleMath(ranges, visible) : ranges).filter(range => !touchesSpan(spans, range.from, range.to))
+    .map(range => Decoration.replace({widget:new MathWidget(range,state.sliceDoc(range.from,range.to)),block:display}).range(range.from,range.to));
 }
 
 // ---- Selection facts shared by both layers ----
@@ -405,6 +485,7 @@ export function buildInline(state: EditorState, ranges: readonly (readonly [numb
       }
     }
   }
+  for (const decoration of mathDecorations(state, tree, false, ranges)) out.push(decoration);
   return Decoration.set(out, true);
 }
 
@@ -437,10 +518,11 @@ const inlineLayer = ViewPlugin.fromClass(
 
 /** Block layer: only top-level blocks can become widgets, so the scan is per block, not per character. */
 function buildBlocks(state: EditorState): DecorationSet {
-  const out: Range<Decoration>[] = [];
+  const tree = syntaxTree(state);
+  const out = mathDecorations(state, tree, true);
   const ctx = lineHelpers(state);
   const fmEnd = frontmatterOf(state.doc);
-  for (let c = syntaxTree(state).topNode.firstChild; c; c = c.nextSibling) {
+  for (let c = tree.topNode.firstChild; c; c = c.nextSibling) {
     if (c.name !== "FencedCode" || c.from < fmEnd || c.to <= c.from) continue;
     const info = c.getChild("CodeInfo");
     const lang = info ? state.sliceDoc(info.from, info.to).trim().toLowerCase() : "";
@@ -494,4 +576,4 @@ const clicks = EditorView.domEventHandlers({
   },
 });
 
-export const livePreview = [inlineLayer, blockField, clicks, imageKeys, imageClicks, linkTooltip, citeTooltip, citeKeys];
+export const livePreview = [inlineLayer, blockField, mathStyles, clicks, imageKeys, imageClicks, linkTooltip, citeTooltip, citeKeys];
