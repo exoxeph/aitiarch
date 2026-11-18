@@ -48,7 +48,7 @@ export function deriveProfile(a:Pick<Attachments,'files'|'repo'>,noteHasDiagrams
 /** What a conversation was approved for on its plan card, and for which conversation and project. `confirmed` is a hash of every other field. */
 export interface Grant {v:1;project:string;session:string;profile:Profile;files:string[];repo:boolean;diagrams:boolean;
  /** The note whose diagrams diagrams was approved for. An approval for the diagrams of one note never covers another note's. Absent on an older grant: it covers no diagrams until the card is approved again. */
- diagramNote?:string;investigateSettingsKey?:string;budgetUsd:number;confirmed:string}
+ diagramNote?:string;investigateSettingsKey?:string;investigateHistoryHash?:string;budgetUsd:number;confirmed:string}
 /** What a turn needs. */
 export interface Need {profile:Profile;files:string[];repo:boolean;diagrams:boolean;/** The note the diagrams are of (the note the turn is about); empty when the turn opens none. */diagramNote:string}
 export const needOf=(a:Pick<Attachments,'files'|'repo'>,noteHasDiagrams:boolean,diagramNote=''):Need=>{const profile=deriveProfile(a,noteHasDiagrams),diagrams=profile==='diagrams';return {profile,files:[...a.files],repo:a.repo,diagrams,diagramNote:diagrams?diagramNote:''};};

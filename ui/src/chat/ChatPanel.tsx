@@ -32,6 +32,7 @@ import {LiveMarkdown} from '../ink/LiveMarkdown.tsx';
 import {ChatSessions} from './ChatSessions.tsx';
 import {CONTINUE_QUESTION,InvestigateTurnView,money} from './InvestigateView.tsx';
 import {PlanCard} from './PlanCard.tsx';
+import {ReviewedHistory} from './ReviewedHistory.tsx';
 import {NativePlanCard} from './NativePlanCard.tsx';
 import {providerName} from './council-view.ts';
 import {APPROVAL_NOTICE,OVER_CAP_TEXT,isAnswerer,isNativeAnswerer,nativeUsageText,councilMemoryText,type Answerer} from './normal-provider.ts';
@@ -86,7 +87,7 @@ export function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{re
   <h3>Review — nothing sent yet</h3>
   <p className="small muted">{recipient} · {selectionLabel(review.modelSettings)}</p>
   {review.continuityNotice&&<p role="note">{review.continuityNotice}</p>}
-  {review.carriedHistory&&<details><summary>Reviewed history for the fresh context</summary><pre>{review.carriedHistory}</pre></details>}
+  {review.carriedHistory&&<ReviewedHistory text={review.carriedHistory}/>}
   <p className="chat-review-lead">{review.demo?'Demo mode: no model is called':`Nothing has been sent to ${recipient} yet.`} Review the context and instructions below before sending.</p>
   <dl>
    <dt>Your question</dt><dd>{review.question}</dd>

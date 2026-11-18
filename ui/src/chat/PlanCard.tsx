@@ -3,6 +3,7 @@ import type {ConversationPlan} from '../../server/harness/conversation.ts';
 import type {CopyExclusions} from '../../shared/harness.ts';
 import {reviewDiagramsText,withheldText} from './diagram-words.ts';
 import {CARRIED_TEXT,FILE_REFUSAL_TEXT,PROFILE_TEXT} from './conversation-model.ts';
+import {ReviewedHistory} from './ReviewedHistory.tsx';
 import {selectionLabel} from '../../shared/model-settings.ts';
 
 /**
@@ -33,7 +34,11 @@ export function PlanCard({plan,resume,busy,onApprove,onReplan,onCancel}:{plan:Co
     <button type="button" className="chat-ctl" disabled={!capChanged||!capOk||busy} onClick={()=>onReplan(value)}>Update the plan</button>
     {capChanged&&<span className="inv-cap-note" role="status"> Update the plan to apply this cap, then approve.</span>}</dd>
   </dl>
-  {plan.carriedOver&&<p className="inv-plan-note" data-plan="carried">{CARRIED_TEXT}</p>}
+  {plan.carryover ? <div data-plan="carried">{plan.carryover.text
+   ? <ReviewedHistory key={plan.hash} text={plan.carryover.text}
+     summary={`Carried-over history · ${plan.carryover.pairCount} question-and-answer ${plan.carryover.pairCount===1?'pair':'pairs'} · ${plan.carryover.bytes} bytes`}/>
+   : <p className="inv-plan-note">Nothing carried over.</p>}</div>
+   : plan.carriedOver&&<p className="inv-plan-note" data-plan="carried">{CARRIED_TEXT}</p>}
   {refused.length>0&&<p className="inv-plan-note" role="alert" data-plan="refused">Remove the refused {refused.length===1?'file':'files'} to go on: the whole message would be refused.</p>}
   {nothingToRead&&refused.length===0&&<p className="inv-plan-note" role="alert">Nothing here can be read.</p>}
   <div className="inv-plan-actions"><button ref={approve} type="button" className="chat-ctl inv-confirm" disabled={blocked} onClick={onApprove}>{resume?'Approve and continue':'Approve and send'}</button><button type="button" className="chat-ctl chat-ctl-quiet" onClick={onCancel}>Cancel</button></div>

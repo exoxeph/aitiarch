@@ -28,17 +28,17 @@ const here=path.dirname(fileURLToPath(import.meta.url)),cli=path.join(here,'fixt
 const dirs:string[]=[];afterEach(async()=>{for(const d of dirs.splice(0))await rm(d,{recursive:true,force:true,maxRetries:5,retryDelay:100});});
 const temp=async(n:string)=>{const d=await mkdtemp(path.join(os.tmpdir(),n));dirs.push(d);return d;};
 
-async function setup(investigateSettings?:GateConfig['investigateSettings']){
+async function setup(investigateSettings?:GateConfig['investigateSettings'], history?:GateConfig['carried']){
  const notebook=await temp('aitiarch-conv-nb-'),repo=await temp('aitiarch-conv-repo-'),harness=await temp('aitiarch-conv-h-'),record=path.join(await temp('aitiarch-conv-rec-'),'calls.jsonl');
  execFileSync('git',['init','-q'],{cwd:notebook,stdio:'pipe'});await writeFile(path.join(notebook,'.gitignore'),'/chat/\n');await writeFile(path.join(notebook,'plan.md'),'# Plan\n\nA unique sentence for the session.\n');
  execFileSync('git',['init','-q'],{cwd:repo,stdio:'pipe'});await mkdir(path.join(repo,'src'));
  await writeFile(path.join(repo,'src','login.js'),"const sessions = new Map();\nfunction login(name) { return sessions.get(name); }\n");await writeFile(path.join(repo,'README.md'),'# Fixture\n');await writeFile(path.join(repo,'.env'),'KEY=CANARY-ENV\n');
  await writeFile(path.join(harness,'repo.json'),JSON.stringify({v:1,repo})); // the project's chosen repo, placed before the index opens
  const store=await Store.open(notebook),ink=await InkStore.open(notebook),index=await SessionIndex.open(harness),questions=new QuestionStore(harness);
- const gate=new ConversationGate({index,notebook:store.rootReal,repo:()=>projectRepo(harness),investigateSettings});
  const runner=new ClaudeSessionRunner({command:process.execPath,prefixArgs:[cli,'ok',record],dir:harness});
  let runtime!:ChatRuntime,invest!:InvestigateService;
- const carried=(s:Parameters<typeof carriedPairs>[0])=>carriedPairs(s,questions,runtime,invest);
+ const carried=history??((s:Parameters<typeof carriedPairs>[0])=>carriedPairs(s,questions,runtime,invest));
+ const gate=new ConversationGate({index,notebook:store.rootReal,repo:()=>projectRepo(harness),investigateSettings,carried});
  invest=new InvestigateService({index,dir:harness,notebook:store.rootReal,command:process.execPath,prefixArgs:[cli,'inv-ok',record],gate,carried,investigateSettings,effortSupported:true});
  runtime=new ChatRuntime(store,ink,new ChatStore(notebook),new FakeChatProvider(),[],undefined,{index,runner,questions,gate,carried});
  const calls=async()=>(await readFile(record,'utf8').catch(()=>'')).trim().split('\n').filter(Boolean).map(l=>JSON.parse(l));
@@ -143,6 +143,43 @@ describe('nothing beyond the grant ever reaches the CLI',()=>{
 });
 
 describe('a profile change starts a fresh CLI session and carries the app\'s history over',()=>{
+ it('displays only the capped, redacted history and sends its exact text in order',async()=>{
+  let current={provider:'claude' as const,key:'a'.repeat(64),model:'sonnet',effort:null};
+  const pairs=[{question:'Omitted old turn',answer:'long '.repeat(7000)},{question:'First café question',answer:'token=SYNTHETIC_SECRET'},{question:'Next question',answer:'Final answer.'}];
+  const t=await setup(async()=>current,async()=>pairs),s=await t.chat(),att={repo:true};
+  const input={conversation:s.id,attachments:att,hasDiagrams:false};
+  await t.approve(s,att);await t.turn(s,'First turn',att);
+  expect((await t.gate.plan(input)).carryover).toBeUndefined();
+  current={...current,key:'b'.repeat(64),model:'opus'};
+  const p=await t.gate.plan(input);
+  expect(p.carryover).toMatchObject({pairCount:2});
+  const text=p.carryover!.text;
+  expect(text).toContain('You: First café question\nAI: token=[SECRET]\n\nYou: Next question\nAI: Final answer.');
+  expect(text).not.toMatch(/Omitted old turn|SYNTHETIC_SECRET/);
+  expect(p.carryover!.bytes).toBe(Buffer.byteLength(text));
+  const noop=()=>{},html=renderToStaticMarkup(createElement(PlanCard,{plan:p,busy:false,onApprove:noop,onCancel:noop,onReplan:noop}));
+  expect(html).toContain('2 question-and-answer pairs');
+  expect(html).toContain(`<pre>${text}</pre>`);
+  await t.gate.approve({...input,hash:p.hash});
+  await t.turn(s,'New context',att);
+  const addendum=(await t.calls()).at(-1)!.addendum as string;
+  expect(addendum.slice(addendum.indexOf('Earlier in this conversation'),addendum.indexOf('Final answer.')+'Final answer.'.length)).toBe(text);
+  expect((await t.gate.plan(input)).carryover).toBeUndefined();
+ });
+ it('rejects changed history both before approval and before a send, and explains an empty reset',async()=>{
+  let pairs:{question:string;answer:string}[]=[];
+  const t=await setup(undefined,async()=>pairs),s=await t.chat(),att={repo:true};
+  await t.turn(s,'Earlier notes turn');
+  const input={conversation:s.id,attachments:att,hasDiagrams:false},empty=await t.gate.plan(input);
+  const noop=()=>{},html=renderToStaticMarkup(createElement(PlanCard,{plan:empty,busy:false,onApprove:noop,onCancel:noop,onReplan:noop}));
+  expect(html).toContain('Nothing carried over');
+  pairs=[{question:'Earlier question',answer:'Earlier answer'}];
+  await expect(t.gate.approve({...input,hash:empty.hash})).rejects.toMatchObject({code:'plan_changed'});
+  await t.approve(s,att);
+  pairs=[{question:'Earlier question',answer:'Changed answer'}];
+  await expect(t.turn(s,'Blocked',att)).rejects.toMatchObject({code:'plan_changed'});
+  expect(await t.calls()).toHaveLength(1);
+ });
  it('up, then down: new ids, never a resume, and only questions and final answers are carried',async()=>{
   const t=await setup(),s=await t.chat(),att={files:['src/login.js']};
   await t.turn(s,'Where does the data live?');                       // notes
@@ -167,7 +204,9 @@ describe('a profile change starts a fresh CLI session and carries the app\'s his
  });
  it('a different set of attached files is a different folder, so a fresh session too',async()=>{
   const t=await setup(),s=await t.chat();
-  await t.approve(s,{repo:true});await t.turn(s,'one',{files:['src/login.js']});await t.turn(s,'two',{files:['README.md']});
+  await t.approve(s,{repo:true});await t.turn(s,'one',{files:['src/login.js']});
+  await expect(t.turn(s,'two',{files:['README.md']})).rejects.toMatchObject({code:'plan_changed'});
+  await t.approve(s,{files:['README.md']});await t.turn(s,'two',{files:['README.md']});
   const [a,b]=await t.calls();expect(a.cwd).not.toBe(b.cwd); // each set of files is its own copy, and the CLI files a session under its folder
   expect(b.args).toContain('--session-id');expect(b.args).not.toContain('--resume');expect(flag(b,'--session-id')).not.toBe(flag(a,'--session-id'));
  });

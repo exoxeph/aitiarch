@@ -210,8 +210,9 @@ export function createApp(opts: AppOptions) {
      const selection=selected.selection??{model:null,effort:null};
      return {key,provider:selected.id,...selection,...(snapshot.investigateModelNotice?{notice:snapshot.investigateModelNotice}:{})};
     }:undefined;
-    const questions=new QuestionStore(index.dir),gate=new ConversationGate({index,notebook:store.rootReal,investigateSettings,repo:()=>projectRepo(index.dir),notes:async()=>{const out:string[]=[],walk=(n:{path:string;type:string;children?:any[]})=>{if(n.type==='file'&&/\.md$/i.test(n.path))out.push(n.path);for(const c of n.children??[])walk(c);};walk(await store.tree());return out;}});
+    const questions=new QuestionStore(index.dir);
     const carried=async(s:import('../shared/harness.ts').HarnessSession):Promise<{question:string;answer:string}[]>=>carriedPairs(s,questions,await chatRef.promise,await investigateRef.promise);
+    const gate=new ConversationGate({index,notebook:store.rootReal,investigateSettings,carried,repo:()=>projectRepo(index.dir),notes:async()=>{const out:string[]=[],walk=(n:{path:string;type:string;children?:any[]})=>{if(n.type==='file'&&/\.md$/i.test(n.path))out.push(n.path);for(const c of n.children??[])walk(c);};walk(await store.tree());return out;}});
     const investigate=new InvestigateService({index,dir:index.dir,notebook:store.rootReal,command:h.command,prefixArgs:h.prefixArgs,model:h.model,effortSupported:h.effortSupported,investigateSettings,gate,carried});investigateRef.resolve(investigate);
     return {index,runner,questions,version:()=>runner.version(), // the CLI's version, for the ledger at a conversation's first turn and for Settings
     investigate,gate,carried};}):Promise.resolve(null);

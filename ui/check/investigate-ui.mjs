@@ -112,6 +112,25 @@ try {
   assert.equal(await focused(), 'Close excerpt'); await page.keyboard.press('Escape'); await excerpt.waitFor({ state: 'detached' });
   await panel.locator('.inv-target-link').first().click(); await panel.locator('.inv-excerpt').waitFor(); await page.keyboard.press('Escape');
 
+  // A model change requires review of the exact history that will be carried into the new session.
+  preferences.providers.claude.roles['investigate-read']={model:'opus',effort:'low'};
+  await saveMachineSetup(config,preferences);
+  await composer.fill('Synthetic reviewed reset'); await composer.press('Enter');
+  await card.waitFor();
+  const carried=card.locator('[data-plan="carried"]');
+  const historySummary=carried.locator('summary');
+  assert.match(await historySummary.innerText(), /Carried-over history.*1 question-and-answer pair.*\d+ bytes/);
+  await historySummary.click();
+  assert.match(await carried.locator('pre').textContent(), /How does login work\?/);
+  await page.setViewportSize({width:1280,height:900});
+  await historySummary.scrollIntoViewIfNeeded();
+  await page.screenshot({path:path.join(output,'investigate-carryover-1280.png')});
+  await card.getByRole('button',{name:'Cancel'}).click();
+  await card.waitFor({state:'hidden'});
+  preferences.providers.claude.roles['investigate-read']={model:'sonnet',effort:'low'};
+  await saveMachineSetup(config,preferences);
+  await page.setViewportSize({width:1440,height:900});
+
   // The next question goes without a card: the conversation is approved for the repo. Stop while it runs: the progress line shows time, tool calls and the cap.
   await scenario('inv-slow'); await composer.fill('Something slow'); await page.keyboard.press('Enter');
   const status = panel.getByRole('status', { name: 'Investigation progress' }); await status.waitFor();

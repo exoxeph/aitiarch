@@ -1082,6 +1082,9 @@ button.claim-chip:focus-visible, .claim-action:focus-visible { outline: 2px soli
 .inv-plan dd { margin: 0; overflow-wrap: anywhere; }
 .inv-plan dd ul { margin: 0; padding-left: 16px; }
 .inv-plan-note { margin: 8px 0 0; color: var(--muted); }
+.inv-plan .chat-reviewed-history { margin-top: 8px; }
+.inv-plan .chat-reviewed-history summary { cursor: pointer; }
+.inv-plan .chat-reviewed-history pre { max-height: 12rem; overflow: auto; margin: 4px 0 0; padding: 8px; border: 1px solid var(--rule); border-radius: var(--radius-small); background: var(--paper); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--text-meta)/1.5 var(--font-mono); }
 .inv-plan-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .inv-log { flex: 1; overflow: auto; padding: 0 16px; }
 .inv-turn { margin: 0 0 16px; }

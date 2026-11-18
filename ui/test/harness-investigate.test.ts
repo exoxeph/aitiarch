@@ -43,8 +43,9 @@ it.each(['default','overridden'])('fake CLI receives the fixed Investigate suffi
   if(mode==='overridden')setActivePipelineConfig(validateOverrides({prompts:{investigateStyle:wording}}).effective);
   const t=await setup(),record=path.join(await temp('aitiarch-inv-suffix-rec-'),'calls.jsonl');
   const svc=new InvestigateService({index:t.index,dir:t.harness,notebook:t.notebook,command:process.execPath,prefixArgs:[cli,'inv-ok',record],carried:async()=>[{question:carried,answer:'Synthetic final answer.'}]});
-  const {s}=await confirmed(svc,t.repo);
+  const s=await svc.create('Synthetic history',t.repo);
   await t.index.ensureCli(s.id,'notes',t.harness);await t.index.touch(s.id);
+  await svc.confirm(s.id,(await svc.plan(s.id)).planHash);
   const r=await t.run(svc,s.id);
   expect(r.complete).toBeDefined();
   // Read only the synthetic fake CLI capture; never an owner's session or transcript.
@@ -114,6 +115,22 @@ it('Investigate reply survives a taken-over ledger lock with visible retry and l
 });
 
 describe('investigation sessions',()=>{
+ it('refuses stale history on legacy Confirm and Send without launching the CLI',async()=>{
+  const t=await setup();
+  let answer='Original synthetic answer';
+  const svc=new InvestigateService({index:t.index,dir:t.harness,notebook:t.notebook,command:process.execPath,
+   prefixArgs:[cli,'inv-ok',path.join(t.harness,'calls.jsonl')],carried:async()=>[{question:'Earlier question',answer}]});
+  const s=await svc.create('Synthetic history',t.repo);
+  await t.index.ensureCli(s.id,'notes',t.harness);await t.index.touch(s.id);
+  const p=await svc.plan(s.id);
+  answer='Changed before approval';
+  await expect(svc.confirm(s.id,p.planHash)).rejects.toMatchObject({code:'plan_changed'});
+  const updated=await svc.plan(s.id);
+  await svc.confirm(s.id,updated.planHash);
+  answer='Changed before send';
+  await expect(t.run(svc,s.id)).rejects.toMatchObject({code:'plan_changed'});
+  await expect(readFile(path.join(t.harness,'calls.jsonl'))).rejects.toMatchObject({code:'ENOENT'});
+ });
  it('rejects a stale legacy card and send and launches only the reviewed model and effort',async()=>{
   const {repo,service,run,calls}=await setup();
   let current={key:'a'.repeat(64),provider:'claude' as const,model:'sonnet',effort:'low'};

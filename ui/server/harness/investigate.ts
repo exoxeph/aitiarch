@@ -17,10 +17,10 @@ import {killTree,spawnInvestigateSession} from '../providers/launcher.ts';
 import {sessionUsage} from './claude-session.ts';
 import {finishFileReply,readRepoFile} from './file-claims.ts';
 import {classifyFailure,cleanToolText} from '../../shared/tool-errors.ts';
-import type {SessionIndex} from './session-index.ts';
-import {buildCarriedHistory,WITHHELD_WITH_REPO,type Authorized,type ConversationGate} from './conversation.ts';
+import {CliPlanChanged,type SessionIndex} from './session-index.ts';
+import {carryoverHash,investigateCarryover,WITHHELD_WITH_REPO,type Authorized,type ConversationGate,type InvestigateCarryover} from './conversation.ts';
 import {covers,needOf} from '../../shared/profile.ts';
-import {snapshotDrift,syncSnapshot,SNAPSHOT_LIMITS,type Drift} from './snapshot.ts';
+import {investigateSnapshotFolder,snapshotDrift,syncSnapshot,SNAPSHOT_LIMITS,type Drift} from './snapshot.ts';
 import {captureFolder,folderChanges,restoreFolder} from './tripwire.ts';
 import {activeTurnDirs} from './sweep.ts';
 import {LedgerStore,appendLedger,type InvestigateTurnAudit} from '../ledger-store.ts';
@@ -57,7 +57,7 @@ export type InvestigateCode='not_investigation'|'invalid'|'repo'|'plan_required'
 // Display metadata only: never resolve this string or use it to decide permission.
 const displayPath=(raw:string)=>raw.replace(/[\u0000-\u001f\u007f-\u009f]/g,'').slice(0,300);
 export class InvestigateError extends Error {code:InvestigateCode;attemptedPath?:string;constructor(code:InvestigateCode,attemptedPath?:string){super(code);this.code=code;if(attemptedPath!==undefined)this.attemptedPath=displayPath(attemptedPath);}}
-export interface Plan {session:string;repo:string;files:number;bytes:number;skipped:Record<string,number>;excluded:string[];excludedFromCopy?:import('../../shared/harness.ts').CopyExclusions;budgetUsd:number;turnLimit:number;snapshotHash:string;planHash:string;investigateSettings?:InvestigateSettings}
+export interface Plan {session:string;repo:string;files:number;bytes:number;skipped:Record<string,number>;excluded:string[];excludedFromCopy?:import('../../shared/harness.ts').CopyExclusions;budgetUsd:number;turnLimit:number;snapshotHash:string;planHash:string;investigateSettings?:InvestigateSettings;carryover?:InvestigateCarryover}
 export interface ToolStep {tool:string;target:string;ok:boolean|null;/** Sanitised requested string, display only; never a read target. */attemptedPath?:string;/** Only a real permission denial by the CLI's rules. */denial?:string;/** Any other tool error (a path that does not exist, a directory read as a file...), cleaned of the copy's folder and redacted. */error?:string;/** The repo-relative path the call named, when it named one. */path?:string;/** Lines in the tool's result (the result itself never leaves the server). */lines?:number}
 /** What a turn had done when it was stopped. `text` is only what was written after the last tool call (the answer so far, often empty); the
  *  narration before the calls is in `trail`, in order. */
@@ -176,7 +176,7 @@ export interface InvestigateConfig {index:SessionIndex;dir:string;notebook:strin
  /** Earlier questions and final answers of a conversation, for a fresh CLI session after its profile changed. */
  carried?:(session:HarnessSession)=>Promise<{question:string;answer:string}[]>}
 /** What one run needs, whichever way it was authorised: an older confirmed investigation (the whole repo) or a granted conversation (the repo, or just the attached files). */
-interface RunSpec {id:string;repo:string;/** Only these repo files are in the copy; absent: the whole repo. */files?:string[];budgetUsd:number;investigateSettings?:InvestigateSettings;
+interface RunSpec {id:string;repo:string;/** Only these repo files are in the copy; absent: the whole repo. */files?:string[];budgetUsd:number;investigateSettings?:InvestigateSettings;carryover?:InvestigateCarryover;
  /** Called when a run stops on its cost cap or the safety backstop: the next turn needs the card again. */onCapStop:()=>Promise<unknown>;
  /** The attached files the run is told to start with (the whole copy when the repo is attached too). */focus?:string[];
  /** The one line that starts the message: what was attached, and the diagrams withheld because the repo is. Never any file text. */prefix?:string}
@@ -200,7 +200,7 @@ export class InvestigateService {
   await appendLedger(this.ledger,{id:randomUUID(),inkId:'investigate-'+session,requestId,note:'',event:'investigate_turn',at:new Date().toISOString(),turn}); // a ledger that cannot be written never fails the turn
  }
  /** The copy's folder for a repo: stable, so the CLI can find the session again. */
- snapshotFolder(repo:string,files?:readonly string[]){const base=path.join(this.o.dir,'snapshots',sha(repo.toLowerCase()+(files?'\n'+[...files].sort().join('\n'):'')).slice(0,16));return {base,files:path.join(base,'files'),manifest:path.join(base,'manifest.json')};}
+ snapshotFolder(repo:string,files?:readonly string[]){return investigateSnapshotFolder(this.o.dir,repo,files);}
  async snapshotCwd(repo:string,files?:readonly string[]){const d=this.snapshotFolder(repo,files);await mkdir(d.files,{recursive:true});return realpath(d.files);}
  /** An investigation, or a conversation that was granted Investigate (its repo is the project's chosen one). */
  private async session(id:string):Promise<HarnessSession&{repo:string}>{
@@ -251,13 +251,20 @@ export class InvestigateService {
   const r=await syncSnapshot(s.repo,d.files,d.manifest,undefined,this.o.notebook),capped=Math.round(budget*100)/100;
   // The cost cap is part of the plan the user confirms, so changing it changes the hash. The backstop is kept in the plan but never shown.
   const investigateSettings=await this.o.investigateSettings?.();
+  const carryover=await this.legacyCarryover(s,investigateSettings?.key);
+  const historyHash=carryoverHash(carryover);
   const core={repo:s.repo,files:r.files,excluded:EXCLUDED,budgetUsd:capped,turnLimit:this.limits.turns,snapshotHash:r.hash,...(investigateSettings?{investigateSettings}:{})};
-  const plan:Plan={session:id,...core,bytes:r.bytes,skipped:r.skipped,excludedFromCopy:r.excludedFromCopy,planHash:sha(JSON.stringify(core))};this.plans.set(id,plan);return plan;
+  const plan:Plan={session:id,...core,bytes:r.bytes,skipped:r.skipped,excludedFromCopy:r.excludedFromCopy,...(carryover?{carryover}:{}),planHash:sha(JSON.stringify({...core,...(historyHash?{historyHash}:{})}))};this.plans.set(id,plan);return plan;
  }
  async confirm(id:string,planHash:unknown){
   const p=this.plans.get(id);
   if(!p||p.planHash!==planHash||p.investigateSettings?.key!==(await this.o.investigateSettings?.())?.key)throw new InvestigateError('plan_changed');
-  await this.o.index.confirm(id,p.planHash,p.budgetUsd,p.investigateSettings?.key);return p;
+  const reviewed=carryoverHash(p.carryover);
+  if(reviewed!==carryoverHash(await this.legacyCarryover(await this.session(id),p.investigateSettings?.key)))throw new InvestigateError('plan_changed');
+  await this.o.index.confirm(id,p.planHash,p.budgetUsd,p.investigateSettings?.key,reviewed);return p;
+ }
+ private legacyCarryover(s:HarnessSession&{repo:string},settingsKey?:string){
+  return investigateCarryover(s,this.o.dir,s.repo,undefined,settingsKey,this.o.carried);
  }
  /** Cancel can reach the server before the turn it is for (both are requests in flight): an early cancel is kept for a few seconds and honoured
   *  as soon as that session's turn starts. */
@@ -271,7 +278,9 @@ export class InvestigateService {
   if(investigateSettings&&(!s.confirmed||s.investigateSettingsKey!==investigateSettings.key))throw new InvestigateError(s.confirmed?'plan_changed':'plan_required');
   if(this.o.gate){const {grant}=this.o.gate.effective(s);if(!covers(grant,needOf({files:[],repo:true},false)))throw new InvestigateError('plan_required');}
   else if(!s.confirmed)throw new InvestigateError('plan_required');
-  return this.run({id,repo:s.repo,budgetUsd:s.budgetUsd??this.limits.budgetUsd,investigateSettings,onCapStop:()=>this.o.index.unconfirm(id)},question,emit,signal);
+  const carryover=await this.legacyCarryover(s,investigateSettings?.key);
+  if(carryover&&carryoverHash(carryover)!==s.investigateHistoryHash)throw new InvestigateError('plan_changed');
+  return this.run({id,repo:s.repo,budgetUsd:s.budgetUsd??this.limits.budgetUsd,investigateSettings,carryover,onCapStop:()=>this.o.index.unconfirm(id)},question,emit,signal);
  }
  /** A turn of a conversation that carries files or the repo. The gate has already decided it is covered; it runs at exactly the grant's cap, and with files only it reads a copy of just those files. */
  async sendGranted(auth:Authorized,question:unknown,emit:(e:InvestigateEvent)=>void,signal?:AbortSignal,withheld?:{n:number;title:string}[]):Promise<void>{
@@ -282,7 +291,7 @@ export class InvestigateService {
    // every diagram of the note is named, each withheld with the reason, in the same words as the chat's editor line (D3 'title' withheld: <reason>.)
    ...(withheld?.length?[withheld.map(d=>`D${d.n} '${redact(d.title).replace(/[\r\n\]]/g,' ').replace(/'/g,'\u2019').slice(0,60)}' withheld: ${WITHHELD_WITH_REPO}.`).join(' ')]:[])].join('\n');
   if(this.o.investigateSettings&&!auth.investigateSettings)throw new InvestigateError('plan_required');
-  return this.run({id:auth.session.id,repo:auth.repo,...(scoped?{files:scoped}:{}),...(auth.files.length?{focus:auth.files}:{}),budgetUsd:auth.grant.budgetUsd,investigateSettings:auth.investigateSettings,onCapStop:()=>this.o.index.clearGrant(auth.session.id),prefix:line},question,emit,signal);
+  return this.run({id:auth.session.id,repo:auth.repo,...(scoped?{files:scoped}:{}),...(auth.files.length?{focus:auth.files}:{}),budgetUsd:auth.grant.budgetUsd,investigateSettings:auth.investigateSettings,carryover:auth.carryover,onCapStop:()=>this.o.index.clearGrant(auth.session.id),prefix:line},question,emit,signal);
  }
  private async run(p:RunSpec,question:string,emit:(e:InvestigateEvent)=>void,signal?:AbortSignal):Promise<void>{
   const id=p.id;
@@ -297,11 +306,10 @@ export class InvestigateService {
    before=await captureFolder(this.o.notebook,backup);
    const cwd=await realpath(d.files);turnDir=await mkdtemp(path.join(this.o.dir,'turn-'));activeTurnDirs.add(path.resolve(turnDir));const file=path.join(turnDir,'system.md');
    // Only a CLI session that already ran at this profile in this folder is resumed; otherwise a fresh one starts and the app's own questions and final answers are carried over. The rules stay last.
-   const cli=await this.o.index.ensureCli(id,'investigate',cwd,p.investigateSettings?.key),extra:string[]=[];
+   const cli=await this.o.index.ensureCli(id,'investigate',cwd,p.investigateSettings?.key,!!p.carryover),extra:string[]=[];
    if(p.files)extra.push('This conversation attached these files, and the folder holds only them:\n'+p.files.map(f=>'- '+f).join('\n'));
    else if(p.focus?.length)extra.push('The user attached these files; start with them:\n'+p.focus.map(f=>'- '+f).join('\n'));
-   const earlier=cli.fresh&&this.o.carried?buildCarriedHistory(await this.o.carried((await this.o.index.get(id))!).catch(()=>[])):'';
-   if(earlier)extra.push(earlier);
+   if(p.carryover?.text)extra.push(p.carryover.text);
    await writeFile(file,investigateInstruction(extra),{mode:0o600});
    if(this.o.gate)await appendLedger(this.ledger,{id:randomUUID(),inkId:'investigate-'+id,requestId:randomId(),note:'',event:'conversation_turn',at,conv:{session:id,profile:'investigate',files:p.files?.length??p.focus?.length??0,notes:0,repo:!p.files,diagrams:0,fresh:cli.fresh,budgetUsd}});
    const gate=new StreamGate({instruction:liveInstruction()}),thinking=new StreamGate({instruction:liveInstruction()});
@@ -340,6 +348,7 @@ export class InvestigateService {
    await this.recordTurn(id,message.id,'completed',stream.reported);
    emit({type:'complete',message});
   }catch(e){
+   if(e instanceof CliPlanChanged)throw new InvestigateError('plan_changed');
    const code:InvestigateCode=e instanceof InvestigateError?e.code:'provider_failed',display=e instanceof InvestigateError&&e.attemptedPath!==undefined?{attemptedPath:e.attemptedPath}:{};
    const t=await tripwire().catch(()=>undefined),partial:PartialTurn={text:answerTail(trail),steps:stream?.steps??[],turns:stream?.turns??0,trail};
    // A stop on the cost cap or the safety backstop needs a fresh confirmed plan (a new cap) before the same session continues.
@@ -375,5 +384,10 @@ export class InvestigateService {
  /** Removes the session's tripwire copy (Delete conversation). */
  async forget(id:string){this.plans.delete(id);this.last.delete(id);await rm(path.join(this.o.dir,'tripwire',id),{recursive:true,force:true});await rm(this.turnsFile(id),{force:true});}
  /** The plan this session last confirmed is still the one the card would show (so the UI knows whether to ask again). */
- async needsPlan(id:string){const s=await this.session(id);return !s.confirmed||s.investigateSettingsKey!==(await this.o.investigateSettings?.())?.key;}
+ async needsPlan(id:string){
+  const s=await this.session(id),key=(await this.o.investigateSettings?.())?.key;
+  if(!s.confirmed||s.investigateSettingsKey!==key)return true;
+  const history=await this.legacyCarryover(s,key);
+  return !!history&&carryoverHash(history)!==s.investigateHistoryHash;
+ }
 }

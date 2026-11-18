@@ -14,6 +14,10 @@ export const SNAPSHOT_LIMITS=Object.freeze({fileBytes:262144,files:5000,totalByt
 export interface SnapshotResult {files:number;bytes:number;changed:number;hash:string;excludedFromCopy:CopyExclusions;skipped:{denied:number;links:number;tooLarge:number;overCap:number;notFile:number}}
 export interface Drift {changed:string[];added:string[];removed:string[]}
 const sha=(b:Buffer|string)=>createHash('sha256').update(b).digest('hex');
+export function investigateSnapshotFolder(dir:string,repo:string,files?:readonly string[]){
+ const base=path.join(dir,'snapshots',sha(repo.toLowerCase()+(files?'\n'+[...files].sort().join('\n'):'')).slice(0,16));
+ return {base,files:path.join(base,'files'),manifest:path.join(base,'manifest.json')};
+}
 // The repo's own git config must not be able to run anything while the app lists files: no system or global config, no fsmonitor hook.
 const gitEnv=()=>({...process.env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',GIT_OPTIONAL_LOCKS:'0',GIT_TERMINAL_PROMPT:'0'});
 

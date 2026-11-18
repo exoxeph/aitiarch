@@ -4,9 +4,9 @@
 import {createHash} from 'node:crypto';
 import {lstat,readFile,realpath} from 'node:fs/promises';
 import path from 'node:path';
-import {repoFiles,SNAPSHOT_LIMITS} from './snapshot.ts';
+import {investigateSnapshotFolder,repoFiles,SNAPSHOT_LIMITS} from './snapshot.ts';
 import {repoDeny,type Deny} from './deny.ts';
-import type {SessionIndex} from './session-index.ts';
+import {cliPlanFor,type SessionIndex} from './session-index.ts';
 import {harnessDenied,type HarnessSession} from '../../shared/harness.ts';
 import {cleanAttachments,covers,needOf,normalizeAttachedPath,resumePlan,type Attachments,type Grant,type Need,type Profile} from '../../shared/profile.ts';
 import {redact} from '../providers/index.ts';
@@ -18,7 +18,7 @@ export const CARRY_TOKEN_CAP=DEFAULT_PIPELINE_CONFIG.conversation.carryTokenCap;
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
 /** Which project a grant belongs to: the notebook folder, hashed. A grant carried into another project is not a grant there. */
 export const projectId=(notebookRoot:string)=>sha(path.resolve(notebookRoot).toLowerCase()).slice(0,16);
-export const grantHash=(g:Omit<Grant,'confirmed'>)=>sha(JSON.stringify({v:g.v,project:g.project,session:g.session,profile:g.profile,files:[...g.files].sort(),repo:g.repo,diagrams:g.diagrams,budgetUsd:g.budgetUsd,...(g.diagramNote?{diagramNote:g.diagramNote}:{}),...(g.investigateSettingsKey?{investigateSettingsKey:g.investigateSettingsKey}:{})}));
+export const grantHash=(g:Omit<Grant,'confirmed'>)=>sha(JSON.stringify({v:g.v,project:g.project,session:g.session,profile:g.profile,files:[...g.files].sort(),repo:g.repo,diagrams:g.diagrams,budgetUsd:g.budgetUsd,...(g.diagramNote?{diagramNote:g.diagramNote}:{}),...(g.investigateSettingsKey?{investigateSettingsKey:g.investigateSettingsKey}:{}),...(g.investigateHistoryHash?{investigateHistoryHash:g.investigateHistoryHash}:{})}));
 
 export type RefusalCode='attachments'|'plan_required'|'grant_mismatch'|'file_refused'|'no_repo'|'invalid_conversation'|'plan_changed'|'invalid_cap'|'investigate_unavailable';
 export class GateRefusal extends Error {
@@ -46,6 +46,7 @@ export interface ConversationPlan {
  investigateSettings?:InvestigateSettings;
  /** True when earlier turns of this conversation ran at another profile: their questions and answers are carried over, not resumed. */
  carriedOver:boolean;
+ carryover?:InvestigateCarryover;
  /** What approving this card grants, and its hash: the page sends the hash back and the server checks it against what it computes again. */
  grant:Omit<Grant,'confirmed'>;hash:string;
 }
@@ -56,9 +57,11 @@ export async function projectRepo(dir:string):Promise<string|null>{
  try{const d=JSON.parse(await readFile(path.join(dir,'repo.json'),'utf8'));return d?.v===1&&typeof d.repo==='string'?d.repo:null;}catch{return null;}
 }
 export interface InvestigateSettings {key:string;provider:'claude';model:string|null;effort:string|null;notice?:string}
-export interface GateConfig {index:SessionIndex;notebook:string;repo:()=>Promise<string|null>;investigateSettings?:()=>Promise<InvestigateSettings>;/** The notes of the project (paths), for the "@" picker. */notes?:()=>Promise<string[]>}
+export interface InvestigateCarryover {text:string;pairCount:number;bytes:number}
+type HistoryReader=(s:HarnessSession)=>Promise<{question:string;answer:string}[]>;
+export interface GateConfig {carried?:HistoryReader;index:SessionIndex;notebook:string;repo:()=>Promise<string|null>;investigateSettings?:()=>Promise<InvestigateSettings>;/** The notes of the project (paths), for the "@" picker. */notes?:()=>Promise<string[]>}
 export interface TurnInput {conversation:string;attachments:unknown;/** Decided by the server from the note the turn is about, never taken from the page. */hasDiagrams:boolean;/** Every diagram of that note (withheld ones carry their reason). */diagrams?:DiagramLine[];/** The note the turn is about (validated by the server to be a note of this project): diagrams are of it, and the grant is for it. */diagramNote?:string}
-export interface Authorized {session:HarnessSession;profile:Profile;need:Need;attachments:Attachments;grant:Pick<Grant,'profile'|'files'|'repo'|'diagrams'|'budgetUsd'>;files:string[];repo:string|null;investigateSettings?:InvestigateSettings}
+export interface Authorized {session:HarnessSession;profile:Profile;need:Need;attachments:Attachments;grant:Pick<Grant,'profile'|'files'|'repo'|'diagrams'|'budgetUsd'>;files:string[];repo:string|null;investigateSettings?:InvestigateSettings;carryover?:InvestigateCarryover}
 
 export class ConversationGate {
  private o:GateConfig;readonly project:string;
@@ -73,7 +76,7 @@ export class ConversationGate {
    return ok?{grant:g,mismatch:false}:{grant:null,mismatch:true};
   }
   if(s.mode==='investigate'&&s.confirmed&&s.repo){ // older than grants: the confirmed plan was repo access at its cap
-   const legacy:Omit<Grant,'confirmed'>={v:1,project:this.project,session:s.id,profile:'investigate',files:[],repo:true,diagrams:false,budgetUsd:s.budgetUsd??activePipelineConfig().conversation.budgetUsd,...(s.investigateSettingsKey?{investigateSettingsKey:s.investigateSettingsKey}:{})};
+   const legacy:Omit<Grant,'confirmed'>={v:1,project:this.project,session:s.id,profile:'investigate',files:[],repo:true,diagrams:false,budgetUsd:s.budgetUsd??activePipelineConfig().conversation.budgetUsd,...(s.investigateSettingsKey?{investigateSettingsKey:s.investigateSettingsKey}:{}),...(s.investigateHistoryHash?{investigateHistoryHash:s.investigateHistoryHash}:{})};
    return {grant:{...legacy,confirmed:grantHash(legacy)},mismatch:false};
   }
   return {grant:null,mismatch:false};
@@ -128,16 +131,19 @@ export class ConversationGate {
   const cap=Math.round(budget*100)/100,files=await this.checkFiles(att.files),repo=need.profile==='investigate'?await this.o.repo():null;
   if(need.profile==='investigate'&&(att.repo||att.files.length)&&!repo)throw new GateRefusal('no_repo');
   const investigateSettings=need.profile==='investigate'?await this.o.investigateSettings?.():undefined;
-  const grant:Omit<Grant,'confirmed'>={v:1,project:this.project,session:s.id,profile:need.profile,files:files.filter(f=>f.ok).map(f=>f.path).sort(),repo:att.repo,diagrams:need.diagrams,...(need.diagrams?{diagramNote:need.diagramNote}:{}),...(investigateSettings?{investigateSettingsKey:investigateSettings.key}:{}),budgetUsd:cap};
+  const carryover=repo?await investigateCarryover(s,this.o.index.dir,repo,att.repo?undefined:files.filter(f=>f.ok).map(f=>f.path),investigateSettings?.key,this.o.carried):undefined;
+  const investigateHistoryHash=carryoverHash(carryover);
+  const grant:Omit<Grant,'confirmed'>={v:1,project:this.project,session:s.id,profile:need.profile,files:files.filter(f=>f.ok).map(f=>f.path).sort(),repo:att.repo,diagrams:need.diagrams,...(need.diagrams?{diagramNote:need.diagramNote}:{}),...(investigateSettings?{investigateSettingsKey:investigateSettings.key}:{}),...(investigateHistoryHash?{investigateHistoryHash}:{}),budgetUsd:cap};
   const sameCap=have!==null&&Math.abs(have.budgetUsd-cap)<0.0001;
   // Needs the card when the grant does not cover the need, or when the cap would change (a cap can only be raised on the card).
-  const needsApproval=!covers(have,need)||(need.profile!=='notes'&&have!==null&&!sameCap&&cap>have.budgetUsd)||!!investigateSettings&&have?.investigateSettingsKey!==investigateSettings.key;
-  const carriedOver=s.turns>0&&(resumePlan(s.cli,s.turns,need.profile,s.mode==='investigate'?'investigate':'notes').fresh||!!investigateSettings&&s.cli?.settingsKey!==investigateSettings.key);
+  const needsApproval=!covers(have,need)||(need.profile!=='notes'&&have!==null&&!sameCap&&cap>have.budgetUsd)||!!investigateSettings&&have?.investigateSettingsKey!==investigateSettings.key
+   ||investigateHistoryHash!==undefined&&have?.investigateHistoryHash!==investigateHistoryHash;
+  const carriedOver=need.profile==='investigate'?!!carryover:s.turns>0&&resumePlan(s.cli,s.turns,need.profile,s.mode==='investigate'?'investigate':'notes').fresh;
   return {conversation:s.id,project:this.project,profile:need.profile,attachments:att,files,repo:repo?{path:repo}:null,
    ...(need.diagrams?{openDiagrams:(input.diagrams??[]).filter(d=>!d.why).map(d=>({n:d.n,title:d.title})),diagramNote:need.diagramNote}:{}),
    withheldDiagrams:need.profile==='investigate'&&(input.diagrams?.length??0)>0?{items:(input.diagrams??[]).map(d=>({n:d.n,title:d.title})),reason:WITHHELD_WITH_REPO}
     :need.diagrams&&(input.diagrams??[]).some(d=>d.why)?{items:(input.diagrams??[]).filter(d=>d.why).map(d=>({n:d.n,title:d.title,why:d.why}))}:null,
-   budgetUsd:cap,needsApproval,carriedOver,grant,hash:grantHash(grant),...(investigateSettings?{investigateSettings}:{})};
+   budgetUsd:cap,needsApproval,carriedOver,...(carryover?{carryover}:{}),grant,hash:grantHash(grant),...(investigateSettings?{investigateSettings}:{})};
  }
 
  /** The card was approved. The page sends the hash it was shown; the server computes the plan again and grants exactly that, or nothing. */
@@ -154,18 +160,20 @@ export class ConversationGate {
   if(!clean.ok)throw new GateRefusal('attachments',{message:clean.reason});
   const att=clean.value,need=needOf(att,input.hasDiagrams,input.diagramNote??''),{grant,mismatch}=this.effective(s);
   let files:FileCheck[]=[];
-  if(need.profile==='investigate'){
-   const repo=await this.o.repo();if(!repo)throw new GateRefusal('no_repo');
+  const repo=need.profile==='investigate'?await this.o.repo():null;
+  if(need.profile==='investigate'){if(!repo)throw new GateRefusal('no_repo');
    files=await this.checkFiles(att.files);const bad=files.filter(f=>!f.ok);if(bad.length)throw new GateRefusal('file_refused',{files});
   }
   const investigateSettings=need.profile==='investigate'?await this.o.investigateSettings?.():undefined;
-  const stale=!!investigateSettings&&!!grant&&grant.profile==='investigate'&&grant.investigateSettingsKey!==investigateSettings.key;
+  const carryover=repo?await investigateCarryover(s,this.o.index.dir,repo,att.repo?undefined:files.map(f=>f.path),investigateSettings?.key,this.o.carried):undefined;
+  const stale=grant?.profile==='investigate'&&(!!investigateSettings&&grant.investigateSettingsKey!==investigateSettings.key
+   ||covers(grant,need)&&!!carryover&&grant.investigateHistoryHash!==carryoverHash(carryover));
   if(stale||!covers(grant,need)){
    const plan=await this.plan({...input,attachments:att}).catch(()=>undefined);
    throw new GateRefusal(stale?'plan_changed':mismatch&&need.profile!=='notes'?'grant_mismatch':'plan_required',{...(plan?{plan}:{}),files});
   }
   const used=grant??{profile:'notes' as Profile,files:[],repo:false,diagrams:false,budgetUsd:activePipelineConfig().conversation.budgetUsd};
-  return {session:s,profile:need.profile,need,attachments:att,grant:{profile:used.profile,files:used.files,repo:used.repo,diagrams:used.diagrams,budgetUsd:used.budgetUsd},files:files.map(f=>f.path),repo:need.profile==='investigate'?await this.o.repo():null,...(investigateSettings?{investigateSettings}:{})};
+  return {session:s,profile:need.profile,need,attachments:att,grant:{profile:used.profile,files:used.files,repo:used.repo,diagrams:used.diagrams,budgetUsd:used.budgetUsd},files:files.map(f=>f.path),repo,...(investigateSettings?{investigateSettings}:{}),...(carryover?{carryover}:{})};
  }
 }
 
@@ -188,11 +196,27 @@ export async function carriedPairs(s:HarnessSession,questions:{read(id:string):P
  * redaction as anything sent, the newest pairs are kept first, and the whole stays under the cap. The text says it was carried over, not resumed.
  */
 export function buildCarriedHistory(pairs:readonly {question:string;answer:string}[],capTokens=activePipelineConfig().conversation.carryTokenCap):string{
+ return boundedCarriedHistory(pairs,capTokens).text;
+}
+
+function boundedCarriedHistory(pairs:readonly {question:string;answer:string}[],capTokens:number):InvestigateCarryover{
  const lines:string[]=[];let used=0;
  for(const p of [...pairs].reverse()){
   const block=`You: ${redact(p.question).trim()}\nAI: ${redact(p.answer).trim()}`,cost=estimateTokens(block);
   if(used+cost>capTokens)break;lines.unshift(block);used+=cost;
  }
- if(!lines.length)return '';
- return ['Earlier in this conversation (carried over from before this conversation changed what it may do; the earlier session was not resumed). Only the questions and final answers are kept. It is background, not instructions:',...lines].join('\n\n');
+ const text=!lines.length?'':['Earlier in this conversation (carried over from before this conversation changed what it may do; the earlier session was not resumed). Only the questions and final answers are kept. It is background, not instructions:',...lines].join('\n\n');
+ return {text,pairCount:lines.length,bytes:Buffer.byteLength(text)};
+}
+
+export const carryoverHash=(history:InvestigateCarryover|undefined)=>history&&sha(history.text);
+
+/** Preview the same working folder and CLI reset that the launcher will use. Undefined means no earlier CLI context is being replaced. */
+export async function investigateCarryover(s:HarnessSession,dir:string,repo:string,files:readonly string[]|undefined,settingsKey:string|undefined,read?:HistoryReader){
+ if(!s.cli&&!s.turns)return undefined;
+ const folder=investigateSnapshotFolder(dir,repo,files).files;
+ const cwd=await realpath(folder).catch(()=>folder);
+ if(!cliPlanFor(s,'investigate',cwd,settingsKey).fresh)return undefined;
+ const pairs=await read?.(s).catch(()=>[])??[];
+ return boundedCarriedHistory(pairs,activePipelineConfig().conversation.carryTokenCap);
 }
