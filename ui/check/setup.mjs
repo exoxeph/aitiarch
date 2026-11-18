@@ -294,6 +294,7 @@ try {
  await page.keyboard.press('Escape');
  await settingsPicker.waitFor({state:'hidden'});
  assert.equal(await settings.isVisible(),true);
+ assert.equal(await normalRole.getByRole('button',{name:/Model: Claude/}).evaluate(el=>el===document.activeElement),true);
  await normalRole.getByRole('button',{name:/Model: Claude/}).click();
  await settingsPicker.getByRole('menuitemradio',{name:'haiku',exact:true}).click();
  await normalRole.getByRole('button',{name:'Model: Claude · Haiku'}).waitFor();
@@ -360,11 +361,13 @@ try {
  assert.equal(await menu.getByText(/starts a fresh conversation/).count(),1);
  // Claude is the default answerer and its CLI declares --effort, so the Effort section is offered; it is the only provider group with one.
  assert.equal(await menu.getByRole('group',{name:'Effort'}).count(),1);
- assert.equal(await menu.getByRole('group').count(),3);
+ assert.equal(await menu.locator('.compose-model-list > [role="group"]').count(),2);
  await atWidths('composer-popover');
 
  // An invalid custom ID is refused with a notice and no write.
  const before = setupWrites();
+ assert.equal(await claude().getByRole('textbox',{name:'Custom model ID for Claude'}).count(),0);
+ await claude().getByText('Custom model…',{exact:true}).click();
  await claude().getByRole('textbox',{name:'Custom model ID for Claude'}).fill('--model x');
  await claude().getByRole('button',{name:'Use'}).click();
  await menu.getByRole('status').filter({hasText:'model ID'}).waitFor();
@@ -404,33 +407,63 @@ try {
  if(process.argv.includes('--version')){console.log(process.argv[2]);process.exit(0);}
  const state=readFileSync(process.argv[3],'utf8');
  const send=message=>console.log(JSON.stringify(message));
+ const extra=Array.from({length:12},(_,i)=>({id:'demo-model-'+i,model:'demo-model-'+i,
+  displayName:'Additional Model '+i,hidden:false,isDefault:false,supportedReasoningEfforts:[]}));
  for await(const line of createInterface({input:process.stdin})){
   const m=JSON.parse(line);
   if(m.type==='control_request'&&m.request?.subtype==='initialize'){
    const model={resolvedModel:state==='model-retired'?'demo-claude-next':'demo-claude',description:'Synthetic model',
     supportsEffort:true,supportedEffortLevels:state==='active'?['low','high']:['low']};
-   send({type:'control_response',response:{subtype:'success',request_id:m.request_id,response:{models:[{...model,value:'default',displayName:'Default'},{...model,value:'alias',displayName:'Claude Demo Model'}]}}});
+   send({type:'control_response',response:{subtype:'success',request_id:m.request_id,response:{models:[{...model,value:'default',displayName:'Default'},{...model,value:'alias',displayName:'Claude Demo Model'},...extra.map(m=>({...model,value:m.id,resolvedModel:m.id,displayName:m.displayName}))]}}});
   }else if(m.method==='initialize')send({id:m.id,result:{userAgent:'fake',platformFamily:'windows',platformOs:'windows'}});
-  else if(m.method==='model/list')send({id:m.id,result:{nextCursor:null,data:[{id:'demo-codex',model:'demo-codex',displayName:'Codex Demo Model',hidden:false,isDefault:false,supportedReasoningEfforts:[{reasoningEffort:'medium',description:'Synthetic effort'}]}]}});
+  else if(m.method==='model/list')send({id:m.id,result:{nextCursor:null,data:[{id:'demo-codex',model:'demo-codex',displayName:'Codex Demo Model',hidden:false,isDefault:false,supportedReasoningEfforts:[{reasoningEffort:'medium',description:'Synthetic effort'}]},...extra]}});
   else if(m.method!=='initialized')process.exit(91);
  }`);
  modelCatalogs=createModelCatalogs(dir,providers,{read:(source,options)=>readCatalog({...source,path:process.execPath},
   {...options,prefixArgs:[fake,source.id==='claude'?source.version+' (Claude Code)':'codex-cli '+source.version,catalogState]})});
  const refreshed=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/setup/models'&&r.ok());
+ const capturePicker = async (name) => {
+  const list = menu.locator('.compose-model-list');
+  const filter = menu.getByRole('searchbox',{name:'Filter models'});
+  const effort = menu.getByRole('group',{name:'Effort'});
+  for (const width of [1280,640]) {
+   await page.setViewportSize({width,height:800});
+   await list.evaluate(el=>el.scrollTop=0);
+   const panel = await menu.boundingBox(), header = await filter.boundingBox(), footer = await effort.boundingBox();
+   assert(panel && header && footer && panel.x>=0 && panel.x+panel.width<=width && panel.y>=0 && panel.height<=561);
+   if(width===640) assert.equal(panel.y+panel.height,800);
+   else assert(panel.y+panel.height<=(await chip.boundingBox()).y);
+   assert(footer.y+footer.height<=panel.y+panel.height);
+   assert.equal(await list.evaluate(el=>{el.scrollTop=el.scrollHeight;return el.scrollTop>0;}),true);
+   assert.deepEqual(await filter.boundingBox(),header);
+   assert.deepEqual(await effort.boundingBox(),footer);
+   await list.locator('[aria-checked="true"]').evaluate(el=>el.scrollIntoView({block:'center',inline:'nearest'}));
+   await shot(`catalog-${name}-${width}.png`);
+  }
+  await page.setViewportSize({width:1280,height:800});
+ };
  await page.reload();
  const chatButton=page.getByRole('button',{name:'Chat',exact:true});
  await chatButton.waitFor();
  if(!await chip.isVisible())await chatButton.click();
  await chip.click();
  await refreshed;
+ const filter = menu.getByRole('searchbox',{name:'Filter models'});
+ await filter.fill('demo-model-11');
+ await menu.getByRole('menuitemradio',{name:'Additional Model 11'}).first().waitFor();
+ assert.equal(await menu.getByRole('menuitemradio',{name:'Additional Model 10'}).count(),0);
+ assert.equal(await claude().getByRole('menuitemradio',{name:/^Default/}).count(),1);
+ await filter.press('ArrowDown');
+ assert.equal(await claude().getByRole('menuitemradio',{name:/^Default/}).evaluate(el=>el===document.activeElement),true);
+ await filter.fill('');
  await claude().getByRole('menuitemradio',{name:'Claude Demo Model',exact:true}).click();
  await chip.click();
  await menu.getByRole('group',{name:'Effort'}).getByRole('menuitemradio',{name:'high',exact:true}).waitFor();
  assert.equal(await menu.getByRole('menuitemradio',{name:'medium',exact:true}).count(),0);
- await shot('catalog-claude-1280.png');
  await menu.getByRole('group',{name:'Effort'}).getByRole('menuitemradio',{name:'high',exact:true}).click();
  await page.getByRole('button',{name:/^Model: Claude .*Claude Demo Model.*High/}).waitFor();
  await chip.click();
+ await capturePicker('claude');
  await writeFile(catalogState,'effort-retired');
  await menu.getByRole('button',{name:'Refresh model lists'}).click();
  await page.getByRole('button',{name:/Claude Demo Model.*Default effort.*no longer listed/}).waitFor();
@@ -446,10 +479,12 @@ try {
  const codexEffort=menu.getByRole('group',{name:'Effort'}).getByRole('menuitemradio',{name:'medium',exact:true});
  await codexEffort.click();
  await page.getByRole('button',{name:/^Model: Codex .*Codex Demo Model.*Medium/}).waitFor();
+ await page.getByRole('combobox',{name:'Theme',exact:true}).selectOption('moss');
+ await page.waitForFunction(()=>document.documentElement.dataset.theme==='moss');
  await chip.click();
  assert.equal(await codexEffort.getAttribute('aria-checked'),'true');
  assert.equal(await menu.getByRole('menuitemradio',{name:'Default (Codex Demo Model)',exact:true}).count(),0);
- await shot('catalog-codex-1280.png');
+ await capturePicker('codex');
  const forced=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/setup/models'&&r.request().postDataJSON()?.force===true&&r.ok());
  await menu.getByRole('button',{name:'Refresh model lists'}).click();
  await forced;

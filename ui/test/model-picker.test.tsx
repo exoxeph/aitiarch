@@ -69,6 +69,33 @@ it('the chip shows the reported model after an answer, or "model not reported"',
  expect(render(base())).not.toContain('model not reported');
 });
 
+it('offers a model filter only above eight models, with Default still first', () => {
+ const withModels = (count: number) => base({
+  providers: [{...provider('claude', true, 'Compatible'), catalog: {
+   source: 'cli', checkedAt: null, models: Array.from({length: count}, (_, index) => ({
+    id: `demo-${index}`, name: `Demo ${index}`, default: false, efforts: ['low'],
+   })),
+  }}],
+ });
+ expect(render(withModels(8), {defaultOpen: true})).not.toContain('aria-label="Filter models"');
+ const html = render(withModels(9), {defaultOpen: true});
+ expect(html).toContain('aria-label="Filter models"');
+ expect(html.indexOf('>Default<')).toBeLessThan(html.indexOf('>Demo 0<'));
+});
+
+it('keeps the effort region present with a reason when no choices can be offered', () => {
+ const view = base({models: [{role: 'normal-chat', provider: 'claude', effortSupported: false, selection: null, effective: {model: null, effort: null}}]});
+ const html = render(view, {defaultOpen: true});
+ expect(html).toContain('aria-label="Effort options"');
+ expect(html).toContain('This CLI does not offer effort choices.');
+});
+
+it('keeps custom ID fields behind a closed disclosure', () => {
+ const html = render(base(), {defaultOpen: true});
+ expect(html).toMatch(/<details[^>]*><summary[^>]*>Custom model…<\/summary>.*?Custom model ID for Claude/);
+ expect(html).not.toMatch(/<details[^>]*\bopen=""/);
+});
+
 it('with no capable provider the chip says AI off and cannot be opened', () => {
  const html = render(base({providers: [], roles: [], models: []}), {defaultOpen: true});
  expect(html).toContain('AI off');
