@@ -39,7 +39,7 @@ import {finishReply,InvalidImageReference} from './reply.ts';
 import type {ConfirmedImageSend} from '../../shared/image-attachments.ts';
 import {confirmImageManifest,reviewImageManifest,type ChatImageDelivery} from './image-review.ts';
 import type {ImageStore} from '../image-store.ts';
-import {imageDeliveryVerified,type ImageDeliveryInput} from '../providers/image-transport.ts';
+import {imageDeliveryNotice,type ImageDeliveryInput} from '../providers/image-transport.ts';
 import {checkContract} from '../../shared/persona-contract.ts';
 import type {PersonaMode} from '../../shared/persona.ts';
 export class ChatError extends Error {code:ChatErrorCode;/** For budget_reached: the numbers the gate used. */budget?:BudgetDetail;/** Which rule said no, for the page's Why? line. Reporting only. */why?:ChatWhy;constructor(code:ChatErrorCode,budget?:BudgetDetail,why?:ChatWhy){super(code);this.code=code;if(budget)this.budget=budget;if(why)this.why=why;}}
@@ -89,9 +89,9 @@ export class ChatRuntime {
  private imageUnavailable(detail:string){return new ChatError('disabled',undefined,{ruleId:'image_input_unavailable',nodeId:'provider_contracts',detail});}
  private imageEligibility(provider:NormalAnswerer,model:string|null,version?:string){
   if(provider==='kiro')return 'Kiro does not have a verified isolated image transport.';
-  const verified=this.imageInput?.delivery?!!model&&this.imageInput.delivery.supports(provider,model):imageDeliveryVerified(provider,version,model);
-  if(!this.imageInput||!verified)return 'image delivery not verified yet';
-  return null;
+  if(!this.imageInput)return 'image delivery not verified yet';
+  if(this.imageInput.delivery)return model&&this.imageInput.delivery.supports(provider,model)?null:'image delivery not verified yet';
+  return imageDeliveryNotice(provider,version,model);
  }
  async imageAvailability(){
   const snapshot=await this.normal?.selection(),selected=snapshot?.resolveRole('normal-chat');

@@ -24,7 +24,7 @@ import {createCliAdapter} from '../server/providers/tool-less.ts';
 import {normalChatTurn} from '../server/chat/normal-answerer.ts';
 import {CHAT_HARD_RULES} from '../server/chat/request.ts';
 import {DEFAULT_PIPELINE_CONFIG} from '../shared/pipeline-config.ts';
-import {runFakeImageTransport} from '../server/providers/image-transport.ts';
+import {imageDeliveryNotice,runFakeImageTransport} from '../server/providers/image-transport.ts';
 import {resolveProjectStorage} from '../server/project-storage.ts';
 import {ImageStore} from '../server/image-store.ts';
 import {NoteWatcher} from '../server/watch.ts';
@@ -147,8 +147,13 @@ it.each(['claude','codex'] as const)('delivers a confirmed manifest through the 
   expect(blocks[1].source.data).toBe(approved.images[0].bytes.toString('base64'));
   expect(result).toMatchObject({rawReply:true,costUsd:0.001,usage:{inputTokens:30,outputTokens:5}});
  }else{
-  const adapter=createCliAdapter({...cli,id:provider});
-  const options={answerer:provider,cap:DEFAULT_PIPELINE_CONFIG.council.caps.codex};
+  const adapter=createCliAdapter({...cli,id:provider,selection:undefined});
+  const registry=new ProviderRegistry([descriptorFromAdapter(adapter,{detect:async()=>({available:true,reason:null,version})})]);
+  const setup=defaultMachineSetup();
+  setup.roles['normal-chat']='codex';setup.providers.codex.enabled=true;setup.providers.codex.model=selection.model;
+  await saveMachineSetup(config,setup);
+  const snapshot=await registry.snapshot(config);
+  const options={answerer:provider,cap:DEFAULT_PIPELINE_CONFIG.council.caps.codex,snapshot};
   expect(await normalChatTurn(request,[adapter],undefined,options)).toMatchObject({status:'ok'});
   const plain=await read();
   const result=await normalChatTurn(request,[adapter],undefined,{...options,images});
@@ -183,6 +188,14 @@ it.each(['claude','codex'] as const)('%s refuses transport after a reviewed mode
 
 it('does not enable the image transport for an unverified executable',async()=>{
  await expect(runImageFixture('codex','executable')).rejects.toThrow(/not been verified/);
+});
+
+it('enables only the live-verified CLI and model and explains the Claude probe failure',()=>{
+ expect(imageDeliveryNotice('codex','0.170.0','gpt-6.2-sol')).toBeNull();
+ expect(imageDeliveryNotice('codex','0.170.0',null)).toBe('image delivery not verified yet');
+ expect(imageDeliveryNotice('codex','0.171.0','gpt-6.2-sol')).toBe('image delivery not verified yet');
+ expect(imageDeliveryNotice('codex','0.170.0','different-model')).toBe('image delivery not verified yet');
+ expect(imageDeliveryNotice('claude','2.1.205','claude-opus-4-8[1m]')).toMatch(/claims check/);
 });
 
 it('checks JPEG dimensions and refuses animated WebP, GIF, SVG and oversized source images before decoding',()=>{

@@ -148,7 +148,9 @@ export class ProviderRegistry {
    if(selection.model===null&&selection.effort===null)return selected;
    const bind=(factory:InvokedBridgeFactory):InvokedBridgeFactory=>options=>factory({...options,selection});
    return Object.freeze({...selected,selection,createToollessAdapter:()=>{
-    const adapter=selected.createToollessAdapter();return {...adapter,startTurn:(input:Parameters<TurnAdapter['startTurn']>[0],signal:AbortSignal)=>adapter.startTurn({...input,selection},signal)};
+    const adapter=selected.createToollessAdapter(),{startImageTurn}=adapter;
+    return {...adapter,startTurn:(input:Parameters<TurnAdapter['startTurn']>[0],signal:AbortSignal)=>adapter.startTurn({...input,selection},signal),
+     ...(startImageTurn?{startImageTurn:(...[input,signal,images]:Parameters<NonNullable<TurnAdapter['startImageTurn']>>)=>startImageTurn.call(adapter,{...input,selection},signal,images)}:{})};
    },...(selected.createInvokedProvider?{createInvokedProvider:bind(selected.createInvokedProvider)}:{}),...(selected.createThreadProvider?{createThreadProvider:bind(selected.createThreadProvider)}:{})});
   };
   const council=()=>{

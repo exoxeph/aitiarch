@@ -16,10 +16,12 @@ type FixtureInput={
 };
 export type ImageDeliveryInput={approved:FixtureInput['approved'];storage:FixtureInput['storage'];version:string};
 
-// Record only an exact provider/version/model tuple demonstrated with the isolated live launcher.
-const verifiedImageModels:ReadonlyArray<readonly [FixtureInput['provider'],string,string]>=[];
-export function imageDeliveryVerified(provider:FixtureInput['provider'],version:string|undefined,model:string|null){
- return verifiedImageModels.some(([id,release,verifiedModel])=>provider===id&&version===release&&model===verifiedModel);
+// Record only exact provider/version/model tuples demonstrated with the isolated live launcher.
+export function imageDeliveryNotice(provider:FixtureInput['provider'],version:string|undefined,model:string|null){
+ if(provider==='codex'&&version==='0.170.0'&&model==='gpt-6.2-sol')return null;
+ if(provider==='claude'&&version==='2.1.205'&&model==='claude-opus-4-8[1m]')
+  return 'image delivery not verified yet: Claude’s probe reply did not pass the image claims check.';
+ return 'image delivery not verified yet';
 }
 
 export function reviewedImageBuffers(provider:FixtureInput['provider'],model:string|null|undefined,approved:FixtureInput['approved']){
