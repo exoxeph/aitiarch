@@ -21,6 +21,7 @@ export interface RepairStatus {pending:number;unverified:number}
 const hash=(s:string|Buffer)=>createHash('sha256').update(s).digest('hex');
 const assetPattern=/^ai-diagram-[a-f0-9]{64}\.svg$/;
 import {resolvePrivateProjectPath} from './project-storage.ts';
+import {privateWriteTemp} from './private-write-temp.ts';
 
 /** Durable write-ahead intent. This class never writes Markdown. */
 export class InsertionStore {
@@ -29,15 +30,24 @@ export class InsertionStore {
  private async confined(rel:string,create=false){const parts=normalizeRel(rel).split('/');let target=this.ink.rootReal;
   for(let i=0;i<parts.length;i++){target=path.join(target,parts[i]);let stat;try{stat=await lstat(target);}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;if(create&&i<parts.length-1){await mkdir(target).catch(async err=>{if(err.code!=='EEXIST')throw err;});stat=await lstat(target);}else continue;}if(stat&&(stat.isSymbolicLink()||(i<parts.length-1?!stat.isDirectory():!stat.isFile())))throw new Error('Linked or invalid insertion path.');}return target;
  }
- private async journalFile(create=false){
-  const {file}=await resolvePrivateProjectPath(this.ink.rootReal,'insertionJournal');
-  return this.confined(path.relative(this.ink.rootReal,file).split(path.sep).join('/'),create);
+ private async journalPath(create=false){
+  const {file,managed}=await resolvePrivateProjectPath(this.ink.rootReal,'insertionJournal');
+  return {file:await this.confined(path.relative(this.ink.rootReal,file).split(path.sep).join('/'),create),managed};
  }
+ private async journalFile(create=false){return (await this.journalPath(create)).file;}
  private async journal():Promise<Intent[]>{const file=await this.journalFile();let text;try{text=await readFile(file,'utf8');}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return [];throw e;}
   if(text.length>1048576)throw new Error('Insertion journal too large.');const d=JSON.parse(text),keys='afterHash,at,beforeHash,from,id,inkId,insertHash,length,note,state';
   if(d.v!==1||Object.keys(d).sort().join()!=='operations,v'||!Array.isArray(d.operations)||d.operations.length>1000||d.operations.some((o:Intent)=>!o||Object.keys(o).filter(key=>key!=='skill').sort().join()!==keys||('skill' in o&&(!validSkillDiagramRef(o.skill)||!o.skill.stage))||!['prepared','recorded','cancelled'].includes(o.state)||!Number.isFinite(Date.parse(o.at))||![o.id,o.inkId].every(id=>typeof id==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(id))||![o.beforeHash,o.afterHash,o.insertHash].every(h=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))||!Number.isInteger(o.from)||o.from<0||!Number.isInteger(o.length)||o.length<1||o.length>200000||normalizeRel(o.note)!==o.note)||new Set(d.operations.map((o:Intent)=>o.id)).size!==d.operations.length)throw new Error('Invalid insertion journal; original preserved.');return d.operations;
  }
- private async save(operations:Intent[]){const file=await this.journalFile(true),temp=file+'.'+randomUUID()+'.tmp',f=await open(temp,'wx',0o600);try{await f.writeFile(JSON.stringify({v:1,operations},null,2)+'\n');await f.sync();}finally{await f.close();}try{if(await this.journalFile()!==file)throw new Error('Insertion journal location changed.');await rename(temp,file);}finally{await unlink(temp).catch(()=>{});}}
+ private async save(operations:Intent[]){
+  const {file,managed}=await this.journalPath(true);
+  const temp=await privateWriteTemp(file,managed),handle=await open(temp,'wx',0o600);
+  try {
+   try{await handle.writeFile(JSON.stringify({v:1,operations},null,2)+'\n');await handle.sync();}finally{await handle.close();}
+   if(await this.journalFile()!==file)throw new Error('Insertion journal location changed.');
+   await rename(temp,file);
+  }finally{await unlink(temp).catch(()=>{});}
+ }
  private async acquireLock(file:string){
   const name=file+'.lock';await this.confined(path.relative(this.ink.rootReal,name).split(path.sep).join('/'));
   for(let attempt=0;attempt<3;attempt++){

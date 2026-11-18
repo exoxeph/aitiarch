@@ -4,6 +4,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {resolvePrivateProjectPath} from "./project-storage.ts";
+import {privateWriteTemp} from "./private-write-temp.ts";
 const exec = promisify(execFile);
 
 export const textHash = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
@@ -59,7 +60,7 @@ export class AnchorCache {
     return {...result,enabled};
   }
   private async file(note: string, create: boolean) {
-    const {file:cache}=await resolvePrivateProjectPath(this.root,"cache");
+    const {file:cache,managed}=await resolvePrivateProjectPath(this.root,"cache");
     const folder=path.join(cache,"anchors");
     for (const dir of [cache,folder]) {
       if (create) await mkdir(dir).catch(e => { if (e.code !== "EEXIST") throw e; });
@@ -69,21 +70,27 @@ export class AnchorCache {
     const file = path.join(folder, textHash(note) + ".json");
     try { const info=await lstat(file);if (!info.isFile()||info.isSymbolicLink()||info.nlink!==1) throw new Error("Linked snapshot rejected."); }
     catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
-    return file;
+    return {file,managed};
   }
   async load(note: string, expectedHash: string | null): Promise<string | null> {
     if (!expectedHash || !(await this.status(note)).enabled) return null;
     try {
-      const snapshot = JSON.parse(await readFile(await this.file(note, false), "utf8"));
+      const {file}=await this.file(note,false);
+      const snapshot = JSON.parse(await readFile(file, "utf8"));
       return snapshot.v === 1 && snapshot.note === note && typeof snapshot.text === "string" &&
         snapshot.textHash === expectedHash && textHash(snapshot.text) === expectedHash ? snapshot.text : null;
     } catch { return null; }
   }
   async save(note: string, text: string): Promise<boolean> {
     if (!(await this.status(note)).enabled) return false;
-    const file = await this.file(note, true), temp = file + "." + randomUUID() + ".tmp";
-    await writeFile(temp, JSON.stringify({ v: 1, note, textHash: textHash(text), text }, null, 2) + "\n", { flag: "wx", mode: 0o600 });
-    await rename(temp, file);
+    const {file,managed}=await this.file(note,true);
+    const temp=await privateWriteTemp(file,managed);
+    const handle=await open(temp,"wx",0o600);
+    try {
+      try {await handle.writeFile(JSON.stringify({ v: 1, note, textHash: textHash(text), text }, null, 2) + "\n");}
+      finally {await handle.close();}
+      await rename(temp,file);
+    } finally {if(managed)await unlink(temp).catch(()=>{});}
     return true;
   }
 }

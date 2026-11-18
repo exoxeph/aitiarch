@@ -8,6 +8,7 @@ import {isPersona} from '../../shared/persona.ts';
 import {validSessionId} from '../../shared/harness.ts';
 import {validContract} from '../../shared/persona-contract.ts';
 import {resolvePrivateProjectPath} from '../project-storage.ts';
+import {privateWriteTemp} from '../private-write-temp.ts';
 const exec=promisify(execFile),missing=(e:unknown)=>(e as NodeJS.ErrnoException).code==='ENOENT';
 export interface ChatDocument {v:1;note:string;messages:ChatMessage[]}
 export class ChatStore {
@@ -15,18 +16,25 @@ export class ChatStore {
  constructor(root:string){this.root=root;}
  private validNote(note:string){return normalizeRel(note)===note&&isNotePath(note)&&!note.split('/').some(s=>s.startsWith('.'));}
  private note(note:string){if(!this.validNote(note))throw new Error('Invalid chat note.');return note;}
- private async confined(rel:string,create=false){
-  const segments=rel.split('/');let file=this.root;
+ private async confinedPath(rel:string,create=false){
+  const segments=rel.split('/');let file=this.root,managed=false;
   if(segments[0]==='chat'){
-   const {file:chat}=await resolvePrivateProjectPath(this.root,'chat');
-   const localParts=path.relative(this.root,chat).split(path.sep);
+   const chat=await resolvePrivateProjectPath(this.root,'chat');
+   managed=chat.managed;
+   const localParts=path.relative(this.root,chat.file).split(path.sep);
    segments.splice(0,1,...localParts);
   }
   for(let n=0;n<segments.length;n++){
    file=path.join(file,segments[n]);
    let s;try{s=await lstat(file);}catch(e){if(!missing(e))throw e;if(create&&n<segments.length-1){await mkdir(file,{mode:0o700}).catch(async e=>{if(e.code!=='EEXIST')throw e;});s=await lstat(file);}}
    if(s&&(s.isSymbolicLink()||s.nlink!==1&&!s.isDirectory()||n<segments.length-1&&!s.isDirectory()||n===segments.length-1&&!s.isFile()))throw new Error('Unsafe private chat path.');
-  }return file;
+  }return {file,managed};
+ }
+ private async confined(rel:string,create=false){return (await this.confinedPath(rel,create)).file;}
+ private async openWriteLock(rel:string,file:string){
+  const lock=await this.confined(rel+'.lock');
+  if(lock!==file+'.lock')throw new Error('Private chat location changed.');
+  return open(lock,'wx',0o600);
  }
  // This record never holds questions (the notice below says so, and it applies to the one-off chat). A named conversation (harness session) keeps
  // its questions separately, in the app's own folder outside the repo (server/harness/questions.ts), and Delete conversation removes them.
@@ -82,7 +90,9 @@ export class ChatStore {
   if(!removed)return 0;
   if(keep.length)this.memory.set(note,{...structuredClone(d),messages:structuredClone(keep)});else this.memory.delete(note);
   if(!(await this.status()).enabled)return removed;
-  const file=await this.confined('chat/'+note+'.chat.json',true),lock=await open(await this.confined('chat/'+note+'.chat.json.lock'),'wx',0o600),temp=file+'.'+randomUUID()+'.tmp';
+  const rel='chat/'+note+'.chat.json';
+  const {file,managed}=await this.confinedPath(rel,true),temp=await privateWriteTemp(file,managed);
+  const lock=await this.openWriteLock(rel,file);
   try{
    if(!(await resolvePrivateProjectPath(this.root,'chat')).managed)for(const target of [file,temp])await exec('git',['check-ignore','-q','--',target],{cwd:this.root,windowsHide:true,timeout:3000});
    if(!keep.length){await unlink(file).catch(e=>{if(!missing(e))throw e;});return removed;} // nothing left: the record goes, it is not kept empty
@@ -93,8 +103,10 @@ export class ChatStore {
  });}
  async append(note:string,message:ChatMessage){return this.serial(async()=>{
   const persistent=(await this.status()).enabled;
-  const file=persistent?await this.confined('chat/'+this.note(note)+'.chat.json',true):undefined;
-  const lock=file?await open(await this.confined('chat/'+note+'.chat.json.lock'),'wx',0o600):undefined,temp=file?file+'.'+randomUUID()+'.tmp':undefined;
+  const rel='chat/'+this.note(note)+'.chat.json';
+  const {file,managed}=persistent?await this.confinedPath(rel,true):{file:undefined,managed:false};
+  const temp=file?await privateWriteTemp(file,managed):undefined;
+  const lock=file?await this.openWriteLock(rel,file):undefined;
   try{
   const d=await this.read(note),inMemory=this.memory.get(note);
   for(const m of inMemory?.messages??[])if(!d.messages.some(x=>x.id===m.id))d.messages.push(m);

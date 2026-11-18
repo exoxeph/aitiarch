@@ -1,6 +1,6 @@
 import {execFileSync,spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {mkdir,mkdtemp,readFile,readdir,realpath,utimes,writeFile} from 'node:fs/promises';
+import {link,mkdir,mkdtemp,readFile,readdir,realpath,utimes,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {expect,it} from 'vitest';
@@ -11,6 +11,7 @@ import {initProject} from '../server/init.ts';
 import {InkStore} from '../server/ink-store.ts';
 import {InsertionStore} from '../server/insertion-store.ts';
 import {LedgerStore} from '../server/ledger-store.ts';
+import {privateTempPath} from '../server/private-write-temp.ts';
 import {SkillDiagramStore} from '../server/skill-diagram-store.ts';
 import {Store} from '../server/store.ts';
 import {UiStateStore} from '../server/ui-state-store.ts';
@@ -63,9 +64,31 @@ async function writePrivate(f:Awaited<ReturnType<typeof fixture>>){
  return {files,staged,diagrams,insertions,existing};
 }
 
-it('keeps all active private writers outside the shareable tree, handoff, ZIP and generic HTTP reads',async()=>{
+it('recovers interrupted atomic writes before checking the shareable tree, handoff, ZIP and HTTP reads',async()=>{
  const f=await fixture(true),{root,git}=f,local=path.join(root,'local');
+ const deadPid=spawnSync(process.execPath,['-e',''],{windowsHide:true}).pid;
+ expect(deadPid).toBeGreaterThan(0);
+ const interrupted=[
+  ['ui-state.json',markers.draft],['ledger.json',markers.ledger],
+  ['.cache/anchors/'+textHash(note)+'.json',markers.cache],
+  ['chat/'+note+'.chat.json',markers.chat],['insertions.json',markers.journal],
+ ];
+ const abandoned:string[]=[];
+ for(const [target,marker] of interrupted){
+  const temp=privateTempPath(path.join(local,target),deadPid);
+  await mkdir(path.dirname(temp),{recursive:true});
+  await writeFile(temp,'{ "partial": "'+marker,{flag:'wx'});
+  abandoned.push(temp);
+ }
+ const live=privateTempPath(path.join(local,'ui-state.json'),process.pid);
+ const unknown=path.join(local,`ui-state.json.${randomUUID()}.tmp`);
+ const human=privateTempPath(path.join(root,'ui-state.json'),deadPid);
+ for(const target of [live,unknown,human])await writeFile(target,'Preserve these bytes.');
+ const linked=privateTempPath(path.join(local,'ui-state.json'),deadPid);
+ await link(human,linked);
  const {files,staged,diagrams,insertions,existing}=await writePrivate(f);
+ for(const temp of abandoned)await expect(readFile(temp),temp).rejects.toMatchObject({code:'ENOENT'});
+ for(const target of [live,unknown,human,linked])expect(await readFile(target,'utf8')).toBe('Preserve these bytes.');
  expect(staged.stage).toMatch(/^[a-f0-9]{32}$/);
  const stagedName=staged.stage+'-'+staged.asset;
  const expected={...files,'insertions.json':markers.journal,['skill-diagrams/'+stagedName]:markers.diagram};

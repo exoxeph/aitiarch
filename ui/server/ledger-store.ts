@@ -1,6 +1,7 @@
 import { link, lstat, open, readFile, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import {projectLedgerIdentity,resolvePrivateProjectPath} from './project-storage.ts';
+import {privateWriteTemp} from './private-write-temp.ts';
 import {isAbortCause,type AbortCause} from '../shared/chat.ts';
 import type {TurnUsage,TurnStatus} from './providers/turn.ts';
 import {validInvokedUsage,type InvokedUsage} from '../shared/invoked-usage.ts';
@@ -195,9 +196,9 @@ export class LedgerStore {
     if(event.event==='conversation_turn'&&!validConversationTurn(event.conv))return Promise.reject(new Error('Invalid conversation turn metadata.'));
     if(event.event==='context_read'&&(contextReadKeys(event)===''||!validContextRead(event)))return Promise.reject(new Error('Invalid context metadata.'));
     const job = this.tail.catch(() => {}).then(async () => {
-      const {file}=await resolvePrivateProjectPath(this.root,'ledger');
+      const {file,managed}=await resolvePrivateProjectPath(this.root,'ledger');
       await this.safe(file); const lockPath = file + '.lock';
-      const mine = await this.lock(lockPath), temp = file + '.' + randomUUID() + '.tmp';
+      const temp=await privateWriteTemp(file,managed),mine=await this.lock(lockPath);
       try {
         const d = await this.readAt(file);
         if (d.events.some(e => ['context_read','investigation','investigate_turn','diagram_read','cli_version','conversation_turn','council_turn'].includes(event.event)?e.id===event.id:e.inkId === event.inkId && e.requestId === event.requestId && e.event === event.event)) return;

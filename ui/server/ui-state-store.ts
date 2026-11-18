@@ -3,6 +3,7 @@ import {lstat,readFile,open,rename,unlink,writeFile} from 'node:fs/promises';
 import {execFile} from 'node:child_process';import {promisify} from 'node:util';
 import {randomUUID,createHash} from 'node:crypto';import path from 'node:path';
 import {resolvePrivateProjectPath} from './project-storage.ts';
+import {privateWriteTemp} from './private-write-temp.ts';
 import {normalizeRel,isNotePath} from './paths.ts';
 import {exactKeys,validAt,validId} from '../shared/threads.ts';
 import {validSavedNodes,type SavedNodeSettings} from '../shared/node-settings.ts';
@@ -64,7 +65,7 @@ export class UiStateStore {
  }
  private async mutateLocked<T>(fn:(s:SavedUiState)=>T,requireIgnored=false){
   const {file,managed}=await resolvePrivateProjectPath(this.root,'state');
-  await this.safe(file);const lock=await open(file+'.lock','wx',0o600),temp=file+'.'+randomUUID()+'.tmp';
+  await this.safe(file);const temp=await privateWriteTemp(file,managed),lock=await open(file+'.lock','wx',0o600);
   try{const s=await this.readAt(file);if(!managed&&(requireIgnored||s.treeCollapsed!==undefined||s.theme!==undefined||s.confirmAdd!==undefined||s.typingHelp!==undefined||s.doubleSpacePeriod!==undefined||s.smartCorrections!==undefined||s.neverCorrect!==undefined||s.nodes!==undefined||Object.keys(s.threadDrafts??{}).length))await this.ignored(file,temp);const result=fn(s),data=JSON.stringify(s,null,2)+'\n';if(Buffer.byteLength(data)>2*1024*1024)throw new Error('UI state too large.');
    const f=await open(temp,'wx',0o600);try{await f.writeFile(data);await f.sync();}finally{await f.close();}await this.safe(file);await rename(temp,file);return result;
   }finally{await unlink(temp).catch(()=>{});await lock.close();await unlink(file+'.lock');}
