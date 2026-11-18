@@ -232,7 +232,7 @@ export const api = {
   saveThreadDraft:(path:string,id:string,text:string,revision:string|null)=>ok<{revision:string}>('PUT','/api/thread-drafts/save',{path,id,text,revision}),
   enableThreadDrafts:()=>ok<{enabled:boolean}>('PUT','/api/thread-drafts/enable',{action:'add-ignore-line'}),
   uiStatePersistence:()=>ok<{enabled:boolean}>('GET','/api/thread-drafts/status'),
-  assistance: () => ok<{ available: boolean; provider?: string; message?: string; warnings?: string[] }>("GET", "/api/assistance"),
+  assistance: (renderer?: string) => ok<{ available: boolean; provider?: string; message?: string; warnings?: string[] }>("GET", renderer==='skill'?"/api/assistance?renderer=skill":"/api/assistance"),
   planStatus:()=>ok<{enabled:boolean;connected?:boolean;model?:string|null;hourlyCap?:number;welcome?:boolean}>('GET','/api/chatgpt-plan'),
   planAction:<T,>(action:string,body:unknown={})=>ok<T>('PUT','/api/chatgpt-plan/'+action,body),
   previewInvocation: (body: Invocation) => ok<unknown>("PUT", "/api/assistance/preview", body),

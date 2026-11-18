@@ -8,6 +8,7 @@ import {sanitizeSvgDocument,SVG_ISSUE_TEXT,SVG_LIMITS} from '../shared/svg-sanit
 import {PAGE} from './fixtures/skill-page.ts';
 import type {Request,Provider} from '../server/providers/index.ts';
 import {prepareRequest} from '../server/providers/index.ts';
+import {LedgerStore} from '../server/ledger-store.ts';
 
 // The Skill renderer through the real HTTP server: the Visualize request carries a skill in instruction mode, the reply is a document, the
 // document is checked and saved, and what the iframe loads carries the CSP. Fake provider only; synthetic note.
@@ -45,6 +46,9 @@ describe('the Skill renderer',()=>{
   expect(item.skillDiagram).toEqual({asset:expect.stringMatching(/^diagram-[a-f0-9]{64}\.svg$/),bytes:Buffer.byteLength(expected.svg)});expect(item.diagram).toBeUndefined();expect(item.diagramIssue).toBeUndefined();
   expect(item.body).toBe('Diagram drawn by the diagram-design skill. It is shown as a static image.');expect(item.body).not.toMatch(/Hope it helps|Release flow/);
   const files=await readdir(path.join(t.root,'assets'));expect(files).toEqual([item.skillDiagram.asset]);
+  expect((await new LedgerStore(t.root).read()).events).toContainEqual(expect.objectContaining({
+   event:'skill_diagram_turn',skillTurn:{model:null,effort:null,reportedModel:'m-1'},
+  }));
   expect((await readFile(path.join(t.root,'assets',files[0]))).equals(Buffer.from(expected.svg,'utf8'))).toBe(true);
  });
  it('a page of more than 300 KB with a small drawing in it becomes a static svg (the cap is on the drawing, not the page)',async()=>{

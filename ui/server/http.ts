@@ -658,7 +658,7 @@ export function createApp(opts: AppOptions) {
       throw new PathError(400,'bad_body','Unknown ChatGPT connection action.');
     }
 
-    if (url.pathname === "/api/assistance" && req.method === "GET") return json(res, 200, await (await assistance).availability());
+    if (url.pathname === "/api/assistance" && req.method === "GET") return json(res, 200, await (await assistance).availability(url.searchParams.get('renderer')));
     if (url.pathname === "/api/assistance/status" && req.method === "GET") {
       try { return json(res, 200, (await assistance).status(url.searchParams.get("id") ?? "")); }
       catch { return json(res, 404, { error: "interrupted", message: "Request not found or interrupted by server restart. It was not rerun." }); }

@@ -119,6 +119,17 @@ describe('first-run setup endpoints', () => {
   });
   await expect(setup.put({role:'investigate-read',provider:'claude'})).rejects.toThrow(/startup Claude/);
  });
+ it('persists Skill diagram model and effort independently of Think and Ask',async()=>{
+  const claude={...codex,id:'claude' as const,effort:true,effortCode:'help_flag_present' as const};
+  const api=service([claude,codex]);
+  await expect(api.put({role:'skill-diagram',provider:'codex'})).rejects.toThrow(/supports this role/);
+  await api.put({role:'skill-diagram',provider:'claude'});
+  await api.put({role:'skill-diagram',provider:'claude',selection:{model:'sonnet',effort:'low'}});
+  const view=await service([claude,codex]).get();
+  expect(view.roles.find(r=>r.role==='skill-diagram')).toMatchObject({capableProviders:['claude'],source:'saved choice'});
+  expect(view.models.find(m=>m.role==='skill-diagram')?.selection).toEqual({model:'sonnet',effort:'low'});
+  expect(view.models.find(m=>m.role==='invoked')?.selection).toBeNull();
+ });
  it('reports enabled Council participants and explicit startup choices without changing saved assignments', async () => {
   const claude = {...codex, id:'claude' as const};
   const kiro = {...codex, id:'kiro' as const};

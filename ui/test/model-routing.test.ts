@@ -24,6 +24,36 @@ const preferences=()=>createSetupHttp({dir,project:dir,ready:async()=>true,provi
  id:'claude',path:'/synthetic/claude',version:'2.1.205',isolation:'metadata-compatible',
  code:'metadata_compatible',reason:'Synthetic metadata',roles:[],effort:true,effortCode:'help_flag_present',
 }]});
+it('uses the Skill role independently and pins its effective settings across preview and send',async()=>{
+ const seen:unknown[]=[];
+ const legacy={name:'claude' as const,checkAvailability:async()=>({available:true as const}),
+  invoke:async(_request:unknown,options:unknown)=>{seen.push(options);return {id:'skill',provider:'claude' as const,model:'reported-model',answer:'',claims:[],usage:null};}};
+ const adapter:TurnAdapter={id:'claude',label:'Claude',safetyLabel:'fenced',async *startTurn(){throw Error('unexpected adapter');}};
+ const registry=new ProviderRegistry([descriptorFromAdapter(adapter,{detect:async()=>({available:true,reason:null}),bridges:{'skill-diagram':true}})]);
+ const setup=defaultMachineSetup();setup.roles.invoked=null;setup.providers.claude.model='opus';
+ await saveMachineSetup(dir,setup);
+ const api=preferences(),role='skill-diagram';
+ await api.put({role,provider:'claude',selection:{model:'sonnet',effort:'low'}});
+ const reviews=new ProviderReviews(role,()=>registry.snapshot(dir),legacy);
+ const review=reviews.issue((await reviews.selection())!,'test',{});
+ expect(review.modelSettings).toEqual({model:'sonnet',effort:'low'});
+ const pinned=await reviews.consume(review.id,'test',{});
+ await reviews.provider(pinned,new LedgerStore(dir),{id:'skill',requestId:'skill',note:'fixture.md'},()=>{}).invoke({} as never);
+ expect(seen).toEqual([{selection:{model:'sonnet',effort:'low'}}]);
+ const stale=reviews.issue((await reviews.selection())!,'test',{});
+ await api.put({role,provider:'claude',selection:{model:null,effort:null}});
+ await expect(reviews.consume(stale.id,'test',{})).rejects.toMatchObject({code:'stale_review'});
+ expect((await reviews.selection())?.provider.selection).toBeUndefined();
+ const saved=await import('../server/setup-store.ts').then(store=>store.loadMachineSetup(dir));
+ saved.providers.claude.roles[role]={model:'retired',effort:'low'};
+ saved.providers.claude.catalogChoices={[role]:'retired'};
+ await saveMachineSetup(dir,saved);
+ const catalog={source:'cli' as const,checkedAt:Date.now(),models:[{id:'current',name:'Current',default:true,efforts:['low']}]};
+ const catalogReviews=new ProviderReviews(role,()=>registry.snapshot(dir,undefined,()=>catalog),legacy);
+ const retired=catalogReviews.issue((await catalogReviews.selection())!,'retired',{});
+ expect(retired.modelSettings).toEqual({model:null,effort:null});
+ expect(retired.modelNotice).toContain('no longer listed');
+});
 it('a model switch freezes and previews carried history before the fresh CLI turn',async()=>{
  const root=path.join(dir,'notes');await mkdir(root);await writeFile(path.join(root,'plan.md'),'Synthetic note.');
  const store=await Store.open(root),ink=await InkStore.open(root),index=await SessionIndex.open(path.join(dir,'index')),questions=new QuestionStore(index.dir);

@@ -72,7 +72,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   const review = async (input: Invocation) => {
     setBusy(true);
     try {
-      const availability = await api.assistance();
+      const availability = await api.assistance(input.renderer);
       if (!availability.available) throw new Error(availability.message ?? 'Claude is unavailable.');
       const packet = await api.previewInvocation(input);
       const reviewed=(packet as {review?:{id:string;provider:string}}).review;
@@ -115,6 +115,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   // only shows it as a fallback when that blob is not on screen (narrow layout), plus the job status lines.
   const sendRef = useRef<HTMLButtonElement>(null), hasPacket = draft?.packet !== undefined;
   const reviewedCap=(draft?.packet as {review?:{cap?:{unit:string;amount:number}|null}}|undefined)?.review?.cap;
+  const modelNotice=(draft?.packet as {review?:{modelNotice?:string}}|undefined)?.review?.modelNotice;
   const stepNode = draft ? nodeFor(draft.input.action, draft.input.question) : 'ask', persona = useNodeSettings(stepNode);
   // Visualize only: who draws the diagram. Skill needs a skill attached to the Visualize step (Settings); Built-in is always there and the default.
   const isVisualize = !!draft && draft.input.question === VISUALIZE_QUESTION, renderer = draft?.input.renderer ?? 'builtin';
@@ -155,6 +156,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       <SkillsReviewList review={(draft.packet as { skills?: SkillsReview }).skills} />
       <details><summary>Exact redacted request</summary><pre>{JSON.stringify(exactRequest(draft.packet), null, 2)}</pre></details></details>}
     {hasPacket && <p className="small muted">{providerLabel} · {selectionLabel((draft.packet as {review?:{modelSettings?:import('../../shared/setup.ts').ModelEffort}}).review?.modelSettings)}. This request uses a fresh CLI context.</p>}
+    {hasPacket && modelNotice && <p className="small muted">{modelNotice}</p>}
     {hasPacket && <p className="small muted ask-hint">Enter to send · Esc to cancel</p>}
     {hasPacket&&reviewedCap&&<p className="small muted">{providerLabel} allowance for this request: {reviewedCap.amount.toLocaleString()} {reviewedCap.unit}. Usage is reported after the turn; if it is not reported, the full allowance is charged conservatively. Another request needs a new review.</p>}
     {draft.error && <p role="alert">{draft.error}</p>}

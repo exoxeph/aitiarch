@@ -11,16 +11,17 @@ export interface ReviewedInvocation {created:number;fingerprint:string;packet:st
 export const staleReview=()=>new PathError(409,'stale_review','The request or selected provider changed. Review again before sending. No provider was called.');
 export class ProviderReviews {
  private reviews=new Map<string,ReviewedInvocation>();
- constructor(privateRole:'invoked'|'thread-reply',routing:RoleRouting|undefined,legacy:Provider){this.role=privateRole;this.routing=routing;this.legacy=legacy;}
- private role:'invoked'|'thread-reply';private routing?:RoleRouting;private legacy:Provider;
+ private role:'invoked'|'thread-reply'|'skill-diagram';private routing?:RoleRouting;private legacy:Provider;
+ constructor(role:ProviderReviews['role'],routing:RoleRouting|undefined,legacy:Provider){this.role=role;this.routing=routing;this.legacy=legacy;}
  async selection(){
   if(!this.routing)return undefined;
   const snapshot=await this.routing(),provider=snapshot.resolveRole(this.role);
   if('available' in provider)throw new PathError(409,provider.code,provider.reason);
   const factory=this.role==='invoked'?provider.createInvokedProvider:provider.createThreadProvider;
-  if(provider.id==='kiro'||provider.id==='codex'&&!factory)throw new PathError(409,'role-unavailable','This provider has no verified bridge for this request. No other provider was tried.');
+  if(provider.id==='kiro'||provider.id==='codex'&&(!factory||this.role==='skill-diagram'))throw new PathError(409,'role-unavailable','This provider has no verified bridge for this request. No other provider was tried.');
   if(provider.id==='claude'&&this.legacy.name&&this.legacy.name!=='claude')throw new PathError(409,'provider-unavailable','Claude is not configured for this request. No other provider was tried.');
-  return {provider,contextKey:snapshot.contextKey(this.role),currentContextKey:snapshot.currentContextKey};
+  return {provider,contextKey:snapshot.contextKey(this.role),currentContextKey:snapshot.currentContextKey,
+   modelNotice:this.role==='skill-diagram'?snapshot.skillModelNotice:undefined};
  }
  async assert(review:ReviewedInvocation){
   const current=await this.selection();let freshKey:string|undefined;
@@ -33,7 +34,8 @@ export class ProviderReviews {
   for(const [key,value] of this.reviews)if(Date.now()-value.created>600000)this.reviews.delete(key);
   if(this.reviews.size>=100)this.reviews.delete(this.reviews.keys().next().value!);
   this.reviews.set(id,{created:Date.now(),fingerprint,packet:JSON.stringify(packet),contextKey:selected.contextKey,provider:selected.provider,cap});
-  return {id,provider:selected.provider.id,cap,modelSettings:selected.provider.selection??{model:null,effort:null}};
+  return {id,provider:selected.provider.id,cap,modelSettings:selected.provider.selection??{model:null,effort:null},
+   ...(selected.modelNotice?{modelNotice:selected.modelNotice}:{})};
  }
  async consume(id:string|undefined,fingerprint:string,packet:unknown){
   const review=id?this.reviews.get(id):undefined;if(!review)throw staleReview();

@@ -147,10 +147,10 @@ async function checkLaunches() {
    }
    const roleRows=panel.locator('.setup-roles');
    assert(!await roleRows.getByText(/explicit flag|set by launch flag/i).count());
-   for(const role of ['Normal chat','Think and Ask','Thread replies']){
+   for(const role of ['Normal chat','Think and Ask','Thread replies','Skill diagrams']){
     const row=roleRows.getByRole('group',{name:role,exact:true});
     assert(await row.getByRole('combobox').isEnabled());
-    assert(await row.locator('option[value="codex"]').isEnabled());
+    assert.equal(await row.locator('option[value="codex"]').isEnabled(),role!=='Skill diagrams');
     assert(await row.getByRole('button',{name:'Reset to default'}).isEnabled());
    }
    const council=roleRows.getByRole('group',{name:'Council participants'});
@@ -174,6 +174,14 @@ async function checkLaunches() {
    row=panel.getByRole('group',{name:'Normal chat',exact:true});
    await row.getByText(/ · default$/).waitFor();
    assert.equal(await row.getByRole('combobox').inputValue(),'claude');
+   let skill=panel.getByRole('group',{name:'Skill diagrams'});
+   await skill.getByRole('button',{name:/Model: Claude/}).click();
+   await skill.getByRole('menuitemradio',{name:'haiku',exact:true}).click();
+   await skill.getByRole('button',{name:/Model: Claude.*Haiku/}).waitFor();
+   await page.reload();
+   panel=await openSetup();
+   skill=panel.getByRole('group',{name:'Skill diagrams'});
+   await skill.getByRole('button',{name:/Model: Claude.*Haiku/}).waitFor();
    await page.screenshot({path:path.join(output,`setup-${mode}-1280.png`)});
    assert.deepEqual(await readFile(note),original);
    for(const folder of [bin,pinned])assert(!(await readdir(folder)).some(file=>file.endsWith('.unexpected-invocation')));

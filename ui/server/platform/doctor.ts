@@ -6,11 +6,14 @@ import {selectClis,type CliSelectionOptions,type SelectedCli} from './cli-select
 import {loadMachineSetup,SETUP_FILE} from '../setup-store.ts';
 import {ROLE_REGISTRY,roleDefinition,type SetupRole,type SetupProvider} from '../../shared/setup.ts';
 import {providerCapabilities} from '../providers/registry.ts';
+import {createModelCatalogs} from '../providers/model-catalog.ts';
+import {modelSelection,selectionLabel} from '../../shared/model-settings.ts';
+import {effectiveCatalogSelection} from '../../shared/models.ts';
 export interface DoctorOptions extends CliSelectionOptions {
  filesystem?:{buildPresent:(dir:string)=>Promise<boolean>;configWritable:(dir:string)=>Promise<boolean>};
 }
 export type DoctorProvider=SelectedCli;
-export interface DoctorRole {role:SetupRole;provider:SetupProvider|null;version:string|null;reason:string|null;participants?:SetupProvider[]}
+export interface DoctorRole {role:SetupRole;provider:SetupProvider|null;version:string|null;reason:string|null;participants?:SetupProvider[];modelSettings?:Readonly<import('../../shared/setup.ts').ModelEffort>;modelNotice?:string}
 export interface DoctorReport {exitCode:0|1;checks:{id:string;ok:boolean;code:string;reason:string}[];providers:DoctorProvider[];roles?:DoctorRole[];notice:string}
 export async function checkPrerequisites(options:DoctorOptions):Promise<DoctorReport['checks']>{
  const install=fileURLToPath(new URL('../../',import.meta.url));
@@ -31,12 +34,19 @@ export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
  const providers=await selectClis(options);
  let setup:Awaited<ReturnType<typeof loadMachineSetup>>|null=null,roleError=false;
  try{await lstat(path.join(options.configDir,SETUP_FILE));setup=await loadMachineSetup(options.configDir);}catch(e){roleError=(e as NodeJS.ErrnoException).code!=='ENOENT';}
- const roles=ROLE_REGISTRY.map(({id:role,capability,multiple})=>{
+ const catalogs=createModelCatalogs(options.configDir,providers);
+ const roles=await Promise.all(ROLE_REGISTRY.map(async({id:role,capability,multiple})=>{
   const id=setup?.roles[role]??null,p=providers.find(p=>p.id===id);
   const capable=id&&providerCapabilities(id,{invoked:true,'thread-reply':true,'investigate-read':true,'skill-diagram':true})[capability];
+  const effective=role==='skill-diagram'&&setup&&id&&p&&capable?(()=>{
+   const requested=modelSelection(setup,role,id);
+   return {requested,listed:setup.providers[id].catalogChoices?.[role]===requested.model};
+  })():undefined;
+  const selection=effective&&p?effectiveCatalogSelection(p.id,effective.requested,effective.listed,(await catalogs.cached(p))??undefined):undefined;
   return {role,provider:id,version:p?.version??null,reason:roleError?'Machine setup could not be read. Fix the saved settings.':!id?'No compatible provider is assigned for this role. Start Aitiarch to assign available defaults.':!setup!.providers[id].enabled?'Assigned provider is disabled.':!capable?`${id} has no verified bridge for ${role}.`:p?.isolation!=='metadata-compatible'?p?.reason??'Assigned provider is unavailable.':null,
+   ...(selection?{modelSettings:selection.effective,...(selection.modelNotice?{modelNotice:selection.modelNotice}:{})}:{}),
    ...(multiple?{participants:providers.filter(p=>p.isolation==='metadata-compatible'&&setup?.providers[p.id].enabled&&(!setup.councilParticipants||setup.councilParticipants.includes(p.id))).map(p=>p.id)}:{})};
- });
+ }));
  return {exitCode:checks.every(c=>c.ok)?0:1,checks,providers,roles,notice:'AI-off editing remains available when optional providers are missing. Login and entitlement were not checked.'};
 }
-export function formatDoctor(report:DoctorReport):string{return [...report.checks.map(c=>`${c.id}: ${c.code} — ${c.reason}`),...report.providers.map(p=>`${p.id}: ${p.code}; path=${p.path??'not found'}; version=${p.version??'unknown'}; isolation=${p.isolation}; roles=${p.roles.join(', ')||'none verified'}; effort=${p.effort===null?'n/a':p.effort} — ${p.reason}`),...(report.roles??[]).map(r=>`${r.role} -> ${r.provider===null?'unset: '+r.reason:(r.provider==='claude'?'Claude':r.provider==='codex'?'Codex':'Kiro')+', version='+(r.version??'not reported')+(r.reason?'; '+r.reason:'')}${r.participants?.length?'; participants='+r.participants.join(', '):''} · ${roleDefinition(r.role).label}`),report.notice].join('\n');}
+export function formatDoctor(report:DoctorReport):string{return [...report.checks.map(c=>`${c.id}: ${c.code} — ${c.reason}`),...report.providers.map(p=>`${p.id}: ${p.code}; path=${p.path??'not found'}; version=${p.version??'unknown'}; isolation=${p.isolation}; roles=${p.roles.join(', ')||'none verified'}; effort=${p.effort===null?'n/a':p.effort} — ${p.reason}`),...(report.roles??[]).map(r=>`${r.role} -> ${r.provider===null?'unset: '+r.reason:(r.provider==='claude'?'Claude':r.provider==='codex'?'Codex':'Kiro')+', version='+(r.version??'not reported')+(r.reason?'; '+r.reason:'')}${r.modelSettings?'; '+selectionLabel(r.modelSettings):''}${r.modelNotice?'; '+r.modelNotice:''}${r.participants?.length?'; participants='+r.participants.join(', '):''} · ${roleDefinition(r.role).label}`),report.notice].join('\n');}

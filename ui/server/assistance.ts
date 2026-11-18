@@ -11,6 +11,7 @@ import { SkillDiagramStore } from './skill-diagram-store.ts';
 import { SKILL_DIAGRAM_FAILED_BODY, SKILL_DIAGRAM_MAX_BYTES, extractDocument, skillDiagramBody, skillDiagramFallbackBody, type SkillDiagramRef } from '../shared/skill-diagram.ts';
 import { sanitizeSvgDocument } from '../shared/svg-sanitize.ts';
 import { appendLedger, LedgerStore } from './ledger-store.ts';
+import {validCatalogModelId} from '../shared/models.ts';
 import { prepareRequest, ProviderError, redact, type Provider, type Request } from './providers/index.ts';
 import { ProductValidationError, validateProductResult, validationCounts, type ValidationLog, type ValidationRecord } from './product-validation.ts';
 import { privateValidationLog } from './providers/failure-metrics.ts';
@@ -39,9 +40,11 @@ export class Assistance {
   private readonly validationLog:ValidationLog;
   private readonly routing?:RoleRouting;
   private reviews:ProviderReviews;
+  private skillReviews:ProviderReviews;
   constructor(store: Store, ink: InkStore, provider: Provider, notify: (path: string) => void = () => {}, validationLog:ValidationLog=privateValidationLog(), extras?: ExtrasFor,routing?:RoleRouting) {
     this.routing=routing;
     this.reviews=new ProviderReviews('invoked',routing,provider);
+    this.skillReviews=new ProviderReviews('skill-diagram',routing,provider);
     this.validationLog=validationLog;this.extras=extras;
     this.store = store; this.ink = ink; this.provider = provider; this.notify = notify;
     this.ledger = new LedgerStore(store.rootReal);
@@ -67,14 +70,8 @@ export class Assistance {
     if (Buffer.byteLength(document) > SKILL_DIAGRAM_MAX_BYTES) return failed('skill_too_large');
     return { body: skillDiagramFallbackBody(skills, svg.reason), model, skillDiagram: { ...await this.skillDiagrams.saveHtml(document), why: svg.reason } as SkillDiagramRef | undefined, diagramIssue: undefined as DiagramIssue | undefined };
   }
-  private async selection(){
-    return this.reviews.selection();
-  }
-  private async assertReviewed(review:ReviewedInvocation){
-    return this.reviews.assert(review);
-  }
-  async availability() {
-    try{const selection=await this.selection();
+  async availability(renderer?:string|null) {
+    try{const selection=await (renderer==='skill'?this.skillReviews:this.reviews).selection();
       if(selection?.provider.id==='codex')return {available:true,provider:'codex'};
       return { ...await this.provider.checkAvailability(), provider:this.provider.name??'claude' };
     }catch(e){return {available:false,provider:'unavailable',code:'unsupported_cli',message:e instanceof PathError?e.message:'Provider settings could not be verified. No provider was selected.'};}
@@ -89,9 +86,10 @@ export class Assistance {
       review: e.review ? { loaded: [], skipped: [], missing: [], note: SKILLS_ONLY_WITH_SKILL_RENDERER } : null };
     return { request: { ...base, persona: e.persona, ...(e.skills.loaded.length ? { skills: e.skills } : {}) }, names: e.names, review: e.review };
   }
-  async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview;review?:{id:string;provider:string;cap:CouncilCap|null;modelSettings:import('../shared/setup.ts').ModelEffort} }> {
+  async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview;review?:{id:string;provider:string;cap:CouncilCap|null;modelSettings:import('../shared/setup.ts').ModelEffort;modelNotice?:string} }> {
     const frozen = freezeInvocation(input);
-    const selected=await this.selection();
+    const reviews=frozen.renderer==='skill'?this.skillReviews:this.reviews;
+    const selected=await reviews.selection();
     const { request, review } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question,
       selection: frozen.selection, note: frozen.text, decisions: [], turns: [], ...(frozen.renderer === 'skill' ? { render: 'skill' as const } : {}) }, frozen.skill);
     this.checkSkillRenderer(frozen.renderer, request,selected?.provider.id==='codex'?'codex':this.provider.name);
@@ -99,7 +97,7 @@ export class Assistance {
     // The instruction in the packet is the exact text; "skills" beside it says what was loaded, skipped or not installed.
     const prepared=review?{...packet,skills:review}:packet;
     if(!selected)return prepared;
-    return {...prepared,review:this.reviews.issue(selected,invocationFingerprint(frozen),packet)};
+    return {...prepared,review:reviews.issue(selected,invocationFingerprint(frozen),packet)};
   }
   private serial<T>(fn: () => Promise<T>): Promise<T> { const p = this.writes.catch(() => {}).then(fn); this.writes = p; return p; }
   private async mutate(path: string, before: string, change: (items: InkItem[], text: string | null) => InkItem[]): Promise<InkSnapshot> {
@@ -128,10 +126,11 @@ export class Assistance {
     // Transcript context stays none. Optional source selection is a later slice;
     // never discover a user's global sessions or transmit one implicitly.
     const packet = prepareRequest(request);
+    const reviews=frozen.renderer==='skill'?this.skillReviews:this.reviews;
     let provider=this.provider,reviewed:ReviewedInvocation|undefined;
     if(this.routing){
-      reviewed=await this.reviews.consume(frozen.reviewId,invocationFingerprint(frozen),packet);
-      provider=this.reviews.provider(reviewed,this.ledger,{id:frozen.id,requestId:frozen.id,note:path},(usage,notice)=>{job.usage=usage;if(notice)job.notice=notice;});
+      reviewed=await reviews.consume(frozen.reviewId,invocationFingerprint(frozen),packet);
+      provider=reviews.provider(reviewed,this.ledger,{id:frozen.id,requestId:frozen.id,note:path},(usage,notice)=>{job.usage=usage;if(notice)job.notice=notice;});
     }
     this.checkSkillRenderer(frozen.renderer,request,provider.name);
     const availability = await provider.checkAvailability();
@@ -158,10 +157,17 @@ export class Assistance {
       const record=async(row:ValidationRecord)=>{try{await this.validationLog.write(row);}catch{/* Metrics never change acceptance or persistence. */}};
       try {
         if (controller.signal.aborted) throw new ProviderError('cancelled');
-        if(reviewed)await this.assertReviewed(reviewed);
+        if(reviewed)await reviews.assert(reviewed);
         result = await provider.invoke(request, { signal: controller.signal });resultReceived=true;
         if (controller.signal.aborted) throw new ProviderError('cancelled');
-        if (request.render === 'skill') ({ body, model, skillDiagram, diagramIssue } = await this.acceptSkillDiagram(result, frozen.id, names));
+        if (request.render === 'skill') {
+          const selection=reviewed?.provider.selection;
+          const saved=await appendLedger(this.ledger,{id:randomUUID(),inkId:frozen.id,requestId:frozen.id,note:path,
+            event:'skill_diagram_turn',at:new Date().toISOString(),skillTurn:{model:selection?.model??null,effort:selection?.effort??null,
+              reportedModel:validCatalogModelId(result.model)?result.model:null}});
+          if(!saved)job.notice='The Skill diagram ledger entry is queued for retry.';
+          ({ body, model, skillDiagram, diagramIssue } = await this.acceptSkillDiagram(result, frozen.id, names));
+        }
         else ({body,model,evidence,diagram,diagramIssue}=validateProductResult(result,frozen.id,packet.data,redact,textHash,provider.name??'claude'));
       } catch (e) {
         if(e instanceof ProductValidationError)await record(e.record);

@@ -10,7 +10,7 @@ import type {TurnAdapter,SafetyLabel} from './turn.ts';
 import type {createInvokedCodexBridge} from './invoked-bridge.ts';
 import type {Provider} from './index.ts';
 import {modelSelection} from '../../shared/model-settings.ts';
-import {applyCatalogAvailability,type ModelCatalog} from '../../shared/models.ts';
+import {applyCatalogAvailability,effectiveCatalogSelection,type ModelCatalog} from '../../shared/models.ts';
 import type {ModelEffort} from '../../shared/setup.ts';
 import {versionParts,type CliNotice} from './cli-compatibility.ts';
 export type InvokedBridgeFactory=(options:Pick<Parameters<typeof createInvokedCodexBridge>[0],'cap'|'onTurn'|'beforeTurn'|'selection'>)=>Provider;
@@ -40,6 +40,7 @@ export function providerCapabilities(id:SetupProvider,bridges:Partial<Record<'in
  return capabilities;
 }
 export interface RequestSettingsSnapshot {
+ readonly skillModelNotice?:string;
  readonly settings:MachineSetup;
  readonly providerVersions?:Readonly<Partial<Record<SetupProvider,string>>>;
  resolveRole(role:SetupRole):RoleResolution;
@@ -101,15 +102,22 @@ export class ProviderRegistry {
   return provider;
  }
  async snapshot(dir:string,initial?:()=>Promise<MachineSetup>,catalogFor?:(provider:SetupProvider)=>ModelCatalog|undefined):Promise<RequestSettingsSnapshot>{
-  const readSettings=async()=>{
+  const readSavedSettings=async()=>{
    let missing=false;
    if(initial)try{await lstat(path.join(dir,SETUP_FILE));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')missing=true;else throw e;}
-   const setup=missing?await initial!():await loadMachineSetup(dir);
-   return catalogFor?applyCatalogAvailability(setup,catalogFor):setup;
+   return missing?await initial!():await loadMachineSetup(dir);
   };
-  let settings:MachineSetup,fault=false;
+  const applyCatalog=(setup:MachineSetup)=>catalogFor?applyCatalogAvailability(setup,catalogFor):setup;
+  const readSettings=async()=>applyCatalog(await readSavedSettings());
+  let settings:MachineSetup,fault=false,skillModelNotice:string|undefined;
   try{
-   settings=await readSettings();
+   const saved=await readSavedSettings();
+   const id=saved.roles['skill-diagram'];
+   if(id&&catalogFor){
+    const requested=modelSelection(saved,'skill-diagram',id);
+    skillModelNotice=effectiveCatalogSelection(id,requested,saved.providers[id].catalogChoices?.['skill-diagram']===requested.model,catalogFor(id)).modelNotice;
+   }
+   settings=applyCatalog(saved);
   }catch{settings=defaultMachineSetup();fault=true;}
   // Capture before asynchronous metadata checks; later disk edits are a new request.
   const frozen=freeze(structuredClone(settings));
@@ -141,7 +149,7 @@ export class ProviderRegistry {
   };
   const providerKey=(settings:MachineSetup,id:SetupProvider)=>versionKey(createHash('sha256').update(JSON.stringify(
    settings.councilParticipants===undefined?settings.providers[id]:{provider:settings.providers[id],participants:settings.councilParticipants})).digest('hex'),id);
-  return Object.freeze({settings:frozen,providerVersions,resolveRole:resolve,resolveParticipant:(id:SetupProvider)=>frozen.councilParticipants&&!frozen.councilParticipants.includes(id)
+  return Object.freeze({settings:frozen,providerVersions,skillModelNotice,resolveRole:resolve,resolveParticipant:(id:SetupProvider)=>frozen.councilParticipants&&!frozen.councilParticipants.includes(id)
    ? unavailable('council',id,'role-unavailable','This provider is not selected in AI settings → Setup → Council participants.')
    : resolve('council',{...frozen,roles:{...frozen.roles,council:id}}),council,
    contextKey:(role:SetupRole)=>versionKey(settingsKey(frozen,role,fault),frozen.roles[role]),currentContextKey:async(role:SetupRole)=>{const current=await readSettings();return versionKey(settingsKey(current,role),current.roles[role]);},

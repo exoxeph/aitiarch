@@ -25,6 +25,10 @@ export function validInvestigateTurn(v:unknown):v is InvestigateTurnAudit {if(!v
   &&[x.inputTokens,x.cachedTokens,x.outputTokens,x.costUsd].every(counter)&&typeof x.outcome==='string'&&/^[a-z_]{1,24}$/.test(x.outcome);}
 /** One diagram the model opened with Read in a conversation turn: which diagram (D<n>), its name in the assets folder, the SHA-256 and size of the copy it read, and the note it is in. Never the picture. */
 export interface DiagramReadAudit {id:string;asset:string;hash:string;bytes:number;note:string}
+interface SkillTurnAudit {model:string|null;effort:string|null;reportedModel:string|null}
+const validSkillTurn=(v:SkillTurnAudit|undefined)=>!!v&&Object.keys(v).sort().join()==='effort,model,reportedModel'&&
+ (v.effort===null||typeof v.effort==='string'&&/^(low|medium|high|xhigh|max)$/.test(v.effort))&&
+ [v.model,v.reportedModel].every(id=>id===null||typeof id==='string'&&/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}(?:\[1m\])?$/.test(id));
 export function validDiagramReadAudit(v:unknown):v is DiagramReadAudit {if(!v||typeof v!=='object'||Array.isArray(v))return false;const x=v as DiagramReadAudit;
  return Object.keys(x).sort().join()==='asset,bytes,hash,id,note'&&/^D[1-9]$/.test(x.id)&&/^(?:ai-)?diagram-[a-f0-9]{64}$/.test(x.asset)&&/^[a-f0-9]{64}$/.test(x.hash)&&typeof x.bytes==='number'&&Number.isSafeInteger(x.bytes)&&x.bytes>=1&&x.bytes<=10_000_000
   &&typeof x.note==='string'&&x.note.length>=1&&x.note.length<=400&&!/[\u0000-\u001f\u007f]/.test(x.note);}
@@ -49,7 +53,7 @@ export function validContextFields(e:LedgerEvent):boolean{
 }
 /** A context_read as a whole: a known module, the hash of what was asked for, and the optional note, size and selection fields. */
 export const validContextRead=(e:LedgerEvent)=>['this-note','other-notes','claude-sessions','codex-sessions'].includes(e.moduleId??'')&&/^[a-f0-9]{64}$/.test(e.sourceHash??'')&&validContextFields(e);
-export interface LedgerEvent { id: string; inkId: string; requestId: string; note: string; event: 'shown' | 'dismissed' | 'inserted' | 'resolved' | 'reopened' | 'adopted' | 'context_read' | 'chat_started' | 'chat_completed' | 'chat_failed'|'investigation'|'investigate_turn'|'diagram_read'|'cli_version'|'conversation_turn'|'council_turn'|'invoked_turn'; at: string; invoked?:InvokedAudit; council?:CouncilAudit; authorship?: 'ai'; insertedBy?: 'human'; moduleId?:'this-note'|'other-notes'|'claude-sessions'|'codex-sessions';sourceHash?:string;investigation?:InvestigationAudit;turn?:InvestigateTurnAudit;/** diagram_read only. */diagram?:DiagramReadAudit;/** cli_version only. */cli?:CliVersionAudit;/** conversation_turn only: what the turn was allowed to do and what it carried, by counts. Never a path or any text. */conv?:ConversationTurnAudit;
+export interface LedgerEvent { id: string; inkId: string; requestId: string; note: string; event: 'shown' | 'dismissed' | 'inserted' | 'resolved' | 'reopened' | 'adopted' | 'context_read' | 'chat_started' | 'chat_completed' | 'chat_failed'|'investigation'|'investigate_turn'|'diagram_read'|'cli_version'|'conversation_turn'|'council_turn'|'invoked_turn'|'skill_diagram_turn'; at: string; skillTurn?:SkillTurnAudit; invoked?:InvokedAudit; council?:CouncilAudit; authorship?: 'ai'; insertedBy?: 'human'; moduleId?:'this-note'|'other-notes'|'claude-sessions'|'codex-sessions';sourceHash?:string;investigation?:InvestigationAudit;turn?:InvestigateTurnAudit;/** diagram_read only. */diagram?:DiagramReadAudit;/** cli_version only. */cli?:CliVersionAudit;/** conversation_turn only: what the turn was allowed to do and what it carried, by counts. Never a path or any text. */conv?:ConversationTurnAudit;
   /** context_read only, all optional (older lines have none). `path` is the note whose text was read, which in a conversation can differ from `note` (the chat's note); `chars` is the size of the source as sent;
    *  `selection` is the selection that went with the request. A context_read without `chars` is the attempt written before the read; the one with `chars` is written after it. */
   path?:string;chars?:number;selection?:ContextSelectionAudit;
@@ -110,6 +114,10 @@ export class LedgerStore {
     // Additive invoked audit branch; the exact-key legacy validators below stay
     // unchanged. Do not disguise an invoked turn as Council or Claude dollars.
     const checked=Array.isArray(d.events)?d.events.filter((e:LedgerEvent)=>{
+      if(e?.event==='skill_diagram_turn'){
+       if(Object.keys(e).sort().join()!=='at,event,id,inkId,note,requestId,skillTurn'||![e.id,e.inkId,e.requestId,e.note,e.at].every(v=>typeof v==='string')||!validSkillTurn(e.skillTurn))throw new Error('Invalid ledger; original preserved.');
+       return false;
+      }
       if(e?.event!=='invoked_turn')return true;
       if(Object.keys(e).sort().join()!=='at,event,id,inkId,invoked,note,requestId'||![e.id,e.inkId,e.requestId,e.note,e.at].every(v=>typeof v==='string')||!validInvokedAudit(e.invoked))throw new Error('Invalid ledger; original preserved.');
       return false;
@@ -173,6 +181,7 @@ export class LedgerStore {
     try { return await retried(() => readFile(lockPath, 'utf8')) === mine; } catch { return false; }
   }
   append(event: LedgerEvent): Promise<void> {
+    if(event.event==='skill_diagram_turn'&&!validSkillTurn(event.skillTurn))return Promise.reject(new Error('Invalid Skill diagram metadata.'));
     if(event.event==='invoked_turn'&&!validInvokedAudit(event.invoked))return Promise.reject(new Error('Invalid invoked metadata.'));
     if(event.event==='council_turn'&&!validCouncilAudit(event.council))return Promise.reject(new Error('Invalid council metadata.'));
     if(event.event==='investigation'&&!validInvestigation(event.investigation))return Promise.reject(new Error('Invalid investigation metadata.'));

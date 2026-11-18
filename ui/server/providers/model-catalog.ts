@@ -176,7 +176,10 @@ export function createModelCatalogs(dir:string,sources:readonly Source[],options
   }).catch(()=>{entry.value={...entry.value,notice};}).finally(()=>{entry.pending=undefined;});
   return entry.pending;
  }));
- return {refresh,view:(source:Source)=>entries.get(key(source))?.value,close:async()=>{
+ return {refresh,cached:async(source:Source)=>{
+  const entry=entries.get(key(source));
+  return entry?await loadCache(entry.file):undefined;
+ },view:(source:Source)=>entries.get(key(source))?.value,close:async()=>{
   controller.abort();await Promise.all([...entries.values()].map(e=>e.pending));
  }};
 }
