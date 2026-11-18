@@ -13,6 +13,10 @@ import {NoteWatcher} from '../server/watch.ts';
 import {createApp} from '../server/http.ts';
 import {createSetupHttp} from '../server/setup-http.ts';
 import {initProject} from '../server/init.ts';
+import {SkillDiagramStore} from '../server/skill-diagram-store.ts';
+import {InkStore} from '../server/ink-store.ts';
+import {captureAnchor} from '../shared/anchors.ts';
+import {skillPreviewUrl,SKILL_DIAGRAM_URL} from '../shared/skill-diagram.ts';
 import {compatibleDefaults,descriptorFromAdapter} from '../server/providers/registry.ts';
 import {saveMachineSetup} from '../server/setup-store.ts';
 import {createModelCatalogs,readCatalog} from '../server/providers/model-catalog.ts';
@@ -194,6 +198,64 @@ async function checkLaunches() {
  }
 }
 
+async function checkSkillStages(base,store,notePath,kind){
+ const files=new SkillDiagramStore(store.rootReal),ink=await InkStore.open(store.rootReal);
+ const svg='<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><text x="10" y="25">Private preview</text></svg>';
+ const note=await store.read(notePath),from=note.text.indexOf('Private fixture anchor');
+ assert(from>=0);
+ const anchor=captureAnchor(note.text,from,from+'Private fixture anchor'.length);
+ const snapshot=await ink.read(notePath);
+ for(const id of ['publish-fixture','discard-fixture']){
+  const skillDiagram=await files.saveSvg(svg);
+  snapshot.document.items.push({id,kind:'answer',body:'A synthetic Skill diagram.',skillDiagram,
+   anchor,originalAnchor:anchor,attachment:{status:'attached',...anchor.position},
+   generation:{provider:'claude',model:null,requestId:id,action:'ask',status:'complete',createdAt:new Date().toISOString(),evidence:[],dismissed:false}});
+ }
+ await ink.write(notePath,snapshot.document,snapshot.version);
+ const [first,second]=snapshot.document.items.slice(-2);
+ const preview=item=>skillPreviewUrl(item.skillDiagram.asset,item.skillDiagram.stage);
+ const publicPath=SKILL_DIAGRAM_URL(first.skillDiagram.asset);
+ const page=await browser.newPage({viewport:{width:1560,height:1000}});
+ const request=rel=>page.request.get(new URL(rel,base).href);
+ const steps=[];
+ page.on('response',r=>{const endpoint=new URL(r.url()).pathname;if(/\/(bring-|file|setup)/.test(endpoint))steps.push([r.request().method(),endpoint,r.status()]);});
+ try{
+  page.setDefaultTimeout(12000);
+  await page.goto(base+'/?debug=1');
+  await page.evaluate(async()=>{const session=await fetch('/api/session');if(!session.ok)throw Error('Missing app session');});
+  if(kind==='git'){
+   const setup=page.getByRole('dialog',{name:'Set up Aitiarch'});
+   await setup.getByRole('button',{name:'Skip',exact:true}).click();
+   await setup.waitFor({state:'hidden'});
+  }
+  const card=id=>page.locator('.margin-card[data-ink-id="'+id+'"]');
+  const firstCard=card(first.id);
+  const image=firstCard.locator('img.skill-diagram-image');
+  await image.waitFor();
+  await image.evaluate(img=>img.decode());
+  assert.match(await image.getAttribute('src'),/skill-diagram-preview/);
+  assert.equal((await request(publicPath)).status(),404);
+  assert.equal((await request(preview(first))).status(),200);
+  await page.screenshot({path:path.join(output,'private-skill-'+kind+'.png')});
+  const completion=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/threads/bring-complete');
+  const [response]=await Promise.all([completion,firstCard.getByRole('button',{name:'Add to note'}).click()]);
+  assert.equal(response.status(),200);
+  assert.deepEqual(await response.json(),{pending:0,unverified:0});
+  assert.equal(await (await request(publicPath)).text(),svg);
+  assert.equal((await request(preview(first))).status(),404);
+  const discarded=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/assistance/event'&&r.request().postDataJSON()?.event==='dismissed');
+  await card(second.id).getByRole('button',{name:'Discard preview'}).click();
+  assert.equal((await discarded).status(),200);
+  assert.equal((await request(preview(second))).status(),404);
+  assert.equal(await (await request(publicPath)).text(),svg);
+  console.log('Private Skill '+kind+': rendered, published on insertion, discarded its own stage.');
+ }catch(error){
+  await page.screenshot({path:path.join(output,'private-skill-'+kind+'-failure.png')});
+  console.error('Private Skill browser evidence:',kind,JSON.stringify(steps),await page.getByRole('alert').allTextContents(),await page.getByRole('dialog').allTextContents());
+  throw error;
+ }finally{await page.close();}
+}
+
 async function checkGitFirstRun(){
  const gitProject=await mkdtemp(path.join(os.tmpdir(),'aitiarch-setup-git-'));
  const gitConfig=await mkdtemp(path.join(os.tmpdir(),'aitiarch-setup-git-config-'));
@@ -220,6 +282,8 @@ async function checkGitFirstRun(){
   assert.equal((await gitSetup.get()).privacy.sharedReady,false);
   await page.screenshot({path:path.join(output,'first-run-private-git.png')});
   console.log('Git first run passed: verified local ignore and shared readiness remains off.');
+  await writeFile(path.join(initialized.root,'Welcome.md'),'# Synthetic Git note\n\nPrivate fixture anchor.\n');
+  await checkSkillStages(new URL(page.url()).origin,gitStore,'Welcome.md','git');
  }finally{await page.close();gitWatcher.stop();await gitApp.close();}
 }
 
@@ -605,6 +669,8 @@ try {
  assert.equal(writes.some(([,route])=>/\/(chat|assistance|council|investigate)\b/.test(route)),false);
  console.log('Setup passed: AI-off card, Settings Setup tab and keyboard replay, text size, composer chip and popover, unchanged project, local requests only.');
  await checkLaunches();
+ await writeFile(note,'# Synthetic plan\n\nPrivate fixture anchor.\n');
+ await checkSkillStages(url,store,'Synthetic plan.md','filesystem');
  await checkGitFirstRun();
 } finally {
  await browser?.close();

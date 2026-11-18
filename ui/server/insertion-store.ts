@@ -6,6 +6,7 @@ import type {InkItem} from '../shared/ink.ts';
 import type {InkStore} from './ink-store.ts';import type {Store} from './store.ts';import type {LedgerStore} from './ledger-store.ts';
 import {normalizeRel} from './paths.ts';import {previewThoughtInsertion} from '../shared/thoughts.ts';
 import {diagramSvg,type DiagramLayout} from '../shared/diagram-svg.ts';
+import {validSkillDiagramRef,type SkillDiagramRef} from '../shared/skill-diagram.ts';
 import {SkillDiagramStore} from './skill-diagram-store.ts';
 export interface BringInput {path:string;id:string;noteVersion:string;layout?:DiagramLayout;theme?:'light'|'dark';replyId?:string}
 export interface BringPreview {noteVersion:string;changes:{from:number;to:number;insert:string};authorship:'ai';insertedBy:'human';assetName?:string}
@@ -15,7 +16,7 @@ function replyAsItem(item:InkItem,replyId:string):InkItem{
  if(!reply)throw new Error('That reply was not found.');
  return {...item,body:reply.body,diagram:reply.diagram,generation:reply.generation};
 }
-interface Intent {id:string;inkId:string;note:string;at:string;beforeHash:string;afterHash:string;insertHash:string;from:number;length:number;state:'prepared'|'recorded'|'cancelled'}
+interface Intent {id:string;inkId:string;note:string;at:string;beforeHash:string;afterHash:string;insertHash:string;from:number;length:number;state:'prepared'|'recorded'|'cancelled';skill?:SkillDiagramRef}
 export interface RepairStatus {pending:number;unverified:number}
 const hash=(s:string|Buffer)=>createHash('sha256').update(s).digest('hex');
 const assetPattern=/^ai-diagram-[a-f0-9]{64}\.svg$/;
@@ -34,9 +35,9 @@ export class InsertionStore {
  }
  private async journal():Promise<Intent[]>{const file=await this.journalFile();let text;try{text=await readFile(file,'utf8');}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return [];throw e;}
   if(text.length>1048576)throw new Error('Insertion journal too large.');const d=JSON.parse(text),keys='afterHash,at,beforeHash,from,id,inkId,insertHash,length,note,state';
-  if(d.v!==1||Object.keys(d).sort().join()!=='operations,v'||!Array.isArray(d.operations)||d.operations.length>1000||d.operations.some((o:Intent)=>!o||Object.keys(o).sort().join()!==keys||!['prepared','recorded','cancelled'].includes(o.state)||!Number.isFinite(Date.parse(o.at))||![o.id,o.inkId].every(id=>typeof id==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(id))||![o.beforeHash,o.afterHash,o.insertHash].every(h=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))||!Number.isInteger(o.from)||o.from<0||!Number.isInteger(o.length)||o.length<1||o.length>200000||normalizeRel(o.note)!==o.note)||new Set(d.operations.map((o:Intent)=>o.id)).size!==d.operations.length)throw new Error('Invalid insertion journal; original preserved.');return d.operations;
+  if(d.v!==1||Object.keys(d).sort().join()!=='operations,v'||!Array.isArray(d.operations)||d.operations.length>1000||d.operations.some((o:Intent)=>!o||Object.keys(o).filter(key=>key!=='skill').sort().join()!==keys||('skill' in o&&(!validSkillDiagramRef(o.skill)||!o.skill.stage))||!['prepared','recorded','cancelled'].includes(o.state)||!Number.isFinite(Date.parse(o.at))||![o.id,o.inkId].every(id=>typeof id==='string'&&/^[a-zA-Z0-9_-]{1,100}$/.test(id))||![o.beforeHash,o.afterHash,o.insertHash].every(h=>typeof h==='string'&&/^[a-f0-9]{64}$/.test(h))||!Number.isInteger(o.from)||o.from<0||!Number.isInteger(o.length)||o.length<1||o.length>200000||normalizeRel(o.note)!==o.note)||new Set(d.operations.map((o:Intent)=>o.id)).size!==d.operations.length)throw new Error('Invalid insertion journal; original preserved.');return d.operations;
  }
- private async save(operations:Intent[]){const file=await this.journalFile(true),temp=file+'.'+randomUUID()+'.tmp',f=await open(temp,'wx',0o600);try{await f.writeFile(JSON.stringify({v:1,operations},null,2)+'\n');await f.sync();}finally{await f.close();}try{await this.confined('ink/insertions.json');await rename(temp,file);}finally{await unlink(temp).catch(()=>{});}}
+ private async save(operations:Intent[]){const file=await this.journalFile(true),temp=file+'.'+randomUUID()+'.tmp',f=await open(temp,'wx',0o600);try{await f.writeFile(JSON.stringify({v:1,operations},null,2)+'\n');await f.sync();}finally{await f.close();}try{if(await this.journalFile()!==file)throw new Error('Insertion journal location changed.');await rename(temp,file);}finally{await unlink(temp).catch(()=>{});}}
  private async acquireLock(file:string){
   const name=file+'.lock';await this.confined(path.relative(this.ink.rootReal,name).split(path.sep).join('/'));
   for(let attempt=0;attempt<3;attempt++){
@@ -50,16 +51,19 @@ export class InsertionStore {
    }
   }throw new Error('Insertion journal is busy.');
  }
- private serial<T>(run:()=>Promise<T>):Promise<T>{const job=this.tail.catch(()=>{}).then(async()=>{const file=await this.confined('ink/insertions.json',true),lock=await this.acquireLock(file);try{return await run();}finally{await lock.close();await unlink(file+'.lock');}});this.tail=job;return job;}
+ private serial<T>(run:()=>Promise<T>):Promise<T>{const job=this.tail.catch(()=>{}).then(async()=>{const file=await this.journalFile(true),lock=await this.acquireLock(file);try{return await run();}finally{await lock.close();await unlink(file+'.lock');}});this.tail=job;return job;}
  private async build(input:BringInput){
   const note=await this.store.read(input.path);if(note.version!==input.noteVersion)throw new Error('The note changed. Review a new preview.');
   const s=await this.ink.read(input.path),mapped=await this.ink.reanchor(input.path,s.version),item=mapped.document.items.find(i=>i.id===input.id);if(!item)throw new Error('Thought not found.');
   const source=input.replyId?replyAsItem(item,input.replyId):item; // a specific AI message (a reply) can be added instead of the first answer
-  const base=previewThoughtInsertion(note,source,input.noteVersion);let preview:BringPreview=base,svg:string|undefined;
+  const base=previewThoughtInsertion(note,source,input.noteVersion);let preview:BringPreview=base,svg:string|undefined,skill:SkillDiagramRef|undefined;
   if(source.skillDiagram){
-   // A skill's diagram is already a saved, hash-named file under assets/: verify it, then point at it from the same AI callout. Nothing is written here.
+   // Prepare a reference to the eventual published asset without copying any bytes.
    if(input.layout!==undefined)throw new Error('The thought diagram changed. Review a new preview.');
-   const ref=source.skillDiagram;await this.skillFiles.read(ref.asset);
+   const ref=source.skillDiagram;
+   if(ref.stage&&source.generation?.dismissed)throw new Error('This diagram was discarded.');
+   await this.skillFiles.readForInsertion(ref);
+   if(ref.stage)skill=ref;
    const relative=path.posix.relative(path.posix.dirname(input.path),'assets/'+ref.asset),label=(source.generation?.skills??[]).join(', ')||'skill',alt=label.replace(/[\\\[\]]/g,'\\$&');
    const nl=note.text.includes('\r\n')?'\r\n':'\n',tail=base.changes.from===note.text.length?nl:'';
    // A still image is an image; the interactive fallback is only a link to the saved page (the editor opens it behind a click).
@@ -70,20 +74,20 @@ export class InsertionStore {
    const nl=note.text.includes('\r\n')?'\r\n':'\n',tail=base.changes.from===note.text.length?nl:'';
    preview={...base,changes:{...base.changes,insert:base.changes.insert.slice(0,base.changes.insert.length-tail.length)+nl+'> !['+alt+']('+relative+')'+tail},assetName};
   }else if(input.layout!==undefined)throw new Error('The thought diagram changed. Review a new preview.');
-  return {preview,svg,note};
+  return {preview,svg,note,skill};
  }
  async preview(input:BringInput):Promise<BringPreview>{return (await this.build(input)).preview;}
  async prepare(input:BringInput&{preview:BringPreview}){return this.serial(async()=>{
-  const {preview,svg,note}=await this.build(input);if(JSON.stringify(preview)!==JSON.stringify(input.preview))throw new Error('The thought changed. Review a new preview.');return this.record(note,input.id,preview,svg);
+  const {preview,svg,note,skill}=await this.build(input);if(JSON.stringify(preview)!==JSON.stringify(input.preview))throw new Error('The thought changed. Review a new preview.');return this.record(note,input.id,preview,svg,skill);
  });}
  /** Server-built preview only; shares the durable journal and subsequent ledger repair with thoughts. */
  async prepareChat(note:{path:string;text:string;version:string},messageId:string,preview:BringPreview){return this.serial(async()=>{
   if((await this.store.read(note.path)).version!==note.version)throw new Error('The note changed. Review a new preview.');return this.record(note,messageId,preview);
  });}
- private async record(note:{path:string;text:string;version:string},messageId:string,preview:BringPreview,svg?:string){
+ private async record(note:{path:string;text:string;version:string},messageId:string,preview:BringPreview,svg?:string,skill?:SkillDiagramRef){
   const operations=await this.journal();if(operations.length>=1000)throw new Error('Insertion history limit reached.');
   if(svg&&preview.assetName){const file=await this.confined('assets/'+preview.assetName,true);try{const f=await open(file,'wx',0o600);try{await f.writeFile(svg);await f.sync();}finally{await f.close();}}catch(e){if((e as NodeJS.ErrnoException).code!=='EEXIST'||await readFile(file,'utf8')!==svg)throw e;}}
-  const c=preview.changes,operation:Intent={id:randomUUID(),inkId:messageId,note:normalizeRel(note.path),at:new Date().toISOString(),beforeHash:hash(note.text),afterHash:hash(note.text.slice(0,c.from)+c.insert+note.text.slice(c.to)),insertHash:hash(c.insert),from:c.from,length:c.insert.length,state:'prepared'};
+  const c=preview.changes,operation:Intent={id:randomUUID(),inkId:messageId,note:normalizeRel(note.path),at:new Date().toISOString(),beforeHash:hash(note.text),afterHash:hash(note.text.slice(0,c.from)+c.insert+note.text.slice(c.to)),insertHash:hash(c.insert),from:c.from,length:c.insert.length,state:'prepared',...(skill?{skill}:{})};
   operations.push(operation);await this.save(operations);return {operationId:operation.id,preview};
  }
  private async reconcileLocked(note:string,completeId?:string):Promise<RepairStatus>{const operations=await this.journal();let current:string|null=null;try{current=(await this.store.read(note)).text;}catch{/* Missing/conflicting note stays pending; no invented ledger event. */}
@@ -91,9 +95,17 @@ export class InsertionStore {
   for(const o of operations){if(o.note!==note||o.state!=='prepared')continue;
    const matches=current!==null&&hash(current)!==o.beforeHash&&(hash(current)===o.afterHash||hash(current.slice(o.from,o.from+o.length))===o.insertHash);
    if(!matches){pending++;unverified++;continue;}
-   try{const recorded=await appendLedger(this.ledger,{id:o.id,requestId:o.id,inkId:o.inkId,note:o.note,event:'inserted',at:o.at,authorship:'ai',insertedBy:'human'});if(recorded){o.state='recorded';changed=true;}else pending++;}catch{pending++;}
+   try{if(o.skill)await this.skillFiles.publish(o.skill);const recorded=await appendLedger(this.ledger,{id:o.id,requestId:o.id,inkId:o.inkId,note:o.note,event:'inserted',at:o.at,authorship:'ai',insertedBy:'human'});if(recorded){o.state='recorded';changed=true;}else pending++;}catch{pending++;}
   }
   if(changed){try{await this.save(operations);}catch{pending=Math.max(1,pending);}}return {pending,unverified};
+ }
+ async discardSkillPreview(ref:SkillDiagramRef,hide:()=>Promise<void>){
+  await this.serial(async()=>{
+   const operations=await this.journal();
+   if(operations.some(o=>o.state==='prepared'&&o.skill?.stage===ref.stage))throw new Error('Finish saving or cancel the pending insertion before discarding this diagram.');
+   await hide();
+   await this.skillFiles.discard(ref);
+  });
  }
  async complete(note:string,id:string){return this.serial(async()=>{const operations=await this.journal();if(!operations.some(o=>o.note===note&&o.id===id))throw new Error('Insertion intent not found.');return this.reconcileLocked(note,id);});}
  async reconcile(note:string){normalizeRel(note);return this.serial(()=>this.reconcileLocked(note));}

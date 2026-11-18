@@ -27,10 +27,13 @@ export const SKILL_DIAGRAM_URL=(asset:string)=>'/api/skill-diagram?name='+encode
 
 /** A stored reference to the saved file. The name is derived from the bytes, so it cannot point anywhere else. A `.svg` is the static image
  *  (shown as an <img>). A `.html` is the fallback, kept only when no valid svg could be made, and `why` says so; it is shown only after a click. */
-export interface SkillDiagramRef {asset:string;bytes:number;why?:SvgIssue}
+export const SKILL_STAGE_PATTERN=/^[a-f0-9]{32}$/;
+export const skillPreviewUrl=(asset:string,stage:string)=>'/api/skill-diagram-preview?name='+encodeURIComponent(asset)+'&stage='+encodeURIComponent(stage);
+export interface SkillDiagramRef {asset:string;bytes:number;why?:SvgIssue;stage?:string}
 export const validSkillDiagramRef=(v:unknown):v is SkillDiagramRef=>{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;
- const keys=Object.keys(v).sort().join();if(keys!=='asset,bytes'&&keys!=='asset,bytes,why')return false;
+ const keys=Object.keys(v).filter(key=>key!=='stage').sort().join();if(keys!=='asset,bytes'&&keys!=='asset,bytes,why')return false;
+ if('stage' in v&&(typeof v.stage!=='string'||!SKILL_STAGE_PATTERN.test(v.stage)))return false;
  const r=v as SkillDiagramRef;
  if(typeof r.asset!=='string'||!/^diagram-[a-f0-9]{64}\.(html|svg)$/.test(r.asset)||!Number.isInteger(r.bytes)||r.bytes<=0||r.bytes>SKILL_DIAGRAM_MAX_BYTES+4096)return false;
  return r.why===undefined||(r.asset.endsWith('.html')&&(SVG_ISSUES as string[]).includes(r.why));

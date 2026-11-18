@@ -603,8 +603,16 @@ export function createApp(opts: AppOptions) {
 
     if(url.pathname==='/api/insertions'&&req.method==='GET')return json(res,200,await (await insertionsReady).reconcile(url.searchParams.get('path')??''));
     // A skill's diagram: served only to be framed by this app, under a CSP that blocks all network (also injected in the document itself).
-    if(url.pathname==='/api/skill-diagram'&&req.method==='GET'){
-      try{const name=url.searchParams.get('name')??'',bytes=await (await assistance).skillDiagrams.read(name),svg=name.endsWith('.svg');res.writeHead(200,{'Content-Type':svg?'image/svg+xml':'text/html; charset=utf-8','Content-Security-Policy':svg?SKILL_DIAGRAM_SVG_CSP_HEADER:SKILL_DIAGRAM_CSP_HEADER,'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Cache-Control':'private, max-age=31536000, immutable'});return res.end(bytes);}catch{return json(res,404,{error:'not_found'});}
+    if((url.pathname==='/api/skill-diagram'||url.pathname==='/api/skill-diagram-preview')&&(req.method==='GET'||req.method==='HEAD')){
+      const preview=url.pathname==='/api/skill-diagram-preview';
+      if(preview)res.setHeader('Cache-Control','no-store');
+      try{
+        const name=url.searchParams.get('name')??'',files=(await assistance).skillDiagrams;
+        const bytes=preview?await files.readPreview(name,url.searchParams.get('stage')??''):await files.read(name);
+        const svg=name.endsWith('.svg');
+        res.writeHead(200,{'Content-Type':svg?'image/svg+xml':'text/html; charset=utf-8','Content-Security-Policy':svg?SKILL_DIAGRAM_SVG_CSP_HEADER:SKILL_DIAGRAM_CSP_HEADER,'X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Cache-Control':preview?'no-store':'private, max-age=31536000, immutable'});
+        return res.end(req.method==='HEAD'?undefined:bytes);
+      }catch{return json(res,404,{error:'not_found'});}
     }
     // The picture of a diagram (a PNG the page made from the diagram's sanitised svg), which a conversation turn may open as a copy: listed and saved only under a strict name, and checked as untrusted bytes.
     // The page never reads it back (there are no thumbnails), so it is not served.
@@ -694,7 +702,8 @@ export function createApp(opts: AppOptions) {
       if (url.pathname.endsWith("/cancel")) { await service.cancel(b.id); return json(res, 200, {}); }
       if (url.pathname.endsWith("/retry-save")) { await service.retrySave(b.id); return json(res, 200, {}); }
       if (url.pathname.endsWith("/event") && typeof b.path === "string" && (b.event === "shown" || b.event === "dismissed")) {
-        await service.event(b.path, b.id, b.event); return json(res, 200, {});
+        await service.event(b.path, b.id, b.event,async(ref,hide)=>(await insertionsReady).discardSkillPreview(ref,hide));
+        return json(res, 200, {});
       }
       throw new PathError(400, "bad_body", "Invalid assistance action.");
     }

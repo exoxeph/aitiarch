@@ -167,6 +167,11 @@ export class Assistance {
               reportedModel:validCatalogModelId(result.model)?result.model:null}});
           if(!saved)job.notice='The Skill diagram ledger entry is queued for retry.';
           ({ body, model, skillDiagram, diagramIssue } = await this.acceptSkillDiagram(result, frozen.id, names));
+          if(controller.signal.aborted){
+            if(skillDiagram)await this.skillDiagrams.discard(skillDiagram);
+            skillDiagram=undefined;
+            throw new ProviderError('cancelled');
+          }
         }
         else ({body,model,evidence,diagram,diagramIssue}=validateProductResult(result,frozen.id,packet.data,redact,textHash,provider.name??'claude'));
       } catch (e) {
@@ -205,12 +210,16 @@ export class Assistance {
     j.controller.abort();
     if (j.status === 'queued') { j.status = 'pending'; await j.run(); }
   }
-  async event(note: string, id: string, event: 'shown' | 'dismissed') {
+  async event(note: string, id: string, event: 'shown' | 'dismissed',discard?:(ref:SkillDiagramRef,hide:()=>Promise<void>)=>Promise<void>) {
     const s = await this.ink.read(note), item = s.document.items.find(i => i.id === id);
     if (!item?.generation || item.generation.status !== 'complete') throw new Error('Completed ink not found.');
     if (event === 'dismissed') {
-      const current = await this.store.read(note).catch(() => null);
-      await this.mutate(note, current?.text ?? '', items => items.map(i => i.id === id ? { ...i, generation: { ...i.generation!, dismissed: true } } : i));
+      const hide=async()=>{
+        const current = await this.store.read(note).catch(() => null);
+        await this.mutate(note, current?.text ?? '', items => items.map(i => i.id === id ? { ...i, generation: { ...i.generation!, dismissed: true } } : i));
+      };
+      if(discard&&item.skillDiagram?.stage)await discard(item.skillDiagram,hide);
+      else await hide();
     }
     await appendLedger(this.ledger,{ id: randomUUID(), inkId: id, requestId: item.generation.requestId, note, event, at: new Date().toISOString() });
   }

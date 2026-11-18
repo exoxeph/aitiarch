@@ -490,6 +490,19 @@ export default function App() {
   // Dismiss hides a thought (nothing is deleted); Restore brings it back. Both are the existing human thread actions.
   const thoughtAction=async(id:string,type:'dismiss'|'restore'|'resolve'|'unresolve')=>{if(!active)return;try{const latest=await api.threads(active),s=await api.threadAction(active,id,latest.version,{type});onInkSaved(active,s);setToast(type==='dismiss'?{text:'Thought dismissed.',id,undo:'restore'}:type==='resolve'?{text:'Thought resolved.',id,undo:'unresolve'}:null);if(type==='restore')setShowDismissed(false);}catch(e){setNotice(e instanceof Error?e.message:'That action could not be applied.');}};
   useEffect(()=>{const dismiss=(e:Event)=>void thoughtAction((e as CustomEvent<{id:string}>).detail.id,'dismiss'),resolve=(e:Event)=>void thoughtAction((e as CustomEvent<{id:string}>).detail.id,'resolve'),reopen=(e:Event)=>void thoughtAction((e as CustomEvent<{id:string}>).detail.id,'unresolve'),show=()=>setShowDismissed(true);window.addEventListener('dismiss-thought',dismiss);window.addEventListener('resolve-thought',resolve);window.addEventListener('reopen-thought',reopen);window.addEventListener('show-dismissed',show);return()=>{window.removeEventListener('dismiss-thought',dismiss);window.removeEventListener('resolve-thought',resolve);window.removeEventListener('reopen-thought',reopen);window.removeEventListener('show-dismissed',show);};});
+  useEffect(()=>{
+    if(!active)return;
+    const discard=async(event:Event)=>{
+      const {id}=(event as CustomEvent<{id:string}>).detail;
+      try{
+        await api.inkEvent(active,id,'dismissed');
+        onInkSaved(active,await api.threads(active));
+        setNotice('Diagram preview discarded.');
+      }catch(error){setNotice(error instanceof Error?error.message:'Could not discard the diagram preview.');}
+    };
+    window.addEventListener('discard-skill-preview',discard);
+    return()=>window.removeEventListener('discard-skill-preview',discard);
+  });
   // Resolving collapses the open conversation (it stays visible, dimmed, in the margin).
   const wasResolved=useRef(false);
   useEffect(()=>{const now=!!activeItems.find(i=>i.id===thoughtChat)?.thread?.resolvedAt;if(thoughtChat&&now&&!wasResolved.current)setThoughtChat(null);wasResolved.current=now;},[thoughtChat,activeItems]);
