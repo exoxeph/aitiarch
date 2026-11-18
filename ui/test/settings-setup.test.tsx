@@ -17,10 +17,10 @@ const data:SetupView={
  ],
  roles:[
   {role:'normal-chat',provider:'codex',source:'saved choice',capableProviders:['claude','codex'],reason:null},
-  {role:'invoked',provider:'claude',source:'explicit flag',capableProviders:['claude','codex'],reason:null},
+  {role:'invoked',provider:'claude',source:'default',capableProviders:['claude','codex'],reason:null},
   {role:'thread-reply',provider:'codex',source:'default',capableProviders:['claude','codex'],reason:'The saved provider is disabled.'},
   {role:'council',provider:'claude',source:'default',capableProviders:['claude','codex'],participants:['claude','codex'],reason:null},
-  ...(['investigate-read','skill-diagram'] as const).map(role=>({role,provider:'claude' as const,source:'explicit flag' as const,capableProviders:['claude' as const],reason:null,routingNote:'This feature uses the startup Claude configuration.'})),
+  ...(['investigate-read','skill-diagram'] as const).map(role=>({role,provider:'claude' as const,source:'default' as const,capableProviders:['claude' as const],reason:null,routingNote:'This feature uses the startup Claude configuration.'})),
  ],
  privacy:{mode:'private',sharedReady:false,notice:'filesystem-private'},
 };

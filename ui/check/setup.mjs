@@ -1,6 +1,10 @@
 import './config-isolation.mjs';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, readdir, readFile, writeFile} from 'node:fs/promises';
+import {copyFile, mkdtemp, mkdir, readdir, readFile, writeFile} from 'node:fs/promises';
+import {execFile, spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {createInterface} from 'node:readline';
+import {promisify} from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
 import {chromium} from 'playwright-core';
@@ -11,6 +15,8 @@ import {createSetupHttp} from '../server/setup-http.ts';
 import {compatibleDefaults,descriptorFromAdapter} from '../server/providers/registry.ts';
 import {saveMachineSetup} from '../server/setup-store.ts';
 import {createModelCatalogs,readCatalog} from '../server/providers/model-catalog.ts';
+import {runPluginPlan} from '../scripts/plugin-run.mjs';
+import {claudeHelp,codexHelp} from '../test/fixtures/cli-help.ts';
 
 const output = path.resolve(process.env.BATCH2A_OUTPUT ?? '');
 const relative = path.relative(path.resolve('..'), output);
@@ -35,6 +41,150 @@ const store = await Store.open(notes);
 const watcher = new NoteWatcher(store);
 const app = createApp({store,watcher,distDir:path.resolve('dist'),pipelineConfigDir:dir,setup});
 let browser;
+
+async function fakeExecutables(root) {
+ const bin=path.join(root,'bin'), pinned=path.join(root,'pinned');
+ await Promise.all([mkdir(bin),mkdir(pinned)]);
+ const source=path.join(root,'MetadataOnly.cs'), binary=path.join(root,'MetadataOnly.exe');
+ await writeFile(source,`using System;
+using System.IO;
+using System.Reflection;
+public class MetadataOnly {
+ public static int Main(string[] args) {
+  string executable = Assembly.GetExecutingAssembly().Location;
+  string name = Path.GetFileNameWithoutExtension(executable);
+  string command = String.Join(" ", args);
+  if (command == "--version") Console.Write(File.ReadAllText(executable + ".version"));
+  else if (command == (name == "claude" ? "--help" : "exec --help")) Console.Write(File.ReadAllText(executable + ".help"));
+  else { File.WriteAllText(executable + ".unexpected-invocation", "Unexpected invocation"); return 99; }
+  return 0;
+ }
+}`);
+ const shell=path.join(process.env.SystemRoot,'System32','WindowsPowerShell','v1.0','powershell.exe');
+ const quote=value=>"'"+value.replaceAll("'","''")+"'";
+ await promisify(execFile)(shell,['-NoProfile','-NonInteractive','-Command',
+  `$ErrorActionPreference='Stop'; Add-Type -Path ${quote(source)} -OutputAssembly ${quote(binary)} -OutputType ConsoleApplication`],
+  {cwd:root,windowsHide:true,timeout:15000});
+ for(const folder of [bin,pinned]) {
+  for(const [id,version,help] of [['claude','2.1.205 (Claude Code)',claudeHelp+'\n  --effort <level>'],['codex','codex-cli 0.167.0',codexHelp]]) {
+   const file=path.join(folder,id+'.exe');
+   await copyFile(binary,file);
+   await writeFile(file+'.version',version);
+   await writeFile(file+'.help',help);
+  }
+ }
+ return {bin,pinned};
+}
+
+async function checkLaunches() {
+ // Exercise the actual Windows executable discovery and selection paths.
+ if(process.platform!=='win32'){
+  console.log('Native launcher regression check skipped: Windows CLI fixtures required.');
+  return;
+ }
+ const scratch=await mkdtemp(path.join(os.tmpdir(),'aitiarch-setup-launch-'));
+ const {bin,pinned}=await fakeExecutables(scratch);
+ const appHome=path.resolve('..');
+ for(const mode of ['direct','plugin']) {
+  const sandbox=path.join(scratch,mode), project=path.join(sandbox,'project');
+  const notebook=path.join(project,'.aitiarch'), configDir=path.join(sandbox,'config');
+  await Promise.all([mkdir(notebook,{recursive:true}),mkdir(configDir,{recursive:true})]);
+  const note=path.join(notebook,'Synthetic plan.md');
+  await writeFile(note,original);
+  const essential=Object.fromEntries(Object.entries(process.env).filter(([key])=>/^(SystemRoot|windir|ComSpec|PATHEXT)$/i.test(key)));
+  const env={...essential,PATH:bin,HOME:sandbox,USERPROFILE:sandbox,APPDATA:sandbox,LOCALAPPDATA:sandbox,
+   TEMP:sandbox,TMP:sandbox,AITIARCH_CONFIG_DIR:configDir,AITIARCH_TEST:'1'};
+  let server;
+  const spawnNode=(args,cwd,env)=>spawn(process.execPath,args,{cwd,env,shell:false,windowsHide:true,stdio:['ignore','pipe','pipe']});
+  const launch=async(args,cwd,env)=>{
+   server=spawnNode(args,cwd,env);
+   let errors='';
+   server.stderr.on('data',chunk=>{errors=(errors+chunk).slice(-4000);});
+   const lines=createInterface({input:server.stdout});
+   const timer=setTimeout(()=>server.kill(),30000);
+   try {
+    for await(const line of lines) {
+     if(line.startsWith('AITIARCH_READY '))return JSON.parse(line.slice('AITIARCH_READY '.length));
+    }
+    throw Error(`Setup server did not report readiness (exit ${server.exitCode??server.signalCode}): ${errors}`);
+   } finally {clearTimeout(timer);lines.close();server.stdout.resume();}
+  };
+  const page=await browser.newPage({viewport:{width:1280,height:800}});
+  page.setDefaultTimeout(10000);
+  try {
+   let ready;
+   if(mode==='direct') {
+    ready=await launch(['server/main.ts','--root',notebook,'--port','0','--no-open',
+     '--claude',path.join(pinned,'claude.exe'),'--codex',path.join(pinned,'codex.exe')],path.join(appHome,'ui'),env);
+   } else {
+    ready=await runPluginPlan({appHome,project,notebook,configDir,buildRequired:false,initializeRequired:false},{
+     env,runStep:async step=>{
+      if(step.id==='start')return launch(step.args,step.cwd,step.env);
+      assert.equal(step.id,'doctor');
+      await promisify(execFile)(step.command,step.args,{cwd:step.cwd,env:step.env,windowsHide:true,timeout:30000});
+      return {};
+     },
+    });
+   }
+   await page.route('**/*',route=>new URL(route.request().url()).origin===new URL(ready.url).origin?route.continue():route.abort());
+   await page.goto(ready.launch);
+   await page.getByRole('dialog',{name:'Set up Aitiarch'}).getByRole('button',{name:'Skip',exact:true}).click();
+   const openSetup=async()=>{
+    await page.getByRole('button',{name:'Notes menu',exact:true}).click();
+    await page.getByRole('button',{name:'AI settings',exact:true}).click();
+    const settings=page.getByRole('dialog',{name:'AI settings'});
+    await settings.getByRole('tab',{name:'Setup',exact:true}).click();
+    const panel=settings.getByRole('tabpanel',{name:'Setup',exact:true});
+    await panel.getByRole('heading',{name:'Tools found'}).waitFor();
+    return panel;
+   };
+   let panel=await openSetup();
+   const providerSource=mode==='direct'?'explicit flag':'discovered';
+   for(const [label,id] of [['Claude','claude'],['Codex','codex']]){
+    const tool=panel.getByRole('listitem').filter({has:page.getByText(label,{exact:true})});
+    assert.match(await tool.textContent(),new RegExp(providerSource));
+    await tool.getByText(path.join(mode==='direct'?pinned:bin,id+'.exe'),{exact:true}).waitFor();
+   }
+   const roleRows=panel.locator('.setup-roles');
+   assert(!await roleRows.getByText(/explicit flag|set by launch flag/i).count());
+   for(const role of ['Normal chat','Think and Ask','Thread replies']){
+    const row=roleRows.getByRole('group',{name:role,exact:true});
+    assert(await row.getByRole('combobox').isEnabled());
+    assert(await row.locator('option[value="codex"]').isEnabled());
+    assert(await row.getByRole('button',{name:'Reset to default'}).isEnabled());
+   }
+   const council=roleRows.getByRole('group',{name:'Council participants'});
+   for(const provider of ['Claude','Codex'])assert(await council.getByRole('checkbox',{name:provider}).isEnabled());
+   let row=panel.getByRole('group',{name:'Normal chat',exact:true});
+   const picker=row.getByRole('combobox');
+   assert.equal(await picker.inputValue(),'claude');
+   await picker.click();
+   await page.keyboard.press('ArrowDown');
+   await page.keyboard.press('Enter');
+   await row.getByText(/saved choice/).waitFor();
+   await page.reload();
+   panel=await openSetup();
+   row=panel.getByRole('group',{name:'Normal chat',exact:true});
+   await row.getByText(/saved choice/).waitFor();
+   assert.equal(await row.getByRole('combobox').inputValue(),'codex');
+   await row.getByRole('button',{name:'Reset to default'}).click();
+   await row.getByText(/ · default$/).waitFor();
+   await page.reload();
+   panel=await openSetup();
+   row=panel.getByRole('group',{name:'Normal chat',exact:true});
+   await row.getByText(/ · default$/).waitFor();
+   assert.equal(await row.getByRole('combobox').inputValue(),'claude');
+   await page.screenshot({path:path.join(output,`setup-${mode}-1280.png`)});
+   assert.deepEqual(await readFile(note),original);
+   for(const folder of [bin,pinned])assert(!(await readdir(folder)).some(file=>file.endsWith('.unexpected-invocation')));
+   console.log(`Setup ${mode} launch passed: binary source, role edit, reload, reset and no provider turns.`);
+  } finally {
+   await page.close();
+   if(server&&server.exitCode===null&&server.signalCode===null){const closed=once(server,'close');server.kill();await closed;}
+  }
+ }
+}
+
 try {
  const url = 'http://127.0.0.1:'+await app.listen(0);
  browser = await chromium.launch({channel:'msedge',headless:true});
@@ -283,6 +433,7 @@ try {
  assert.deepEqual(external,[]);
  assert.equal(writes.some(([,route])=>/\/(chat|assistance|council|investigate)\b/.test(route)),false);
  console.log('Setup passed: AI-off card, Settings Setup tab and keyboard replay, text size, composer chip and popover, unchanged project, local requests only.');
+ await checkLaunches();
 } finally {
  await browser?.close();
  watcher.stop();

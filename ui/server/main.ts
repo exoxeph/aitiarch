@@ -13,6 +13,7 @@ import {createModelCatalogs} from './providers/model-catalog.ts';
 import {checkPrerequisites} from './platform/doctor.ts';
 import {createInvokedCodexBridge} from './providers/invoked-bridge.ts';
 import {validateCodexCommand} from './providers/codex-command.ts';
+import {SETUP_PROVIDERS} from '../shared/setup.ts';
 import { createHost } from "./host.ts";
 import { PipelineConfigStore } from "./pipeline-config-store.ts";
 import { Registry, RegistryError, resolveConfigFolder, underTest, type ProjectEntry } from "./registry.ts";
@@ -28,7 +29,7 @@ import { ChatGPTPlan } from "./providers/chatgpt-plan.ts";
 import { sweepStaleProviderTemps } from "./providers/temp-cleanup.ts";
 
 function parseArgs(argv: string[]) {
-  const o = { root: undefined as string | undefined, port: undefined as number | undefined, open: true, origins: [] as string[], claude: undefined as string | undefined, codex:undefined as string|undefined, chatgptPlan:false, devSession:false };
+  const o = { root: undefined as string | undefined, port: undefined as number | undefined, open: true, origins: [] as string[], claude: undefined as string | undefined, codex:undefined as string|undefined, kiro:undefined as string|undefined, chatgptPlan:false, devSession:false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--root") o.root = argv[++i] ?? "";
@@ -36,11 +37,12 @@ function parseArgs(argv: string[]) {
     else if (a === "--allow-origin") o.origins.push(argv[++i] ?? "");
     else if (a === "--claude") o.claude = argv[++i] ?? "";
     else if (a === '--codex') o.codex=validateCodexCommand(argv[++i]??'');
+    else if (a === '--kiro') o.kiro=argv[++i]??'';
     else if (a === "--chatgpt-plan") o.chatgptPlan = true;
     else if (a === "--no-open") o.open = false;
     else if (a === "--dev-session") o.devSession = true; // contributors only: Vite on another port never sees the launch link
     else if (a === "--help" || a === "-h") {
-      console.log("usage: aitiarch [--root <folder>] [--port N] [--no-open] [--codex <absolute native executable>] [--claude <absolute native executable> | --chatgpt-plan]\nDefault root: ./.aitiarch in the current directory. ChatGPT plan is disabled unless --chatgpt-plan is supplied. Each provider requires an explicit action per call.");
+      console.log("usage: aitiarch [--root <folder>] [--port N] [--no-open] [--codex <absolute native executable>] [--kiro <absolute native executable>] [--claude <absolute native executable> | --chatgpt-plan]\nDefault root: ./.aitiarch in the current directory. ChatGPT plan is disabled unless --chatgpt-plan is supplied. Each provider requires an explicit action per call.");
       process.exit(0);
     } else {
       console.error(`Unknown argument: ${a}`);
@@ -54,6 +56,9 @@ function parseArgs(argv: string[]) {
 /** Startup is explicit so the app command can preflight without starting a server. */
 export async function startServer(argv: string[] = process.argv.slice(2)) {
 const args = parseArgs(argv);
+// Automated launchers without an explicit port must not contact a user's server
+// or open a desktop browser. The manual fixture opts in with its own port.
+const testDefaults = underTest() && args.port === undefined;
 await sweepStaleProviderTemps();
 // The registry and the running-instance file live in the user's config folder. AITIARCH_CONFIG_DIR points checks at a temp folder.
 const configFolder = resolveConfigFolder(); // throws under tests unless AITIARCH_CONFIG_DIR is set
@@ -74,14 +79,15 @@ const appFolder=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..
 const {version}=JSON.parse(await readFile(path.join(appFolder,'ui','package.json'),'utf8'));
 const identity={version,appFolder,notebookRoot:path.join(projectFolder,'.aitiarch')};
 const { UsageLogs } = await import("./providers/usage.ts");
-const runtime=await selectRuntimeProviders({configDir:configFolder,overrides:{...(args.claude!==undefined?{claude:args.claude}:{}),...(args.codex!==undefined?{codex:args.codex}:{})}});
+const overrides={claude:args.claude,codex:args.codex,kiro:args.kiro};
+const runtime=await selectRuntimeProviders({configDir:configFolder,overrides});
 const catalogs=createModelCatalogs(configFolder,underTest()?[]:runtime.providers);
 const serverIdentity={...identity,providers:runtime.providers};
 const claudeCommand=runtime.commands.claude;
 // Plugin run/start and the normal command both reach here. Save compatible defaults once, before any project opens.
 const initialRouting=roleRouting({dir:configFolder,adapters:runtime.adapters,checks:runtime.availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!claudeCommand,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true});
 try {
- await initialRouting.initializeDefaults([...(args.claude!==undefined?['claude' as const]:[]),...(args.codex!==undefined?['codex' as const]:[])]);
+ await initialRouting.initializeDefaults(SETUP_PROVIDERS.filter(id=>overrides[id]!==undefined));
 } catch {
  // Saved settings remain authoritative; routing reports unreadable/unassigned roles.
  // Optional AI setup must not prevent AI-off editing or replace damaged settings.
@@ -109,7 +115,7 @@ const openProject = async (entry: ProjectEntry) => {
   const routing=roleRouting({dir:configFolder,adapters,checks:availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!claudeCommand,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true,
    catalogFor:id=>{const provider=runtime.providers.find(p=>p.id===id);return provider&&catalogs.view(provider);}});
   const setup = createSetupHttp({dir:configFolder, project:entry.root, providers:runtime.providers,catalogs,
-    overrides:{claude:args.claude,codex:args.codex},
+    overrides,
     ready:async()=>(await checkPrerequisites({configDir:configFolder,distDir})).every(check=>check.ok)});
   const app = createApp({ pipelineConfigDir: configFolder, store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, setup, council:{adapters,availabilityChecks,routing}, harness: claudeCommand ? { command: claudeCommand } : undefined });
   return { handle: app.handle, close: async () => { watcher.stop(); await plan?.close(); await app.close(); } };
@@ -127,7 +133,7 @@ const notebookMissing = () => {
 
 let choice: Awaited<ReturnType<typeof listenOrReuse>>;
 try {
-  choice = await listenOrReuse((p) => host.listen(p), args.port ?? DEFAULT_PORT, undefined, {expected:serverIdentity});
+  choice = await listenOrReuse((p) => host.listen(p), args.port ?? (testDefaults ? 0 : DEFAULT_PORT), undefined, {expected:serverIdentity});
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));
   process.exit(1);
@@ -153,7 +159,7 @@ if (choice!.kind === "reuse") {
   if (!id && args.root) notebookMissing();
   const launch = `http://127.0.0.1:${port}/?launch=${inst.token}${id ? `&project=${id}` : ""}`;
   console.log(`AITIARCH_READY ${JSON.stringify({ url: `http://127.0.0.1:${port}/`, launch, port, project: id ?? null, reused: true })}`);
-  if (args.open) openBrowser(launch);
+  if (args.open && !testDefaults) openBrowser(launch);
   process.exit(0);
 }
 
@@ -171,7 +177,7 @@ const url = `http://127.0.0.1:${boundPort}/`;
 const launch = `${url}?launch=${security.token}${defaultId ? `&project=${defaultId}` : ""}`;
 console.log(`AITIARCH_READY ${JSON.stringify({ url, launch, root: defaultId ? registry!.get(defaultId)?.notes : null, port: boundPort, project: defaultId ?? null })}`);
 void catalogs.refresh();
-if (args.open) openBrowser(launch);
+if (args.open && !testDefaults) openBrowser(launch);
 const shutdown = async () => {
   await catalogs.close();
   await clearInstance(configFolder, process.pid);

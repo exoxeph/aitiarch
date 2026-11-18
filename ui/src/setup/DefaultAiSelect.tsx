@@ -8,9 +8,9 @@ export function DefaultAiSelect({view,disabled,onChange}:{
  if(!choices.length) return <p>AI is off. You can still open and edit your notes.</p>;
  const selected = choices.find(provider=>provider.id===chat?.provider);
  return <label>Answers by default{' '}
-  <select value={selected?.id??''} disabled={disabled||!!chat?.locked} onChange={event=>onChange(event.currentTarget.value as SetupProvider)}>
+  <select value={selected?.id??''} disabled={disabled} onChange={event=>onChange(event.currentTarget.value as SetupProvider)}>
    {!selected && <option value="" disabled>Choose one</option>}
-   {choices.map(provider=><option value={provider.id} key={provider.id} disabled={provider.source==='explicit flag'&&provider.id!==selected?.id}>{provider.label}</option>)}
+   {choices.map(provider=><option value={provider.id} key={provider.id}>{provider.label}</option>)}
   </select>
  </label>;
 }

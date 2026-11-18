@@ -7,10 +7,10 @@ import {roleModelLabel} from '../shared/model-choice.ts';
 import {formatDoctor} from '../server/platform/doctor.ts';
 
 const view:SetupView={ready:true,seen:false,fontSize:null,models:[],
- providers:[{id:'claude',label:'Claude',path:'/fake/claude',version:'2.1.205',source:'discovered',compatible:true,reason:'Metadata matched.',notices:[]},
+ providers:[{id:'claude',label:'Claude',path:'/fake/claude',version:'2.1.205',source:'explicit flag',compatible:true,reason:'Metadata matched.',notices:[]},
  {id:'kiro',label:'Kiro',path:'/fake/kiro',version:'3.3.0',source:'discovered',compatible:true,reason:'Metadata matched.',notices:[]}],
  roles:ROLE_REGISTRY.map(def=>({role:def.id,provider:'claude',source:'default',reason:null,capableProviders:['claude'],
-  ...(def.multiple?{participants:['claude']}:{}),...(def.id==='invoked'?{locked:'Set by launch flag; remove the flag to edit here.'}:{})})),
+  ...(def.multiple?{participants:['claude']}:{})})),
  privacy:{mode:'private',sharedReady:false,notice:'filesystem-private'}};
 
 it('defines every role in Settings, collapsed first-run customization, doctor and the chip labels',()=>{
@@ -26,7 +26,8 @@ it('defines every role in Settings, collapsed first-run customization, doctor an
  }
  expect(settings).toMatch(/<option value="kiro" disabled="">Kiro/);
  expect(settings).toContain('does not support this role');
- expect(settings).toContain('Set by launch flag; remove the flag to edit here.');
+ expect(settings).not.toContain('Set by launch flag; remove the flag to edit here.');
+ expect(settings.match(/<select aria-label="Think and Ask"[^>]*>/)?.[0]).toBe('<select aria-label="Think and Ask">');
  expect(settings).toContain('Reset to default');
  expect(first).not.toContain('aria-haspopup="menu"');
 });

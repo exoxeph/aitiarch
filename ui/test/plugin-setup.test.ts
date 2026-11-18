@@ -65,10 +65,12 @@ describe('single-command resumable setup',()=>{
   expect(calls.map(c=>c.id)).toEqual(['copy-source','npm-ci','build','stamp','init-private','doctor','start']);
   for(const c of calls.slice(1))expect(c.cwd).toBe(f.target);
   expect(calls.find(c=>c.id==='init-private').args).toEqual([path.join(f.target,'ui/scripts/aitiarch.mjs'),'init',f.base,'--private','--yes-ignore']);
+  expect(calls.find(c=>c.id==='start').args).toEqual([path.join(f.target,'ui/scripts/aitiarch.mjs'),'start','--project',path.join(f.base,'.aitiarch')]);
   expect(JSON.parse(output.at(-1)!)).toMatchObject({buildRequired:false,initializeRequired:false,status:'ready',url:'http://127.0.0.1:4999/'});
   calls.length=0;
   expect(await pluginSetup(['run','--project',f.base,'--yes-ignore'],deps)).toBe(0);
   expect(calls.map(c=>c.id)).toEqual(['doctor','start']);
+  expect(calls.at(-1).args).toEqual([path.join(f.target,'ui/scripts/aitiarch.mjs'),'start','--project',path.join(f.base,'.aitiarch')]);
  });
  it('requires explicit ignore consent and stops before later steps on failure',async()=>{
   const f=await fixture(),errors:string[]=[],calls:string[]=[];

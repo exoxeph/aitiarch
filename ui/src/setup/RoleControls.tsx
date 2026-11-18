@@ -38,21 +38,20 @@ export function RoleControls({view,busy,customize=false,save,onChange}:{
   {ROLE_REGISTRY.map(def=>{
    const role=view.roles.find(item=>item.role===def.id);
    const selected=role?.provider??null;
-   const disabled=busy||!role||!!role.locked||!!role.routingNote;
+   const disabled=busy||!role||!!role.routingNote;
    const modelProviders=def.multiple?role?.participants??[]:selected?[selected]:[];
    return <fieldset key={def.id} data-role={def.id} className="setup-model">
     <legend>{def.label}</legend>
     <p className="settings-lead">{def.help}{role&&` · ${role.source}`}</p>
     {role?.reason&&<p className="settings-lead">{role.reason}</p>}
     {role?.routingNote&&<p className="settings-lead">{role.routingNote}</p>}
-    {role?.locked&&<p className="settings-lead">{role.locked}</p>}
     {def.multiple&&role ?
      <CouncilChoices key={role.participants?.join(',')} tools={view.providers} role={role} disabled={disabled} save={save}/>
      : <select aria-label={def.label} value={selected??''} disabled={disabled||!role?.capableProviders.length}
       onChange={event=>save({role:def.id,provider:event.currentTarget.value as SetupProvider})}>
       {(!selected||!view.providers.some(tool=>tool.id===selected))&&<option value={selected??''} disabled>{selected??'No provider selected'}</option>}
       {view.providers.map(tool=>{
-       const reason=unavailable(tool,role?.capableProviders??[])??(tool.source==='explicit flag'&&tool.id!==selected?'Executable set by launch flag.':null);
+       const reason=unavailable(tool,role?.capableProviders??[]);
        return <option key={tool.id} value={tool.id} disabled={!!reason}>{tool.label}{reason&&` · ${reason}`}</option>;
       })}
      </select>}

@@ -130,26 +130,48 @@ describe('first-run setup endpoints', () => {
   const setup = createSetupHttp({dir,project,providers:[claude,codex,kiro],overrides:{claude:claude.path!},ready:async()=>true});
   const view = await setup.get();
   expect(view.roles.find(r=>r.role==='council')).toMatchObject({participants:['claude','codex'],reason:null});
-  expect(view.roles.find(r=>r.role==='normal-chat')).toMatchObject({provider:'claude',source:'explicit flag'});
-  expect(view.roles.find(r=>r.role==='investigate-read')).toMatchObject({provider:'claude',source:'explicit flag',reason:null});
+  expect(view.providers.find(p=>p.id==='claude')?.source).toBe('explicit flag');
+  expect(view.roles.find(r=>r.role==='normal-chat')).toMatchObject({provider:'claude',source:'default'});
+  expect(view.roles.every(r=>['saved choice','default'].includes(r.source))).toBe(true);
+  expect(view.roles.find(r=>r.role==='investigate-read')).toMatchObject({provider:'claude',source:'default',reason:null});
   expect((await loadMachineSetup(dir)).roles['investigate-read']).toBe('codex');
  });
- it('shows discovered paths separately from launch locks, and resets effective settings',async()=>{
+ it('changes roles and models with both binaries flagged, reloads the saved choice and resets to the preferred default',async()=>{
   const claude={...codex,id:'claude' as const};
   const saved=defaultMachineSetup();
   saved.providers.codex.enabled=true;
   await saveMachineSetup(dir,saved);
-  const open=service([codex,claude]);
-  expect((await open.get()).providers[0].source).toBe('discovered');
+  const launch=()=>createSetupHttp({dir,project,providers:[codex,claude],overrides:{claude:claude.path!,codex:codex.path!},ready:async()=>true});
+  expect((await service([codex,claude]).get()).providers[0].source).toBe('discovered');
+  const open=launch();
   await open.put({role:'normal-chat',provider:'codex'});
   await open.put({role:'normal-chat',provider:'codex',selection:{model:'custom',effort:null}});
-  await open.put({role:'normal-chat',reset:true});
+  const reloaded=launch();
+  expect((await reloaded.get()).roles.find(r=>r.role==='normal-chat')).toMatchObject({provider:'codex',source:'saved choice'});
+  await reloaded.put({role:'normal-chat',reset:true});
   expect((await open.get()).roles.find(r=>r.role==='normal-chat')).toMatchObject({provider:'claude',source:'default'});
   expect((await loadMachineSetup(dir)).providers.codex.roles['normal-chat']).toBeUndefined();
-  const locked=createSetupHttp({dir,project,providers:[codex,claude],overrides:{claude:claude.path!},ready:async()=>true});
-  expect((await locked.get()).roles.find(r=>r.role==='normal-chat')?.locked).toMatch(/set by launch flag/i);
-  await expect(locked.put({role:'normal-chat',provider:'codex'})).rejects.toThrow(/remove the flag/i);
-  expect((await loadMachineSetup(dir)).roles['normal-chat']).toBe('claude');
+ });
+ it('offers each compatible provider even when another binary was explicitly pinned and is incompatible',async()=>{
+  const reason='Missing pinned flag --ephemeral.';
+  const broken={...codex,isolation:'unverified' as const,reason};
+  const api=createSetupHttp({dir,project,providers:[broken,{...codex,id:'claude'}],overrides:{codex:codex.path!},ready:async()=>true});
+  await expect(api.put({role:'normal-chat',provider:'codex'})).rejects.toThrow(/compatible/);
+  await api.put({role:'normal-chat',provider:'claude'});
+  const view=await api.get();
+  expect(view.providers[0]).toMatchObject({compatible:false,source:'explicit flag',reason});
+  expect(view.roles.find(r=>r.role==='normal-chat')).toMatchObject({provider:'claude',capableProviders:['claude'],source:'saved choice'});
+ });
+ it('prefers the sole flagged compatible binary on reset without overriding an existing role choice',async()=>{
+  const saved=defaultMachineSetup();
+  saved.providers.codex.enabled=true;
+  await saveMachineSetup(dir,saved);
+  const api=createSetupHttp({dir,project,providers:[codex,{...codex,id:'claude'}],overrides:{codex:codex.path!},ready:async()=>true});
+  expect((await api.get()).roles.find(r=>r.role==='normal-chat')).toMatchObject({provider:'claude',source:'saved choice'});
+  await api.put({role:'normal-chat',reset:true});
+  expect((await api.get()).roles.find(r=>r.role==='normal-chat')).toMatchObject({provider:'codex',source:'default'});
+  await api.put({role:'normal-chat',provider:'claude'});
+  expect((await api.get()).roles.find(r=>r.role==='normal-chat')).toMatchObject({provider:'claude',source:'saved choice'});
  });
  it('validates Council membership atomically and reset restores all enabled compatible providers',async()=>{
   const saved=defaultMachineSetup();

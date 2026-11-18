@@ -16,7 +16,6 @@ export const SETUP_ROLES=ROLE_REGISTRY.map(role=>role.id);
 export const roleDefinition=(id:SetupRole)=>ROLE_REGISTRY.find(role=>role.id===id)!;
 export const MODEL_ROLES=ROLE_REGISTRY.flatMap(role=>role.modelSettings?[role.id]:[]);
 export type ModelRole=Extract<RoleDefinition,{modelSettings:true}>['id'];
-export const LAUNCH_ROLE_LOCK='Set by launch flag; remove the flag to edit here.';
 export interface ModelEffort {model:string|null;effort:string|null}
 export interface ProviderSetup extends ModelEffort {
  enabled:boolean;executable:string|null;roles:Partial<Record<SetupRole,ModelEffort>>;
@@ -43,14 +42,15 @@ export interface RoleModelPreference {
 export type SetupUpdate = {seen:true}|{role:SetupRole;provider:SetupProvider}|
  {role:ModelRole;provider:SetupProvider;selection:ModelEffort|null;catalogModel?:true}|{fontSize:number}|
  {role:SetupRole;reset:true}|{role:'council';participants:SetupProvider[]};
-export type SetupSource = 'explicit flag' | 'discovered' | 'saved choice' | 'default';
+export type RoleSource = 'saved choice' | 'default';
+export type SetupSource = 'explicit flag' | 'discovered' | RoleSource;
 export interface SetupView {
  ready:boolean;
  seen:boolean;
  fontSize:number|null;
  models:RoleModelPreference[];
  providers:{id:SetupProvider;label:string;path:string|null;version:string|null;notices:string[];reason:string;compatible:boolean;source:SetupSource;catalog?:ModelCatalog}[];
- roles:{role:SetupRole;provider:SetupProvider|null;capableProviders:SetupProvider[];reason:string|null;source:SetupSource;routingNote?:string;locked?:string;participants?:SetupProvider[];eligibleParticipants?:SetupProvider[]}[];
+ roles:{role:SetupRole;provider:SetupProvider|null;capableProviders:SetupProvider[];reason:string|null;source:RoleSource;routingNote?:string;participants?:SetupProvider[];eligibleParticipants?:SetupProvider[]}[];
  privacy:{mode:'private';sharedReady:false;notice:string};
 }
 /** New object per call: editing preferences cannot mutate defaults in another request. */

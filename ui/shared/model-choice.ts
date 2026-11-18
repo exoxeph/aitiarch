@@ -54,9 +54,8 @@ export function chatChoiceModel(view: SetupView, role: ModelRole = 'normal-chat'
  const info = view.roles.find(r => r.role === role);
  const capable = info?.capableProviders ?? [];
  const groups = view.providers.filter(p=>!scopedProvider||p.id===scopedProvider).map(p => {
-  const pinned = role!=='council'&&p.source==='explicit flag'&&info?.provider!==p.id;
-  const available = p.compatible && capable.includes(p.id) && !info?.locked && !pinned;
-  return {id: p.id, label: p.label || names[p.id], available, reason: available ? null : info?.locked??(pinned?'Executable set by launch flag.':p.compatible?'This provider does not support this role.':p.reason),
+  const available = p.compatible && capable.includes(p.id);
+  return {id: p.id, label: p.label || names[p.id], available, reason: available ? null : p.compatible?'This provider does not support this role.':p.reason,
    options: available ? optionsFor(p.id,p.catalog) : [], customAllowed: available && p.id !== 'kiro',catalog:p.catalog,
    effortFlag:view.models.some(m=>m.role===role&&m.provider===p.id&&m.effortSupported)};
  });

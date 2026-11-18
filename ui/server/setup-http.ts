@@ -2,7 +2,7 @@ import type {SelectedCli} from './platform/cli-selection.ts';
 import {providerCapabilities} from './providers/registry.ts';
 import {loadMachineSetup, saveMachineSetup, SetupError} from './setup-store.ts';
 import {initProject, privateProtection} from './init.ts';
-import {LAUNCH_ROLE_LOCK, MODEL_ROLES, ROLE_REGISTRY, SETUP_PROVIDERS, SETUP_ROLES, roleDefinition, validCouncilParticipants, type MachineSetup, type ModelEffort, type SetupProvider, type SetupRole, type SetupView} from '../shared/setup.ts';
+import {MODEL_ROLES, ROLE_REGISTRY, SETUP_PROVIDERS, SETUP_ROLES, roleDefinition, validCouncilParticipants, type MachineSetup, type ModelEffort, type SetupProvider, type SetupRole, type SetupView} from '../shared/setup.ts';
 import {modelArguments, modelSelection} from '../shared/model-settings.ts';
 import type {createModelCatalogs} from './providers/model-catalog.ts';
 import {catalogEntry,effectiveCatalogSelection} from '../shared/models.ts';
@@ -25,7 +25,8 @@ export function createSetupHttp(options: {
  const capable = (role:SetupRole) => options.providers.filter(p =>
   p.isolation==='metadata-compatible' && providerCapabilities(p.id, wiredBridges)[roleDefinition(role).capability]
  ).map(p => p.id);
- const launchLocked = (provider:SetupProvider|null) => provider!==null && options.overrides?.[provider]!==undefined;
+ const binaryPinned = (provider:SetupProvider) => options.overrides?.[provider]!==undefined;
+ const defaultOrder = [...new Set([...SETUP_PROVIDERS.filter(binaryPinned),...SETUP_PROVIDERS])];
  const enabledCouncil = (setup:MachineSetup) => capable('council').filter(id=>setup.providers[id].enabled);
  const effortSupported = (id:SetupProvider) => options.providers.some(p=>p.id===id&&(
   id==='claude'?p.effort===true&&p.effortCode==='help_flag_present':
@@ -52,7 +53,7 @@ export function createSetupHttp(options: {
    providers:options.providers.map(p => ({
     id:p.id, label:labels[p.id], path:p.path, version:p.version, reason:p.reason,
     notices:p.notices?.map(n=>n.message)??[], compatible:p.isolation==='metadata-compatible',
-    source:launchLocked(p.id)?'explicit flag':setup.providers[p.id].executable?'saved choice':p.path?'discovered':'default', catalog:catalogFor(p.id),
+    source:binaryPinned(p.id)?'explicit flag':setup.providers[p.id].executable?'saved choice':p.path?'discovered':'default', catalog:catalogFor(p.id),
    })),
    roles:ROLE_REGISTRY.map(def => {
     const role=def.id;
@@ -60,11 +61,9 @@ export function createSetupHttp(options: {
     const capableProviders = capable(role);
     const provider = routingNote ? capableProviders.includes('claude') ? 'claude' : null : setup.roles[role];
     const savedChoice = provider!==null && !setup.defaultRoles?.includes(role);
-    const locked = !def.multiple && launchLocked(provider) ? LAUNCH_ROLE_LOCK : undefined;
-    const source = routingNote
-     ? launchLocked('claude') ? 'explicit flag' : setup.providers.claude.executable ? 'saved choice' : 'default'
-     : def.multiple ? setup.councilParticipants===undefined ? 'default' : 'saved choice'
-     : locked ? 'explicit flag' : savedChoice ? 'saved choice' : 'default';
+    const source = def.multiple
+     ? setup.councilParticipants===undefined ? 'default' : 'saved choice'
+     : !routingNote && savedChoice ? 'saved choice' : 'default';
     const eligibleParticipants = def.multiple ? enabledCouncil(setup) : undefined;
     const participants = eligibleParticipants && (setup.councilParticipants??eligibleParticipants);
     let reason = null;
@@ -73,7 +72,7 @@ export function createSetupHttp(options: {
     else if (provider === null) reason = 'No provider is assigned to this role.';
     else if (!capableProviders.includes(provider)) reason = 'The saved provider is unavailable for this role.';
     else if (!routingNote && !setup.providers[provider].enabled) reason = 'The saved provider is disabled.';
-    return {role, provider, capableProviders, reason, source, ...(participants ? {participants,eligibleParticipants} : {}), ...(locked ? {locked} : {}),
+    return {role, provider, capableProviders, reason, source, ...(participants ? {participants,eligibleParticipants} : {}),
      ...(routingNote ? {routingNote} : {})};
    }),
    privacy:{mode:'private', sharedReady:protection.sharedReady, notice:protection.messages.join(' ')},
@@ -122,13 +121,12 @@ export function createSetupHttp(options: {
    else if (font) {
     setup.fontSize=Number(data.fontSize);
     setup.fontSizeConfigured=true;
-   } else if (!def?.multiple && (launchLocked(setup.roles[role])||((assignment||model)&&launchLocked(provider)))) {
-    throw new SetupRequestError(LAUNCH_ROLE_LOCK);
    } else if (reset) {
     for(const id of SETUP_PROVIDERS){delete setup.providers[id].roles[role];delete setup.providers[id].catalogChoices?.[role];}
     if(def?.multiple) delete setup.councilParticipants;
     else {
-     setup.roles[role]=SETUP_PROVIDERS.find(id=>capable(role).includes(id)&&setup.providers[id].enabled&&!launchLocked(id))??null;
+     const eligible=capable(role);
+     setup.roles[role]=defaultOrder.find(id=>eligible.includes(id)&&setup.providers[id].enabled)??null;
      setup.defaultRoles=[...new Set([...(setup.defaultRoles??[]),role])];
     }
    } else if (participants) {
