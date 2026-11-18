@@ -25,6 +25,13 @@ describe('running server identity',()=>{
  it('refuses older servers with missing identity',async()=>{
   await expect(listenOrReuse(busy,4317,async()=>true,{expected,readIdentity:async()=>null})).rejects.toThrow(/identity.*unavailable/i);
  });
+ it('does not reuse a server with a different or unreported provider selection',async()=>{
+  const providers=[{id:'codex',path:path.resolve('new/codex.exe'),version:'0.168.0',isolation:'metadata-compatible'}] as const;
+  for(const actual of [expected,{...expected,providers:[{...providers[0],path:path.resolve('old/codex.exe')}]},{...expected,providers:[{...providers[0],version:'0.167.0'}]}]){
+   await expect(listenOrReuse(busy,4317,async()=>true,{expected:{...expected,providers},readIdentity:async()=>actual})).rejects.toThrow(/provider selection.*restart/i);
+  }
+  expect(await listenOrReuse(busy,4317,async()=>true,{expected:{...expected,providers},readIdentity:async()=>({...expected,providers})})).toEqual({kind:'reuse',port:4317});
+ });
  it('publishes and checks all three fields on the real local health route before reuse',async()=>{
   let port=0;
   const host=createHost({registry:{} as Registry,security:createSecurity({port:()=>port}),distDir:process.env.AITIARCH_CONFIG_DIR!,

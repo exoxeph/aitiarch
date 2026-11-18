@@ -11,6 +11,7 @@ import {listFolders} from './folders.ts';
 import {InitError,initPlan,initialize} from './project-init.ts';
 import {summarize} from './project-summary.ts';
 import type {ServerIdentity} from './launch.ts';
+import type {SelectedCli} from './platform/cli-selection.ts';
 
 export interface ProjectApp {handle(req:http.IncomingMessage,res:http.ServerResponse):unknown;close():Promise<void>}
 export interface HostOptions {
@@ -20,6 +21,7 @@ export interface HostOptions {
  /** The project opened with --root, if any: it answers the unprefixed /api routes. */
  defaultProject?:()=>string|undefined;
  identity?:ServerIdentity;
+ providers?:readonly SelectedCli[];
 }
 const ID=/^[0-9a-f]{12}$/,MAX_BODY=64*1024;
 
@@ -79,7 +81,7 @@ export function createHost(o:HostOptions){
    const origin=(req.headers.origin??'').toLowerCase(),site=req.headers['sec-fetch-site'];
    if(origin&&!security.originOk(origin))return json(res,403,{error:'forbidden_origin'});
    if(typeof site==='string'&&site!=='same-origin'&&site!=='none')return json(res,403,{error:'forbidden_site'});
-   if(url.pathname==='/api/health'&&req.method==='GET')return json(res,200,{app:'aitiarch',v:1,...o.identity});
+   if(url.pathname==='/api/health'&&req.method==='GET')return json(res,200,{app:'aitiarch',v:1,...o.identity,...(o.providers?{providers:o.providers}:{})});
    // A project's own routes. The id must name a registered project exactly; the rest of the path never leaves that project.
    const m=/^\/api\/p\/([^/]+)(\/.*)?$/.exec(url.pathname);
    if(m){const e=entryOf(m[1]);if(!e||!m[2])return json(res,404,{error:'unknown_project'});const app=await appFor(e);req.url='/api'+m[2]+url.search;return app.handle(req,res);}

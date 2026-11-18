@@ -4,8 +4,9 @@ import {DEFAULT_PIPELINE_CONFIG as defaults,activePipelineConfig} from '../share
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { createSecurity } from "./security.ts";
-import {councilAdapters} from './providers/council-adapters.ts';
-import {councilLocalChecks} from './providers/council-availability.ts';
+import {selectRuntimeProviders} from './platform/runtime-providers.ts';
+import {selectedCouncilAdapters} from './providers/council-adapters.ts';
+export {selectRuntimeProviders} from './platform/runtime-providers.ts';
 import {roleRouting} from './providers/routing.ts';
 import {createInvokedCodexBridge} from './providers/invoked-bridge.ts';
 import {validateCodexCommand} from './providers/codex-command.ts';
@@ -70,8 +71,11 @@ const appFolder=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..
 const {version}=JSON.parse(await readFile(path.join(appFolder,'ui','package.json'),'utf8'));
 const identity={version,appFolder,notebookRoot:path.join(projectFolder,'.aitiarch')};
 const { UsageLogs } = await import("./providers/usage.ts");
-if (args.claude) {
-  const probe = createProvider({ provider: "claude", command: args.claude, contract: "claude-canary-2.1.205" });
+const runtime=await selectRuntimeProviders({configDir:configFolder,overrides:{...(args.claude!==undefined?{claude:args.claude}:{}),...(args.codex!==undefined?{codex:args.codex}:{})}});
+const serverIdentity={...identity,providers:runtime.providers};
+const claudeCommand=runtime.commands.claude;
+if (claudeCommand&&!args.chatgptPlan) {
+  const probe = createProvider({ provider: "claude", command: claudeCommand, contract: "claude-canary-2.1.205" });
   for (const warning of (await probe.checkAvailability()).warnings ?? []) console.warn(warning);
 }
 
@@ -87,13 +91,13 @@ const openProject = async (entry: ProjectEntry) => {
   const plan = args.chatgptPlan ? new ChatGPTPlan({ enabled: true, notebookRoot: store.rootReal }) : undefined;
   if (plan) plans.add(plan);
   const usage = new UsageLogs({ notebookRoot: store.rootReal });
-  const provider = plan ?? (args.claude ? createProvider({ provider: defaults.roles.chat, command: args.claude, contract: "claude-canary-2.1.205", usageLog: usage }) : undefined);
-  const adapters=councilAdapters(args.claude,args.codex),availabilityChecks=councilLocalChecks(args.claude,args.codex);
-  const routing=roleRouting({dir:configFolder,adapters,checks:availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!args.claude,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true});
-  const app = createApp({ pipelineConfigDir: configFolder, store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, council:{adapters,availabilityChecks,routing}, harness: args.claude ? { command: args.claude } : undefined });
+  const provider = plan ?? (claudeCommand ? createProvider({ provider: defaults.roles.chat, command: claudeCommand, contract: "claude-canary-2.1.205", usageLog: usage }) : undefined);
+  const adapters=selectedCouncilAdapters(runtime.providers),availabilityChecks=runtime.availabilityChecks;
+  const routing=roleRouting({dir:configFolder,adapters,checks:availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!claudeCommand,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true});
+  const app = createApp({ pipelineConfigDir: configFolder, store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, council:{adapters,availabilityChecks,routing}, harness: claudeCommand ? { command: claudeCommand } : undefined });
   return { handle: app.handle, close: async () => { watcher.stop(); await plan?.close(); await app.close(); } };
 };
-const host = createHost({ registry: registry!, security, distDir, openProject, identity, defaultProject: () => defaultId });
+const host = createHost({ registry: registry!, security, distDir, openProject, identity:serverIdentity, providers:runtime.providers, defaultProject: () => defaultId });
 
 const openBrowser = (target: string) => {
   const [cmd, a] = process.platform === "win32" ? ["cmd", ["/c", "start", "", target.replace(/&/g, "^&")]] : process.platform === "darwin" ? ["open", [target]] : ["xdg-open", [target]];
@@ -106,7 +110,7 @@ const notebookMissing = () => {
 
 let choice: Awaited<ReturnType<typeof listenOrReuse>>;
 try {
-  choice = await listenOrReuse((p) => host.listen(p), args.port ?? DEFAULT_PORT, undefined, {expected:identity});
+  choice = await listenOrReuse((p) => host.listen(p), args.port ?? DEFAULT_PORT, undefined, {expected:serverIdentity});
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));
   process.exit(1);

@@ -3,9 +3,10 @@
 import http from 'node:http';
 import {mkdir,readFile,rename,rm,writeFile} from 'node:fs/promises';
 import path from 'node:path';
+import type {SelectedCli} from './platform/cli-selection.ts';
 
 export const DEFAULT_PORT=4317;
-export interface ServerIdentity {version:string;appFolder:string;notebookRoot:string}
+export interface ServerIdentity {version:string;appFolder:string;notebookRoot:string;providers?:readonly Pick<SelectedCli,'id'|'path'|'version'|'isolation'>[]}
 async function health(port:number,timeoutMs=1500):Promise<any>{
  return new Promise(resolve=>{
   const req=http.get({host:'127.0.0.1',port,path:'/api/health',headers:{host:`127.0.0.1:${port}`},timeout:timeoutMs},res=>{
@@ -19,7 +20,7 @@ async function health(port:number,timeoutMs=1500):Promise<any>{
 export async function readServerIdentity(port:number):Promise<ServerIdentity|null>{
  const d=await health(port);
  return d&&['version','appFolder','notebookRoot'].every(key=>typeof d[key]==='string'&&d[key].length>0)?
-  {version:d.version,appFolder:d.appFolder,notebookRoot:d.notebookRoot}:null;
+  {version:d.version,appFolder:d.appFolder,notebookRoot:d.notebookRoot,...(Array.isArray(d.providers)&&d.providers.length<=3&&d.providers.every((p:any)=>p&&['claude','codex','kiro'].includes(p.id)&&(p.path===null||typeof p.path==='string')&&(p.version===null||typeof p.version==='string')&&['unverified','metadata-compatible'].includes(p.isolation))?{providers:d.providers.map((p:any)=>({id:p.id,path:p.path,version:p.version,isolation:p.isolation}))}:{})}:null;
 }
 
 /** True only when the port answers our health probe. Anything else (another program, silence) is not Aitiarch. */
@@ -39,6 +40,10 @@ export async function listenOrReuse(listen:(port:number)=>Promise<number>,port:n
    const samePath=(a:string,b:string)=>process.platform==='win32'?path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase():path.resolve(a)===path.resolve(b);
    if(actual.version!==expected.version||!samePath(actual.appFolder,expected.appFolder)||!samePath(actual.notebookRoot,expected.notebookRoot))
     throw new Error(`Server identity mismatch on port ${port}: running version ${actual.version}, app folder ${actual.appFolder}, notebook root ${actual.notebookRoot}; requested version ${expected.version}, app folder ${expected.appFolder}, notebook root ${expected.notebookRoot}. Close the running server or use --port <number>.`);
+   if(expected.providers){
+    const key=(p:NonNullable<ServerIdentity['providers']>)=>JSON.stringify(p.map(({id,path:binary,version,isolation})=>({id,path:binary===null?null:process.platform==='win32'?path.resolve(binary).toLowerCase():path.resolve(binary),version,isolation})).sort((a,b)=>a.id.localeCompare(b.id)));
+    if(!actual.providers||key(actual.providers)!==key(expected.providers))throw Error(`Server provider selection differs on port ${port}. Close that server and restart with the requested CLI settings, or choose another port.`);
+   }
    return {kind:'reuse',port};
   }
   if(await probe(port))return {kind:'reuse',port};
