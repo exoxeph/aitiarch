@@ -1,3 +1,4 @@
+import {execFileSync} from 'node:child_process';
 import {mkdtemp, mkdir, readdir, readFile, writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -128,12 +129,12 @@ describe('first-run setup endpoints', () => {
   expect(await readdir(project)).toEqual(['.git']);
  });
  it('requires explicit consent for private init and keeps machine preferences separate', async () => {
-  await writeFile(path.join(project,'.git'), 'gitdir: synthetic');
+  execFileSync('git',['init','--quiet'],{cwd:project,windowsHide:true});
   await saveMachineSetup(dir, defaultMachineSetup());
   const before = await readFile(path.join(dir,SETUP_FILE));
   await expect(service().init({confirmIgnore:false})).rejects.toThrow(/confirm/i);
   expect(await readdir(project)).toEqual(['.git']);
-  expect(await service().init({confirmIgnore:true})).toMatchObject({sharing:'private', sharedReady:false, protection:'git-ignored'});
+  expect(await service().init({confirmIgnore:true})).toMatchObject({sharing:'private', sharedReady:false, protection:'git-ignored',privateLocation:path.join(project,'.aitiarch','local')});
   expect(await readFile(path.join(project,'.gitignore'),'utf8')).toBe('/.aitiarch/\n');
   expect(await readFile(path.join(dir,SETUP_FILE))).toEqual(before);
  });

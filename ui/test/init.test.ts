@@ -1,13 +1,25 @@
 import {beforeEach,afterEach,expect,it,vi} from 'vitest';
+import {execFileSync} from 'node:child_process';
+import {promisify} from 'node:util';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';import path from 'node:path';
 import {initProject} from '../server/init.ts';
 import {resolveRoot} from '../server/root.ts';
-vi.mock('node:child_process',()=>Object.fromEntries(['spawn','execFile','exec','fork','spawnSync','execFileSync','execSync'].map(name=>[name,vi.fn(()=>{throw Error('Init must not run a child process.');})])));
+vi.mock('node:child_process',async importOriginal=>{
+ const actual=await importOriginal<typeof import('node:child_process')>();
+ const {promisify: wrap}=await import('node:util');
+ // Check the subprocess boundary without replacing Git's output.
+ const execFile=vi.fn(()=>{throw Error('Use the checked Git call.');});
+ Object.defineProperty(execFile,wrap.custom,{value:vi.fn((executable:string,args:string[],options:object)=>{
+  if(executable!=='git'||args[0]!=='check-ignore'&&!(args[0]==='--literal-pathspecs'&&args[1]==='ls-files'))throw Error('Init may only run read-only Git checks.');
+  return wrap(actual.execFile)(executable,args,options);
+ })});
+ return {...actual,execFile};
+});
 let project:string;
 beforeEach(async()=>{const dir=await fs.mkdtemp(path.join(os.tmpdir(),'aitiarch-init-'));vi.stubEnv('AITIARCH_CONFIG_DIR',path.join(dir,'config'));await fs.mkdir(process.env.AITIARCH_CONFIG_DIR!);project=path.join(dir,'project');await fs.mkdir(project);});
 afterEach(()=>vi.unstubAllEnvs());
-const git=()=>fs.mkdir(path.join(project,'.git'));
+const git=()=>execFileSync('git',['init','--quiet'],{cwd:project,windowsHide:true});
 it.each(['private','shared'] as const)('%s needs explicit ignore consent, not merely a mode',async sharing=>{
  await git();const r=await initProject({project,sharing,confirmIgnore:false});
  expect(r.privatePersistence).toBe(false);expect(r.protection).toBe('unverified');expect(r.messages.join(' ')).toMatch(/private persistence.*disabled/i);
@@ -18,7 +30,7 @@ it.each([{sharing:'private' as const,line:'/.aitiarch/'},{sharing:'shared' as co
  const r=await initProject({project,sharing,confirmIgnore:true}),after=await fs.readFile(path.join(project,'.gitignore'));
  expect(after.subarray(0,before.length)).toEqual(before);expect(after.subarray(before.length).toString()).toBe(line+'\r\n');
  expect(r.protection).toBe('git-ignored');expect(r.privatePersistence).toBe(sharing==='private');expect(r.sharedReady).toBe(false);
- if(sharing==='shared')expect(r.messages.join(' ')).toMatch(/not ready.*slice 9/i);
+ if(sharing==='shared')expect(r.messages.join(' ')).toMatch(/not ready.*private writers/i);
  expect(await fs.readFile(path.join(r.root,'local','.gitignore'),'utf8')).toBe('*\n');
  expect(await resolveRoot({cwd:project})).toBe(r.root);await expect(fs.stat(path.join(r.root,'notes'))).rejects.toMatchObject({code:'ENOENT'});
  for(const dir of ['ink','decisions','local'])expect((await fs.stat(path.join(r.root,dir))).isDirectory()).toBe(true);
@@ -62,7 +74,8 @@ it('existing local ignore rules are never overwritten and unsafe rules do not en
  await git();await fs.mkdir(path.join(project,'.aitiarch','local'),{recursive:true});const file=path.join(project,'.aitiarch','local','.gitignore');await fs.writeFile(file,'!keep\r\n');
  const r=await initProject({project,sharing:'private',confirmIgnore:true});expect(await fs.readFile(file,'utf8')).toBe('!keep\r\n');expect(r.privatePersistence).toBe(false);
 });
-it('init performs no child process or git commands',async()=>{
- const child=await import('node:child_process');await initProject({project,sharing:'private',confirmIgnore:true});
- for(const name of ['spawn','execFile','exec','fork','spawnSync','execFileSync','execSync'] as const)expect(child[name]).not.toHaveBeenCalled();
+it('init performs no Git checks outside a repository',async()=>{
+ const child=await import('node:child_process');const checks=vi.mocked(promisify(child.execFile));checks.mockClear();
+ await initProject({project,sharing:'private',confirmIgnore:true});
+ expect(checks).not.toHaveBeenCalled();
 });

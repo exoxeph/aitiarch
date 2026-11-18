@@ -1,25 +1,13 @@
 import * as nodeFs from 'node:fs/promises';
-import {constants,type Stats} from 'node:fs';
+import {constants} from 'node:fs';
 import path from 'node:path';
+import {assertStoragePath as safePath,hasGitMarker as gitProject,resolveProjectStorage,storageEntry as entry,storageErrorCode as errorCode} from './project-storage.ts';
 
 export interface InitOptions {project:string;sharing:'private'|'shared';confirmIgnore:boolean|((line:string)=>Promise<boolean>)}
-export interface InitResult {root:string;sharing:'private'|'shared';protection:'git-ignored'|'filesystem-private'|'unverified';privatePersistence:boolean;sharedReady:false;created:string[];messages:string[]}
-/** Only filesystem operations are injectable: init never discovers a provider or executes Git. */
+export interface InitResult {root:string;sharing:'private'|'shared';protection:'git-ignored'|'filesystem-private'|'unverified';privatePersistence:boolean;privateLocation:string|null;sharedReady:false;created:string[];messages:string[]}
+/** Filesystem operations can be injected. Git checks are read-only and init never discovers a provider. */
 export type InitFilesystem=Pick<typeof nodeFs,'lstat'|'readFile'|'mkdir'|'writeFile'|'open'>;
 const MAX_IGNORE_BYTES=1024*1024;
-const errorCode=(e:unknown)=>(e as NodeJS.ErrnoException)?.code;
-async function entry(fs:InitFilesystem,file:string):Promise<Stats|null>{
- try{return await fs.lstat(file);}catch(e){if(errorCode(e)==='ENOENT')return null;throw e;}
-}
-/** Reject links in every existing path component, including Windows junctions. */
-async function safePath(fs:InitFilesystem,target:string){
- const base=path.parse(target).root;let current=base;
- for(const part of path.relative(base,target).split(path.sep).filter(Boolean)){
-  current=path.join(current,part);const s=await entry(fs,current);
-  if(s?.isSymbolicLink())throw Error('Unsafe symbolic link target; init did not follow it.');
-  if(current!==target&&s&&!s.isDirectory())throw Error('Unsafe parent directory.');
- }
-}
 async function regular(fs:InitFilesystem,file:string){
  await safePath(fs,file);const s=await entry(fs,file);
  if(s&&(!s.isFile()||s.nlink!==1))throw Error('Unsafe file target.');return s;
@@ -35,13 +23,6 @@ const rules=(data:Buffer)=>new TextDecoder('utf-8',{fatal:true}).decode(data).sp
 // Conservative proof of the rule we wrote, not a general Git pattern interpreter.
 // A final anchored directory exclusion cannot be undone by a nested ignore file.
 const hasFinalRule=(data:Buffer,line:string)=>rules(data).at(-1)===line;
-async function gitProject(fs:InitFilesystem,project:string){
- for(let p=project;;p=path.dirname(p)){
-  const marker=path.join(p,'.git'),s=await entry(fs,marker);
-  if(s){if(s.isSymbolicLink()||!s.isDirectory()&&!s.isFile())throw Error('Unsafe Git marker.');return true;}
-  if(path.dirname(p)===p)return false;
- }
-}
 /** Read-only preview for an already-open project. Never create init targets here. */
 export async function privateProtection(project:string,fs:InitFilesystem=nodeFs):Promise<Pick<InitResult,'protection'|'sharedReady'|'messages'>>{
  let protection:InitResult['protection']='unverified';
@@ -82,18 +63,34 @@ export async function initProject(options:InitOptions,fs:InitFilesystem=nodeFs):
  for(const directory of directories){await safePath(fs,directory);const s=await entry(fs,directory);if(s&&!s.isDirectory())throw Error('Unsafe notebook directory target.');}
  await regular(fs,welcome);await regular(fs,localIgnore);
  const inGit=await gitProject(fs,project),ignore=path.join(project,'.gitignore');if(inGit)await regular(fs,ignore);
- const result:InitResult={root,sharing:options.sharing,protection:inGit?'unverified':'filesystem-private',privatePersistence:false,sharedReady:false,created:[],messages:[]};
- if(options.sharing==='shared')result.messages.push('Shared mode is not ready until slice 9 moves private writers into local/. Saved threads can contain sensitive text; secret exclusion is not retroactive redaction. Do not publish this folder yet.');
+ const result:InitResult={root,sharing:options.sharing,protection:inGit?'unverified':'filesystem-private',privatePersistence:false,privateLocation:null,sharedReady:false,created:[],messages:[]};
+ let layout=await resolveProjectStorage(root,{create:true,fs});
+ result.created.push(...layout.created.map(file=>path.relative(project,file)));
+ if(!layout.ok&&!layout.created.includes(root)){
+  result.messages.push(layout.reason,protectionMessage(result.protection),'Private persistence is disabled. Existing files were preserved.');
+  return result;
+ }
+ if(options.sharing==='shared')result.messages.push('Shared mode is not ready until all private writers use the local/ layout. Saved threads can contain sensitive text; secret exclusion is not retroactive redaction. Do not publish this folder yet.');
  let ignoreVerified=!inGit;
  if(inGit){
   const line=options.sharing==='private'?'/.aitiarch/':'/.aitiarch/local/';
   try{
    const existing=await readIgnore(fs,ignore);
    const consent=hasFinalRule(existing.data,line)|| (typeof options.confirmIgnore==='function'?await options.confirmIgnore(line):options.confirmIgnore);
-   if(consent){await mergeIgnore(fs,ignore,line);ignoreVerified=true;result.protection='git-ignored';}
+   if(consent){
+    await mergeIgnore(fs,ignore,line);
+    layout=await resolveProjectStorage(root,{fs});
+    ignoreVerified=layout.ok;
+    if(ignoreVerified)result.protection='git-ignored';
+   }
   }catch{result.messages.push('The ignore rule could not be written or verified.');}
  }
- for(const directory of directories){
+ if(layout.ok)result.privateLocation=layout.local;
+ else {
+  result.protection=inGit?'unverified':'filesystem-private';
+  result.messages.push(layout.reason);
+ }
+ for(const directory of directories.slice(1,-1)){
   await safePath(fs,directory);
   try{await fs.mkdir(directory,{mode:0o700});result.created.push(path.relative(project,directory));}
   catch(e){if(errorCode(e)!=='EEXIST')throw e;if(!(await entry(fs,directory))?.isDirectory())throw Error('Unsafe notebook directory target.');await safePath(fs,directory);}
@@ -103,18 +100,15 @@ export async function initProject(options:InitOptions,fs:InitFilesystem=nodeFs):
   try{await fs.writeFile(file,data,{flag:'wx',mode:0o600});result.created.push(path.relative(project,file));}
   catch(e){if(errorCode(e)!=='EEXIST')throw e;await regular(fs,file);}
  };
- await create(localIgnore,'*\n');
- const local=await readIgnore(fs,localIgnore),localSafe=rules(local.data).join('\n')==='*';
- if(!localSafe)result.messages.push('Existing local/.gitignore was preserved, but its private ignore rule could not be verified.');
  if(!await entry(fs,welcome)){
   const guide=await fs.readFile(new URL('../../docs/guide.md',import.meta.url),'utf8');
   if(guide.length>16000)throw Error('Welcome guide is too large.');
   const content=guide.split(/^## Welcome\r?\n/m)[1]?.split(/\r?\n## /)[0]?.trim();if(!content)throw Error('Welcome guide is unavailable.');
   await create(welcome,content+'\n');
  }
- result.privatePersistence=ignoreVerified&&localSafe&&options.sharing==='private';
+ result.privatePersistence=ignoreVerified&&layout.ok&&options.sharing==='private';
  result.messages.push(protectionMessage(result.protection));
  if(!result.privatePersistence)result.messages.push('Private persistence is disabled for this init result. No private writer was started.');
- result.messages.push('Existing files were preserved. No Git commands or provider calls were run.');
+ result.messages.push('Existing files were preserved. Git checks are read-only. No provider calls were run.');
  return result;
 }

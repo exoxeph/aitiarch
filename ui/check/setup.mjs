@@ -12,6 +12,7 @@ import {Store} from '../server/store.ts';
 import {NoteWatcher} from '../server/watch.ts';
 import {createApp} from '../server/http.ts';
 import {createSetupHttp} from '../server/setup-http.ts';
+import {initProject} from '../server/init.ts';
 import {compatibleDefaults,descriptorFromAdapter} from '../server/providers/registry.ts';
 import {saveMachineSetup} from '../server/setup-store.ts';
 import {createModelCatalogs,readCatalog} from '../server/providers/model-catalog.ts';
@@ -25,9 +26,9 @@ assert(process.env.BATCH2A_OUTPUT && (relative.startsWith('..'+path.sep) || path
 await mkdir(output,{recursive:true});
 const project = await mkdtemp(path.join(os.tmpdir(),'aitiarch-setup-check-'));
 const notes = path.join(project,'.aitiarch');
-// Slice 8 init creates this directory. Existing server boot also creates it,
-// so start from an initialized notebook to isolate setup-screen writes.
-await mkdir(path.join(notes,'ink'),{recursive:true});
+const localInit=await initProject({project,sharing:'private',confirmIgnore:false});
+assert.equal(localInit.protection,'filesystem-private');
+assert.equal(localInit.privateLocation,path.join(notes,'local'));
 const note = path.join(notes,'Synthetic plan.md');
 const original = Buffer.from('\uFEFF# Synthetic plan\r\n\r\nRelease in June.\r\n');
 await writeFile(note,original);
@@ -191,6 +192,31 @@ async function checkLaunches() {
    if(server&&server.exitCode===null&&server.signalCode===null){const closed=once(server,'close');server.kill();await closed;}
   }
  }
+}
+
+async function checkGitFirstRun(){
+ const gitProject=await mkdtemp(path.join(os.tmpdir(),'aitiarch-setup-git-'));
+ const gitConfig=await mkdtemp(path.join(os.tmpdir(),'aitiarch-setup-git-config-'));
+ await promisify(execFile)('git',['init','--quiet'],{cwd:gitProject,windowsHide:true});
+ const initialized=await initProject({project:gitProject,sharing:'private',confirmIgnore:true});
+ assert.equal(initialized.protection,'git-ignored');
+ assert.equal(initialized.sharedReady,false);
+ assert.equal(await readFile(path.join(initialized.privateLocation,'.gitignore'),'utf8'),'*\n');
+ const checked=await promisify(execFile)('git',['check-ignore','--','.aitiarch/local/images/probe.png'],{cwd:gitProject,windowsHide:true});
+ assert.match(checked.stdout,/probe\.png/);
+ const gitStore=await Store.open(initialized.root);
+ const gitWatcher=new NoteWatcher(gitStore);
+ const gitSetup=createSetupHttp({dir:gitConfig,project:gitProject,providers:[],ready:async()=>true});
+ const gitApp=createApp({store:gitStore,watcher:gitWatcher,distDir:path.resolve('dist'),pipelineConfigDir:gitConfig,setup:gitSetup});
+ const page=await browser.newPage({viewport:{width:1280,height:800}});
+ try{
+  await page.goto('http://127.0.0.1:'+await gitApp.listen(0)+'/?debug=1');
+  const card=page.getByRole('dialog',{name:'Set up Aitiarch'});
+  await card.getByText(/Required ignore rule verified/).waitFor();
+  assert.equal((await gitSetup.get()).privacy.sharedReady,false);
+  await page.screenshot({path:path.join(output,'first-run-private-git.png')});
+  console.log('Git first run passed: verified local ignore and shared readiness remains off.');
+ }finally{await page.close();gitWatcher.stop();await gitApp.close();}
 }
 
 try {
@@ -573,6 +599,7 @@ try {
  assert.equal(writes.some(([,route])=>/\/(chat|assistance|council|investigate)\b/.test(route)),false);
  console.log('Setup passed: AI-off card, Settings Setup tab and keyboard replay, text size, composer chip and popover, unchanged project, local requests only.');
  await checkLaunches();
+ await checkGitFirstRun();
 } finally {
  await browser?.close();
  watcher.stop();
