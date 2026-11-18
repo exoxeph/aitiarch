@@ -1,7 +1,7 @@
 import type {MachineSetup,ModelEffort,SetupProvider,SetupRole} from './setup.ts';
 
 export interface CatalogModel {id:string;name:string;default:boolean;efforts:string[]}
-export interface ModelCatalog {source:'cli'|'fallback';models:CatalogModel[];checkedAt:number|null;notice?:string}
+export interface ModelCatalog {source:'cli'|'fallback';models:CatalogModel[];checkedAt:number|null;notice?:string;loading?:true}
 export const CATALOG_MAX_AGE_MS=15*60*1000;
 export const DISCONTINUED_MODEL_NOTICE='This model is no longer listed. New sends use the CLI default until you choose again.';
 export const DISCONTINUED_EFFORT_NOTICE='This effort is no longer listed for the model. New sends use the CLI default effort.';

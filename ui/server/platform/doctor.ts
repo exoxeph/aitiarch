@@ -6,15 +6,18 @@ import {selectClis,type CliSelectionOptions,type SelectedCli} from './cli-select
 import {loadMachineSetup,SETUP_FILE} from '../setup-store.ts';
 import {ROLE_REGISTRY,roleDefinition,type SetupRole,type SetupProvider} from '../../shared/setup.ts';
 import {providerCapabilities} from '../providers/registry.ts';
-import {createModelCatalogs} from '../providers/model-catalog.ts';
+import {createModelCatalogs,readCatalog,type CatalogTiming} from '../providers/model-catalog.ts';
 import {modelSelection,selectionLabel} from '../../shared/model-settings.ts';
 import {effectiveCatalogSelection} from '../../shared/models.ts';
 export interface DoctorOptions extends CliSelectionOptions {
+ models?:boolean;
+ readModels?:typeof readCatalog;
  filesystem?:{buildPresent:(dir:string)=>Promise<boolean>;configWritable:(dir:string)=>Promise<boolean>};
 }
 export type DoctorProvider=SelectedCli;
 export interface DoctorRole {role:SetupRole;provider:SetupProvider|null;version:string|null;reason:string|null;participants?:SetupProvider[];modelSettings?:Readonly<import('../../shared/setup.ts').ModelEffort>;modelNotice?:string}
-export interface DoctorReport {exitCode:0|1;checks:{id:string;ok:boolean;code:string;reason:string}[];providers:DoctorProvider[];roles?:DoctorRole[];notice:string}
+export interface DoctorModelCheck {id:SetupProvider;result:string;count:number;timing?:CatalogTiming}
+export interface DoctorReport {exitCode:0|1;checks:{id:string;ok:boolean;code:string;reason:string}[];providers:DoctorProvider[];roles?:DoctorRole[];modelChecks?:DoctorModelCheck[];notice:string}
 export async function checkPrerequisites(options:DoctorOptions):Promise<DoctorReport['checks']>{
  const install=fileURLToPath(new URL('../../',import.meta.url));
  const nodeRange=options.nodeRange??JSON.parse(await readFile(path.join(install,'package.json'),'utf8')).engines.node;
@@ -47,6 +50,16 @@ export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
    ...(selection?{modelSettings:selection.effective,...(selection.modelNotice?{modelNotice:selection.modelNotice}:{})}:{}),
    ...(multiple?{participants:providers.filter(p=>p.isolation==='metadata-compatible'&&setup?.providers[p.id].enabled&&(!setup.councilParticipants||setup.councilParticipants.includes(p.id))).map(p=>p.id)}:{})};
  }));
- return {exitCode:checks.every(c=>c.ok)?0:1,checks,providers,roles,notice:'AI-off editing remains available when optional providers are missing. Login and entitlement were not checked.'};
+ const modelChecks=options.models?await Promise.all(providers.map(async(p):Promise<DoctorModelCheck>=>{
+  if(p.isolation!=='metadata-compatible')return {id:p.id,result:p.reason,count:0};
+  if(p.id==='kiro')return {id:p.id,result:'Model list is not available for Kiro.',count:0};
+  let timing:CatalogTiming|undefined;
+  const catalog=await (options.readModels??readCatalog)(p,{timing:value=>{timing=value;}});
+  return {id:p.id,result:catalog.notice??'OK',count:catalog.models.length,...(timing?{timing}:{})};
+ })):undefined;
+ return {exitCode:checks.every(c=>c.ok)?0:1,checks,providers,roles,...(modelChecks?{modelChecks}:{}),notice:'AI-off editing remains available when optional providers are missing. Login and entitlement were not checked.'};
+}
+export function formatModelChecks(report:DoctorReport):string[]{
+ return (report.modelChecks??[]).map(({id,result,count,timing})=>`${id} models: ${result}; ${count} entries; spawn=${timing?.spawnMs??'unreported'} ms; initialize=${timing?.initializeMs??'unreported'} ms; list=${timing?.listMs??'unreported'} ms; stderr=${timing?.stderr??'unreported'}`);
 }
 export function formatDoctor(report:DoctorReport):string{return [...report.checks.map(c=>`${c.id}: ${c.code} — ${c.reason}`),...report.providers.map(p=>`${p.id}: ${p.code}; path=${p.path??'not found'}; version=${p.version??'unknown'}; isolation=${p.isolation}; roles=${p.roles.join(', ')||'none verified'}; effort=${p.effort===null?'n/a':p.effort} — ${p.reason}`),...(report.roles??[]).map(r=>`${r.role} -> ${r.provider===null?'unset: '+r.reason:(r.provider==='claude'?'Claude':r.provider==='codex'?'Codex':'Kiro')+', version='+(r.version??'not reported')+(r.reason?'; '+r.reason:'')}${r.modelSettings?'; '+selectionLabel(r.modelSettings):''}${r.modelNotice?'; '+r.modelNotice:''}${r.participants?.length?'; participants='+r.participants.join(', '):''} · ${roleDefinition(r.role).label}`),report.notice].join('\n');}

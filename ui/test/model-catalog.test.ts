@@ -40,6 +40,7 @@ else {
   }else if(req.method==='initialize'&&++calls===1)send({id:req.id,result:{userAgent:'fake',platformFamily:'windows',platformOs:'windows',codexHome:'.'}});
   else if(req.method==='initialized'&&++calls===2)continue;
   else if(req.method==='model/list'&&++calls<=4){
+   if(mode==='list-timeout')continue;
    if(mode==='login')send({id:req.id,error:{code:-32000,message:'Login required'}});
    else send({id:req.id,result:{data:[{...${JSON.stringify(row)},...(calls===4?{id:'second',model:'second',isDefault:false}:{})}],nextCursor:calls===3?'next':null}});
   }else process.exit(91);
@@ -49,6 +50,34 @@ else {
  return [file];
 }
 describe('metadata-only catalogs',()=>{
+ it('hydrates matching disk entries before starting a refresh and leaves changed paths or versions loading',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'aitiarch-catalog-restart-'));
+  const a=source(),changed=source('codex','1.2.4');
+  const result={source:'cli' as const,models:[{id:'advertised',name:'Advertised',default:true,efforts:['medium']}],checkedAt:Date.now()};
+  await createModelCatalogs(dir,[a],{read:async()=>result}).refresh();
+  let reads=0;
+  const restarted=createModelCatalogs(dir,[a,changed],{read:async()=>{reads++;return result;}});
+  await restarted.hydrate();
+  expect(restarted.view(a)).toEqual(result);
+  expect(restarted.view(changed)).toMatchObject({loading:true});
+  expect(reads).toBe(0);
+ });
+ it('keeps a cold picker loading while retrying a transient first failure',async()=>{
+  const dir=await mkdtemp(path.join(os.tmpdir(),'aitiarch-catalog-retry-'));
+  let tries=0;
+  const a=source();
+  const catalog=createModelCatalogs(dir,[a],{retryDelayMs:1,read:async()=>{
+   tries++;
+   if(tries===1)return {source:'fallback',models:[],checkedAt:null,notice:'Temporary failure'};
+   return {source:'cli',models:[{id:'advertised',name:'Advertised',default:true,efforts:['medium']}],checkedAt:Date.now()};
+  }});
+  const pending=catalog.refresh();
+  expect(catalog.view(a)).toMatchObject({loading:true});
+  await pending;
+  expect(tries).toBe(2);
+  expect(catalog.view(a)).toMatchObject({source:'cli'});
+  expect(catalog.view(a)?.notice).toBeUndefined();
+ });
  it('reads Codex model/list pages, matching response IDs, with explicit default and effort',async()=>{
   const result=await readCatalog(source(),{prefixArgs:await cli()});
   expect(result).toMatchObject({source:'cli',models:[{id:'advertised',name:row.displayName,default:true,efforts:['medium']},{id:'second',default:false}]});
@@ -61,6 +90,10 @@ describe('metadata-only catalogs',()=>{
   const result=await readCatalog(source(),{prefixArgs:await cli(mode),timeoutMs:mode==='timeout'?200:4000});
   expect(result).toMatchObject({source:'fallback',models:[],notice:expect.any(String)});
   expect(result.notice).not.toMatch(/x{20}/);
+ });
+ it.each([['timeout','did not answer the handshake'],['list-timeout','model list request timed out']])('identifies the timed-out stage for %s',async(mode,message)=>{
+  const result=await readCatalog(source(),{prefixArgs:await cli(mode),timeoutMs:250});
+  expect(result.notice).toContain(message);
  });
  it('serves the cache synchronously while refreshing, deduplicates and isolates binary path and version',async()=>{
   let finish!:()=>void,started!:()=>void,calls=0;

@@ -82,6 +82,8 @@ const { UsageLogs } = await import("./providers/usage.ts");
 const overrides={claude:args.claude,codex:args.codex,kiro:args.kiro};
 const runtime=await selectRuntimeProviders({configDir:configFolder,overrides});
 const catalogs=createModelCatalogs(configFolder,underTest()?[]:runtime.providers);
+await catalogs.hydrate();
+void catalogs.refresh();
 const serverIdentity={...identity,providers:runtime.providers};
 const claudeCommand=runtime.commands.claude;
 // Plugin run/start and the normal command both reach here. Save compatible defaults once, before any project opens.
@@ -176,7 +178,6 @@ await writeInstance(configFolder, { v: 1, port: boundPort, pid: process.pid, tok
 const url = `http://127.0.0.1:${boundPort}/`;
 const launch = `${url}?launch=${security.token}${defaultId ? `&project=${defaultId}` : ""}`;
 console.log(`AITIARCH_READY ${JSON.stringify({ url, launch, root: defaultId ? registry!.get(defaultId)?.notes : null, port: boundPort, project: defaultId ?? null })}`);
-void catalogs.refresh();
 if (args.open && !testDefaults) openBrowser(launch);
 const shutdown = async () => {
   await catalogs.close();

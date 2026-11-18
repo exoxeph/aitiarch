@@ -1,5 +1,5 @@
 // Source checkout (Node >=24, npm ci + npm run build required):
-// node scripts/aitiarch.mjs doctor [--json]
+// node scripts/aitiarch.mjs doctor [--json] [--models]
 // node scripts/aitiarch.mjs init [project] [--private|--shared] [--yes-ignore]
 // node scripts/aitiarch.mjs start [--project <folder>]
 // No published bin: this source tree is not a standalone installation artifact.
@@ -8,7 +8,7 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {mkdir} from 'node:fs/promises';
 
 const installDir=fileURLToPath(new URL('../',import.meta.url));
-const usage='Usage: node scripts/aitiarch.mjs doctor [--json] | init [project] [--private|--shared] [--yes-ignore] | start [--project <folder>]';
+const usage='Usage: node scripts/aitiarch.mjs doctor [--json] [--models] | init [project] [--private|--shared] [--yes-ignore] | start [--project <folder>]';
 
 async function initialize(args,dependencies,out,err){
  let target,sharing,consent=false;
@@ -51,7 +51,7 @@ export async function runCli(argv, dependencies = {}) {
   if(args.length&&!(args.length===2&&args[0]==='--project'&&args[1].trim()&&!args[1].startsWith('--'))){err(usage);return 2;}
   project=path.resolve(dependencies.cwd??process.cwd(),args[1]??'.');
  }else if(command==='doctor'){
-  if(args.length&&!(args.length===1&&args[0]==='--json')){err(usage);return 2;}
+  if(new Set(args).size!==args.length||args.some(arg=>arg!=='--json'&&arg!=='--models')){err(usage);return 2;}
  }else if(command==='init'){
   return initialize(args,dependencies,out,err);
  }else{err(usage);return 2;}
@@ -59,14 +59,14 @@ export async function runCli(argv, dependencies = {}) {
  try{
   // Import only after dispatch: init/help cannot initialize any runtime or registry.
   const {resolveConfigFolder}=await import('../server/registry.ts');
-  const {doctor,formatDoctor}=await import('../server/platform/doctor.ts');
+  const {doctor,formatDoctor,formatModelChecks}=await import('../server/platform/doctor.ts');
   const env=dependencies.env??process.env;
   const configDir=resolveConfigFolder(env);
   await mkdir(configDir,{recursive:true});
   const distDir=path.join(installDir,'dist');
-  const report=await (dependencies.doctor??doctor)({configDir,distDir,cwd:configDir,env});
+  const report=await (dependencies.doctor??doctor)({configDir,distDir,cwd:configDir,env,...(command==='doctor'&&args.includes('--models')?{models:true}:{})});
   if(command==='doctor'){
-   out(args.includes('--json')?JSON.stringify(report):formatDoctor(report));return report.exitCode;
+   out(args.includes('--json')?JSON.stringify(report):[formatDoctor(report),...formatModelChecks(report)].join('\n'));return report.exitCode;
   }
   if(report.exitCode!==0){err(formatDoctor(report));return report.exitCode;}
   const start=dependencies.startServer??(async({project})=>{

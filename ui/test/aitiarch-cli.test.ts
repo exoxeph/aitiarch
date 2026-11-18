@@ -56,7 +56,7 @@ describe('source app command wrapper',()=>{
  it('runs the source entry through native Node from a different cwd without starting anything',async()=>{
   const h=harness();await mkdir(h.cwd,{recursive:true});
   const {stdout}=await promisify(execFile)(process.execPath,[script,'--help'],{cwd:h.cwd,env:{...process.env,...h.deps.env},timeout:10000});
-  expect(stdout).toContain('doctor [--json] | init [project]');
+  expect(stdout).toContain('doctor [--json] [--models] | init [project]');
   const result=await promisify(execFile)(process.execPath,[script,'init'],{cwd:h.cwd,env:{...process.env,...h.deps.env},timeout:10000});
   expect(result.stdout).toContain('Defaulting to private');expect(await readFile(path.join(h.cwd,'.aitiarch','local','.gitignore'),'utf8')).toBe('*\n');
  });
@@ -65,6 +65,16 @@ describe('source app command wrapper',()=>{
   expect(h.output.join('\n')).toContain('AI-off available');expect(h.probes[0].configDir).toBe(process.env.AITIARCH_CONFIG_DIR);
   expect(h.probes[0].distDir).toBe(fileURLToPath(new URL('../dist',import.meta.url)));
   expect(h.starts).toEqual([]);
+ });
+ it('doctor --models requests metadata diagnostics and supports both output formats',async()=>{
+  const report:DoctorReport={exitCode:0,checks:[],providers:[],notice:'AI-off available',modelChecks:[{id:'codex',result:'OK',count:4,timing:{spawnMs:20,initializeMs:30,listMs:5,stderr:'redacted'}}]};
+  const plain=harness(report);
+  expect(await runCli(['doctor','--models'],plain.deps)).toBe(0);
+  expect(plain.probes[0].models).toBe(true);
+  expect(plain.output.join('')).toContain('spawn=20 ms; initialize=30 ms; list=5 ms; stderr=redacted');
+  const json=harness(report);
+  expect(await runCli(['doctor','--models','--json'],json.deps)).toBe(0);
+  expect(JSON.parse(json.output.join(''))).toEqual(report);
  });
  it('doctor --json emits only the report and returns its failure exitCode',async()=>{
   const report:DoctorReport={exitCode:1,checks:[{id:'build',ok:false,code:'build_unavailable',reason:'Run npm run build.'}],providers:[],notice:'AI-off'};

@@ -21,7 +21,7 @@ export function spawnModelCatalog(config:{id:'claude'|'codex';command:string;pre
  const safeEnv=Object.fromEntries(Object.entries(process.env).filter(([k])=>/^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP)$/i.test(k)));
  const env={...safeEnv,HOME:cwd,USERPROFILE:cwd,APPDATA:cwd,LOCALAPPDATA:cwd,CODEX_HOME:cwd,CLAUDE_CONFIG_DIR:cwd,
   XDG_CONFIG_HOME:cwd,XDG_DATA_HOME:cwd,XDG_CACHE_HOME:cwd,XDG_STATE_HOME:cwd};
- return spawn(config.command,[...(config.prefixArgs??[]),...args],{cwd,env,shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:['pipe','pipe','ignore']});
+ return spawn(config.command,[...(config.prefixArgs??[]),...args],{cwd,env,shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:['pipe','pipe','pipe']});
 }
 
 /** Separate notes-only profiles. Never shares or alters the Claude/Investigate/diagram profiles below.

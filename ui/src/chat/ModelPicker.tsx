@@ -82,7 +82,7 @@ export function ModelPicker({role = 'normal-chat', provider, lastAnswer, onChang
   </button>
   {open && usable && <div className="compose-mode-menu compose-model-menu" role="menu" aria-label="Model and effort" aria-busy={busy}>
    <p className="compose-model-hint">Changing provider, model or effort starts a fresh conversation.</p>
-   {catalogAvailable&&<button type="button" className="ghost" disabled={refreshing||busy} onClick={()=>void refresh(true)}>{refreshing?'Checking model lists…':'Refresh model lists'}</button>}
+   {catalogAvailable&&<button type="button" className="ghost" disabled={refreshing||busy} onClick={()=>void refresh(true)}>{refreshing?'Checking model lists…':model.groups.some(g=>g.catalog?.notice&&!g.catalog.loading)?'Try again':'Refresh model lists'}</button>}
    {model.groups.map(g => <div key={g.id} role="group" aria-label={g.label} className="compose-model-group">
     <p className="compose-model-title">{g.label}</p>
     {g.available ? <>
@@ -106,7 +106,7 @@ export function ModelPicker({role = 'normal-chat', provider, lastAnswer, onChang
      <span className="compose-mode-name">{g.label}</span><span className="compose-mode-help">{g.reason}</span></div>}
    </div>)}
    {model.modelNotice&&<p role="status" className="compose-model-notice">{model.modelNotice}</p>}
-   {model.effortReason&&<p className="compose-model-hint">{model.effortReason}</p>}
+   {model.effortReason&&!model.groups.some(g=>g.id===cur?.provider&&g.catalog?.loading)&&<p className="compose-model-hint">{model.effortReason}</p>}
    {model.efforts.length>0 && cur && <div role="group" aria-label="Effort" className="compose-model-group">
     <p className="compose-model-title">Effort</p>
     {[null, ...model.efforts].map(value => <button key={value ?? 'default'} type="button" role="menuitemradio" className="compose-mode-item compose-model-item" disabled={busy||!model.effortSupported}

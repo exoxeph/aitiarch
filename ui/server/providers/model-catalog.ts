@@ -4,6 +4,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {lstat,mkdtemp,open,realpath,rename,rm,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
 import {CATALOG_MAX_AGE_MS,validCatalogModelId,validEffortId,type CatalogModel,type ModelCatalog} from '../../shared/models.ts';
 import type {SelectedCli} from '../platform/cli-selection.ts';
 
@@ -42,12 +43,14 @@ function claudeModels(rows:unknown):CatalogModel[] {
  return [...byId.values()];
 }
 
+export interface CatalogTiming {spawnMs?:number;initializeMs?:number;listMs?:number;stderr:'empty'|'sign-in mentioned'|'redacted'}
 /** Only allow outbound metadata requests. Never pass a message, project cwd, user config, or auth env. */
-export async function readCatalog(source:Source,options:{prefixArgs?:readonly string[];timeoutMs?:number;signal?:AbortSignal}={}):Promise<ModelCatalog>{
+export async function readCatalog(source:Source,options:{prefixArgs?:readonly string[];timeoutMs?:number;signal?:AbortSignal;timing?:(timing:CatalogTiming)=>void}={}):Promise<ModelCatalog>{
  if(source.id==='kiro'||!source.path||!source.version||source.isolation!=='metadata-compatible')return fallback();
  const {id,path:command}=source;
  let dir:string|undefined;
  let cleanupAfterClose=false;
+ const timing:CatalogTiming={stderr:'empty'};
  try{
   dir=await realpath(await mkdtemp(path.join(os.tmpdir(),'aitiarch-model-catalog-')));
   const cwd=dir;
@@ -57,7 +60,13 @@ export async function readCatalog(source:Source,options:{prefixArgs?:readonly st
   if(cliVersion(id,version)!==source.version)return fallback('The CLI version changed. Restart Aitiarch to check the current model list.');
   if(options.signal?.aborted)return fallback();
   const models=await new Promise<CatalogModel[]>((resolve,reject)=>{
+   const launched=performance.now();
    const child=spawnModelCatalog({id,command,prefixArgs:options.prefixArgs},cwd);
+   let spawned=launched,initialized=launched;
+   child.stderr.setEncoding('utf8').on('data',(chunk:string)=>{
+    if(/sign.?in|login|authenticat/i.test(chunk))timing.stderr='sign-in mentioned';
+    else if(timing.stderr==='empty')timing.stderr='redacted';
+   });
    const send=(value:unknown)=>child.stdin.write(JSON.stringify(value)+'\n');
    const finish=()=>{if(!modelsValid(rows))throw Error('shape');done=true;child.stdin.end();};
    let bytes=0,buffer='',done=false,request=1,error:string|undefined,rows:CatalogModel[]=[];
@@ -71,17 +80,22 @@ export async function readCatalog(source:Source,options:{prefixArgs?:readonly st
     forceKill=setTimeout(()=>child.kill(),500);
     cutoff=setTimeout(()=>{
      cleanupAfterClose=true;
-     child.stdout.destroy();child.stdin.destroy();child.unref();reject(Error(code));
+     child.stdout.destroy();child.stderr.destroy();child.stdin.destroy();child.unref();reject(Error(code));
     },1000);
    };
    const abort=()=>fail('cancelled');
-   const timer=setTimeout(()=>fail('timeout'),options.timeoutMs??5000);
+   let timer:ReturnType<typeof setTimeout>;
+   const stage=(reason:string,ms:number)=>{clearTimeout(timer);timer=setTimeout(()=>fail(reason),options.timeoutMs??ms);};
+   stage('spawn',15000);
    options.signal?.addEventListener('abort',abort,{once:true});
    child.stdin.on('error',()=>fail('failed'));
-   child.on('error',()=>fail('failed'));
-   child.once('spawn',()=>source.id==='codex'
-    ?send({id:1,method:'initialize',params:{clientInfo:{name:'aitiarch_catalog',version:'1'}}})
-    :send({type:'control_request',request_id:'catalog',request:{subtype:'initialize'}}));
+   child.on('error',()=>fail(child.pid?'failed':'spawn'));
+   child.once('spawn',()=>{
+    stage('initialize',15000);
+    spawned=performance.now();timing.spawnMs=Math.round(spawned-launched);
+    if(source.id==='codex')send({id:1,method:'initialize',params:{clientInfo:{name:'aitiarch_catalog',version:'1'}}});
+    else send({type:'control_request',request_id:'catalog',request:{subtype:'initialize'}});
+   });
    const nextPage=(cursor?:string)=>send({id:++request,method:'model/list',params:{limit:50,includeHidden:false,...(cursor?{cursor}:{})}});
    const receive=(line:string)=>{
     const msg:unknown=JSON.parse(line);
@@ -90,6 +104,7 @@ export async function readCatalog(source:Source,options:{prefixArgs?:readonly st
      const response=msg.response;
      if(msg.type!=='control_response'||!object(response)||response.request_id!=='catalog'||response.subtype!=='success'||
         Object.hasOwn(msg,'session_id')||Object.hasOwn(msg,'usage')||!object(response.response))throw Error('shape');
+     timing.initializeMs=Math.round(performance.now()-spawned);
      rows=claudeModels(response.response.models);finish();return;
     }
     if(msg.method==='remoteControl/status/changed'&&!Object.hasOwn(msg,'id')&&object(msg.params)&&msg.params.status==='disabled')return;
@@ -99,13 +114,14 @@ export async function readCatalog(source:Source,options:{prefixArgs?:readonly st
     }
     if(!object(msg.result))throw Error('shape');
     if(request===1){
+     initialized=performance.now();timing.initializeMs=Math.round(initialized-spawned);
      if(!safeName(msg.result.userAgent)||typeof msg.result.platformFamily!=='string'||typeof msg.result.platformOs!=='string')throw Error('shape');
-     send({method:'initialized'});nextPage();return;
+     stage('list',10000);send({method:'initialized'});nextPage();return;
     }
     const {data,nextCursor}=msg.result;
     if(!Array.isArray(data)||rows.length+data.length>MAX_MODELS)throw Error('shape');
     rows.push(...data.map(codexModel));
-    if(nextCursor==null){finish();return;}
+    if(nextCursor==null){timing.listMs=Math.round(performance.now()-initialized);finish();return;}
     if(typeof nextCursor!=='string'||!nextCursor.length||nextCursor.length>256||cursors.has(nextCursor)||cursors.size>=MAX_PAGES-1)throw Error('shape');
     cursors.add(nextCursor);nextPage(nextCursor);
    };
@@ -120,14 +136,15 @@ export async function readCatalog(source:Source,options:{prefixArgs?:readonly st
    child.once('close',code=>{
     clearTimeout(timer);clearTimeout(forceKill);clearTimeout(cutoff);options.signal?.removeEventListener('abort',abort);
     if(cleanupAfterClose)void removeScratch(cwd);
-    if(error||code!==0||!done||buffer.trim())reject(Error(error??'failed'));else resolve(rows);
+    if(error||code!==0||!done||buffer.trim())reject(Error(error??(buffer.trim()?'shape':'failed')));else resolve(rows);
    });
   });
   return {source:'cli',models,checkedAt:Date.now()};
  }catch(error){
-  const reasons:Record<string,string>={timeout:'The model list check timed out.',limit:'The model list exceeded the output limit.',shape:'The CLI returned an unrecognized model list.',login:'The CLI requires sign-in to list models.'};
+  const label=id==='codex'?'Codex':'Claude';
+  const reasons:Record<string,string>={spawn:`${label} did not start.`,initialize:`${label} did not answer the handshake.`,list:`${label}'s model list request timed out.`,limit:'The model list exceeded the output limit.',shape:'The CLI returned invalid model list output.',login:'The CLI requires sign-in to list models.'};
   return fallback(`${reasons[(error as Error).message]??'The model list check did not complete.'} ${notice}`);
- }finally{if(dir&&!cleanupAfterClose)await removeScratch(dir);}
+ }finally{if(dir&&!cleanupAfterClose)await removeScratch(dir);options.timing?.(timing);}
 }
 
 async function removeScratch(dir:string){
@@ -152,12 +169,16 @@ async function loadCache(file:string):Promise<ModelCatalog|undefined>{
  }catch{/* A missing or invalid cache never blocks startup. */}
 }
 
-export function createModelCatalogs(dir:string,sources:readonly Source[],options:{read?:typeof readCatalog}={}){
+export function createModelCatalogs(dir:string,sources:readonly Source[],options:{read?:typeof readCatalog;retryDelayMs?:number}={}){
  const controller=new AbortController();
  const key=(source:Source)=>JSON.stringify([source.id,source.path,source.version]);
  const entries=new Map(sources.filter(s=>s.id!=='kiro'&&s.path&&s.version&&s.isolation==='metadata-compatible').map(source=>{
   const file=path.join(dir,`model-catalog-${source.id}-${createHash('sha256').update(key(source)).digest('hex')}.json`);
-  return [key(source),{source,file,value:fallback('Checking CLI model availability.'),attempted:0,pending:undefined as Promise<void>|undefined}];
+  return [key(source),{source,file,value:{...fallback('Loading models…'),loading:true} as ModelCatalog,attempted:0,pending:undefined as Promise<void>|undefined}];
+ }));
+ let hydration:Promise<void[]>|undefined;
+ const hydrate=()=>hydration??=Promise.all([...entries.values()].map(async entry=>{
+  entry.value=await loadCache(entry.file)??entry.value;
  }));
  const refresh=(force=true)=>Promise.all([...entries.values()].map(entry=>{
   if(controller.signal.aborted)return;
@@ -165,18 +186,26 @@ export function createModelCatalogs(dir:string,sources:readonly Source[],options
   if(!force&&Date.now()-entry.attempted<CATALOG_MAX_AGE_MS)return;
   entry.attempted=Date.now();
   entry.pending=Promise.resolve().then(async()=>{
-   if(entry.value.checkedAt===null)entry.value=await loadCache(entry.file)??entry.value;
-   const result=await (options.read??readCatalog)(entry.source,{signal:controller.signal});
+   await hydrate();
+   if(controller.signal.aborted)return;
+   if(entry.value.source==='fallback')entry.value={...fallback('Loading models…'),loading:true};
+   const read=options.read??readCatalog;
+   let result=await read(entry.source,{signal:controller.signal});
+   for(let retry=0;result.source==='fallback'&&retry<2&&!controller.signal.aborted;retry++){
+    await delay((options.retryDelayMs??300)*2**retry,undefined,{signal:controller.signal});
+    result=await read(entry.source,{signal:controller.signal});
+   }
+   if(controller.signal.aborted)return;
    if(result.source==='fallback'&&entry.value.source==='cli')entry.value={...entry.value,notice:result.notice};
    else entry.value=result;
    if(result.source!=='cli')return;
    const temp=`${entry.file}.${randomUUID()}.tmp`;
    try{await writeFile(temp,JSON.stringify(result),{mode:0o600,flag:'wx'});await rename(temp,entry.file);}
    catch{await rm(temp,{force:true}).catch(()=>{});}
-  }).catch(()=>{entry.value={...entry.value,notice};}).finally(()=>{entry.pending=undefined;});
+  }).catch(()=>{if(!controller.signal.aborted)entry.value=entry.value.source==='cli'?{...entry.value,notice}:fallback(notice);}).finally(()=>{entry.pending=undefined;});
   return entry.pending;
  }));
- return {refresh,cached:async(source:Source)=>{
+ return {hydrate,refresh,cached:async(source:Source)=>{
   const entry=entries.get(key(source));
   return entry?await loadCache(entry.file):undefined;
  },view:(source:Source)=>entries.get(key(source))?.value,close:async()=>{
