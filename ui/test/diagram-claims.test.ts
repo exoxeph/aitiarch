@@ -9,6 +9,8 @@ import {finishReply,parseClaimsBlock} from '../server/chat/reply.ts';
 import {ChatStore} from '../server/chat/store.ts';
 import {CHAT_HARD_RULES,CHAT_HARD_RULES_DIAGRAMS,DIAGRAM_RULES,DIAGRAM_RULES_UNAVAILABLE,SESSION_INVARIANTS,SESSION_INVARIANTS_DIAGRAMS,chatSessionInstruction,editorManifest} from '../server/chat/request.ts';
 import {validClaims,type ChatClaim,type ChatMessage} from '../shared/chat.ts';
+import {NOTESPACE_GUIDE,replyProfileInstruction} from '../shared/notespace-guide.ts';
+import {DEFAULT_PIPELINE_CONFIG} from '../shared/pipeline-config.ts';
 import {claimChips} from '../src/chat/claim-chips.ts';
 import {claimLines,VISUAL_WORDS} from '../src/chat/chat-model.ts';
 import {ClaimChips} from '../src/chat/ClaimChips.tsx';
@@ -89,10 +91,12 @@ describe('the editor line and the instruction for diagrams',()=>{
  });
  it('adds the rules between the invariants and the mode, names the one tool only when a picture can be opened, and keeps the hard rules last',()=>{
   const none=chatSessionInstruction({},[],{}),open=chatSessionInstruction({persona:'plan'},[],{diagrams:true,canOpen:true}),shut=chatSessionInstruction({},[],{diagrams:true});
-  expect(none.addendum).not.toContain(DIAGRAM_RULES);expect(none.addendum.startsWith(SESSION_INVARIANTS)).toBe(true);expect(none.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);
+  // 9c2305b replaces the editable prose length in ordinary chat and puts the notespace guide before the locked suffix.
+  const richInvariants=SESSION_INVARIANTS.replace(DEFAULT_PIPELINE_CONFIG.prompts.chatLength,()=>replyProfileInstruction('rich'));
+  expect(none.addendum).not.toContain(DIAGRAM_RULES);expect(none.addendum.startsWith(richInvariants+'\n\n')).toBe(true);expect(none.addendum.endsWith(NOTESPACE_GUIDE+'\n\n'+CHAT_HARD_RULES)).toBe(true);
   for(const t of [open.addendum,open.instruction]){expect(t.startsWith(SESSION_INVARIANTS_DIAGRAMS+'\n\n'+DIAGRAM_RULES)).toBe(true);expect(t.endsWith(CHAT_HARD_RULES_DIAGRAMS)).toBe(true);}
   expect(SESSION_INVARIANTS_DIAGRAMS).not.toBe(SESSION_INVARIANTS);expect(CHAT_HARD_RULES_DIAGRAMS).not.toBe(CHAT_HARD_RULES);expect(CHAT_HARD_RULES_DIAGRAMS).toContain('Never write, suggest or pre-fill the user');
-  expect(shut.addendum.startsWith(SESSION_INVARIANTS+'\n\n'+DIAGRAM_RULES_UNAVAILABLE)).toBe(true);expect(shut.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);
+  expect(shut.addendum.startsWith(richInvariants+'\n\n'+DIAGRAM_RULES_UNAVAILABLE)).toBe(true);expect(shut.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);
   expect(open.instruction).toContain('Plan with me'.slice(0,4));
  });
 });
