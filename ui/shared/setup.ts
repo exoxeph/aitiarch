@@ -32,7 +32,7 @@ export interface SetupView {
  fontSize:number|null;
  models:RoleModelPreference[];
  providers:{id:SetupProvider;label:string;path:string|null;version:string|null;notices:string[];reason:string;compatible:boolean;source:SetupSource}[];
- roles:{role:SetupRole;provider:SetupProvider|null;capableProviders:SetupProvider[];reason:string|null;source:SetupSource;routingNote?:string}[];
+ roles:{role:SetupRole;provider:SetupProvider|null;capableProviders:SetupProvider[];reason:string|null;source:SetupSource;routingNote?:string;participants?:SetupProvider[]}[];
  privacy:{mode:'private';sharedReady:false;notice:string};
 }
 /** New object per call: editing preferences cannot mutate defaults in another request. */

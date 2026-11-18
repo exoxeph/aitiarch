@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {applyPrivateSetup, fetchSetup, saveSetup} from '../api.ts';
-import type {SetupProvider, SetupView} from '../../shared/setup.ts';
+import type {SetupView} from '../../shared/setup.ts';
+import {DefaultAiSelect} from './DefaultAiSelect.tsx';
 
 /** First run: one small card. Which tools were found, which AI answers by default, how the notebook stays private. No model or effort here: that lives in the chat box. */
 export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(notice?:string)=>void;onPreferences?:(view:SetupView)=>void}) {
@@ -26,8 +27,6 @@ export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(n
   try {await saveSetup({seen:true}); onClose();}
   catch {onClose('Setup was skipped. The app could not remember that choice.');}
  });
- const chat = view.roles.find(role => role.role==='normal-chat');
- const choices = view.providers.filter(provider => provider.compatible && (chat?.capableProviders.includes(provider.id) ?? false));
  return <div className="settings-scrim">
   <section ref={dialog} tabIndex={-1} className="settings-dialog setup-card" role="dialog" aria-modal="true" aria-labelledby="setup-title"
    onKeyDown={event=>{
@@ -46,26 +45,17 @@ export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(n
     <div className="settings-section">
      <h3>Tools found</h3>
      <p className="settings-lead">Login and entitlement are verified on first use.</p>
-     {choices.length===0 && <p>AI is off. You can still open and edit your notes.</p>}
      <ul>{view.providers.map(provider=><li key={provider.id}>
       <strong>{provider.label}</strong> · {provider.version??'Version unavailable'}
       {!provider.compatible && <span className="settings-lead"> · {provider.reason}</span>}
       {provider.notices.map(notice=><p key={notice} className="settings-lead">{notice}</p>)}
      </li>)}</ul>
-     {choices.length>0 && <label>Answers by default{' '}
-      <select value={chat?.provider??''} disabled={busy} onChange={event=>{
-       const provider=event.currentTarget.value as SetupProvider;
-       void perform(async()=>{
-        const next=await saveSetup({role:'normal-chat',provider});
-        setView(next);
-        onPreferences?.(next);
-       });
-      }}>
-       {chat?.provider===null && <option value="" disabled>Choose one</option>}
-       {choices.map(provider=><option value={provider.id} key={provider.id}>{provider.label}</option>)}
-      </select>
-     </label>}
-     {choices.length>0 && <p className="settings-lead">Choose the model in the chat box.</p>}
+     <DefaultAiSelect view={view} disabled={busy} onChange={provider=>void perform(async()=>{
+      const next=await saveSetup({role:'normal-chat',provider});
+      setView(next);
+      onPreferences?.(next);
+     })}/>
+     <p className="settings-lead">Choose the model in the chat box.</p>
     </div>
     <div className="settings-section">
      <h3>Your notebook stays private</h3>

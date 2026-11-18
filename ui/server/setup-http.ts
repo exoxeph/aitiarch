@@ -45,17 +45,21 @@ export function createSetupHttp(options: {
     source:options.overrides?.[p.id]!==undefined?'explicit flag':setup.providers[p.id].executable?'saved choice':'default',
    })),
    roles:SETUP_ROLES.map(role => {
-    const provider = setup.roles[role];
+    const routingNote = legacyRouting(role);
     const capableProviders = capable(role);
+    const provider = routingNote ? capableProviders.includes('claude') ? 'claude' : null : setup.roles[role];
+    const savedChoice = provider!==null && !setup.defaultRoles?.includes(role);
+    const source = routingNote
+     ? options.overrides?.claude!==undefined ? 'explicit flag' : setup.providers.claude.executable ? 'saved choice' : 'default'
+     : savedChoice ? 'saved choice' : provider && options.overrides?.[provider]!==undefined ? 'explicit flag' : 'default';
+    const participants = role==='council' ? capableProviders.filter(id=>setup.providers[id].enabled) : undefined;
     let reason = null;
-    if (!capableProviders.length) reason = 'No detected compatible provider can perform this role.';
+    if (participants) reason = participants.length<2 ? 'Council needs at least two enabled, compatible providers.' : null;
+    else if (!capableProviders.length) reason = 'No detected compatible provider can perform this role.';
     else if (provider === null) reason = 'No provider is assigned to this role.';
     else if (!capableProviders.includes(provider)) reason = 'The saved provider is unavailable for this role.';
-    else if (!setup.providers[provider].enabled) reason = 'The saved provider is disabled.';
-    if (role==='council' && capableProviders.filter(id=>setup.providers[id].enabled).length<2)
-     reason = 'Council needs at least two enabled, compatible providers.';
-    const routingNote = legacyRouting(role);
-    return {role, provider, capableProviders, reason, source:provider===null||setup.defaultRoles?.includes(role)?'default':'saved choice',
+    else if (!routingNote && !setup.providers[provider].enabled) reason = 'The saved provider is disabled.';
+    return {role, provider, capableProviders, reason, source, ...(participants ? {participants} : {}),
      ...(routingNote ? {routingNote} : {})};
    }),
    privacy:{mode:'private', sharedReady:protection.sharedReady, notice:protection.messages.join(' ')},

@@ -119,4 +119,19 @@ describe('first-run setup endpoints', () => {
   });
   await expect(setup.put({role:'investigate-read',provider:'claude'})).rejects.toThrow(/startup Claude/);
  });
+ it('reports enabled Council participants and explicit startup choices without changing saved assignments', async () => {
+  const claude = {...codex, id:'claude' as const};
+  const kiro = {...codex, id:'kiro' as const};
+  const saved = defaultMachineSetup();
+  saved.providers.codex.enabled = true;
+  saved.defaultRoles = ['normal-chat'];
+  saved.roles['investigate-read'] = 'codex';
+  await saveMachineSetup(dir,saved);
+  const setup = createSetupHttp({dir,project,providers:[claude,codex,kiro],overrides:{claude:claude.path!},ready:async()=>true});
+  const view = await setup.get();
+  expect(view.roles.find(r=>r.role==='council')).toMatchObject({participants:['claude','codex'],reason:null});
+  expect(view.roles.find(r=>r.role==='normal-chat')).toMatchObject({provider:'claude',source:'explicit flag'});
+  expect(view.roles.find(r=>r.role==='investigate-read')).toMatchObject({provider:'claude',source:'explicit flag',reason:null});
+  expect((await loadMachineSetup(dir)).roles['investigate-read']).toBe('codex');
+ });
 });

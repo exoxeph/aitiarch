@@ -7,10 +7,11 @@ import {SkillsPane} from '../skills/SkillsPane.tsx';
 import {cliNotice,tokenMeter,type Meter} from './settings-model.ts';
 import {PipelinePane} from './PipelinePane.tsx';
 import {SetupPreferences} from '../setup/SetupPreferences.tsx';
+import {SetupPane} from './SetupPane.tsx';
 import type {SetupView} from '../../shared/setup.ts';
 
-type Tab='usage'|'skills'|'pipeline'|'preferences';
-const TABS:{id:Tab;label:string}[]=[{id:'usage',label:'Usage'},{id:'skills',label:'Skills'},{id:'pipeline',label:'Pipeline'}];
+type Tab='usage'|'setup'|'skills'|'pipeline'|'preferences';
+const TABS:{id:Tab;label:string}[]=[{id:'usage',label:'Usage'},{id:'setup',label:'Setup'},{id:'skills',label:'Skills'},{id:'pipeline',label:'Pipeline'}];
 
 function MeterBar({meter,label}:{meter:Meter;label:string}){
  return <div className="meter-row"><div className="meter" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={meter.percent} data-tone={meter.tone}><i style={{transform:`scaleX(${meter.percent/100})`}}/></div><span className="meter-label">{meter.label}</span></div>;
@@ -41,8 +42,9 @@ export function SettingsDialog({onClose,onOpenStudio,onOpenSetup,setupError,pref
  const tabs=preferences&&onPreferences?[...TABS,{id:'preferences' as const,label:'Text size'}]:TABS;
  const dialog=useRef<HTMLElement>(null);
  // Focus lands on the tabs; Tab stays inside the dialog; Escape closes it and nothing underneath also hears it.
+ useEffect(()=>{dialog.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();},[]);
  useEffect(()=>{
-  const el=dialog.current;el?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+  const el=dialog.current;
   const key=(e:KeyboardEvent)=>{
    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();onClose();return;}
    if(e.key!=='Tab'||!el)return;
@@ -65,9 +67,8 @@ export function SettingsDialog({onClose,onOpenStudio,onOpenSetup,setupError,pref
      {tabs.map(t=><button key={t.id} id={`settings-tab-${t.id}`} type="button" role="tab" aria-selected={tab===t.id} aria-controls={`settings-pane-${t.id}`} tabIndex={tab===t.id?0:-1} onClick={()=>setTab(t.id)}>{t.label}</button>)}
     </div>
     <div className="settings-pane" role="tabpanel" id={`settings-pane-${tab}`} aria-labelledby={`settings-tab-${tab}`}>
-     {onOpenSetup && <button type="button" onClick={onOpenSetup}>Open setup</button>}
-     {setupError && <p className="settings-warn" role="status">{setupError}</p>}
-     {tab==='preferences'&&preferences&&onPreferences?<SetupPreferences view={preferences} onChange={onPreferences}/>:
+     {tab==='setup'?<SetupPane view={preferences} onChange={onPreferences} onReplay={onOpenSetup} error={setupError}/>:
+      tab==='preferences'&&preferences&&onPreferences?<SetupPreferences view={preferences} onChange={onPreferences}/>:
       tab==='skills'?<SkillsPane/>:tab==='pipeline'?<PipelinePane onOpenStudio={onOpenStudio}/>:<UsagePane/>}
     </div>
    </div>

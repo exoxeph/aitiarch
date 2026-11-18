@@ -35,10 +35,11 @@ try {
  browser = await chromium.launch({channel:'msedge',headless:true});
  const page = await browser.newPage({viewport:{width:1280,height:800}});
  page.setDefaultTimeout(10000);
- const external = [], writes = [];
+ const external = [], writes = [], setupRequests = [];
  await page.route('**/*',route=>{
   const request = route.request();
   if(new URL(request.url()).origin!==url){external.push(request.url());return route.abort();}
+  if(new URL(request.url()).pathname==='/api/setup') setupRequests.push(request.method());
   if(request.method()!=='GET' && request.method()!=='HEAD') writes.push([request.method(),new URL(request.url()).pathname]);
   return route.continue();
  });
@@ -72,15 +73,42 @@ try {
  await dialog.waitFor({state:'detached'});
  assert.equal((await setup.get()).seen,true);
 
- // A compatible Claude appears. Settings holds only the text size and a pointer; the model is chosen in the chat box.
- providers.push({id:'claude',path:'C:/synthetic/claude.exe',version:'2.1.205',isolation:'metadata-compatible',
-  reason:'Synthetic startup metadata',effort:true,effortCode:'help_flag_present'});
+ // A compatible Claude appears. Setup uses the metadata already loaded by the editor.
+ providers.push({id:'claude',path:'C:/synthetic/claude.exe',version:'2.1.206',isolation:'metadata-compatible',
+  reason:'Synthetic startup metadata',effort:true,effortCode:'help_flag_present',
+  notices:[{level:'info',message:'untested version: tested 2.1.205, found 2.1.206'}]});
  await page.reload();
  await page.getByRole('button',{name:'Notes menu',exact:true}).click();
  assert.equal(await dialog.count(),0);
  await page.getByRole('button',{name:'AI settings',exact:true}).click();
- await page.getByRole('tab',{name:'Text size'}).click();
  const settings = page.getByRole('dialog',{name:'AI settings'});
+ const usageTab = settings.getByRole('tab',{name:'Usage',exact:true});
+ await usageTab.focus();
+ assert.equal(await settings.getByRole('button',{name:/open setup|run first-time setup/i}).count(),0);
+ await page.keyboard.press('ArrowDown');
+ const setupTab = settings.getByRole('tab',{name:'Setup',exact:true});
+ const setupPane = settings.getByRole('tabpanel',{name:'Setup',exact:true});
+ await page.waitForFunction(()=>document.activeElement?.id==='settings-tab-setup');
+ const readCount = setupRequests.length;
+ await setupPane.getByText('C:/synthetic/claude.exe',{exact:true}).waitFor();
+ await setupPane.getByText(/untested version: tested 2.1.205/).waitFor();
+ await setupPane.getByText('Council needs at least two enabled, compatible providers.').waitFor();
+ await setupPane.getByText(/This feature uses the startup Claude configuration/).first().waitFor();
+ await setupPane.getByText('Choose the model in the chat box.').waitFor();
+ assert.equal(await setupPane.getByRole('combobox',{name:'Answers by default'}).inputValue(),'claude');
+ assert.equal(await setupPane.getByRole('combobox').count(),1);
+ assert.equal(await setupPane.getByText(/Save model|Custom model|Effort/).count(),0);
+ for(const width of [1280,640]){
+  await page.setViewportSize({width,height:800});
+  assert.equal(await setupPane.evaluate(el=>el.scrollWidth<=el.clientWidth),true);
+  const box=await setupTab.boundingBox();
+  assert(box && box.x>=0 && box.x+box.width<=width);
+  await shot(`settings-setup-${width}.png`);
+ }
+ await page.setViewportSize({width:1280,height:800});
+ assert.equal(setupRequests.length,readCount);
+
+ await settings.getByRole('tab',{name:'Text size'}).click();
  await settings.getByText('Choose the model in the chat box.').waitFor();
  assert.equal(await settings.getByText(/Models and effort|Save model|Inherit provider/).count(),0);
  const font = settings.getByRole('spinbutton',{name:'Font size (px)'});
@@ -98,7 +126,8 @@ try {
  await page.waitForFunction(()=>getComputedStyle(document.querySelector('.cm-scroller')).fontSize==='14px');
 
  // Replay of the first-run card with a provider: tools found, one default-AI select, Continue.
- await settings.getByRole('button',{name:'Open setup',exact:true}).click();
+ await setupTab.click();
+ await settings.getByRole('button',{name:'Run first-time setup again',exact:true}).press('Enter');
  await dialog.getByText('Claude').first().waitFor();
  assert.equal(await dialog.getByRole('combobox').count(),1);
  assert.equal(await dialog.getByText(/Effort|Models and effort|Save model|Custom ID/).count(),0);
@@ -159,7 +188,7 @@ try {
  assert.deepEqual(await readdir(project,{recursive:true}),baseline);
  assert.deepEqual(external,[]);
  assert.equal(writes.some(([,route])=>/\/(chat|assistance|council|investigate)\b/.test(route)),false);
- console.log('Setup passed: AI-off card, Settings text size only, composer chip and popover (invalid ID refused, alias+effort saved, focus returns), unchanged project, local requests only.');
+ console.log('Setup passed: AI-off card, Settings Setup tab and keyboard replay, text size, composer chip and popover, unchanged project, local requests only.');
 } finally {
  await browser?.close();
  watcher.stop();
