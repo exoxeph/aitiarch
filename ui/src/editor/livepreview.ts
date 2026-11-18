@@ -1,3 +1,4 @@
+import { renderMermaidSvg } from '../ink/rich-render.ts';
 // Live preview: decorations only. The document text is never altered; markup is hidden (replace
 // decorations). Inline source reveals in the selected span; block source on the active line.
 import { syntaxTree } from "@codemirror/language";
@@ -66,32 +67,16 @@ class AdoptButton extends WidgetType {
   }
 }
 // ---- Mermaid (lazy, strict security level; never throws into the editor) ----
-let mermaidLib: Promise<typeof import("mermaid").default> | null = null;
-let mermaidSeq = 0;
 const goodRenders = new Map<string, string>();
 const warming = new Set<string>(); // diagrams being rendered ahead of time, so each is queued once
 
-let mermaidTail: Promise<unknown> = Promise.resolve();
 async function renderMermaid(code: string, dark: boolean): Promise<string> {
   const key = (dark ? "d:" : "l:") + code;
   const hit = goodRenders.get(key);
   if (hit) return hit;
-  mermaidLib ??= import("mermaid").then((m) => m.default);
-  const mermaid = await mermaidLib;
-  const job = mermaidTail.then(async () => {
-  mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "default", fontFamily: "inherit", suppressErrorRendering: true });
-  const id = `aitiarch-mmd-${++mermaidSeq}`;
-  try {
-    const { svg } = await mermaid.render(id, code);
-    goodRenders.set(key, svg);
-    return svg;
-  } finally {
-    document.getElementById(id)?.remove();
-    document.getElementById("d" + id)?.remove();
-  }
-  });
-  mermaidTail = job.catch(() => {});
-  return job;
+  const svg = await renderMermaidSvg(code, dark);
+  goodRenders.set(key, svg);
+  return svg;
 }
 
 const mermaidCleanup = new WeakMap<HTMLElement, () => void>();

@@ -1,3 +1,4 @@
+import {profileForRole} from '../../shared/reply-render-profile.ts';
 import type {CouncilViewRun as CouncilRun} from './council-model.ts';
 import {CouncilPanel,CouncilResults} from './CouncilPanel.tsx';
 import {selectionLabel,reportedModelLabel} from '../../shared/model-settings.ts';
@@ -462,9 +463,9 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
      </>:<>
      {t.opened&&t.opened.length>0&&<OpenedRows opened={t.opened} running={t.status==='streaming'}/>}
      {t.status==='streaming'&&<div className="chat-message chat-ai chat-streaming" data-from="ai" aria-busy="true"><span className="chat-who">{aiLabel(answerer)}</span>
-      {t.text?<div className="chat-stream"><LiveMarkdown text={t.text} live/></div>:<div className="chat-thinking"><Thinking/><span className="chat-wait" role="status" data-wait>{waitText(now-(t.sentAt??now))}</span></div>}
+      {t.text?<div className="chat-stream"><LiveMarkdown text={t.text} profile={profileForRole("normal-chat")} live/></div>:<div className="chat-thinking"><Thinking/><span className="chat-wait" role="status" data-wait>{waitText(now-(t.sentAt??now))}</span></div>}
       <div className="chat-message-tools"><button type="button" className="chat-stop" onClick={()=>stop(t)}>Stop</button></div></div>}
-     {t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai" data-provider={t.message?.provider}><span className="chat-who">{aiLabel(t.message?.provider)} · {reportedModelLabel(t.message?.model)}</span><ReplyMarkdown text={t.text}/>{t.message?.unstructured&&<p className="chat-unstructured">{UNSTRUCTURED_LABEL}</p>}{t.message?.echo&&<p className="chat-flag chat-echo">{ECHO_LABEL}</p>}
+     {t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai" data-provider={t.message?.provider}><span className="chat-who">{aiLabel(t.message?.provider)} · {reportedModelLabel(t.message?.model)}</span><ReplyMarkdown text={t.text} profile={profileForRole("normal-chat",t.message?.persona)}/>{t.message?.unstructured&&<p className="chat-unstructured">{UNSTRUCTURED_LABEL}</p>}{t.message?.echo&&<p className="chat-flag chat-echo">{ECHO_LABEL}</p>}
       {t.message&&<ReplyNotes message={t.message} question={t.question} busy={composing} onAskAgain={q=>void submit(q)} note={asked(t.message)}/>}<UsedSkills names={t.message?.skills}/>{t.message?.costUsd!==undefined&&<p className="chat-turn-cost">{turnCostText(t.message.costUsd)}</p>}
       {isNativeAnswerer(t.message?.provider)&&nativeUsageText(t.message?.nativeUsage)&&<p className="chat-turn-cost" data-usage="native">{nativeUsageText(t.message?.nativeUsage)}</p>}
       {t.message?.overCap&&<p className="council-calm council-overcap" role="alert" data-notice="over-cap"><span aria-hidden="true">!</span> {t.message.warning??OVER_CAP_TEXT}</p>}

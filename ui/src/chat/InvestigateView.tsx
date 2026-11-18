@@ -1,3 +1,4 @@
+import {profileForRole} from '../../shared/reply-render-profile.ts';
 // The Investigate shape of a turn in the single chat box (a turn whose start event says profile "investigate"): its trail, its answer with file claims, and its banners.
 import {InlineCode,LiveMarkdown} from '../ink/LiveMarkdown.tsx';
 import {ClaimChips} from './ClaimChips.tsx';
@@ -47,7 +48,7 @@ export function InvestigateTurnView({turn,snapshotFiles,onOpen,onRestore,restori
    {canContinue(turn)&&<button type="button" className="chat-ctl" onClick={onContinue}>Continue with a new plan</button>}
   </div>}
   {(turn.text||turn.message)&&<div className="chat-message chat-ai" data-from="ai"><span className="chat-who">AI</span>
-   <LiveMarkdown text={turn.text} live={turn.running}/>
+   <LiveMarkdown text={turn.text} live={turn.running} profile={profileForRole("investigate-read")}/>
    {turn.message&&<ClaimChips claims={turn.message.claims} path={null} noteText="" onShow={()=>false} onCite={()=>false} onFile={(p,l)=>onOpen(p,l)}/>}
   </div>}
   {blockedCount>0&&!turn.running&&<div className="inv-banner" data-kind="denied" role="note"><p>{`${blockedCount} ${blockedCount===1?'attempt':'attempts'} blocked, nothing left the approved scope`}</p></div>}

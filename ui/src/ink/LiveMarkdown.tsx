@@ -1,3 +1,4 @@
+import type {ReplyRenderProfile} from '../../shared/reply-render-profile.ts';
 import {Fragment,useEffect,useRef,useState} from 'react';
 import {ReplyMarkdown} from './ReplyMarkdown.tsx';
 import {healMarkdown} from './heal-markdown.ts';
@@ -16,10 +17,10 @@ function useFrameText(text:string,live:boolean):string{
  useEffect(()=>()=>batcher.current?.cancel(),[]);
  return live?shown:text; // not live: the final text itself, with no frame of delay
 }
-export function LiveMarkdown({text,live}:{text:string;live:boolean}){
+export function LiveMarkdown({text,live,profile}:{text:string;live:boolean;profile?:ReplyRenderProfile}){
  const shown=useFrameText(text,live);
  return <>
-  <ReplyMarkdown text={live?healMarkdown(shown.replace(/\s+$/,'')):text}/>
+  <ReplyMarkdown profile={profile} deferRich={live} text={live?healMarkdown(shown.replace(/\s+$/,'')):text}/>
   {live&&<span className="chat-caret" aria-hidden="true"/>}
  </>;
 }

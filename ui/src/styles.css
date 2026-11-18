@@ -1833,3 +1833,15 @@ p.chat-wait { margin: 4px 0 0; }
 .studio-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 8px var(--space-4); border-bottom: 1px solid var(--rule); background: var(--paper-2); font-size: var(--text-control); }
 .studio-notice[data-notice="studio-notice-error"] { color: var(--danger); border-left: 3px solid var(--danger); }
 .studio-notice .ghost { flex: none; }
+
+/* Rich reply previews share the surrounding Grove colors. */
+.rich-reply-display, .rich-reply-diagram { display: block; max-width: 100%; overflow: auto; margin-block: .65em; }
+.rich-reply-source, .reply-limit pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.rich-reply-notice { display: block; color: var(--muted); font-size: .875em; }
+.rich-render-stage { position: fixed; visibility: hidden; pointer-events: none; inset: 0 auto auto 0; }
+.rich-reply-diagram svg { display: block; width: 100%; height: auto; color: var(--ink-text); }
+.rich-reply-diagram svg :is(text, tspan) { fill: currentColor; }
+.rich-reply-diagram svg :is(.node rect, .node circle, .node polygon, .node ellipse, .actor) { fill: var(--paper-2); stroke: var(--accent); }
+.rich-reply-diagram svg :is(.flowchart-link, .messageLine0, .messageLine1, .actor-line) { fill: none; stroke: currentColor; }
+.rich-reply-diagram svg .edgeLabel rect { fill: var(--paper); }
+.rich-reply-diagram svg marker path { fill: currentColor; stroke: currentColor; }
