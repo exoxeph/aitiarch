@@ -1,13 +1,43 @@
 import {describe,it,expect} from 'vitest';
 import {doctor,formatDoctor,type DoctorOptions} from '../server/platform/doctor.ts';
-import {writeFile,mkdir} from 'node:fs/promises';
+import {writeFile,mkdir,mkdtemp,readFile,realpath} from 'node:fs/promises';
+import os from 'node:os';
+import {randomUUID} from 'node:crypto';
 import path from 'node:path';
 import {claudeHelp,codexHelp,kiroHelp} from './fixtures/cli-help.ts';
 import {ProviderRegistry,descriptorFromAdapter} from '../server/providers/registry.ts';
 import {defaultMachineSetup} from '../shared/setup.ts';
+import {initProject} from '../server/init.ts';
 const base=():DoctorOptions=>({nodeVersion:'24.1.0',nodeRange:'>=24',distDir:'/build',configDir:process.env.AITIARCH_CONFIG_DIR!,cwd:process.env.AITIARCH_CONFIG_DIR!,
  env:{},platform:'linux',discovery:{inspect:()=>undefined},filesystem:{buildPresent:async()=>true,configWritable:async()=>true}});
 describe('metadata-only doctor',()=>{
+ it('lists recognized unowned private leftovers by storage directory and preserves their bytes',async()=>{
+  const scratch=await mkdtemp(path.join(await realpath(os.tmpdir()),'aitiarch-doctor-leftovers-'));
+  const {privateLocation}=await initProject({project:scratch,sharing:'private',confirmIgnore:false});
+  const local=privateLocation!;
+  await mkdir(path.join(local,'chat','nested'),{recursive:true});
+  await mkdir(path.join(local,'.cache','anchors'),{recursive:true});
+  const fixtures=[
+   ['ui-state.json.lock',''],
+   ['ui-state.json.'+randomUUID()+'.tmp','synthetic draft sentinel'],
+   ['ledger.json.lock.broken.'+randomUUID(),'synthetic quarantine sentinel'],
+   ['chat/nested/fictional-note.md.chat.json.lock',''],
+   ['.cache/anchors/'+'a'.repeat(64)+'.json.'+randomUUID()+'.tmp','synthetic cache sentinel'],
+   ['human.tmp','synthetic human original'],
+  ];
+  for(const [relative,contents] of fixtures)await writeFile(path.join(local,relative),contents);
+  const report=await doctor({...base(),project:scratch});
+  expect(report.privateLeftovers).toEqual([
+   {directory:'local/',count:3},{directory:'local/.cache/anchors',count:1},{directory:'local/chat',count:1},
+  ]);
+  expect(formatDoctor(report)).toContain('unowned private leftovers: 3, in local/');
+  expect(formatDoctor(report)).not.toMatch(/sentinel|fictional-note/);
+  for(const [relative,contents] of fixtures)expect(await readFile(path.join(local,relative),'utf8')).toBe(contents);
+  const legacy=path.join(scratch,'legacy');
+  await mkdir(path.join(legacy,'.aitiarch','local'),{recursive:true});
+  await writeFile(path.join(legacy,'.aitiarch','local','ui-state.json.lock'),'');
+  expect((await doctor({...base(),project:legacy})).privateLeftovers).toEqual([]);
+ });
  it.each([['claude','2.1.206',claudeHelp],['codex','0.168.0',codexHelp],['kiro','3.4.0',kiroHelp]])('enables newer %s only with declared capabilities and an info notice',async(id,version,help)=>{
   const o=base();o.env={PATH:'/bin'};o.discovery={inspect:p=>p==='/bin/'+(id==='kiro'?'kiro-cli':id)?{file:true,executable:true}:undefined};
   o.runner=async(_f,a)=>a[0]==='--version'?(id==='claude'?`${version} (Claude Code)`:`${id==='kiro'?'kiro-cli':'codex-cli'} ${version}`):help;

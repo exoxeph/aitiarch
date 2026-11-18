@@ -64,7 +64,9 @@ export async function runCli(argv, dependencies = {}) {
   const configDir=resolveConfigFolder(env);
   await mkdir(configDir,{recursive:true});
   const distDir=path.join(installDir,'dist');
-  const report=await (dependencies.doctor??doctor)({configDir,distDir,cwd:configDir,env,...(command==='doctor'&&args.includes('--models')?{models:true}:{})});
+  const report=await (dependencies.doctor??doctor)({configDir,distDir,cwd:configDir,env,...(command==='doctor'?{
+   project:path.resolve(dependencies.cwd??process.cwd()),...(args.includes('--models')?{models:true}:{}),
+  }:{})});
   if(command==='doctor'){
    out(args.includes('--json')?JSON.stringify(report):[formatDoctor(report),...formatModelChecks(report)].join('\n'));return report.exitCode;
   }

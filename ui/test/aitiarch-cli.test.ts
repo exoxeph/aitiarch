@@ -64,6 +64,7 @@ describe('source app command wrapper',()=>{
   const h=harness();expect(await runCli(['doctor'],h.deps)).toBe(0);
   expect(h.output.join('\n')).toContain('AI-off available');expect(h.probes[0].configDir).toBe(process.env.AITIARCH_CONFIG_DIR);
   expect(h.probes[0].distDir).toBe(fileURLToPath(new URL('../dist',import.meta.url)));
+  expect(h.probes[0].project).toBe(h.cwd);
   expect(h.starts).toEqual([]);
  });
  it('doctor --models requests metadata diagnostics and supports both output formats',async()=>{
@@ -108,9 +109,16 @@ describe('source app command wrapper',()=>{
   expect(await runCli(['init','--shared','--yes-ignore'],deps)).toBe(0);expect(calls[1]).toMatchObject({project:h.cwd,sharing:'shared',confirmIgnore:true});expect(h.probes).toEqual([]);
  });
  it('interactive sharing choice and separate ignore consent are explicit',async()=>{
-  const h=harness();await mkdir(path.join(h.cwd,'.git'),{recursive:true});const questions:string[]=[],answers=['shared','yes'];
-  const code=await runCli(['init'],{...h.deps,interactive:true,ask:async(q:string)=>{questions.push(q);return answers.shift();}});
-  expect(code).toBe(1);expect(questions).toHaveLength(2);expect(questions[1]).toContain('/.aitiarch/local/');expect(await readFile(path.join(h.cwd,'.gitignore'),'utf8')).toContain('/.aitiarch/local/');expect(h.output.join('\n')).toMatch(/not ready/i);
+  const h=harness(),cwd=path.join(path.dirname(h.cwd),'shared-git-project');
+  await mkdir(cwd);
+  await promisify(execFile)('git',['init','--quiet'],{cwd,windowsHide:true});
+  const questions:string[]=[],answers=['shared','yes'];
+  const code=await runCli(['init'],{...h.deps,cwd,interactive:true,ask:async(q:string)=>{questions.push(q);return answers.shift();}});
+  expect(code).toBe(0);
+  expect(questions).toHaveLength(2);
+  expect(questions[1]).toContain('/.aitiarch/local/');
+  expect(await readFile(path.join(cwd,'.gitignore'),'utf8')).toContain('/.aitiarch/local/');
+  expect(h.output.join('\n')).toMatch(/required ignore rule verified/i);
  });
  it.each([['init','--private','--shared'],['init','--yes'],['init','a','b'],['init','--private','--private']])('rejects malformed init %j',async(...argv)=>{
   const h=harness();expect(await runCli(argv,h.deps)).toBe(2);expect(h.probes).toEqual([]);

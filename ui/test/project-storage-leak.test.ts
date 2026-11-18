@@ -12,6 +12,7 @@ import {InkStore} from '../server/ink-store.ts';
 import {InsertionStore} from '../server/insertion-store.ts';
 import {LedgerStore} from '../server/ledger-store.ts';
 import {privateTempPath} from '../server/private-write-temp.ts';
+import {privateLeftovers} from '../server/private-leftovers.ts';
 import {SkillDiagramStore} from '../server/skill-diagram-store.ts';
 import {Store} from '../server/store.ts';
 import {UiStateStore} from '../server/ui-state-store.ts';
@@ -89,6 +90,11 @@ it('recovers interrupted atomic writes before checking the shareable tree, hando
  const {files,staged,diagrams,insertions,existing}=await writePrivate(f);
  for(const temp of abandoned)await expect(readFile(temp),temp).rejects.toMatchObject({code:'ENOENT'});
  for(const target of [live,unknown,human,linked])expect(await readFile(target,'utf8')).toBe('Preserve these bytes.');
+ const ownerlessLocks=['ui-state.json.lock','chat/'+note+'.chat.json.lock'];
+ for(const file of ownerlessLocks)await writeFile(path.join(local,file),'',{flag:'wx'});
+ expect(await privateLeftovers(path.dirname(root))).toEqual([
+  {directory:'local/',count:2},{directory:'local/chat',count:1},
+ ]);
  expect(staged.stage).toMatch(/^[a-f0-9]{32}$/);
  const stagedName=staged.stage+'-'+staged.asset;
  const expected={...files,'insertions.json':markers.journal,['skill-diagrams/'+stagedName]:markers.diagram};
@@ -109,6 +115,11 @@ it('recovers interrupted atomic writes before checking the shareable tree, hando
     expect(res.status,url).toBe(404);
     assertPublic(Buffer.from(await res.arrayBuffer()),url);
    }
+  }
+  for(const relative of [...ownerlessLocks,path.basename(unknown)]){
+   const target='local/'+relative;
+   expect((await get('/api/file?path='+encodeURIComponent(target))).status).toBe(404);
+   expect((await get('/'+target)).status).toBe(404);
   }
   const preview=skillPreviewUrl(staged.asset,staged.stage!);
   expect((await fetch(base+preview)).status).toBe(401);

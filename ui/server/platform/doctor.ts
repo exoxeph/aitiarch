@@ -9,15 +9,17 @@ import {providerCapabilities} from '../providers/registry.ts';
 import {createModelCatalogs,readCatalog,type CatalogTiming} from '../providers/model-catalog.ts';
 import {modelSelection,selectionLabel} from '../../shared/model-settings.ts';
 import {effectiveCatalogSelection} from '../../shared/models.ts';
+import {privateLeftovers} from '../private-leftovers.ts';
 export interface DoctorOptions extends CliSelectionOptions {
  models?:boolean;
+ project?:string;
  readModels?:typeof readCatalog;
  filesystem?:{buildPresent:(dir:string)=>Promise<boolean>;configWritable:(dir:string)=>Promise<boolean>};
 }
 export type DoctorProvider=SelectedCli;
 export interface DoctorRole {role:SetupRole;provider:SetupProvider|null;version:string|null;reason:string|null;participants?:SetupProvider[];modelSettings?:Readonly<import('../../shared/setup.ts').ModelEffort>;modelNotice?:string}
 export interface DoctorModelCheck {id:SetupProvider;result:string;count:number;timing?:CatalogTiming}
-export interface DoctorReport {exitCode:0|1;checks:{id:string;ok:boolean;code:string;reason:string}[];providers:DoctorProvider[];roles?:DoctorRole[];modelChecks?:DoctorModelCheck[];notice:string}
+export interface DoctorReport {exitCode:0|1;checks:{id:string;ok:boolean;code:string;reason:string}[];providers:DoctorProvider[];roles?:DoctorRole[];modelChecks?:DoctorModelCheck[];privateLeftovers?:Awaited<ReturnType<typeof privateLeftovers>>;notice:string}
 export async function checkPrerequisites(options:DoctorOptions):Promise<DoctorReport['checks']>{
  const install=fileURLToPath(new URL('../../',import.meta.url));
  const nodeRange=options.nodeRange??JSON.parse(await readFile(path.join(install,'package.json'),'utf8')).engines.node;
@@ -57,9 +59,12 @@ export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
   const catalog=await (options.readModels??readCatalog)(p,{timing:value=>{timing=value;}});
   return {id:p.id,result:catalog.notice??'OK',count:catalog.models.length,...(timing?{timing}:{})};
  })):undefined;
- return {exitCode:checks.every(c=>c.ok)?0:1,checks,providers,roles,...(modelChecks?{modelChecks}:{}),notice:'AI-off editing remains available when optional providers are missing. Login and entitlement were not checked.'};
+ const leftovers=options.project?await privateLeftovers(options.project):undefined;
+ return {exitCode:checks.every(c=>c.ok)?0:1,checks,providers,roles,...(modelChecks?{modelChecks}:{}),
+  ...(leftovers?{privateLeftovers:leftovers}:{}),notice:'AI-off editing remains available when optional providers are missing. Login and entitlement were not checked.'};
 }
 export function formatModelChecks(report:DoctorReport):string[]{
  return (report.modelChecks??[]).map(({id,result,count,timing})=>`${id} models: ${result}; ${count} entries; spawn=${timing?.spawnMs??'unreported'} ms; initialize=${timing?.initializeMs??'unreported'} ms; list=${timing?.listMs??'unreported'} ms; stderr=${timing?.stderr??'unreported'}`);
 }
-export function formatDoctor(report:DoctorReport):string{return [...report.checks.map(c=>`${c.id}: ${c.code} — ${c.reason}`),...report.providers.map(p=>`${p.id}: ${p.code}; path=${p.path??'not found'}; version=${p.version??'unknown'}; isolation=${p.isolation}; roles=${p.roles.join(', ')||'none verified'}; effort=${p.effort===null?'n/a':p.effort} — ${p.reason}`),...(report.roles??[]).map(r=>`${r.role} -> ${r.provider===null?'unset: '+r.reason:(r.provider==='claude'?'Claude':r.provider==='codex'?'Codex':'Kiro')+', version='+(r.version??'not reported')+(r.reason?'; '+r.reason:'')}${r.modelSettings?'; '+selectionLabel(r.modelSettings):''}${r.modelNotice?'; '+r.modelNotice:''}${r.participants?.length?'; participants='+r.participants.join(', '):''} · ${roleDefinition(r.role).label}`),report.notice].join('\n');}
+export function formatDoctor(report:DoctorReport):string{return [...report.checks.map(c=>`${c.id}: ${c.code} — ${c.reason}`),...report.providers.map(p=>`${p.id}: ${p.code}; path=${p.path??'not found'}; version=${p.version??'unknown'}; isolation=${p.isolation}; roles=${p.roles.join(', ')||'none verified'}; effort=${p.effort===null?'n/a':p.effort} — ${p.reason}`),...(report.roles??[]).map(r=>`${r.role} -> ${r.provider===null?'unset: '+r.reason:(r.provider==='claude'?'Claude':r.provider==='codex'?'Codex':'Kiro')+', version='+(r.version??'not reported')+(r.reason?'; '+r.reason:'')}${r.modelSettings?'; '+selectionLabel(r.modelSettings):''}${r.modelNotice?'; '+r.modelNotice:''}${r.participants?.length?'; participants='+r.participants.join(', '):''} · ${roleDefinition(r.role).label}`),
+ ...(report.privateLeftovers??[]).map(({count,directory})=>`unowned private leftovers: ${count}, in ${directory}`),report.notice].join('\n');}
