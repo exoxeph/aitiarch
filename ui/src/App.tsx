@@ -38,6 +38,9 @@ import {calloutHeader} from './editor/reveal.ts';
 import {ThoughtInsertionPreview} from './ink/ThoughtInsertionPreview.tsx';
 import {ThoughtChat} from './ink/ThoughtChat.tsx';
 import {SettingsDialog} from './settings/SettingsDialog.tsx';
+import {Setup} from './setup/Setup.tsx';
+import {fetchSetup} from './api.ts';
+import type {SetupView} from '../shared/setup.ts';
 import {isolateHistory,undo} from '@codemirror/commands';
 /** A brief highlight on the lines that were just added, so you can see where they went. */
 function flashInserted(view:{state:{doc:{lineAt:(p:number)=>{from:number;to:number;number:number};length:number}};domAtPos:(p:number)=>{node:Node}},from:number,length:number){
@@ -56,6 +59,23 @@ export default function App() {
   const [tree, setTree] = useState<TreeNode | null>(null);
   const menu=useEdgeMenu(),burgerRef=useRef<HTMLButtonElement>(null),noteMenuRef=useRef<HTMLButtonElement>(null),chatPillRef=useRef<HTMLButtonElement>(null);
   const [noteMenuOpen,setNoteMenuOpen]=useState(false),[chatOpen,setChatOpen]=useState(false),[settingsOpen,setSettingsOpen]=useState(false);
+  const [setup,setSetup]=useState<SetupView|null>(null);
+  const [setupError,setSetupError]=useState<string|null>(null);
+  useEffect(()=>{
+    if(boot.state!=='ready')return;
+    let active=true;
+    void fetchSetup().then(view=>{if(active&&view.ready&&!view.seen)setSetup(view);}).catch(()=>{});
+    return ()=>{active=false;};
+  },[boot]);
+  async function reopenSetup(){
+    setSetupError(null);
+    try{
+      const view=await fetchSetup();
+      if(!view.ready)throw Error('Run Aitiarch doctor to check the setup prerequisites.');
+      setSettingsOpen(false);
+      setSetup(view);
+    }catch(error){setSetupError(error instanceof Error?error.message:'Setup is unavailable.');}
+  }
   // The Pipeline Studio: open or not, and the node to light up when it was opened from a blocked reply's "Show on pipeline".
   const [studio,setStudio]=useState<{highlight?:string}|null>(null),studioButtonRef=useRef<HTMLButtonElement>(null);
   const [treePersistence,setTreePersistence]=useState(false);
@@ -632,7 +652,8 @@ export default function App() {
           onUseAsContext={ps => { setMapNotes(ps); setChatOpen(true); }} />
       </Suspense>}
       {chatOpen && <ChatPanel extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} editor={chatEditor} onShowOnPipeline={(nodeId) => setStudio({ highlight: nodeId })} onAdd={addChatMessage} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onCiteClaim={(heading) => { const h = active ? panes.current.get(active) : undefined; return !!h && !!active && citeAtCursor(h.view, active, { path: active, title: titleOf(h.view.state.doc.toString(), active), ...(heading ? { heading } : {}) }); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
-      {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); burgerRef.current?.focus(); }} onOpenStudio={() => { setSettingsOpen(false); setStudio({}); }} />}
+      {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); burgerRef.current?.focus(); }} onOpenStudio={() => { setSettingsOpen(false); setStudio({}); }} onOpenSetup={()=>void reopenSetup()} setupError={setupError} />}
+      {setup && <Setup data={setup} onClose={message=>{setSetup(null);if(message)setNotice(message);burgerRef.current?.focus();}}/>}
       {studio && <Suspense fallback={<section className="studio" role="status" aria-label="Pipeline Studio"><p className="cn-empty">Drawing the pipeline…</p></section>}>
         <PipelineStudio highlight={studio.highlight} onClose={() => { setStudio(null); studioButtonRef.current?.focus(); }} />
       </Suspense>}

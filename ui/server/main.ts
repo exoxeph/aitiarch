@@ -8,6 +8,8 @@ import {selectRuntimeProviders} from './platform/runtime-providers.ts';
 import {selectedCouncilAdapters} from './providers/council-adapters.ts';
 export {selectRuntimeProviders} from './platform/runtime-providers.ts';
 import {roleRouting} from './providers/routing.ts';
+import {createSetupHttp} from './setup-http.ts';
+import {checkPrerequisites} from './platform/doctor.ts';
 import {createInvokedCodexBridge} from './providers/invoked-bridge.ts';
 import {validateCodexCommand} from './providers/codex-command.ts';
 import { createHost } from "./host.ts";
@@ -103,7 +105,10 @@ const openProject = async (entry: ProjectEntry) => {
   const provider = plan ?? (claudeCommand ? createProvider({ provider: defaults.roles.chat, command: claudeCommand, contract: "claude-canary-2.1.205", usageLog: usage }) : undefined);
   const adapters=selectedCouncilAdapters(runtime.providers),availabilityChecks=runtime.availabilityChecks;
   const routing=roleRouting({dir:configFolder,adapters,checks:availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!claudeCommand,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true});
-  const app = createApp({ pipelineConfigDir: configFolder, store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, council:{adapters,availabilityChecks,routing}, harness: claudeCommand ? { command: claudeCommand } : undefined });
+  const setup = createSetupHttp({dir:configFolder, project:entry.root, providers:runtime.providers,
+    overrides:{claude:args.claude,codex:args.codex},
+    ready:async()=>(await checkPrerequisites({configDir:configFolder,distDir})).every(check=>check.ok)});
+  const app = createApp({ pipelineConfigDir: configFolder, store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, setup, council:{adapters,availabilityChecks,routing}, harness: claudeCommand ? { command: claudeCommand } : undefined });
   return { handle: app.handle, close: async () => { watcher.stop(); await plan?.close(); await app.close(); } };
 };
 const host = createHost({ registry: registry!, security, distDir, openProject, identity:serverIdentity, providers:runtime.providers, defaultProject: () => defaultId });

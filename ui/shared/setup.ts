@@ -10,6 +10,16 @@ export interface ProviderSetup extends ModelEffort {
 export interface MachineSetup {
  version:1;providers:Record<SetupProvider,ProviderSetup>;roles:Record<SetupRole,SetupProvider|null>;
  fontSize:number;tour:{completed:boolean};
+ setupSeen?:boolean;
+ defaultRoles?:SetupRole[];
+}
+export type SetupSource = 'explicit flag' | 'saved choice' | 'default';
+export interface SetupView {
+ ready:boolean;
+ seen:boolean;
+ providers:{id:SetupProvider;label:string;path:string|null;version:string|null;notices:string[];reason:string;compatible:boolean;source:SetupSource}[];
+ roles:{role:SetupRole;provider:SetupProvider|null;capableProviders:SetupProvider[];reason:string|null;source:SetupSource;routingNote?:string}[];
+ privacy:{mode:'private';sharedReady:false;notice:string};
 }
 /** New object per call: editing preferences cannot mutate defaults in another request. */
 export function defaultMachineSetup():MachineSetup {
@@ -29,7 +39,9 @@ function modelEffort(v:unknown):v is ModelEffort {
 }
 /** Exact v1 keys at every level. Catalog/role compatibility is slice 5/6, not a safety grant. */
 export function validMachineSetup(v:unknown):v is MachineSetup {
- if(!object(v)||!keys(v,['version','providers','roles','fontSize','tour'])||v.version!==1||
+ if(!object(v)||!keys(v,['version','providers','roles','fontSize','tour',...['setupSeen','defaultRoles'].filter(k=>Object.hasOwn(v,k))])||v.version!==1||
+  (Object.hasOwn(v,'setupSeen')&&typeof v.setupSeen!=='boolean')||
+  (Object.hasOwn(v,'defaultRoles')&&(!Array.isArray(v.defaultRoles)||!v.defaultRoles.every(role=>SETUP_ROLES.includes(role))))||
   !Number.isInteger(v.fontSize)||Number(v.fontSize)<14||Number(v.fontSize)>24||
   !object(v.tour)||!keys(v.tour,['completed'])||typeof v.tour.completed!=='boolean'||
   !object(v.roles)||!keys(v.roles,SETUP_ROLES)||!Object.values(v.roles).every(id=>id===null||SETUP_PROVIDERS.includes(id as SetupProvider))||

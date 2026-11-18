@@ -31,7 +31,7 @@ function UsagePane(){
  </div>;
 }
 
-export function SettingsDialog({onClose,onOpenStudio}:{onClose:()=>void;onOpenStudio?:()=>void}){
+export function SettingsDialog({onClose,onOpenStudio,onOpenSetup,setupError}:{onClose:()=>void;onOpenStudio?:()=>void;onOpenSetup?:()=>void;setupError?:string|null}){
  const [tab,setTab]=useState<Tab>('usage');
  const dialog=useRef<HTMLElement>(null);
  // Focus lands on the tabs; Tab stays inside the dialog; Escape closes it and nothing underneath also hears it.
@@ -59,6 +59,8 @@ export function SettingsDialog({onClose,onOpenStudio}:{onClose:()=>void;onOpenSt
      {TABS.map(t=><button key={t.id} id={`settings-tab-${t.id}`} type="button" role="tab" aria-selected={tab===t.id} aria-controls={`settings-pane-${t.id}`} tabIndex={tab===t.id?0:-1} onClick={()=>setTab(t.id)}>{t.label}</button>)}
     </div>
     <div className="settings-pane" role="tabpanel" id={`settings-pane-${tab}`} aria-labelledby={`settings-tab-${tab}`}>
+     {onOpenSetup && <button type="button" onClick={onOpenSetup}>Open setup</button>}
+     {setupError && <p className="settings-warn" role="status">{setupError}</p>}
      {tab==='skills'?<SkillsPane/>:tab==='pipeline'?<PipelinePane onOpenStudio={onOpenStudio}/>:<UsagePane/>}
     </div>
    </div>

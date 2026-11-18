@@ -48,8 +48,11 @@ import {CouncilHistory} from './council-history.ts';
 import type {AvailabilityCheck} from './providers/council-availability.ts';
 import type {TurnAdapter} from './providers/turn.ts';
 import type {RoleRouting} from './providers/routing.ts';
+import {SetupRequestError, type createSetupHttp} from './setup-http.ts';
+import {SetupError} from './setup-store.ts';
 
 export interface AppOptions {
+  setup?:ReturnType<typeof createSetupHttp>;
   /** The per-user folder for pipeline-config.json (the folder that holds the project list). Tests pass a temp folder; otherwise AITIARCH_CONFIG_DIR or the real config folder, which is refused under tests. */
   pipelineConfigDir?:string;
   council?:{adapters:TurnAdapter[];index?:SessionIndex;availabilityChecks?:AvailabilityCheck[];routing?:RoleRouting};
@@ -259,6 +262,25 @@ export function createApp(opts: AppOptions) {
     if (mutating) {
       if (req.headers["x-aitiarch"] !== "1" || !/^application\/json/i.test(req.headers["content-type"] ?? "") || !origin) {
         return json(res, 403, { error: "bad_request_headers" });
+      }
+    }
+
+    if (opts.setup && (url.pathname === '/api/setup' || url.pathname === '/api/setup/private')) {
+      try {
+        if (url.pathname === '/api/setup' && req.method === 'GET') return json(res, 200, await opts.setup.get());
+        if (url.pathname === '/api/setup' && req.method === 'PUT') {
+          await opts.setup.put(await readBody(req, 2048));
+          return json(res, 200, await opts.setup.get());
+        }
+        if (url.pathname === '/api/setup/private' && req.method === 'POST')
+          return json(res, 200, await opts.setup.init(await readBody(req, 2048)));
+        return json(res, 405, {error:'method_not_allowed'});
+      } catch (error) {
+        const invalid = error instanceof SyntaxError || error instanceof SetupRequestError ||
+          (error instanceof SetupError && error.code === 'setup_invalid');
+        const message = error instanceof SetupError || error instanceof SetupRequestError ? error.message :
+          invalid ? 'The setup request was invalid.' : 'Setup could not complete. Check the app and project folders.';
+        return json(res, invalid ? 400 : 409, {error:'setup_unavailable',message});
       }
     }
 

@@ -91,6 +91,12 @@ async function ok<T>(method: "GET" | "PUT" | "POST", url: string, body?: unknown
   throw new ApiError(status, data?.error ?? "error", data?.message ?? `Request failed (${status})`, data);
 }
 
+export const fetchSetup = () => ok<import('../shared/setup.ts').SetupView>('GET','/api/setup');
+export const saveSetup = (body:{seen:true}|{role:import('../shared/setup.ts').SetupRole;provider:import('../shared/setup.ts').SetupProvider}) =>
+  ok<import('../shared/setup.ts').SetupView>('PUT','/api/setup',body);
+export const applyPrivateSetup = () =>
+  ok<{messages:string[]}>('POST','/api/setup/private',{confirmIgnore:true});
+
 /** What GET /api/chat returns: accepted assistant messages only (questions are not stored), plus where the chat is kept. */
 export interface ChatSnapshot { v: 1; note: string; messages: ChatMessage[]; persistence: { enabled: boolean }; questionPlaceholder: string; usage: ChatUsage | null }
 /** PUT /api/chat/send as a server-sent-event stream. Rejects with ApiError when the server refuses before streaming starts. */

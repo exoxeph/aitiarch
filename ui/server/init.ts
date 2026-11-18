@@ -42,6 +42,20 @@ async function gitProject(fs:InitFilesystem,project:string){
   if(path.dirname(p)===p)return false;
  }
 }
+/** Read-only preview for an already-open project. Never create init targets here. */
+export async function privateProtection(project:string,fs:InitFilesystem=nodeFs):Promise<Pick<InitResult,'protection'|'sharedReady'|'messages'>>{
+ let protection:InitResult['protection']='unverified';
+ try{
+  if(!await gitProject(fs,project))protection='filesystem-private';
+  else if(hasFinalRule((await readIgnore(fs,path.join(project,'.gitignore'))).data,'/.aitiarch/'))protection='git-ignored';
+ }catch{/* A failed check cannot establish protection. */}
+ return {protection,sharedReady:false,messages:[protectionMessage(protection)]};
+}
+function protectionMessage(protection:InitResult['protection']){
+ if(protection==='git-ignored')return 'Required ignore rule verified (this does not untrack previously committed files).';
+ if(protection==='filesystem-private')return 'filesystem-private: no Git repository detected; no Git protection claimed.';
+ return 'No Git ignore protection verified.';
+}
 async function mergeIgnore(fs:InitFilesystem,file:string,line:string){
  const before=await readIgnore(fs,file);if(hasFinalRule(before.data,line))return;
  const newline=before.data.includes(Buffer.from('\r\n'))?'\r\n':'\n';
@@ -99,7 +113,7 @@ export async function initProject(options:InitOptions,fs:InitFilesystem=nodeFs):
   await create(welcome,content+'\n');
  }
  result.privatePersistence=ignoreVerified&&localSafe&&options.sharing==='private';
- result.messages.push(inGit?result.protection==='git-ignored'?'Required ignore rule verified (this does not untrack previously committed files).':'No Git ignore protection verified.':'filesystem-private: no Git repository detected; no Git protection claimed.');
+ result.messages.push(protectionMessage(result.protection));
  if(!result.privatePersistence)result.messages.push('Private persistence is disabled for this init result. No private writer was started.');
  result.messages.push('Existing files were preserved. No Git commands or provider calls were run.');
  return result;

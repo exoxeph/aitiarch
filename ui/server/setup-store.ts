@@ -86,7 +86,10 @@ export async function initializeDefaultRoles(dir:string,providers:readonly Provi
  for(const role of SETUP_ROLES){
   if(setup.roles[role]!==null)continue;
   const selected=order.map(id=>available.find(p=>p.id===id&&p.capabilities[role]&&setup.providers[id].enabled)).find(Boolean);
-  if(selected)setup.roles[role]=selected.id;
+  if(selected){
+   setup.roles[role]=selected.id;
+   (setup.defaultRoles??=[]).push(role);
+  }
  }
  // Council eligibility uses all enabled compatible descriptors, not this legacy single-role slot.
  if(!exists||before!==JSON.stringify(setup))await saveMachineSetup(dir,setup);

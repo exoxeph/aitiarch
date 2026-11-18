@@ -12,7 +12,7 @@ export interface DoctorOptions extends CliSelectionOptions {
 export type DoctorProvider=SelectedCli;
 export interface DoctorRole {role:SetupRole;provider:SetupProvider|null;version:string|null;reason:string|null;participants?:SetupProvider[]}
 export interface DoctorReport {exitCode:0|1;checks:{id:string;ok:boolean;code:string;reason:string}[];providers:DoctorProvider[];roles?:DoctorRole[];notice:string}
-export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
+export async function checkPrerequisites(options:DoctorOptions):Promise<DoctorReport['checks']>{
  const install=fileURLToPath(new URL('../../',import.meta.url));
  const nodeRange=options.nodeRange??JSON.parse(await readFile(path.join(install,'package.json'),'utf8')).engines.node;
  const checks:DoctorReport['checks']=[];
@@ -24,6 +24,10 @@ export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
   stat(path.join(options.distDir??path.join(install,'dist'),'index.html')).then(s=>s.isFile()),'Build assets missing; run npm ci and npm run build from the ui install folder.');
  await check('config',()=>options.filesystem?options.filesystem.configWritable(options.configDir):
   stat(options.configDir).then(async s=>s.isDirectory()&&(await access(options.configDir,constants.W_OK),true)),'Create a writable app config folder or select one with AITIARCH_CONFIG_DIR.');
+ return checks;
+}
+export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
+ const checks=await checkPrerequisites(options);
  const providers=await selectClis(options);
  let setup:Awaited<ReturnType<typeof loadMachineSetup>>|null=null,roleError=false;
  try{await lstat(path.join(options.configDir,SETUP_FILE));setup=await loadMachineSetup(options.configDir);}catch(e){roleError=(e as NodeJS.ErrnoException).code!=='ENOENT';}
