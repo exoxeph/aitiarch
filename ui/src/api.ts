@@ -95,8 +95,8 @@ export const fetchSetup = () => ok<import('../shared/setup.ts').SetupView>('GET'
 export const refreshSetupModels = (force:boolean) => ok<import('../shared/setup.ts').SetupView>('POST','/api/setup/models',{force});
 export const saveSetup = (body:import('../shared/setup.ts').SetupUpdate) =>
   ok<import('../shared/setup.ts').SetupView>('PUT','/api/setup',body);
-export const applyPrivateSetup = () =>
-  ok<{messages:string[]}>('POST','/api/setup/private',{confirmIgnore:true});
+export const applyNotebookSetup = (sharing:'private'|'shared') =>
+  ok<{messages:string[]}>('POST','/api/setup/private',{sharing,confirmIgnore:true});
 
 /** What GET /api/chat returns: accepted assistant messages only (questions are not stored), plus where the chat is kept. */
 export interface ChatSnapshot { v: 1; note: string; messages: ChatMessage[]; persistence: { enabled: boolean }; questionPlaceholder: string; usage: ChatUsage | null }

@@ -3,7 +3,7 @@ import {execFileSync} from 'node:child_process';
 import {promisify} from 'node:util';
 import * as fs from 'node:fs/promises';
 import os from 'node:os';import path from 'node:path';
-import {initProject} from '../server/init.ts';
+import {initProject,privateProtection} from '../server/init.ts';
 import {resolveRoot} from '../server/root.ts';
 vi.mock('node:child_process',async importOriginal=>{
  const actual=await importOriginal<typeof import('node:child_process')>();
@@ -29,8 +29,8 @@ it.each([{sharing:'private' as const,line:'/.aitiarch/'},{sharing:'shared' as co
  await git();const before=Buffer.from('\ufeff# synthetic\r\nnode_modules/\r\n');await fs.writeFile(path.join(project,'.gitignore'),before);
  const r=await initProject({project,sharing,confirmIgnore:true}),after=await fs.readFile(path.join(project,'.gitignore'));
  expect(after.subarray(0,before.length)).toEqual(before);expect(after.subarray(before.length).toString()).toBe(line+'\r\n');
- expect(r.protection).toBe('git-ignored');expect(r.privatePersistence).toBe(sharing==='private');expect(r.sharedReady).toBe(false);
- if(sharing==='shared')expect(r.messages.join(' ')).toMatch(/not ready.*private writers/i);
+ expect(r.protection).toBe('git-ignored');expect(r.privatePersistence).toBe(true);expect(r.sharedReady).toBe(true);
+ if(sharing==='shared')expect(r.messages.join(' ')).toMatch(/saved threads can contain sensitive text/i);
  expect(await fs.readFile(path.join(r.root,'local','.gitignore'),'utf8')).toBe('*\n');
  expect(await resolveRoot({cwd:project})).toBe(r.root);await expect(fs.stat(path.join(r.root,'notes'))).rejects.toMatchObject({code:'ENOENT'});
  for(const dir of ['ink','decisions','local'])expect((await fs.stat(path.join(r.root,dir))).isDirectory()).toBe(true);
@@ -78,4 +78,44 @@ it('init performs no Git checks outside a repository',async()=>{
  const child=await import('node:child_process');const checks=vi.mocked(promisify(child.execFile));checks.mockClear();
  await initProject({project,sharing:'private',confirmIgnore:true});
  expect(checks).not.toHaveBeenCalled();
+});
+it('switches to shared after verification, preserving private files, notes and existing ignore bytes',async()=>{
+ await git();
+ const created=await initProject({project,sharing:'private',confirmIgnore:true});
+ const local=path.join(created.root,'local'),note=path.join(created.root,'Welcome.md');
+ const noteBytes=Buffer.from('\ufeff# Fiction\r\n\r\nKeep bytes.  \r\n');
+ await fs.writeFile(note,noteBytes);
+ await fs.writeFile(path.join(local,'ui-state.json'),'synthetic draft');
+ const ignore=path.join(project,'.gitignore'),before=await fs.readFile(ignore);
+ const get=()=>privateProtection(project);
+ expect(await get()).toMatchObject({mode:'private',sharedReady:true});
+ expect((await initProject({project,sharing:'shared',confirmIgnore:false})).privatePersistence).toBe(false);
+ expect(await fs.readFile(ignore)).toEqual(before);
+ const result=await initProject({project,sharing:'shared',confirmIgnore:true});
+ expect(result).toMatchObject({sharedReady:true,privatePersistence:true,created:[],sharing:'shared'});
+ expect(await get()).toMatchObject({mode:'shared',sharedReady:true});
+ expect((await fs.readFile(ignore)).subarray(0,before.length)).toEqual(before);
+ expect(await fs.readFile(note)).toEqual(noteBytes);
+ expect(await fs.readFile(path.join(local,'ui-state.json'),'utf8')).toBe('synthetic draft');
+ expect(execFileSync('git',['ls-files','--others','--exclude-standard','--','.aitiarch'],{cwd:project,encoding:'utf8'})).toContain('.aitiarch/Welcome.md');
+ expect(execFileSync('git',['check-ignore','--','.aitiarch/local/ui-state.json'],{cwd:project,encoding:'utf8'})).toContain('local/ui-state.json');
+ const sharedIgnore=await fs.readFile(ignore);
+ expect((await initProject({project,sharing:'shared',confirmIgnore:false})).privatePersistence).toBe(true);
+ expect(await fs.readFile(ignore)).toEqual(sharedIgnore);
+});
+it.each(['tracked private file','legacy root file','unmanaged layout'])('refuses sharing with a %s',async condition=>{
+ await git();
+ const root=path.join(project,'.aitiarch');
+ if(condition==='unmanaged layout')await fs.mkdir(root);
+ else{
+  await initProject({project,sharing:'private',confirmIgnore:true});
+  const file=condition==='tracked private file'?'local/ui-state.json':'ledger.json.old.tmp';
+  await fs.writeFile(path.join(root,file),'synthetic private bytes');
+  if(condition==='tracked private file')execFileSync('git',['add','-f','--','.aitiarch/local/ui-state.json'],{cwd:project});
+ }
+ const before=await fs.readdir(root,{recursive:true});
+ const reason=condition==='tracked private file'?/already tracks/:condition==='legacy root file'?/outside local/:/legacy/;
+ expect(await privateProtection(project)).toMatchObject({sharedReady:false,sharedReason:expect.stringMatching(reason)});
+ expect(await initProject({project,sharing:'shared',confirmIgnore:true})).toMatchObject({sharedReady:false,privatePersistence:false,created:[]});
+ expect(await fs.readdir(root,{recursive:true})).toEqual(before);
 });

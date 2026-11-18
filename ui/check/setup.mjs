@@ -1,6 +1,6 @@
 import './config-isolation.mjs';
 import assert from 'node:assert/strict';
-import {copyFile, mkdtemp, mkdir, readdir, readFile, utimes, writeFile} from 'node:fs/promises';
+import {copyFile, mkdtemp, mkdir, readdir, readFile, realpath, utimes, writeFile} from 'node:fs/promises';
 import {execFile, spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {createInterface} from 'node:readline';
@@ -11,6 +11,9 @@ import {chromium} from 'playwright-core';
 import {Store} from '../server/store.ts';
 import {NoteWatcher} from '../server/watch.ts';
 import {createApp} from '../server/http.ts';
+import {createHost} from '../server/host.ts';
+import {Registry} from '../server/registry.ts';
+import {createSecurity} from '../server/security.ts';
 import {createSetupHttp} from '../server/setup-http.ts';
 import {initProject} from '../server/init.ts';
 import {SkillDiagramStore} from '../server/skill-diagram-store.ts';
@@ -287,7 +290,7 @@ async function checkGitFirstRun(){
  await promisify(execFile)('git',['init','--quiet'],{cwd:gitProject,windowsHide:true});
  const initialized=await initProject({project:gitProject,sharing:'private',confirmIgnore:true});
  assert.equal(initialized.protection,'git-ignored');
- assert.equal(initialized.sharedReady,false);
+ assert.equal(initialized.sharedReady,true);
  assert.equal(await readFile(path.join(initialized.privateLocation,'.gitignore'),'utf8'),'*\n');
  const checked=await promisify(execFile)('git',['check-ignore','--','.aitiarch/local/images/probe.png'],{cwd:gitProject,windowsHide:true});
  assert.match(checked.stdout,/probe\.png/);
@@ -304,12 +307,94 @@ async function checkGitFirstRun(){
   const blocked=await page.request.get(new URL('/api/file?path=LOCAL%2Ftest-private.md',page.url()).href);
   assert.equal(blocked.status(),404);
   assert(!((await blocked.text()).includes('synthetic private storage')));
-  assert.equal((await gitSetup.get()).privacy.sharedReady,false);
+  assert.equal((await gitSetup.get()).privacy.sharedReady,true);
   await page.screenshot({path:path.join(output,'first-run-private-git.png')});
-  console.log('Git first run passed: verified local ignore and shared readiness remains off.');
+  console.log('Git first run passed: verified local ignore and sharing eligibility.');
   await writeFile(path.join(initialized.root,'Welcome.md'),'# Synthetic Git note\n\nPrivate fixture anchor.\n');
   await checkSkillStages(new URL(page.url()).origin,gitStore,'Welcome.md','git');
  }finally{await page.close();gitWatcher.stop();await gitApp.close();}
+}
+
+async function checkHomePrivacy(kind){
+ const scratch=await mkdtemp(path.join(await realpath(os.tmpdir()),'aitiarch-home-privacy-'));
+ const projectDir=path.join(scratch,'demo'),config=path.join(scratch,'config');
+ await Promise.all([mkdir(config),mkdir(projectDir)]);
+ const git=(...args)=>promisify(execFile)('git',args,{cwd:projectDir,windowsHide:true});
+ if(kind==='git')await git('init','--quiet');
+ const registry=await Registry.open(config);
+ let port;
+ const security=createSecurity({port:()=>port,requireLaunch:true});
+ const distDir=path.resolve('dist');
+ const host=createHost({registry,security,distDir,openProject:async entry=>{
+  const store=await Store.open(entry.notes),watcher=new NoteWatcher(store);
+  const setup=createSetupHttp({dir:config,project:entry.root,providers:[],ready:async()=>true});
+  const projectApp=createApp({store,watcher,distDir,security,pipelineConfigDir:config,setup});
+  return {handle:projectApp.handle,close:async()=>{watcher.stop();await projectApp.close();}};
+ }});
+ const page=await browser.newPage({viewport:{width:1280,height:800}});
+ try{
+  port=await host.listen(0);
+  await page.route('**/api/projects/folders',route=>{
+   const url=new URL(route.request().url());
+   url.searchParams.set('path',projectDir);
+   return route.continue({url:url.href});
+  });
+  await page.goto('http://127.0.0.1:'+port+'/?launch='+security.token);
+  await page.getByRole('button',{name:'Add project',exact:true}).first().click();
+  const add=page.getByRole('dialog',{name:'Add a project'});
+  await add.getByRole('button',{name:'Use this folder'}).click();
+  const create=add.getByRole('button',{name:'Initialize and add'});
+  await create.waitFor();
+  const notes=path.join(projectDir,'.aitiarch');
+  await assert.rejects(readdir(notes),{code:'ENOENT'});
+  assert.equal(await create.isEnabled(),kind!=='git');
+  if(kind==='git')await add.getByRole('checkbox',{name:/Allow Aitiarch/}).check();
+  await create.click();
+  await add.getByRole('status').filter({hasText:kind==='git'?'Required ignore rule verified':'filesystem-private'}).waitFor();
+  await add.getByRole('button',{name:'Done',exact:true}).click();
+  const project=registry.list()[0];
+  assert.ok(project);
+  if(!new URL(page.url()).searchParams.has('project')){
+   await page.goto('http://127.0.0.1:'+port+'/?project='+project.id);
+  }
+  const card=page.getByRole('dialog',{name:'Set up Aitiarch'});
+  const shared=card.getByRole('button',{name:'Use shared mode'});
+  await shared.waitFor();
+  if(kind==='git'){
+   const bytes=Buffer.from('\uFEFF# Verified privacy\r\n');
+   const noteFile=path.join(notes,'unchanged.md');
+   const sentinel=path.join(notes,'local','private-sentinel.md');
+   await writeFile(noteFile,bytes);
+   await writeFile(sentinel,'synthetic private sentinel');
+   assert.equal(await shared.isEnabled(),false);
+   await card.getByRole('checkbox',{name:/Allow Aitiarch/}).check();
+   await shared.click();
+   await card.getByText(/^Shared mode\./).waitFor();
+   assert.deepEqual(await readFile(noteFile),bytes);
+   assert.equal(await readFile(sentinel,'utf8'),'synthetic private sentinel');
+   await git('check-ignore','--','.aitiarch/local/private-sentinel.md');
+   await assert.rejects(git('check-ignore','--','.aitiarch/unchanged.md'),{code:1});
+   const response=await page.request.get('http://127.0.0.1:'+port+'/api/p/'+project.id+'/file?path=local%2Fprivate-sentinel.md');
+   assert.equal(response.status(),404);
+  }else{
+   await card.getByText('Shared mode requires a Git repository.').waitFor();
+   assert.equal(await shared.isEnabled(),false);
+  }
+  await page.screenshot({path:path.join(output,'home-privacy-'+kind+'.png')});
+  await card.getByRole('button',{name:'Continue',exact:true}).click();
+  await card.waitFor({state:'detached'});
+  await page.getByRole('button',{name:'Notes menu',exact:true}).click();
+  await page.getByRole('button',{name:'AI settings',exact:true}).click();
+  const settings=page.getByRole('dialog',{name:'AI settings'});
+  await settings.getByRole('tab',{name:'Setup',exact:true}).click();
+  const panel=settings.getByRole('tabpanel',{name:'Setup',exact:true});
+  if(kind==='git')await panel.getByText(/^Shared mode\./).waitFor();
+  else{
+   await panel.getByText('Shared mode requires a Git repository.').waitFor();
+   assert.equal(await panel.getByRole('button',{name:'Use shared mode'}).isEnabled(),false);
+  }
+  console.log('Home privacy passed: '+kind);
+ }finally{await page.close();await host.close();}
 }
 
 try {
@@ -700,6 +785,8 @@ try {
  await writeFile(note,'# Synthetic plan\n\nPrivate fixture anchor.\n');
  await checkSkillStages(url,store,'Synthetic plan.md','filesystem');
  await checkGitFirstRun();
+ await checkHomePrivacy('git');
+ await checkHomePrivacy('non-git');
 } finally {
  await browser?.close();
  watcher.stop();

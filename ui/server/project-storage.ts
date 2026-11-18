@@ -58,13 +58,52 @@ async function exactFile(fs:StorageFilesystem,file:string,contents:string){
   (await fs.readFile(file)).equals(Buffer.from(contents));
 }
 
-async function gitProtects(root:string,local:string,names:string[]){
+function gitAt(root:string,args:string[]){
  const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^git_/i.test(key)));
- const git=(args:string[])=>exec('git',args,{cwd:root,env,windowsHide:true,timeout:3000,maxBuffer:64*1024});
+ return exec('git',args,{cwd:root,env,windowsHide:true,timeout:3000,maxBuffer:64*1024});
+}
+
+export async function notebookIgnored(project:string){
+ try{await gitAt(project,['check-ignore','--no-index','-q','--','.aitiarch']);return true;}
+ catch(error){if((error as {code?:unknown}).code===1)return false;throw error;}
+}
+
+export async function privateFilesTracked(root:string){
+ const {stdout}=await gitAt(root,['--literal-pathspecs','ls-files','-z','--',path.join(root,'local')]);
+ return stdout.length!==0;
+}
+
+/** A managed layout can be shared only after proving it came from exclusive
+ * init and checking the publishable tree for aliases and legacy private paths. */
+export async function sharedTreeIssue(root:string,fs:StorageFilesystem){
+ if(!await exactFile(fs,path.join(root,ROOT_VERSION_FILE),VERSION))return 'This notebook predates verified private storage.';
+ const legacyName=/^(?:ui-state\.json(?:\..*)?|ledger\.json(?:\..*)?|usage\.jsonl(?:\..*)?|\.cache|chat|runs|measurements|backups|images)$/i;
+ let count=0;
+ async function walk(dir:string):Promise<string|null>{
+  await assertStoragePath(fs,dir);
+  for await(const item of await nodeFs.opendir(dir)){
+   if(++count>10000)return 'The shareable tree is too large to verify.';
+   const name=item.name.toLowerCase(),file=path.join(dir,item.name);
+   if(dir===root&&name==='local')continue;
+   if(dir===root&&legacyName.test(name)||path.relative(root,dir).toLowerCase()==='ink'&&/^insertions\.json(?:\..*)?$/i.test(name))
+    return 'Legacy private files are present outside local/.';
+   const stat=await storageEntry(fs,file);
+   if(!stat||stat.isSymbolicLink()||(!stat.isDirectory()&&(!stat.isFile()||stat.nlink!==1)))
+    return 'The shareable tree contains an unsafe or linked path.';
+   if(stat.isDirectory()){
+    const reason=await walk(file);if(reason)return reason;
+   }
+  }
+  return null;
+ }
+ return walk(root);
+}
+
+async function gitProtects(root:string,local:string,names:string[]){
+ const git=(args:string[])=>gitAt(root,args);
  // Tracked files are never made private by ignore rules. Also require that
  // each writer's entry is ignored, including the directories writers descend into.
- const tracked=await git(['--literal-pathspecs','ls-files','-z','--',local]);
- if(tracked.stdout.length)return false;
+ if(await privateFilesTracked(root))return false;
  await git(['check-ignore','-q','--',path.relative(root,local)]);
  const targets=names.map(name=>path.relative(root,path.join(local,name)));
  const ignored=await git(['check-ignore','--',...targets]);

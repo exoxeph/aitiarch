@@ -134,8 +134,12 @@ describe('first-run setup endpoints', () => {
   const before = await readFile(path.join(dir,SETUP_FILE));
   await expect(service().init({confirmIgnore:false})).rejects.toThrow(/confirm/i);
   expect(await readdir(project)).toEqual(['.git']);
-  expect(await service().init({confirmIgnore:true})).toMatchObject({sharing:'private', sharedReady:false, protection:'git-ignored',privateLocation:path.join(project,'.aitiarch','local')});
+  expect(await service().init({confirmIgnore:true})).toMatchObject({sharing:'private', sharedReady:true, protection:'git-ignored',privateLocation:path.join(project,'.aitiarch','local')});
   expect(await readFile(path.join(project,'.gitignore'),'utf8')).toBe('/.aitiarch/\n');
+  expect(await readFile(path.join(dir,SETUP_FILE))).toEqual(before);
+  await expect(service().init({sharing:'shared',confirmIgnore:false})).rejects.toThrow(/confirm/i);
+  expect(await service().init({sharing:'shared',confirmIgnore:true})).toMatchObject({sharing:'shared',sharedReady:true});
+  expect((await service().get()).privacy).toMatchObject({mode:'shared',sharedReady:true});
   expect(await readFile(path.join(dir,SETUP_FILE))).toEqual(before);
  });
  it('saves and resets Investigate model and effort independently of Skill diagrams', async () => {

@@ -43,3 +43,15 @@ it('has role selects inside collapsed customization without model or effort cont
  expect(html).toContain('Skill diagrams');
  expect(html).not.toContain('type="number"');
 });
+
+it('explains which files can be shared and only offers sharing with verified protection', () => {
+ const disabled=render({...empty,privacy:{...empty.privacy,sharedReason:'Shared mode requires a Git repository.'}});
+ expect(disabled).toContain('Shared mode requires a Git repository.');
+ expect(disabled).toMatch(/<button[^>]*disabled[^>]*>Use shared mode/);
+ const ready=render({...empty,privacy:{mode:'private',sharedReady:true,notice:'Required ignore rule verified.'}});
+ expect(ready).toContain('Allow Aitiarch');
+ expect(ready).toContain('/.aitiarch/local/');
+ expect(ready).toContain('Stays private');
+ expect(ready).toContain('Can be committed');
+ expect(ready).toContain('Use shared mode');
+});

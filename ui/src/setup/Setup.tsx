@@ -1,9 +1,9 @@
 import {useEffect, useRef, useState} from 'react';
-import {applyPrivateSetup, fetchSetup, saveSetup} from '../api.ts';
+import {saveSetup} from '../api.ts';
 import type {SetupUpdate, SetupView} from '../../shared/setup.ts';
 import {DefaultAiSelect} from './DefaultAiSelect.tsx';
 import {RoleControls} from './RoleControls.tsx';
-import {PrivacyConsent} from './PrivacyConsent.tsx';
+import {NotebookPrivacy} from './NotebookPrivacy.tsx';
 
 /** First run: one small card. Which tools were found, which AI answers by default, how the notebook stays private. No model or effort here: that lives in the chat box. */
 export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(notice?:string)=>void;onPreferences?:(view:SetupView)=>void}) {
@@ -63,16 +63,7 @@ export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(n
       <RoleControls view={view} busy={busy} customize save={save}/>
      </details>
     </div>
-    <div className="settings-section">
-     <h3>Your notebook stays private</h3>
-     <p className="settings-lead">{view.privacy.notice}</p>
-     {view.privacy.notice==='No Git ignore protection verified.' &&
-      <PrivacyConsent rule="/.aitiarch/" disabled={busy} label="Apply private setup" onApply={()=>void perform(async()=>{
-       const result=await applyPrivateSetup();
-       setView(await fetchSetup());
-       setMessage(result.messages.join(' '));
-      })}/>}
-    </div>
+    <NotebookPrivacy privacy={view.privacy} disabled={busy} onChange={next=>{setView(next);onPreferences?.(next);}}/>
     {message && <p className="settings-warn" role="status">{message}</p>}
    </div>
    <footer className="settings-head">

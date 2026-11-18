@@ -138,10 +138,10 @@ it('refuses a legacy root that has the old local scaffold but no storage identit
  expect(await readFile(path.join(root,'old.md'))).toEqual(notes);
 });
 
-it('checks Git protection without staging data and keeps shared disabled until writers are wired',async()=>{
+it('allows shared mode only with verified Git protection and no staged private data',async()=>{
  git('init','--quiet');
  const first=await initialize();
- expect(first).toMatchObject({protection:'git-ignored',sharedReady:false});
+ expect(first).toMatchObject({protection:'git-ignored',sharedReady:true});
  const result=await storage.resolveProjectStorage(root);
  expect(result).toMatchObject({ok:true,protection:'git-ignored'});
  expect(git('check-ignore','--','.aitiarch/local/images/sentinel.png').trim()).toMatch(/sentinel\.png$/);

@@ -59,7 +59,7 @@ export interface SetupView {
  models:RoleModelPreference[];
  providers:{id:SetupProvider;label:string;path:string|null;version:string|null;notices:string[];reason:string;compatible:boolean;source:SetupSource;catalog?:ModelCatalog}[];
  roles:{role:SetupRole;provider:SetupProvider|null;capableProviders:SetupProvider[];providerReasons?:Partial<Record<SetupProvider,string>>;reason:string|null;source:RoleSource;routingNote?:string;participants?:SetupProvider[];eligibleParticipants?:SetupProvider[]}[];
- privacy:{mode:'private';sharedReady:false;notice:string};
+ privacy:{mode:'private'|'shared';sharedReady:boolean;notice:string;sharedReason?:string|null};
 }
 /** New object per call: editing preferences cannot mutate defaults in another request. */
 export function defaultMachineSetup():MachineSetup {

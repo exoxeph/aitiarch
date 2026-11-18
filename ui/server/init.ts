@@ -1,11 +1,11 @@
 import * as nodeFs from 'node:fs/promises';
 import {constants} from 'node:fs';
 import path from 'node:path';
-import {assertStoragePath as safePath,hasGitMarker as gitProject,resolveProjectStorage,storageEntry as entry,storageErrorCode as errorCode} from './project-storage.ts';
+import {assertStoragePath as safePath,hasGitMarker as gitProject,notebookIgnored,privateFilesTracked,resolveProjectStorage,sharedTreeIssue,storageEntry as entry,storageErrorCode as errorCode} from './project-storage.ts';
 
 export interface InitOptions {project:string;sharing:'private'|'shared';confirmIgnore:boolean|((line:string)=>Promise<boolean>);newOnly?:boolean}
 export class AlreadyInitialized extends Error {constructor(){super('This folder already has a .aitiarch notebook.');}}
-export interface InitResult {root:string;sharing:'private'|'shared';protection:'git-ignored'|'filesystem-private'|'unverified';privatePersistence:boolean;privateLocation:string|null;sharedReady:false;created:string[];messages:string[]}
+export interface InitResult {root:string;sharing:'private'|'shared';protection:'git-ignored'|'filesystem-private'|'unverified';privatePersistence:boolean;privateLocation:string|null;sharedReady:boolean;created:string[];messages:string[]}
 /** Filesystem operations can be injected. Git checks are read-only and init never discovers a provider. */
 export type InitFilesystem=Pick<typeof nodeFs,'lstat'|'readFile'|'mkdir'|'writeFile'|'open'>;
 const MAX_IGNORE_BYTES=1024*1024;
@@ -24,24 +24,42 @@ const rules=(data:Buffer)=>new TextDecoder('utf-8',{fatal:true}).decode(data).sp
 // Conservative proof of the rule we wrote, not a general Git pattern interpreter.
 // A final anchored directory exclusion cannot be undone by a nested ignore file.
 const hasFinalRule=(data:Buffer,line:string)=>rules(data).at(-1)===line;
+const PRIVATE_RULE='/.aitiarch/', LOCAL_RULE='/.aitiarch/local/', OPEN_RULE='!/.aitiarch/';
+const SHARED_WARNING='Notes, saved threads, ink, decisions, and assets you have inserted can be committed. Saved threads can contain sensitive text. Secret exclusion is not retroactive redaction.';
 /** Read-only preview for an already-open project. Never create init targets here. */
-export async function privateProtection(project:string,fs:InitFilesystem=nodeFs):Promise<Pick<InitResult,'protection'|'sharedReady'|'messages'>>{
+export async function privateProtection(project:string,fs:InitFilesystem=nodeFs){
  let protection:InitResult['protection']='unverified';
+ let mode:InitResult['sharing']='private',sharedReason:string|null;
  try{
-  if(!await gitProject(fs,project))protection='filesystem-private';
-  else if(hasFinalRule((await readIgnore(fs,path.join(project,'.gitignore'))).data,'/.aitiarch/'))protection='git-ignored';
- }catch{/* A failed check cannot establish protection. */}
- return {protection,sharedReady:false,messages:[protectionMessage(protection)]};
+  if(!await gitProject(fs,project)){
+   protection='filesystem-private';
+   sharedReason='Shared mode requires a Git repository.';
+  }else{
+   const root=path.join(project,'.aitiarch'),layout=await resolveProjectStorage(root,{fs});
+   if(!layout.ok)sharedReason=layout.code==='git-unverified'&&await privateFilesTracked(root)
+    ?'Git already tracks files in local/. Remove them from Git tracking before enabling sharing.':layout.reason;
+   else{
+    protection='git-ignored';
+    const ignored=await notebookIgnored(project);
+    sharedReason=await sharedTreeIssue(root,fs);
+    if(ignored&&!hasFinalRule((await readIgnore(fs,path.join(project,'.gitignore'))).data,PRIVATE_RULE))
+     sharedReason??='A separate Git ignore rule hides the notebook.';
+    if(!ignored&&!sharedReason)mode='shared';
+   }
+  }
+ }catch{sharedReason='Git protection or the shareable tree could not be verified.';}
+ return {protection,mode,sharedReady:sharedReason===null,sharedReason,messages:[protectionMessage(protection)]};
 }
 function protectionMessage(protection:InitResult['protection']){
  if(protection==='git-ignored')return 'Required ignore rule verified (this does not untrack previously committed files).';
  if(protection==='filesystem-private')return 'filesystem-private: no Git repository detected; no Git protection claimed.';
  return 'No Git ignore protection verified.';
 }
-async function mergeIgnore(fs:InitFilesystem,file:string,line:string){
- const before=await readIgnore(fs,file);if(hasFinalRule(before.data,line))return;
+async function mergeIgnore(fs:InitFilesystem,file:string,lines:string[]){
+ const matches=(data:Buffer)=>rules(data).slice(-lines.length).join('\n')===lines.join('\n');
+ const before=await readIgnore(fs,file);if(matches(before.data))return;
  const newline=before.data.includes(Buffer.from('\r\n'))?'\r\n':'\n';
- const addition=(before.data.length&&before.data.at(-1)!==10?newline:'')+line+newline;
+ const addition=(before.data.length&&before.data.at(-1)!==10?newline:'')+lines.join(newline)+newline;
  if(before.data.length+Buffer.byteLength(addition)>MAX_IGNORE_BYTES)throw Error('Ignore file is too large.');
  await safePath(fs,file);
  // O_NOFOLLOW is unavailable on some Windows versions; handle identity + nlink
@@ -52,7 +70,7 @@ async function mergeIgnore(fs:InitFilesystem,file:string,line:string){
   if(before.stat&&(opened.dev!==before.stat.dev||opened.ino!==before.stat.ino||opened.size!==before.stat.size||opened.mtimeMs!==before.stat.mtimeMs))throw Error('Ignore file changed; no append made.');
   await handle.writeFile(addition);await handle.sync();
  }finally{await handle.close();}
- const verified=await readIgnore(fs,file);if(!hasFinalRule(verified.data,line))throw Error('Ignore rule could not be verified.');
+ const verified=await readIgnore(fs,file);if(!matches(verified.data))throw Error('Ignore rule could not be verified.');
 }
 
 export async function initProject(options:InitOptions,fs:InitFilesystem=nodeFs):Promise<InitResult>{
@@ -72,15 +90,34 @@ export async function initProject(options:InitOptions,fs:InitFilesystem=nodeFs):
   result.messages.push(layout.reason,protectionMessage(result.protection),'Private persistence is disabled. Existing files were preserved.');
   return result;
  }
- if(options.sharing==='shared')result.messages.push('Shared mode is not ready until all private writers use the local/ layout. Saved threads can contain sensitive text; secret exclusion is not retroactive redaction. Do not publish this folder yet.');
+ if(options.sharing==='shared'){
+  result.messages.push(SHARED_WARNING);
+  if(!layout.created.includes(root)){
+   const state=await privateProtection(project,fs);
+   // CLI init may finish a managed setup that previously stopped before
+   // receiving ignore consent. Even there, check the tree and index first.
+   const unfinished=!layout.ok&&layout.code==='git-unverified'&&inGit&&
+    !await sharedTreeIssue(root,fs)&&!await privateFilesTracked(root);
+   if(!state.sharedReady&&!unfinished){
+    result.messages.push(state.sharedReason!,'Sharing is disabled. Existing files were preserved.');
+    return result;
+   }
+  }
+ }
  let ignoreVerified=!inGit;
  if(inGit){
-  const line=options.sharing==='private'?'/.aitiarch/':'/.aitiarch/local/';
+  const line=options.sharing==='private'?PRIVATE_RULE:LOCAL_RULE;
   try{
    const existing=await readIgnore(fs,ignore);
-   const consent=hasFinalRule(existing.data,line)|| (typeof options.confirmIgnore==='function'?await options.confirmIgnore(line):options.confirmIgnore);
+   const existingRules=rules(existing.data);
+   const alreadyApplied=hasFinalRule(existing.data,line)||
+    (options.sharing==='shared'&&existingRules.at(-2)===LOCAL_RULE&&existingRules.at(-1)===OPEN_RULE);
+   const consent=alreadyApplied|| (typeof options.confirmIgnore==='function'?await options.confirmIgnore(line):options.confirmIgnore);
    if(consent){
-    await mergeIgnore(fs,ignore,line);
+    const opening=options.sharing==='shared'&&await notebookIgnored(project);
+    // Put the private exclusion first; every complete prefix of the append
+    // keeps local/ excluded even if the process stops mid-write.
+    if(!alreadyApplied||opening)await mergeIgnore(fs,ignore,opening?[LOCAL_RULE,OPEN_RULE]:[line]);
     layout=await resolveProjectStorage(root,{fs});
     ignoreVerified=layout.ok;
     if(ignoreVerified)result.protection='git-ignored';
@@ -108,7 +145,10 @@ export async function initProject(options:InitOptions,fs:InitFilesystem=nodeFs):
   const content=guide.split(/^## Welcome\r?\n/m)[1]?.split(/\r?\n## /)[0]?.trim();if(!content)throw Error('Welcome guide is unavailable.');
   await create(welcome,content+'\n');
  }
- result.privatePersistence=ignoreVerified&&layout.ok&&options.sharing==='private';
+ const state=layout.ok&&inGit?await privateProtection(project,fs):null;
+ result.sharedReady=state?.sharedReady??false;
+ result.privatePersistence=ignoreVerified&&layout.ok&&(options.sharing==='private'||state?.mode==='shared'&&result.sharedReady);
+ if(options.sharing==='shared'&&!result.privatePersistence)result.messages.push(state?.sharedReason??'Shared mode requires verified Git protection and explicit consent.');
  result.messages.push(protectionMessage(result.protection));
  if(!result.privatePersistence)result.messages.push('Private persistence is disabled for this init result. No private writer was started.');
  result.messages.push('Existing files were preserved. Git checks are read-only. No provider calls were run.');

@@ -12,8 +12,8 @@ const wiredBridges = {invoked:true, 'thread-reply':true, 'investigate-read':true
 const writes = new Map<string, Promise<unknown>>();
 
 export class SetupRequestError extends Error {}
-export const setupInit=(project:string,confirmIgnore:boolean,newOnly=false)=>
- initProject({project,sharing:'private',confirmIgnore,newOnly});
+export const setupInit=(project:string,confirmIgnore:boolean,newOnly=false,sharing:'private'|'shared'='private')=>
+ initProject({project,sharing,confirmIgnore,newOnly});
 
 /** Called behind the ordinary project API session and origin guards. */
 export function createSetupHttp(options: {
@@ -93,7 +93,7 @@ export function createSetupHttp(options: {
     else if (!setup.providers[provider].enabled) reason = 'The saved provider is disabled.';
     return {role, provider, capableProviders, providerReasons, reason, source, ...(participants ? {participants,eligibleParticipants} : {})};
    }),
-   privacy:{mode:'private', sharedReady:protection.sharedReady, notice:protection.messages.join(' ')},
+   privacy:{mode:protection.mode, sharedReady:protection.sharedReady, sharedReason:protection.sharedReason, notice:protection.messages.join(' ')},
   };
  }
 
@@ -171,10 +171,16 @@ export function createSetupHttp(options: {
  }
 
  async function init(body:unknown) {
-  if (!body || typeof body!=='object' || Object.keys(body).length!==1 ||
-      !('confirmIgnore' in body) || body.confirmIgnore!==true)
-   throw new SetupRequestError('Confirm the private Git ignore rule before applying it.');
-  return setupInit(options.project,true);
+  if (!body || typeof body!=='object' || !('confirmIgnore' in body) || body.confirmIgnore!==true)
+   throw new SetupRequestError('Confirm the Git ignore change before applying it.');
+  const sharing='sharing' in body?body.sharing:'private';
+  if ((sharing!=='private'&&sharing!=='shared') || Object.keys(body).some(key=>key!=='confirmIgnore'&&key!=='sharing'))
+   throw new SetupRequestError('Choose private or shared setup.');
+  if(sharing==='shared'){
+   const state=await privateProtection(options.project);
+   if(!state.sharedReady)throw new SetupRequestError(state.sharedReason??'Shared mode is unavailable.');
+  }
+  return setupInit(options.project,true,false,sharing);
  }
  async function refreshModels(body:unknown){
   if(!body||typeof body!=='object'||Object.keys(body).length!==1||!('force' in body)||typeof body.force!=='boolean')
