@@ -31,6 +31,13 @@ export interface Unavailable {
  code:'provider-disabled'|'provider-unavailable'|'role-unavailable'|'settings-unavailable';reason:string;
 }
 export type RoleResolution=ProviderDescriptor|Unavailable;
+/** Shared transport policy; metadata compatibility alone does not supply a bridge. */
+export function providerCapabilities(id:SetupProvider,bridges:Partial<Record<'invoked'|'thread-reply'|'investigate-read'|'skill-diagram',boolean>>={}):Record<SetupRole|'vision',boolean> {
+ const capabilities:Record<SetupRole|'vision',boolean>={'normal-chat':true,council:true,invoked:false,'thread-reply':false,'investigate-read':false,'skill-diagram':false,vision:false};
+ if(id==='claude')for(const role of ['invoked','thread-reply','investigate-read','skill-diagram'] as const)capabilities[role]=bridges[role]===true;
+ if(id==='codex'){capabilities.invoked=bridges.invoked===true;capabilities['thread-reply']=bridges['thread-reply']===true;}
+ return capabilities;
+}
 export interface RequestSettingsSnapshot {
  readonly settings:MachineSetup;
  readonly providerVersions?:Readonly<Partial<Record<SetupProvider,string>>>;
@@ -60,10 +67,7 @@ function freeze<T>(v:T):T {
 export function descriptorFromAdapter(adapter:TurnAdapter,options:{detect:()=>Promise<Detection>;invokedBridge?:InvokedBridgeFactory;threadReplyBridge?:InvokedBridgeFactory;bridges?:Partial<Record<'invoked'|'thread-reply'|'investigate-read'|'skill-diagram',boolean>>}):ProviderDescriptor {
  if(!SETUP_PROVIDERS.includes(adapter.id as SetupProvider))throw Error('Unknown registry provider');
  const id=adapter.id as SetupProvider;
- const capabilities:Record<SetupRole|'vision',boolean>={'normal-chat':true,council:true,invoked:false,'thread-reply':false,'investigate-read':false,'skill-diagram':false,vision:false};
- if(id==='claude')for(const role of ['invoked','thread-reply','investigate-read','skill-diagram'] as const)capabilities[role]=options.bridges?.[role]===true;
- if(id==='codex')capabilities.invoked=typeof options.invokedBridge==='function';
- if(id==='codex')capabilities['thread-reply']=typeof options.threadReplyBridge==='function';
+ const capabilities=providerCapabilities(id,id==='codex'?{invoked:typeof options.invokedBridge==='function','thread-reply':typeof options.threadReplyBridge==='function'}:options.bridges);
  return freeze({id,label:adapter.label,safetyLabel:adapter.safetyLabel,capabilities,
   vision:{available:false,reason:'Image input for this role, model and isolated transport is not verified.'},
   detect:options.detect,models:async()=>({source:'default' as const,models:[{id:null,label:'Default'}],reason:'Model catalog is not verified yet; use the CLI default.'}),

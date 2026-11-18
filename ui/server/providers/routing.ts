@@ -5,9 +5,10 @@ import type {TurnAdapter} from './turn.ts';
 import {ProviderRegistry,descriptorFromAdapter,compatibleDefaults,type RequestSettingsSnapshot,type InvokedBridgeFactory} from './registry.ts';
 import {CouncilAvailability,type AvailabilityCheck} from './council-availability.ts';
 import type {createInvokedCodexBridge} from './invoked-bridge.ts';
+import {initializeDefaultRoles} from '../setup-store.ts';
 
 export type RoleRouting=()=>Promise<RequestSettingsSnapshot>;
-export function roleRouting(o:{dir:string;adapters:TurnAdapter[];checks:AvailabilityCheck[];legacyAnswerer:()=>SetupProvider;claudeBridge?:boolean;codexInvokedBridge?:typeof createInvokedCodexBridge;codexThreadReplies?:boolean}):RoleRouting {
+export function roleRouting(o:{dir:string;adapters:TurnAdapter[];checks:AvailabilityCheck[];legacyAnswerer:()=>SetupProvider;claudeBridge?:boolean;codexInvokedBridge?:typeof createInvokedCodexBridge;codexThreadReplies?:boolean}):RoleRouting&{initializeDefaults:(preferred?:readonly SetupProvider[])=>Promise<MachineSetup>} {
  const availability=new CouncilAvailability(o.checks);
  const bridge=(a:TurnAdapter):InvokedBridgeFactory|undefined=>a.id==='codex'&&o.codexInvokedBridge?options=>o.codexInvokedBridge!({...options,adapter:a,checkAvailability:async()=>{
   const state=(await availability.get()).find(p=>p.id==='codex');
@@ -19,7 +20,7 @@ export function roleRouting(o:{dir:string;adapters:TurnAdapter[];checks:Availabi
  },invokedBridge:bridge(a),threadReplyBridge:o.codexThreadReplies?bridge(a):undefined,bridges:a.id==='claude'&&o.claudeBridge?{invoked:true,'thread-reply':true,'investigate-read':true,'skill-diagram':true}:undefined}));
  const registry=new ProviderRegistry(descriptors);
  let initial:Promise<MachineSetup>|undefined;
- return ()=>registry.snapshot(o.dir,async()=>{
+ const routing=()=>registry.snapshot(o.dir,async()=>{
   // A first-run suggestion is selected once, never recomputed as runtime fallback.
   initial??=availability.get().then(states=>compatibleDefaults(descriptors.filter(d=>states.some(s=>s.id===d.id&&s.available))));
   const setup=structuredClone(await initial),legacy=o.legacyAnswerer();
@@ -28,4 +29,7 @@ export function roleRouting(o:{dir:string;adapters:TurnAdapter[];checks:Availabi
   if(legacy!=='claude'){setup.roles['normal-chat']=legacy;setup.providers[legacy].enabled=true;}
   return setup;
  });
+ return Object.assign(routing,{initializeDefaults:(preferred:readonly SetupProvider[]=[])=>{
+  const legacy=o.legacyAnswerer();return initializeDefaultRoles(o.dir,descriptors,preferred,legacy==='claude'?{}:{'normal-chat':legacy});
+ }});
 }

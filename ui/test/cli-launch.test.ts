@@ -20,6 +20,12 @@ const get=(port:number,p:string,cookie?:string)=>new Promise<{status:number;head
 });
 
 describe('aitiarch start-up',()=>{
+ it('keeps AI-off editing available with malformed machine settings and never replaces them',async()=>{
+  const base=await mkdtemp(path.join(os.tmpdir(),'aitiarch-cli-'));temps.push(base);const cfg=path.join(base,'cfg'),a=await project(base,'alpha');await mkdir(cfg);
+  const file=path.join(cfg,'machine-setup.json');await writeFile(file,'{malformed synthetic settings');
+  const {ready}=await launch(['--root',a,'--port','0'],cfg);
+  expect((await get(ready.port,'/api/health')).status).toBe(200);expect(await readFile(file,'utf8')).toBe('{malformed synthetic settings');
+ });
  it('prints a launch link, keeps the session behind it, and records the project in the config folder',async()=>{
   const base=await mkdtemp(path.join(os.tmpdir(),'aitiarch-cli-'));temps.push(base);const cfg=path.join(base,'cfg'),a=await project(base,'alpha');
   const {ready}=await launch(['--root',path.join(a,'.aitiarch'),'--port','0'],cfg);

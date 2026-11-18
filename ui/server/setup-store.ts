@@ -2,7 +2,8 @@ import {open,mkdir,rename,unlink,lstat} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {randomUUID} from 'node:crypto';
 import path from 'node:path';
-import {defaultMachineSetup,validMachineSetup,SETUP_PROVIDERS,type MachineSetup} from '../shared/setup.ts';
+import {defaultMachineSetup,validMachineSetup,SETUP_PROVIDERS,SETUP_ROLES,type MachineSetup,type SetupProvider,type SetupRole} from '../shared/setup.ts';
+import type {ProviderDescriptor} from './providers/registry.ts';
 import {configDir,underTest} from './registry.ts';
 import {resolveCli} from './platform/cli-discovery.ts';
 
@@ -68,4 +69,26 @@ export async function saveMachineSetup(dir:string,value:unknown,options:{replace
   await (options.replace??rename)(temp,path.join(target,SETUP_FILE));
  }catch{throw new SetupError('setup_write');}
  finally{if(created)await unlink(temp).catch(()=>{/* Only our uniquely named staging file; a leftover is harmless. */});}
+}
+
+/** Explicit startup initialization, not runtime fallback. Existing assignments and provider preferences win. */
+export async function initializeDefaultRoles(dir:string,providers:readonly ProviderDescriptor[],preferred:readonly SetupProvider[]=[],priorRoles:Partial<Record<SetupRole,SetupProvider>>={}):Promise<MachineSetup>{
+ let exists=true;try{await lstat(path.join(folder(dir),SETUP_FILE));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')exists=false;else throw new SetupError('setup_read');}
+ const setup=await loadMachineSetup(dir),before=JSON.stringify(setup);
+ const available=(await Promise.all(providers.map(async p=>{try{return (await p.detect()).available?p:null;}catch{return null;}}))).filter((p):p is ProviderDescriptor=>p!==null);
+ if(!exists){
+  // loadMachineSetup's legacy Claude defaults are not saved user choices.
+  for(const role of SETUP_ROLES)setup.roles[role]=null;
+  for(const id of SETUP_PROVIDERS)setup.providers[id].enabled=available.some(p=>p.id===id);
+  for(const role of SETUP_ROLES){const id=priorRoles[role];if(id){setup.roles[role]=id;setup.providers[id].enabled=true;}}
+ }
+ const order=[...new Set([...preferred,...SETUP_PROVIDERS])];
+ for(const role of SETUP_ROLES){
+  if(setup.roles[role]!==null)continue;
+  const selected=order.map(id=>available.find(p=>p.id===id&&p.capabilities[role]&&setup.providers[id].enabled)).find(Boolean);
+  if(selected)setup.roles[role]=selected.id;
+ }
+ // Council eligibility uses all enabled compatible descriptors, not this legacy single-role slot.
+ if(!exists||before!==JSON.stringify(setup))await saveMachineSetup(dir,setup);
+ return setup;
 }

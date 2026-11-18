@@ -74,6 +74,15 @@ const { UsageLogs } = await import("./providers/usage.ts");
 const runtime=await selectRuntimeProviders({configDir:configFolder,overrides:{...(args.claude!==undefined?{claude:args.claude}:{}),...(args.codex!==undefined?{codex:args.codex}:{})}});
 const serverIdentity={...identity,providers:runtime.providers};
 const claudeCommand=runtime.commands.claude;
+// Plugin run/start and the normal command both reach here. Save compatible defaults once, before any project opens.
+const initialRouting=roleRouting({dir:configFolder,adapters:runtime.adapters,checks:runtime.availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!claudeCommand,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true});
+try {
+ await initialRouting.initializeDefaults([...(args.claude!==undefined?['claude' as const]:[]),...(args.codex!==undefined?['codex' as const]:[])]);
+} catch {
+ // Saved settings remain authoritative; routing reports unreadable/unassigned roles.
+ // Optional AI setup must not prevent AI-off editing or replace damaged settings.
+ console.warn('AI role defaults could not be saved. Existing settings were left unchanged; check machine setup. AI-off editing remains available.');
+}
 if (claudeCommand&&!args.chatgptPlan) {
   const probe = createProvider({ provider: "claude", command: claudeCommand, contract: "claude-canary-2.1.205" });
   for (const warning of (await probe.checkAvailability()).warnings ?? []) console.warn(warning);
