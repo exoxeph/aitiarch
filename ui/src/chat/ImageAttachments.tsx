@@ -1,9 +1,11 @@
 import {useEffect,useRef,useState} from 'react';
-import {IMAGE_SEND_MAX_BYTES,IMAGE_SEND_MAX_COUNT,IMAGE_WARNING,type StagedImage} from '../../shared/image-attachments.ts';
+import {IMAGE_SEND_MAX_BYTES,IMAGE_SEND_MAX_COUNT,IMAGE_WARNING,type ImageAvailability,type StagedImage} from '../../shared/image-attachments.ts';
 import {chatImageAvailability,removeChatImage,stageChatImage} from '../api.ts';
 import {imageAsPng} from './image-source.ts';
 
 export type ImagePreview=StagedImage&{src:string};
+type ImageSupport=ImageAvailability|{available:false;status?:undefined;reason:string};
+export const imageSupportText=(support:ImageSupport)=>support.status?(`${support.status[0].toUpperCase()}${support.status.slice(1)}. ${support.reason}`):support.reason;
 
 export function clipboardImages(data:DataTransfer){
  return Array.from(data.files).filter(file=>file.type.startsWith('image/'));
@@ -21,7 +23,7 @@ function pngData(file:Blob):Promise<string>{
 function discard(id:string){void removeChatImage(id).catch(()=>{});}
 
 export function useChatImages(settings:unknown,showNotice:(text:string)=>void){
- const [support,setSupport]=useState<{available:boolean;reason:string|null}>({available:false,reason:'Checking image delivery…'});
+ const [support,setSupport]=useState<ImageSupport>({available:false,reason:'Checking image delivery…'});
  const [images,setImages]=useState<ImagePreview[]>([]),[loading,setLoading]=useState(false);
  const current=useRef<ImagePreview[]>([]),alive=useRef(true),staging=useRef(false);
  useEffect(()=>{
@@ -43,7 +45,8 @@ export function useChatImages(settings:unknown,showNotice:(text:string)=>void){
  },[]);
  async function add(files:readonly File[]){
   if(!files.length||staging.current)return;
-  if(!support.available){showNotice(support.reason??'Images are unavailable.');return;}
+  if(!support.available){showNotice(imageSupportText(support));return;}
+  if(support.status==='untested model'||support.status==='untested version')showNotice(imageSupportText(support));
   staging.current=true;
   setLoading(true);
   try{

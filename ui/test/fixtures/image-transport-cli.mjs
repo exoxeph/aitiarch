@@ -1,6 +1,22 @@
 // Fake image transport. Never forwards stdin or invokes a provider.
 import {readFileSync,readdirSync,writeFileSync} from 'node:fs';
+import {createInterface} from 'node:readline';
 const [provider,...args]=process.argv.slice(2);
+if(provider==='catalog'){
+ if(args.includes('--version')){console.log('codex-cli 0.170.0');process.exit(0);}
+ if(args[0]!=='app-server')process.exit(91);
+ for await(const line of createInterface({input:process.stdin})){
+  const {id,method}=JSON.parse(line);
+  const respond=result=>console.log(JSON.stringify({id,result}));
+  if(method==='initialize')respond({userAgent:'fake',platformFamily:'windows',platformOs:'windows'});
+  else if(method==='model/list'){
+   const data=Object.entries({vision:['text','image'],'text-only':['text'],unknown:undefined}).map(([model,inputModalities])=>
+    ({id:model,model,displayName:model,hidden:false,isDefault:false,supportedReasoningEfforts:[],inputModalities}));
+   respond({data,nextCursor:null});
+  }else if(method!=='initialized')process.exit(92);
+ }
+ process.exit(0);
+}
 const record=args[0]==='record'?args[1]:null;
 const argv=record?args.slice(2):args;
 if(record&&argv.includes('--version')){

@@ -101,7 +101,7 @@ export const applyNotebookSetup = (sharing:'private'|'shared') =>
 /** What GET /api/chat returns: accepted assistant messages only (questions are not stored), plus where the chat is kept. */
 export interface ChatSnapshot { v: 1; note: string; messages: ChatMessage[]; persistence: { enabled: boolean }; questionPlaceholder: string; usage: ChatUsage | null }
 /** PUT /api/chat/send as a server-sent-event stream. Rejects with ApiError when the server refuses before streaming starts. */
-export const chatImageAvailability=()=>ok<{available:boolean;reason:string|null}>('GET','/api/chat/image-availability');
+export const chatImageAvailability=()=>ok<import('../shared/image-attachments.ts').ImageAvailability>('GET','/api/chat/image-availability');
 export const stageChatImage=(data:string)=>ok<import('../shared/image-attachments.ts').StagedImage>('PUT','/api/chat/image-stage',{data});
 export const removeChatImage=(id:string)=>ok<object>('PUT','/api/chat/image-remove',{id});
 

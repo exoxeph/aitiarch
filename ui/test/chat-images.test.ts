@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {finishReply,type ReplySources} from '../server/chat/reply.ts';
 import {hash} from '../server/chat/context.ts';
-import {ImageConfirmation,ImageInterpretationNotice,clipboardImages} from '../src/chat/ImageAttachments.tsx';
+import {ImageConfirmation,ImageInterpretationNotice,clipboardImages,imageSupportText} from '../src/chat/ImageAttachments.tsx';
 import {inspectImageSource} from '../src/chat/image-source.ts';
 import {ChatRuntime} from '../server/chat/runtime.ts';
 import {ChatStore} from '../server/chat/store.ts';
@@ -24,7 +24,7 @@ import {createCliAdapter} from '../server/providers/tool-less.ts';
 import {normalChatTurn} from '../server/chat/normal-answerer.ts';
 import {CHAT_HARD_RULES} from '../server/chat/request.ts';
 import {DEFAULT_PIPELINE_CONFIG} from '../shared/pipeline-config.ts';
-import {imageDeliveryNotice,runFakeImageTransport} from '../server/providers/image-transport.ts';
+import {imageDeliveryStatus,runFakeImageTransport} from '../server/providers/image-transport.ts';
 import {resolveProjectStorage} from '../server/project-storage.ts';
 import {ImageStore} from '../server/image-store.ts';
 import {NoteWatcher} from '../server/watch.ts';
@@ -34,6 +34,7 @@ import {descriptorFromAdapter,ProviderRegistry} from '../server/providers/regist
 import {saveMachineSetup} from '../server/setup-store.ts';
 import {SessionIndex} from '../server/harness/session-index.ts';
 import {LedgerStore} from '../server/ledger-store.ts';
+import {readCatalog} from '../server/providers/model-catalog.ts';
 import type {TurnAdapter} from '../server/providers/turn.ts';
 
 const source={note:'The attached file has no matching quote in this note.',selection:'',decisions:[],diagrams:['D1']};
@@ -133,7 +134,7 @@ it.each(['claude','codex'] as const)('delivers a confirmed manifest through the 
  const cli={command:process.execPath,prefixArgs:[fixture,provider,'record',record],selection};
  const read=async()=>JSON.parse(await readFile(record,'utf8'));
  const reviewedPrompt=prepareRequest(request,review).instruction;
- expect(reviewedPrompt).toContain(review.images[0].sha256);
+ expect(reviewedPrompt).toContain('<claims>'+JSON.stringify(review.images.map(({id,sha256})=>({kind:'image',id,sha256,sendId:review.sendId,provider:review.provider,model:review.model})))+'</claims>');
  expect(reviewedPrompt.endsWith(CHAT_HARD_RULES)).toBe(true);
  const version=provider==='claude'?'2.1.205':'0.167.0',images={approved,storage,version};
  if(provider==='claude'){
@@ -190,12 +191,38 @@ it('does not enable the image transport for an unverified executable',async()=>{
  await expect(runImageFixture('codex','executable')).rejects.toThrow(/not been verified/);
 });
 
-it('enables only the live-verified CLI and model and explains the Claude probe failure',()=>{
- expect(imageDeliveryNotice('codex','0.170.0','gpt-6.2-sol')).toBeNull();
- expect(imageDeliveryNotice('codex','0.170.0',null)).toBe('image delivery not verified yet');
- expect(imageDeliveryNotice('codex','0.171.0','gpt-6.2-sol')).toBe('image delivery not verified yet');
- expect(imageDeliveryNotice('codex','0.170.0','different-model')).toBe('image delivery not verified yet');
- expect(imageDeliveryNotice('claude','2.1.205','claude-opus-4-8[1m]')).toMatch(/claims check/);
+it('gates image delivery by the probed versions and the Codex catalog modality',()=>{
+ expect(imageDeliveryStatus('codex','0.170.0','gpt-6.2-sol')).toMatchObject({available:true,status:'verified'});
+ expect(imageDeliveryStatus('codex','0.171.0','gpt-6.2-sol')).toMatchObject({available:true,status:'untested version'});
+ expect(imageDeliveryStatus('codex','0.171.0','another-model',true)).toMatchObject({available:true,status:'untested model'});
+ expect(imageDeliveryStatus('codex','0.169.0','another-model',true)).toMatchObject({available:false,reason:expect.stringContaining('0.170.0')});
+ expect(imageDeliveryStatus('codex','bad','another-model',true).available).toBe(false);
+ expect(imageDeliveryStatus('codex','0.170.0','another-model')).toMatchObject({available:false,reason:'image delivery not verified for this model'});
+ expect(imageDeliveryStatus('codex','0.171.0','gpt-6.2-sol',false)).toMatchObject({available:false,status:'unsupported'});
+ expect(imageDeliveryStatus('claude','2.1.205','claude-opus-4-8[1m]')).toMatchObject({available:true,status:'verified'});
+ expect(imageDeliveryStatus('claude','2.1.205','other')).toMatchObject({available:false,status:'not verified yet'});
+ expect(imageDeliveryStatus('kiro','3.3.0','other')).toMatchObject({available:false,status:'unsupported'});
+});
+
+it('reads Codex inputModalities and captures the selected model capability for chat',async()=>{
+ const catalog=await readCatalog({id:'codex',path:process.execPath,version:'0.170.0',isolation:'metadata-compatible'},{prefixArgs:[fixture,'catalog']});
+ expect(catalog.source).toBe('cli');
+ expect(catalog.models.map(({id,imageInput})=>[id,imageInput])).toEqual([['vision',true],['text-only',false],['unknown',undefined]]);
+ expect(catalog.models[2]).not.toHaveProperty('imageInput');
+ const config=await mkdtemp(path.join(process.env.AITIARCH_CONFIG_DIR!,'modality-')),setup=defaultMachineSetup();
+ setup.providers.codex.enabled=true;
+ setup.providers.codex.model='vision';
+ setup.roles['normal-chat']='codex';
+ await saveMachineSetup(config,setup);
+ const adapter:TurnAdapter={id:'codex',label:'Codex',safetyLabel:'contained',async *startTurn(){throw Error('No inference expected.');}};
+ const registry=new ProviderRegistry([descriptorFromAdapter(adapter,{detect:async()=>({available:true,reason:null,version:'0.170.0'})})]);
+ const snapshot=await registry.snapshot(config,undefined,()=>catalog);
+ expect(snapshot.codexChatImageInput).toBe(true);
+ const status=imageDeliveryStatus('codex',snapshot.providerVersions?.codex,'vision',snapshot.codexChatImageInput);
+ expect(imageSupportText(status)).toMatch(/^Untested model\. The Codex catalog declares image input\./);
+ expect(imageSupportText(imageDeliveryStatus('kiro','3.3.0',null))).toMatch(/^Unsupported\. Kiro/);
+ expect(imageSupportText(imageDeliveryStatus('claude','2.1.205','claude-opus-4-8[1m]'))).toMatch(/^Verified\. Claude/);
+ expect(imageSupportText(imageDeliveryStatus('claude','2.1.205','other'))).toMatch(/^Not verified yet\. Claude/);
 });
 
 it('checks JPEG dimensions and refuses animated WebP, GIF, SVG and oversized source images before decoding',()=>{
@@ -357,7 +384,7 @@ it('rejects and never stores a fake provider reply that invents image consent',a
   async invoke(request){return {id:request.id,provider:'claude',model:null,answer:answer([reference]),rawReply:true,claims:[],usage:null};},
  },[]);
  try{
-  expect(await runtime.imageAvailability()).toEqual({available:false,reason:'image delivery not verified yet'});
+  expect(await runtime.imageAvailability()).toEqual({available:false,status:'not verified yet',reason:'image delivery not verified yet'});
   const review=await runtime.review({id:'request-1',path:note,question:'Summarize this.',context:[]});
   await expect(runtime.review({id:'request-image',path:note,question:'Summarize this.',context:[],imageIds:[id]})).rejects.toMatchObject({code:'disabled'});
   await expect(runtime.send({reviewId:review.reviewId,confirmed:true,confirmImages:true,imageIds:[id]},()=>{})).rejects.toMatchObject({code:'review_required'});

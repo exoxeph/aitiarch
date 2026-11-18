@@ -2,7 +2,8 @@ import {createHash} from 'node:crypto';
 import {mkdtemp,realpath} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {IMAGE_MAX_BYTES,IMAGE_SEND_MAX_BYTES,IMAGE_SEND_MAX_COUNT} from '../../shared/image-attachments.ts';
+import {IMAGE_MAX_BYTES,IMAGE_SEND_MAX_BYTES,IMAGE_SEND_MAX_COUNT,type ImageAvailability} from '../../shared/image-attachments.ts';
+import {compareVersions,versionParts} from './cli-compatibility.ts';
 import type {ModelEffort} from '../../shared/setup.ts';
 import type {confirmImageManifest} from '../chat/image-review.ts';
 import {killTree,spawnImageFixture} from './launcher.ts';
@@ -16,12 +17,25 @@ type FixtureInput={
 };
 export type ImageDeliveryInput={approved:FixtureInput['approved'];storage:FixtureInput['storage'];version:string};
 
-// Record only exact provider/version/model tuples demonstrated with the isolated live launcher.
-export function imageDeliveryNotice(provider:FixtureInput['provider'],version:string|undefined,model:string|null){
- if(provider==='codex'&&version==='0.170.0'&&model==='gpt-6.2-sol')return null;
- if(provider==='claude'&&version==='2.1.205'&&model==='claude-opus-4-8[1m]')
-  return 'image delivery not verified yet: Claude’s probe reply did not pass the image claims check.';
- return 'image delivery not verified yet';
+const CODEX_IMAGE_BASELINE='0.170.0',CODEX_PROBED_MODEL='gpt-6.2-sol';
+export function imageDeliveryStatus(provider:FixtureInput['provider']|'kiro',version:string|undefined,model:string|null,imageInput?:boolean):ImageAvailability{
+ if(provider==='kiro')return {available:false,status:'unsupported',reason:'Kiro does not have a verified isolated image transport.'};
+ if(provider==='claude'){
+  if(version==='2.1.205'&&model==='claude-opus-4-8[1m]')
+   return {available:true,status:'verified',reason:'Claude delivered the image and passed the claims check.'};
+  return {available:false,status:'not verified yet',reason:'Claude image delivery was verified only for CLI 2.1.205 with claude-opus-4-8[1m].'};
+ }
+ if(!version||!versionParts(version)||compareVersions(version,CODEX_IMAGE_BASELINE)<0)
+  return {available:false,status:'not verified yet',reason:`Codex image delivery requires CLI ${CODEX_IMAGE_BASELINE} or newer.`};
+ if(!model)return {available:false,status:'not verified yet',reason:'Choose a specific Codex model to attach images.'};
+ if(imageInput===false)return {available:false,status:'unsupported',reason:'The Codex catalog says this model does not accept image input.'};
+ if(model!==CODEX_PROBED_MODEL){
+  if(imageInput!==true)return {available:false,status:'not verified yet',reason:'image delivery not verified for this model'};
+  return {available:true,status:'untested model',reason:'The Codex catalog declares image input. This model has not been probed with Aitiarch.'};
+ }
+ if(version!==CODEX_IMAGE_BASELINE)
+  return {available:true,status:'untested version',reason:`Codex image delivery was tested with CLI ${CODEX_IMAGE_BASELINE}. This CLI reports ${version}.`};
+ return {available:true,status:'verified',reason:'Codex delivered the image and passed the claims check.'};
 }
 
 export function reviewedImageBuffers(provider:FixtureInput['provider'],model:string|null|undefined,approved:FixtureInput['approved']){

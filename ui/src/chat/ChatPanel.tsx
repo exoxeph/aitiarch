@@ -12,7 +12,7 @@ import {investigateLine} from './investigate-usage.ts';
 import {whyRule,whyText} from '../../shared/chat-why.ts';
 import {nodeById} from '../../shared/pipeline-nodes.ts';
 import {CHAT_MESSAGES,type BudgetDetail,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatReview,type ChatUsage} from '../../shared/chat.ts';
-import {clipboardImages,ImageConfirmation,ImageInterpretationNotice,ImageThumbnails,useChatImages,type ImagePreview} from './ImageAttachments.tsx';
+import {clipboardImages,ImageConfirmation,ImageInterpretationNotice,ImageThumbnails,imageSupportText,useChatImages,type ImagePreview} from './ImageAttachments.tsx';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
 import {SessionPicker} from './SessionPicker.tsx';
 import {sessionChoices,type PickedSession} from './session-picker-model.ts';
@@ -563,10 +563,10 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
       <input ref={imageInput} type="file" hidden accept="image/png,image/jpeg,image/webp" multiple onChange={e=>{
        const files=Array.from(e.target.files??[]);e.target.value='';if(!composing)void imageDraft.add(files);
       }}/>
-      <button type="button" className="chat-ctl" aria-label="Attach images" title={imageDraft.support.reason??'Attach images'}
+      <button type="button" className="chat-ctl" aria-label="Attach images" title={imageSupportText(imageDraft.support)}
        aria-disabled={composing||imageDraft.loading||!imageDraft.support.available} onClick={()=>{
         if(composing||imageDraft.loading)return;
-        if(!imageDraft.support.available){setNotice(imageDraft.support.reason??'Images are unavailable.');return;}
+        if(!imageDraft.support.available){setNotice(imageSupportText(imageDraft.support));return;}
         imageInput.current?.click();
        }}>Image</button>
      </>}

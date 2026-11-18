@@ -15,7 +15,7 @@ const fallback=(message=notice):ModelCatalog=>({source:'fallback',models:[],chec
 const object=(v:unknown):v is Record<string,unknown>=>v!==null&&typeof v==='object'&&!Array.isArray(v);
 const safeName=(v:unknown):v is string=>typeof v==='string'&&v.trim().length>0&&v.length<=160&&!/[\x00-\x1f\x7f]/.test(v);
 const modelsValid=(rows:unknown):rows is CatalogModel[]=>Array.isArray(rows)&&rows.length>0&&rows.length<=MAX_MODELS&&
- rows.every(row=>object(row)&&Object.keys(row).length===4&&validCatalogModelId(row.id)&&safeName(row.name)&&typeof row.default==='boolean'&&
+ rows.every(row=>object(row)&&Object.keys(row).length===(typeof row.imageInput==='boolean'?5:4)&&validCatalogModelId(row.id)&&safeName(row.name)&&typeof row.default==='boolean'&&
   Array.isArray(row.efforts)&&row.efforts.length<=20&&row.efforts.every(validEffortId)&&new Set(row.efforts).size===row.efforts.length)&&
  new Set(rows.map(row=>row.id)).size===rows.length&&rows.filter(row=>row.default).length<=1;
 function codexModel(row:unknown):CatalogModel {
@@ -25,7 +25,9 @@ function codexModel(row:unknown):CatalogModel {
   if(!object(option)||!validEffortId(option.reasoningEffort)||typeof option.description!=='string')throw Error('shape');
   return option.reasoningEffort;
  });
- return {id:row.model,name:row.displayName,default:row.isDefault,efforts};
+ const modalities=row.inputModalities;
+ const imageInput=Array.isArray(modalities)&&modalities.every(safeName)?modalities.includes('image'):undefined;
+ return {id:row.model,name:row.displayName,default:row.isDefault,efforts,...(imageInput===undefined?{}:{imageInput})};
 }
 function claudeModels(rows:unknown):CatalogModel[] {
  if(!Array.isArray(rows)||rows.length>MAX_MODELS)throw Error('shape');

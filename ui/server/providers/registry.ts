@@ -44,6 +44,7 @@ export interface RequestSettingsSnapshot {
  readonly investigateModelNotice?:string;
  readonly settings:MachineSetup;
  readonly providerVersions?:Readonly<Partial<Record<SetupProvider,string>>>;
+ readonly codexChatImageInput?:boolean;
  resolveRole(role:SetupRole):RoleResolution;
  resolveParticipant(id:SetupProvider):RoleResolution;
  council():{available:boolean;providers:readonly ProviderDescriptor[];reason:string|null};
@@ -161,7 +162,10 @@ export class ProviderRegistry {
   };
   const providerKey=(settings:MachineSetup,id:SetupProvider)=>versionKey(createHash('sha256').update(JSON.stringify(
    settings.councilParticipants===undefined?settings.providers[id]:{provider:settings.providers[id],participants:settings.councilParticipants})).digest('hex'),id);
-  return Object.freeze({settings:frozen,providerVersions,skillModelNotice,investigateModelNotice,resolveRole:resolve,resolveParticipant:(id:SetupProvider)=>frozen.councilParticipants&&!frozen.councilParticipants.includes(id)
+  const codexCatalog=frozen.roles['normal-chat']==='codex'?catalogFor?.('codex'):undefined;
+  const codexChatImageInput=codexCatalog?.source==='cli'?
+   codexCatalog.models.find(entry=>entry.id===modelSelection(frozen,'normal-chat','codex').model)?.imageInput:undefined;
+  return Object.freeze({settings:frozen,providerVersions,codexChatImageInput,skillModelNotice,investigateModelNotice,resolveRole:resolve,resolveParticipant:(id:SetupProvider)=>frozen.councilParticipants&&!frozen.councilParticipants.includes(id)
    ? unavailable('council',id,'role-unavailable','This provider is not selected in AI settings → Setup → Council participants.')
    : resolve('council',{...frozen,roles:{...frozen.roles,council:id}}),council,
    contextKey:(role:SetupRole)=>contextKey(frozen,role,investigateRequestedKey,fault),

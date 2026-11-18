@@ -39,7 +39,8 @@ import {finishReply,InvalidImageReference} from './reply.ts';
 import type {ConfirmedImageSend} from '../../shared/image-attachments.ts';
 import {confirmImageManifest,reviewImageManifest,type ChatImageDelivery} from './image-review.ts';
 import type {ImageStore} from '../image-store.ts';
-import {imageDeliveryNotice,type ImageDeliveryInput} from '../providers/image-transport.ts';
+import {imageDeliveryStatus,type ImageDeliveryInput} from '../providers/image-transport.ts';
+import type {ImageAvailability} from '../../shared/image-attachments.ts';
 import {checkContract} from '../../shared/persona-contract.ts';
 import type {PersonaMode} from '../../shared/persona.ts';
 export class ChatError extends Error {code:ChatErrorCode;/** For budget_reached: the numbers the gate used. */budget?:BudgetDetail;/** Which rule said no, for the page's Why? line. Reporting only. */why?:ChatWhy;constructor(code:ChatErrorCode,budget?:BudgetDetail,why?:ChatWhy){super(code);this.code=code;if(budget)this.budget=budget;if(why)this.why=why;}}
@@ -87,18 +88,19 @@ export class ChatRuntime {
  constructor(store:Store,ink:InkStore,chats:ChatStore,provider?:Provider,sessions?:ContextModule[],extras?:ExtrasFor,harness?:ChatHarness,images?:DiagramImageStore,normal?:NormalChat,
   imageInput?:{store:ImageStore;delivery?:ChatImageDelivery}){this.imageInput=imageInput;this.normal=normal;this.images=images;this.harness=harness;this.extras=extras;this.store=store;this.ink=ink;this.chats=chats;this.provider=provider;this.ledger=new LedgerStore(store.rootReal);this.sessions=sessions??sessionModules({project:path.dirname(store.rootReal)});}
  private imageUnavailable(detail:string){return new ChatError('disabled',undefined,{ruleId:'image_input_unavailable',nodeId:'provider_contracts',detail});}
- private imageEligibility(provider:NormalAnswerer,model:string|null,version?:string){
-  if(provider==='kiro')return 'Kiro does not have a verified isolated image transport.';
-  if(!this.imageInput)return 'image delivery not verified yet';
-  if(this.imageInput.delivery)return model&&this.imageInput.delivery.supports(provider,model)?null:'image delivery not verified yet';
-  return imageDeliveryNotice(provider,version,model);
+ private imageEligibility(provider:NormalAnswerer,model:string|null,snapshot?:RequestSettingsSnapshot):ImageAvailability{
+  if(provider==='kiro')return imageDeliveryStatus(provider,undefined,model);
+  if(!this.imageInput||this.imageInput.delivery){
+   if(model&&this.imageInput?.delivery?.supports(provider,model))return {available:true,status:'synthetic',reason:'Synthetic image delivery.'};
+   return {available:false,status:'not verified yet',reason:'image delivery not verified yet'};
+  }
+  return imageDeliveryStatus(provider,snapshot?.providerVersions?.[provider],model,snapshot?.codexChatImageInput);
  }
- async imageAvailability(){
+ async imageAvailability():Promise<ImageAvailability>{
   const snapshot=await this.normal?.selection(),selected=snapshot?.resolveRole('normal-chat');
-  if(selected&&'available' in selected)return {available:false,reason:selected.reason};
+  if(selected&&'available' in selected)return {available:false,status:'unsupported',reason:selected.reason};
   const id=selected?.id??activePipelineConfig().normalAnswerer;
-  const reason=this.imageEligibility(id,selected?.selection?.model??null,snapshot?.providerVersions?.[id]);
-  return {available:reason===null,reason};
+  return this.imageEligibility(id,selected?.selection?.model??null,snapshot);
  }
  memoryMessages(note:string){return structuredClone(this.ephemeral.get(note)??[]);}
  /** The counters of one chat: a note's one-off chat (keyed by the note) or a named conversation (keyed by its id), which owns its budget, hourly cap and calls whichever note is open.
@@ -137,8 +139,8 @@ export class ChatRuntime {
   const reviewId=randomUUID();
   let imageReview:ChatReview['images'];
   if(withImages){
-   const model=selected?.selection?.model??null,reason=this.imageEligibility(answerer,model,routing?.providerVersions?.[answerer]);
-   if(reason||answerer==='kiro')throw this.imageUnavailable(reason??'This provider cannot accept images.');
+   const model=selected?.selection?.model??null,support=this.imageEligibility(answerer,model,routing);
+   if(!support.available||answerer==='kiro')throw this.imageUnavailable(support.reason);
    try{imageReview=await reviewImageManifest(this.imageInput!.store,input.imageIds!,{sendId:reviewId,provider:answerer,model});}
    catch{throw new ChatError('review_required',undefined,{ruleId:'image_review_required',nodeId:'permission_gate',detail:'A staged image could not be read. Attach it again before reviewing.'});}
   }
@@ -287,8 +289,8 @@ export class ChatRuntime {
   let imageInput:ImageDeliveryInput|undefined;
   if(review.images){
    const version=current?.providerVersions?.[answerer];
-   const model=selected?.selection?.model??null,reason=this.imageEligibility(answerer,model,version);
-   if(reason||answerer==='kiro')throw this.imageUnavailable(reason??'This provider cannot accept images.');
+   const model=selected?.selection?.model??null,support=this.imageEligibility(answerer,model,current);
+   if(!support.available||answerer==='kiro')throw this.imageUnavailable(support.reason);
    try{approvedImages=await confirmImageManifest(this.imageInput!.store,review.images,{sendId:review.reviewId,provider:answerer,model},{confirmImages:input.confirmImages,imageIds:input.imageIds??[]});}
    catch{throw new ChatError('review_required',undefined,{ruleId:'image_review_required',nodeId:'permission_gate',detail:'Confirm the current images, or attach and review them again if they changed.'});}
    if(!this.imageInput!.delivery){
@@ -331,7 +333,7 @@ export class ChatRuntime {
     const tokens=nativeResult.usage.filter(u=>u.unit==='tokens');
     if(tokens.length){s.usage.spent+=tokens.reduce((n,u)=>n+u.amount,0);charged=true;} // Actual total tokens, without inventing an input/output split.
     if(controller.signal.aborted)throw new ChatError('cancelled');
-    if(nativeResult.status!=='ok')throw new ChatError(nativeResult.status==='unavailable'?'disabled':'provider_failed',undefined,{ruleId:nativeResult.status==='unavailable'?'provider-unavailable':nativeResult.status==='refused'?'provider-refused':nativeResult.status==='timeout'?'provider-timeout':'provider-error',nodeId:'provider_contracts',detail:`${answerer}: ${safeName(nativeResult.code)}`});
+    if(nativeResult.status!=='ok')throw new ChatError(nativeResult.status==='unavailable'?'disabled':'provider_failed',undefined,{ruleId:nativeResult.status==='unavailable'?'provider-unavailable':nativeResult.status==='refused'?'provider-refused':nativeResult.status==='timeout'?'provider-timeout':'provider-error',nodeId:'provider_contracts',detail:imageInput?'Codex could not complete the image send.':`${answerer}: ${safeName(nativeResult.code)}`});
    }
    const fixtureDelivery=this.imageInput?.delivery;
    const reply:ProductResult=approvedImages&&fixtureDelivery?await fixtureDelivery.send({request,selection:review.modelSettings!,approved:approvedImages},controller.signal):

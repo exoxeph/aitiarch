@@ -23,3 +23,9 @@ export interface ConfirmedImageSend {
 export interface ReviewedImageManifest extends ConfirmedImageSend {
  images:readonly (StagedImage&{sha256:string})[];
 }
+
+export interface ImageAvailability {
+ available:boolean;
+ status:'verified'|'untested model'|'untested version'|'not verified yet'|'unsupported'|'synthetic';
+ reason:string;
+}
