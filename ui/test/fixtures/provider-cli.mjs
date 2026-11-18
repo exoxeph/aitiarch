@@ -101,7 +101,7 @@ if (scenario.startsWith('verified-')) {
     'verified-chat-contract-grill-two':'Who agreed to the budget figure? And who pays for the venue?\n<claims>{"none":"question_back"}</claims>',
     'verified-chat-contract-plan-ok':'Option A keeps the library and the small budget. Option B moves outdoors and costs more.\n\nWhich of these fits what you want?\n<claims>{"none":"opinion"}</claims>',
     'verified-chat-contract-plan-none':'Option A keeps the library and the small budget. Option B moves outdoors and costs more. Go with option A.\n<claims>{"none":"opinion"}</claims>',
-    'verified-chat-contract-explain-long':'Yes. '+'alpha beta gamma delta '.repeat(70)+'\n<claims>{"none":"opinion"}</claims>',
+    'verified-chat-contract-explain-long':'Yes. '+'alpha beta gamma delta '.repeat(301)+'\n<claims>{"none":"opinion"}</claims>',
     // A claims block with claims whose source ids are not valid (a word, an unknown letter, a number, none), next to one good claim.
     'verified-chat-claims-badsource':'Several points.\n<claims>[{"source":"N1","quote":"The venue is the library"},{"source":"banana","quote":"The budget is 40 dollars"},{"source":"Z9","quote":"Volunteers bring their own food"},{"source":7,"quote":"the event starts at noon"},{"quote":"the second Saturday of June"}]</claims>',
     // A prose reply with a key in it, streamed in small pieces (synthetic key shape).

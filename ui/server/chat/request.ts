@@ -1,6 +1,7 @@
 // The chat's prompt, built in one place. Order: what the data is (invariants), then the chosen mode, which IS the answer style (there is no
 // default style above it to outvote it), then any skills, then the output format, and last the rules that always win.
-import {DEFAULT_PIPELINE_CONFIG,activePipelineConfig,withActivePrompt,type PipelineConfig} from '../../shared/pipeline-config.ts';
+import {DEFAULT_PIPELINE_CONFIG,activePipelineConfig,type PipelineConfig} from '../../shared/pipeline-config.ts';
+import {NOTESPACE_GUIDE,replyProfileInstruction} from '../../shared/notespace-guide.ts';
 import type {PersonaMode} from '../../shared/persona.ts';
 import {SKILL_HEADING,type SkillBlock} from '../../shared/instruction.ts';
 
@@ -110,23 +111,35 @@ export function editorManifest(m:ManifestParts):string{
 }
 /** The message a session turn sends on stdin: the manifest line, a blank line, then the question. */
 export const turnMessage=(manifest:string,question:string)=>`${manifest}\n\n${question}`;
+
+export function chatLengthInstruction(mode:PersonaMode|undefined,config:PipelineConfig){
+ const length=config.prompts.chatLength;
+ if(mode==='grill'||mode==='plan')return length;
+ const profile=replyProfileInstruction(mode==='explain'?'explain':'rich');
+ return length===DEFAULT_PIPELINE_CONFIG.prompts.chatLength?profile:`${profile}\n${length}`;
+}
+
+const withLength=(base:string,mode:PersonaMode|undefined,config:PipelineConfig)=>
+ base.replace(DEFAULT_PIPELINE_CONFIG.prompts.chatLength,()=>chatLengthInstruction(mode,config));
 /** `instruction` is what the review shows and the echo guard compares with (no source text, so quoting a note is never an echo);
  *  `addendum` is what the CLI gets: the instruction with the sources before the rules. */
-export function chatSessionInstruction(request:{persona?:PersonaMode;skills?:SkillBlock},sources:readonly {id:string;label:string;text:string}[],options:{diagrams?:boolean;canOpen?:boolean}={},config:PipelineConfig=activePipelineConfig()):{instruction:string;addendum:string}{
+export function chatSessionInstruction(request:{persona?:PersonaMode;skills?:SkillBlock},sources:readonly {id:string;label:string;text:string}[],options:{diagrams?:boolean;canOpen?:boolean;inlineMessage?:string}={},config:PipelineConfig=activePipelineConfig()):{instruction:string;addendum:string}{
  // `diagrams`: the note shows diagrams (the rules about them are given). `canOpen`: at least one picture was copied for this turn, so the CLI has the Read tool and the rules say so.
- const head=[options.canOpen?SESSION_INVARIANTS_DIAGRAMS:SESSION_INVARIANTS];
+ const head=[withLength(options.canOpen?SESSION_INVARIANTS_DIAGRAMS:SESSION_INVARIANTS,request.persona,config)];
  if(options.diagrams)head.push(options.canOpen?DIAGRAM_RULES:DIAGRAM_RULES_UNAVAILABLE);
  if(request.persona)head.push(chatMode(request.persona,config));
  if(request.skills?.text)head.push(`${SKILL_INTRO}\n\n${request.skills.text}`);
  head.push(CHAT_FORMAT);
  const rules=options.canOpen?CHAT_HARD_RULES_DIAGRAMS:CHAT_HARD_RULES;
- const live=(s:string)=>withActivePrompt(s,c=>c.prompts.chatLength,config);return {instruction:live([...head,rules].join('\n\n')),addendum:live([...head,sourcesBlock(sources),rules].join('\n\n'))};
+ const data=[sourcesBlock(sources)];
+ if(options.inlineMessage)data.push(options.inlineMessage);
+ return {instruction:[...head,NOTESPACE_GUIDE,rules].join('\n\n'),addendum:[...head,...data,NOTESPACE_GUIDE,rules].join('\n\n')};
 }
 
 export function chatInstruction(request:{persona?:PersonaMode;skills?:SkillBlock},config:PipelineConfig=activePipelineConfig()):string{
- const parts=[CHAT_INVARIANTS];
+ const parts=[withLength(CHAT_INVARIANTS,request.persona,config)];
  if(request.persona)parts.push(chatMode(request.persona,config));
  if(request.skills?.text)parts.push(`${SKILL_INTRO}\n\n${request.skills.text}`);
- parts.push(CHAT_FORMAT,CHAT_HARD_RULES);
- return withActivePrompt(parts.join('\n\n'),c=>c.prompts.chatLength,config);
+ parts.push(CHAT_FORMAT,NOTESPACE_GUIDE,CHAT_HARD_RULES);
+ return parts.join('\n\n');
 }

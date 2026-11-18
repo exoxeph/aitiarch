@@ -1,4 +1,6 @@
 // Data only. No loader, persistence, UI, provider switching or safety overrides.
+import {EXPLAIN_PROSE_WORDS} from './notespace-guide.ts';
+
 export type PipelineProvider='claude'|'codex'|'kiro'|'chatgpt-plan';
 export type NormalAnswerer='claude'|'codex'|'kiro';
 export type PipelineSafetyLabel='fenced'|'contained'|'host-gated';
@@ -51,7 +53,7 @@ export const DEFAULT_PIPELINE_CONFIG=freeze({
    grill:{label:'Grill me',oneLine:'Asks one hard question at a time until the idea holds up.',instruction:'Do not summarize the note, list options, or answer the question for the user. Reply with exactly one probing question, aimed at the weakest assumption you can see, in one or two sentences, and nothing else. Ask one question at a time, then stop and wait for the reply. Do not answer your own question. Keep going until the idea holds up, then say so in a sentence. Keep to the length limit already set.'},
    explain:{label:'Explain',oneLine:'Answers first, then only what helps.',instruction:'Give the answer first, in the opening sentence. Then add only what helps: the key reasoning, one caveat, or the next step. Do not restate the question or summarize the note back. Keep to the length limit already set.'},
   },
-  grillMaxWords:60,grillMaxSentences:2,answerWordCap:120,explainMaxWords:240,
+  grillMaxWords:60,grillMaxSentences:2,answerWordCap:120,explainMaxWords:EXPLAIN_PROSE_WORDS,
  },
 } satisfies PipelineConfig);
 
@@ -77,7 +79,7 @@ const ranges:Record<string,readonly [number,number]>={
  'council.caps.claude.amount':[0.01,5],'council.caps.codex.amount':[1,100000],'council.caps.kiro.amount':[0.001,2],
  'council.caps.claude.deadlineMs':[100,180000],'council.caps.codex.deadlineMs':[100,180000],'council.caps.kiro.deadlineMs':[100,180000],'council.outputBytes':[1,262144],
  'transport.cliTimeoutMs':[1,180000],'transport.sessionTimeoutMs':[1,180000],'transport.planTimeoutMs':[1,180000],'transport.planHttpTimeoutMs':[1,30000],'transport.planHourlyCap':[1,100],
- 'prompts.grillMaxWords':[1,120],'prompts.grillMaxSentences':[1,10],'prompts.answerWordCap':[1,240],'prompts.explainMaxWords':[1,480],
+ 'prompts.grillMaxWords':[1,120],'prompts.grillMaxSentences':[1,10],'prompts.answerWordCap':[1,240],'prompts.explainMaxWords':[1,EXPLAIN_PROSE_WORDS],
 };
 const fractional=new Set(['estimates.cacheReadWeight','estimates.bytesPerToken','investigate.budgetUsd','conversation.budgetUsd','diagram.turnCapUsd','council.caps.claude.amount','council.caps.kiro.amount']);
 export function validPipelineConfig(value:unknown):value is PipelineConfig{

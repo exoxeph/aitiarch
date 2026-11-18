@@ -60,9 +60,9 @@ describe('Plan with me',()=>{
 });
 
 describe('Explain',()=>{
- it('longer than twice the length limit: flagged and kept in full',async()=>{
+ it('over the prose guidance: flagged and kept in full',async()=>{
   const t=await boot('verified-chat-contract-explain-long','explain'),m=await t.send();
-  expect(m.contract).toEqual({mode:'explain',met:false,issues:['too_long']});expect(m.body.split(/\s+/).length).toBeGreaterThan(240);
+  expect(m.contract).toEqual({mode:'explain',met:false,issues:['too_long']});expect(m.body.split(/\s+/).length).toBeGreaterThan(1200);
  },20000);
 });
 

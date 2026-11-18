@@ -39,7 +39,7 @@ export class ThreadRuntime {
   return [{id:i.id,body:i.body,generation:i.generation},...(i.thread?.followups??[])].filter(r=>r.generation?.status==='complete').map(r=>({id:r.id,user:this.questions.get(r.id)??'Earlier question unavailable after reload.',assistant:r.body}));
  }
  private async request(input:PreviewInput,i:InkItem,note:string,codex:boolean){
-  return this.withExtras({id:input.replyId,action:'ask',question:input.purpose==='summary'?'Provide a closing summary of the selected note. Never write or suggest a takeaway, why or failed-reason.':input.question,selection:i.anchor.quote,note,decisions:[],turns:codex?this.history(i):[]});
+  return this.withExtras({id:input.replyId,action:'ask',surface:'thread-reply',question:input.purpose==='summary'?'Provide a closing summary of the selected note. Never write or suggest a takeaway, why or failed-reason.':input.question,selection:i.anchor.quote,note,decisions:[],turns:codex?this.history(i):[]});
  }
  private async continuity(path:string,id:string,provider:'claude'|'codex'|'chatgpt-plan'){
   const notice=await this.threads.providerNotice(path,id,provider);

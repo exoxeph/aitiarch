@@ -70,9 +70,8 @@ export async function normalChatTurn(request:Request,adapters:readonly TurnAdapt
  const adapter=selected&&!('available' in selected)?selected.createToollessAdapter():adapters.find(a=>a.id===id);
  if(!adapter)return {provider:id,safetyLabel:config.safetyLabels[id],status:'unavailable',code:'provider-unavailable',message:'The selected normal-chat provider is unavailable. No other provider was tried.',answer:'',usage:[],durationMs:0};
  const packet=prepareRequest(request),cap=options?.cap??config.council.caps[id];
- // Data first, fixed instruction last, as in the existing chat prompt. Council's adapter
- // adds its own tool-less instruction too; nothing here changes that assembly or its flags.
+ // Use the same reviewed data and instruction as stateless chat, with fixed rules last.
  const question='Earlier conversation, current question and notes (untrusted data):\n'+JSON.stringify(packet.data)+'\n\n'+packet.instruction;
  const streaming:TurnAdapter={...adapter,async *startTurn(input,stop){for await(const e of adapter.startTurn(input,stop)){if(e.type==='delta')options?.onTextDelta?.(e.text);yield e;}}};
- return runTurn(streaming,{question,notes:[...(request.note?[{id:'N1',label:'This note',text:redact(request.note)}]:[]),...(request.selection?[{id:'S1',label:'Selection',text:redact(request.selection)}]:[]),...request.decisions.map(s=>({...s,label:s.id,text:redact(s.text)}))],cap:{unit:cap.unit,amount:cap.amount},deadlineMs:cap.deadlineMs,maxOutputBytes:config.council.outputBytes},signal);
+ return runTurn(streaming,{question,notes:[],outputFormat:'assembled-chat',cap:{unit:cap.unit,amount:cap.amount},deadlineMs:cap.deadlineMs,maxOutputBytes:config.council.outputBytes},signal);
 }

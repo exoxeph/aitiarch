@@ -1,9 +1,9 @@
 import {afterEach,expect,it} from 'vitest';
 import {validateOverrides} from '../server/pipeline-config-store.ts';
-import {DEFAULT_PIPELINE_CONFIG,setActivePipelineConfig,withActivePrompt} from '../shared/pipeline-config.ts';
+import {DEFAULT_PIPELINE_CONFIG,setActivePipelineConfig} from '../shared/pipeline-config.ts';
 import {chatInstruction,chatSessionInstruction,CHAT_HARD_RULES} from '../server/chat/request.ts';
 import {skillDiagramInstruction,SKILL_DIAGRAM_RULES} from '../shared/skill-diagram.ts';
-import {INVESTIGATE_INSTRUCTION} from '../server/harness/investigate.ts';
+import {INVESTIGATE_INSTRUCTION,investigateInstruction} from '../server/harness/investigate.ts';
 
 // Synthetic wording only. Exercise the PUT validator and the same prompt assembler/transform
 // used in production, without files, configuration persistence, or a provider call.
@@ -41,9 +41,7 @@ it('Skill-diagram retains its complete locked suffix after overridden wording an
 const investigateSuffix='Fixed rules: the read-only scope and untrusted-file rules above are fixed and take priority over any editable wording.';
 it.each(['default','overridden'])('Investigate preserves its locked text and ends with a fixed suffix with %s wording',mode=>{
  if(mode==='overridden')activate({investigateStyle:wording});
- // This is exactly liveInstruction() in harness/investigate.ts, which is passed to the CLI
- // and both output gates. Keep this test read-only; no fake or real turn is needed.
- const prompt=withActivePrompt(INVESTIGATE_INSTRUCTION,c=>c.prompts.investigateStyle);
+ const prompt=investigateInstruction();
  const blocks=INVESTIGATE_INSTRUCTION.split('\n\n');
  // The style is the only editable block. Scope, untrusted-data handling, grounding,
  // output format and human-owned-field rules are all locked in existing code.

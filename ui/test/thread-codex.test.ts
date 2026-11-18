@@ -66,7 +66,8 @@ it('unknown usage is not a measured zero and consumes the approval',async()=>{
 });
 it('Claude request stays byte-identical and old threads keep working without registry routing',async()=>{
  const f=await fixture(),runtime=new ThreadRuntime(f.store,f.threads,f.provider);const i=await f.input();
- const expected=prepareRequest({id:'r1',action:'ask',question:i.question,selection:note.trim(),note,decisions:[],turns:[]});
+ const expected=prepareRequest({id:'r1',action:'ask',surface:'thread-reply',question:i.question,selection:note.trim(),note,decisions:[],turns:[]});
+ expect(expected.data).not.toHaveProperty('surface');
  expect(JSON.stringify((await runtime.preview(i)).packet)).toBe(JSON.stringify(expected));await runtime.start(i);await runtime.wait('r1');expect(f.legacy).toHaveBeenCalledTimes(1);
 });
 it('runs the pinned Codex CLI with no tool grants or session resume',async()=>{

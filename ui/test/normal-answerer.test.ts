@@ -3,7 +3,9 @@ import path from 'node:path';
 import os from 'node:os';
 import {DEFAULT_PIPELINE_CONFIG as defaults,setActivePipelineConfig,validPipelineConfig} from '../shared/pipeline-config.ts';
 import {validateOverrides} from '../server/pipeline-config-store.ts';
-import {createCliAdapter} from '../server/providers/tool-less.ts';
+import {createCliAdapter,turnPrompt} from '../server/providers/tool-less.ts';
+import {CHAT_HARD_RULES} from '../server/chat/request.ts';
+import {NOTESPACE_GUIDE} from '../shared/notespace-guide.ts';
 import type {Request,Provider} from '../server/providers/index.ts';
 import type {TurnAdapter} from '../server/providers/turn.ts';
 import {normalChatTurn,validateNormalChatResult} from '../server/chat/normal-answerer.ts';
@@ -35,6 +37,19 @@ it.each(['codex','kiro'] as const)('%s runs through the unchanged Council fake C
  expect(result.status).toBe('ok');expect(result.provider).toBe(id);
  expect(validateNormalChatResult({id:request.id,provider:id,model:null,answer:result.answer,claims:[],usage:null},request).body).toBe('June.');
  expect(result.usage[0].unit).toBe(id==='codex'?'tokens':'credits');
+});
+it('sends the reviewed mode to the tool-less transport with exactly one guide and the final locked rules',async()=>{
+ let prompt='';
+ const adapter:TurnAdapter={id:'codex',label:'Codex',safetyLabel:'contained',async *startTurn(input){
+  prompt=turnPrompt(input);yield {type:'complete',answer:'June.'};
+ }};
+ const result=await normalChatTurn({...request,persona:'explain'},[adapter],undefined,{answerer:'codex',cap:defaults.council.caps.codex});
+ expect(result.status).toBe('ok');
+ expect(prompt.split(NOTESPACE_GUIDE)).toHaveLength(2);
+ expect(prompt).toContain(request.note);
+ expect(prompt).toContain('1,200 prose words');
+ expect(prompt).not.toContain('600 prose words');
+ expect(prompt.endsWith(CHAT_HARD_RULES)).toBe(true);
 });
 it('rejects a mismatched provider and preserves every other product validator',()=>{
  choose('kiro');const result={id:request.id,provider:'codex' as const,model:null,answer:'June.',claims:[],usage:null};

@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {prepareRequest,type Request} from '../server/providers/index.ts';
-import {composeInstruction,HARD_RULES,SKILL_HEADING,type SkillBlock} from '../shared/instruction.ts';
+import {HARD_RULES,SKILL_HEADING,type SkillBlock} from '../shared/instruction.ts';
 import {CHAT_FORMAT,CHAT_HARD_RULES,CHAT_INVARIANTS,chatMode} from '../server/chat/request.ts';
 import {personaInstruction} from '../shared/persona.ts';
 
@@ -17,10 +17,13 @@ describe('without a persona or skills',()=>{
 });
 
 describe('with a persona mode',()=>{
- it('adds the mode after the existing instruction, for Ask and Think',()=>{
+ it('adds the selected mode before the guide and locked protocol, for Ask and Think',()=>{
   for(const extra of [{},{action:'think' as const,question:''}]){
    const plain=prepareRequest({...base,...extra}).instruction,withMode=prepareRequest({...base,...extra,persona:'grill'}).instruction;
-   expect(withMode.startsWith(plain)).toBe(true);expect(withMode).toContain(personaInstruction('grill'));
+   const mode=personaInstruction('grill');
+   expect(withMode).toContain(mode);
+   expect(withMode.indexOf(mode)).toBeLessThan(withMode.indexOf('Aitiarch notespace'));
+   expect(withMode.replace('\n'+mode,'')).toBe(plain);
   }
   // Chat builds its own prompt (server/chat/request.ts): the mode is the answer style, right after what the data is, and before the format.
   const chat=prepareRequest({...base,chat:true,persona:'grill'}).instruction;
@@ -32,7 +35,8 @@ describe('with attached skills',()=>{
  it('puts the skill text in the instruction under its heading and ends with the hard rules',()=>{
   const t=prepareRequest({...base,persona:'explain',skills}).instruction;
   expect(t).toContain(SKILL_HEADING);expect(t).toContain('Use a table when it helps.');expect(t.endsWith(HARD_RULES)).toBe(true);
-  expect(t).toBe(composeInstruction({base:prepareRequest(base).instruction,persona:personaInstruction('explain'),skillBlock:skills}));
+  expect(t.indexOf(skills.text)).toBeLessThan(t.indexOf('Aitiarch notespace'));
+  expect(t.indexOf('Aitiarch notespace')).toBeLessThan(t.indexOf('Return one JSON object'));
  });
  it('keeps skill text out of the data the model is told to treat as untrusted',()=>{
   const packet=prepareRequest({...base,skills});

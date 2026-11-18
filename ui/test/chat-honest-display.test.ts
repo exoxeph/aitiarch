@@ -19,7 +19,7 @@ describe('the contract line',()=>{
  });
  it('works for Plan with me and Explain',()=>{
   expect(contractNotice(message({persona:'plan',contract:checkContract('plan','Do A.')}))?.text).toBe('Not what Plan with me asks for: it does not end with a question.');
-  expect(contractNotice(message({persona:'explain',contract:checkContract('explain','word '.repeat(300))}))?.text).toBe('Not what Explain asks for: it is longer than twice the length limit.');
+  expect(contractNotice(message({persona:'explain',contract:checkContract('explain','word '.repeat(1201))}))?.text).toBe('Not what Explain asks for: it exceeds the prose length guidance.');
  });
  it('never changes the message: no body rewrite, no hidden flag',()=>{
   const m=message({body:'Summary. Summary. Summary.',persona:'grill',contract:checkContract('grill','Summary. Summary. Summary.')}),before=JSON.stringify(m);

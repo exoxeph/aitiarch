@@ -21,9 +21,11 @@ Reply in exactly the JSON output format above, with no extra fields, and keep to
 
 const SKILL_INTRO=`${SKILL_HEADING}\nThe user chose these skills for this step. You have no tools, so follow only the parts that apply to producing text output.`;
 
-export function composeInstruction(parts:{base:string;persona?:string|null;skillBlock?:SkillBlock|null}):string{
+export function composeInstruction(parts:{base:string;persona?:string|null;skillBlock?:SkillBlock|null;finalInstruction?:string}):string{
  let out=parts.base;
  if(parts.persona)out+='\n'+parts.persona;
- if(parts.skillBlock&&parts.skillBlock.text)out+=`\n\n${SKILL_INTRO}\n\n${parts.skillBlock.text}\n\n${HARD_RULES}`;
+ if(parts.skillBlock?.text)out+=`\n\n${SKILL_INTRO}\n\n${parts.skillBlock.text}`;
+ if(parts.finalInstruction)out+='\n'+parts.finalInstruction;
+ if(parts.skillBlock?.text)out+='\n\n'+HARD_RULES;
  return out;
 }

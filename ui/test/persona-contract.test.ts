@@ -59,9 +59,9 @@ describe('Plan with me',()=>{
 });
 
 describe('Explain',()=>{
- it('within twice the 120-word cap passes, longer does not',()=>{
-  expect(checkContract('explain',words(240)).met).toBe(true);
-  const c=checkContract('explain',words(241));expect(c).toEqual({mode:'explain',met:false,issues:['too_long']});
+ it('warns above the teaching profile’s prose guidance without counting fenced code',()=>{
+  expect(checkContract('explain',words(1200)+'\n\n```\n'+words(20)+'\n```').met).toBe(true);
+  const c=checkContract('explain',words(1201));expect(c).toEqual({mode:'explain',met:false,issues:['too_long']});
  });
  it('a question or a list is fine here',()=>{expect(checkContract('explain','Yes.\n- a\n- b\nWhy?').met).toBe(true);});
 });
@@ -81,7 +81,7 @@ describe('the result',()=>{
   expect(contractText(checkContract('grill','Why?'))).toBeNull();
   expect(contractText(checkContract('grill','Summary one. Summary two. Summary three.'))).toBe('Not what Grill me asks for: it does not end with a question and has more than two sentences.');
   expect(contractText(checkContract('plan','Pick one.'))).toBe('Not what Plan with me asks for: it does not end with a question.');
-  expect(contractText(checkContract('explain',words(300)))).toBe('Not what Explain asks for: it is longer than twice the length limit.');
+  expect(contractText(checkContract('explain',words(1201)))).toBe('Not what Explain asks for: it exceeds the prose length guidance.');
   expect(contractText(checkContract('grill','A? B?'))).toBe('Not what Grill me asks for: it has more than one question.');
  });
 });

@@ -26,6 +26,7 @@ import {activeTurnDirs} from './sweep.ts';
 import {LedgerStore,appendLedger,type InvestigateTurnAudit} from '../ledger-store.ts';
 import {validCatalogModelId} from '../../shared/models.ts';
 import type {InvestigateUsage} from '../../shared/usage.ts';
+import {NOTESPACE_GUIDE,replyProfileInstruction} from '../../shared/notespace-guide.ts';
 const exec=promisify(execFile);
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
 
@@ -50,7 +51,7 @@ export const INVESTIGATE_INSTRUCTION=[
 /** Shared by real turns and the content-free preview. Extra context is data, before the fixed final rules. */
 export function investigateInstruction(extra:readonly string[]=[],config:PipelineConfig=activePipelineConfig()){
  const head=withActivePrompt(INVESTIGATE_INSTRUCTION,c=>c.prompts.investigateStyle,config).split('\n\n'),suffix=head.pop()!,rules=head.pop()!;
- return [...head,...extra,rules,suffix].join('\n\n');
+ return [...head,...extra,replyProfileInstruction('explain'),NOTESPACE_GUIDE,rules,suffix].join('\n\n');
 }
 
 export type InvestigateCode='not_investigation'|'invalid'|'repo'|'plan_required'|'plan_changed'|'busy'|'turn_limit'|'outside_path'|'tool_refused'|'isolation'|'budget'|'cancelled'|'timeout'|'provider_failed'|'nothing_to_restore';

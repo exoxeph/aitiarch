@@ -50,7 +50,8 @@ describe('pipeline configurables',()=>{
  it('preserves the pre-extraction prompt bytes, including style ordering and hard rules',()=>{
   const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
   const request=prepareRequest({id:'fixture',action:'think',question:'Q',selection:'A',note:'A',decisions:[],turns:[]});
-  expect(sha(request.instruction.slice(0,1918))).toBe('d526a8e0f2606348fb331a2f2e54e1fbe78533d0a9d27000907f780c71bcc7c0');
+  const original=request.instruction.replace(/\nAitiarch notespace \(app instructions\)[\s\S]*?\n\n/,'\n');
+  expect(sha(original.slice(0,1918))).toBe('d526a8e0f2606348fb331a2f2e54e1fbe78533d0a9d27000907f780c71bcc7c0');
   expect(sha(CHAT_INVARIANTS)).toBe('9794e323980216e46527ccb0b249b730bad6d6f71739a38f32d0a1a08e9a511b');
   expect(sha(SESSION_INVARIANTS)).toBe('f9d503b22b90a43b3c85a6dd32983dfe22a2e64d198072f213e89080c53735b3');
   expect(sha(SKILL_DIAGRAM_INSTRUCTION)).toBe('1ce539daaee67300e5047681b4193c271f733ce09e8068379d47b1acd60ad07c');
