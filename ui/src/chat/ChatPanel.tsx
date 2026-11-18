@@ -12,7 +12,7 @@ import {investigateLine} from './investigate-usage.ts';
 import {whyRule,whyText} from '../../shared/chat-why.ts';
 import {nodeById} from '../../shared/pipeline-nodes.ts';
 import {CHAT_MESSAGES,type BudgetDetail,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatReview,type ChatUsage} from '../../shared/chat.ts';
-import {ImageInterpretationNotice} from './ImageAttachments.tsx';
+import {clipboardImages,ImageConfirmation,ImageInterpretationNotice,ImageThumbnails,useChatImages,type ImagePreview} from './ImageAttachments.tsx';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
 import {SessionPicker} from './SessionPicker.tsx';
 import {sessionChoices,type PickedSession} from './session-picker-model.ts';
@@ -81,11 +81,21 @@ function OpenedRows({opened,running}:{opened:readonly {n:number;title:string;why
  </ol>;
 }
 
-export function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{review:ChatReview;stopAsking:boolean;setStopAsking:(v:boolean)=>void;onSend:()=>void;onCancel:()=>void}){
+export function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel,images=[]}:{review:ChatReview;stopAsking:boolean;setStopAsking:(v:boolean)=>void;onSend:(confirmedImages?:boolean)=>void;onCancel:()=>void;images?:readonly ImagePreview[]}){
  const send=useRef<HTMLButtonElement>(null);
+ const card=useRef<HTMLElement>(null);
+ const [confirmedImages,setConfirmedImages]=useState(false);
+ const reviewedImages=review.images?.images.flatMap(image=>{
+  const local=images.find(item=>item.id===image.id);
+  return local?[{...image,src:local.src}]:[];
+ })??[];
+ const imagesReady=!review.images||(confirmedImages&&reviewedImages.length===review.images.images.length);
  const recipient=providerName(review.provider??review.normalPlan?.providers[0]??'claude');
- useEffect(()=>{send.current?.focus();},[]);
- return <section className="chat-review" aria-label="What will be sent">
+ useEffect(()=>{
+  if(review.images)card.current?.querySelector<HTMLInputElement>('.chat-image-confirm input')?.focus();
+  else send.current?.focus();
+ },[]);
+ return <section ref={card} className="chat-review" aria-label="What will be sent">
   <h3>Review — nothing sent yet</h3>
   <p className="small muted">{recipient} · {selectionLabel(review.modelSettings)}</p>
   {review.continuityNotice&&<p role="note">{review.continuityNotice}</p>}
@@ -97,19 +107,20 @@ export function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel}:{re
    {reviewDiagramsText(review)&&<><dt>Diagrams</dt><dd className="chat-review-diagrams">{reviewDiagramsText(review)}. It opens one only when your question needs it.</dd></>}
    {review.diagramsWithheld&&review.diagramsWithheld.length>0&&<><dt>Withheld</dt><dd>{review.diagramsWithheld.map(i=><span key={i.n} className="chat-review-block" data-diagram={i.n} data-status="withheld">{withheldText(i)}</span>)}</dd></>}
    <dt>Context</dt>
-   <dd>{review.sources.length===0?<span className="chat-review-none">None. Only your question is sent.</span>:review.sources.map(s=>
+   <dd>{review.sources.length===0?<span className="chat-review-none">{review.images?'No note context.':'None. Only your question is sent.'}</span>:review.sources.map(s=>
     <details key={s.id} className="chat-review-source"><summary>{s.label} <span className="chat-review-est">about {formatCount(s.estimatedTokens)} tokens</span></summary><pre>{review.ephemeral?s.text:previewText(s.text,2000)}</pre></details>)}</dd>
    {review.excluded&&review.excluded.length>0&&<><dt>Left out</dt><dd>{review.excluded.join(', ')}: a chat never gets the notebook file, hidden files, Aitiarch's own files or secrets, apart from the note it is open on.</dd></>}
    {review.manifest&&<><dt>{review.session?'Starts with':'Editor line'}</dt><dd className="chat-review-manifest">{review.manifest}</dd></>}
    <dt>Earlier messages</dt>
-   <dd>{review.session?`Kept in the conversation “${review.session.label}” (${review.session.turns} so far), not pasted again.`:review.historyPairs===0?'None yet.':`${review.historyPairs} earlier ${review.historyPairs===1?'exchange':'exchanges'} included${review.omittedPairs>0?`, ${review.omittedPairs} older left out`:''}.`}{review.otherModePairs?` ${review.otherModePairs} earlier ${review.otherModePairs===1?'exchange':'exchanges'} left out: different mode.`:''}</dd>
+   <dd>{review.session&&!review.images?`Kept in the conversation “${review.session.label}” (${review.session.turns} so far), not pasted again.`:review.historyPairs===0?'None yet.':`${review.historyPairs} earlier ${review.historyPairs===1?'exchange':'exchanges'} included${review.omittedPairs>0?`, ${review.omittedPairs} older left out`:''}.`}{review.otherModePairs?` ${review.otherModePairs} earlier ${review.otherModePairs===1?'exchange':'exchanges'} left out: different mode.`:''}</dd>
   </dl>
   <SkillsReviewList review={review.skills}/>
+  {review.images&&<ImageConfirmation images={reviewedImages} checked={confirmedImages} onChange={setConfirmedImages}/>}
   <details className="chat-review-source"><summary>Instructions {recipient} gets</summary><pre>{review.instruction}</pre></details>
-  <p className="chat-review-total">About {formatCount(review.estimatedTokens)} tokens in all</p>
+  <p className="chat-review-total">About {formatCount(review.estimatedTokens)} {review.images?'text tokens':'tokens in all'}</p>
   {review.budget&&<p className="chat-review-budget">Budget: {formatCount(review.budget.spent)} used + about {formatCount(review.budget.next)} for this message of {formatCount(review.budget.budget)}{review.budget.spent+review.budget.next>review.budget.budget?'. This will not fit; the send will be refused.':'.'}</p>}
-  {review.ephemeral?<><p>{SESSION_NOTICES.privacy}</p><details><summary>Recent messages included</summary>{review.history.map(t=><div key={t.id}><pre>{t.user}</pre><pre>{t.assistant}</pre></div>)}</details></>:<label className="chat-review-ask"><input type="checkbox" checked={stopAsking} onChange={e=>setStopAsking(e.target.checked)}/> Don’t ask again this session</label>}
-  <div className="chat-review-actions"><button ref={send} type="button" className="chat-review-send" onClick={onSend}>{review.demo?'Send (demo, no model)':`Send to ${recipient}`}</button><button type="button" className="ghost" onClick={onCancel}>Cancel</button></div>
+  {review.ephemeral?<><p>{SESSION_NOTICES.privacy}</p><details><summary>Recent messages included</summary>{review.history.map(t=><div key={t.id}><pre>{t.user}</pre><pre>{t.assistant}</pre></div>)}</details></>:!review.images&&<label className="chat-review-ask"><input type="checkbox" checked={stopAsking} onChange={e=>setStopAsking(e.target.checked)}/> Don’t ask again this session</label>}
+  <div className="chat-review-actions"><button ref={send} type="button" className="chat-review-send" disabled={!imagesReady} onClick={()=>onSend(review.images?confirmedImages:undefined)}>{review.demo?'Send (demo, no model)':`Send to ${recipient}`}</button><button type="button" className="ghost" onClick={onCancel}>Cancel</button></div>
  </section>;
 }
 
@@ -147,6 +158,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  const [councilProviders,setCouncilProviders]=useState<string[]>([]);
  const persona=useNodeSettings('chat');
  const [usage,setUsage]=useState<ChatUsage|null>(null),[persistence,setPersistence]=useState<'private'|'memory'>('memory'),[notice,setNotice]=useState(''),[adding,setAdding]=useState<string|null>(null);
+ const imageDraft=useChatImages(setupView,setNotice),imageInput=useRef<HTMLInputElement>(null);
  const sentAt=useRef(0),input=useRef<HTMLTextAreaElement>(null),log=useRef<HTMLDivElement>(null),abort=useRef<AbortController|null>(null),alive=useRef(true);
  const [pickedSessions,setPickedSessions]=useState<PickedSession[]>([]),[ctxOpen,setCtxOpen]=useState(false),[hoverThreads,setHoverThreads]=useState(false);
  const [invRefresh,setInvRefresh]=useState(0),[listRefresh,setListRefresh]=useState(0);
@@ -239,13 +251,17 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
   setTurns(t=>t.map(x=>x.id===id?{...x,status:'streaming' as const,sentAt:Date.now()}:x));setNow(Date.now());
   if(question&&conversation&&current&&current.id===conversation&&isPlaceholder(current)){const c=current;setCurrent({...c,label:autoName(question)});void api.harnessSessionCall('rename',{id:c.id,label:autoName(question)}).then(s=>{setCurrent(s);setListRefresh(n=>n+1);}).catch(()=>{});}
  };
- const send=async(review:ChatReview,dontAskAgain:boolean)=>{
+ const send=async(review:ChatReview,dontAskAgain:boolean,confirmImages?:boolean)=>{
+  const imageIds=imageDraft.images.map(image=>image.id);
+  if(review.images&&(!confirmImages||review.images.images.length!==imageIds.length||review.images.images.some((image,index)=>image.id!==imageIds[index]))){
+   setNotice('The attached images changed. Review again before sending.');return;
+  }
   setPending(null);setBusy(true);sentAt.current=Date.now();const id=review.requestId,controller=new AbortController();abort.current=controller;
   setSwitched(null);setChips(list=>list.map(c=>c.id==='selection'&&!c.on?{...c,on:true}:c)); // removing the selection or the notice holds for one message
-  startStreaming(id,review.question);
+  startStreaming(id,review.images?undefined:review.question);
   let finished=false;
   try{
-   await streamChat({reviewId:review.reviewId,confirmed:true,dontAskAgain},event=>{
+   await streamChat({reviewId:review.reviewId,confirmed:true,dontAskAgain,...(review.images?{confirmImages:true,imageIds}:{})},event=>{
     if(!alive.current)return;
     if(event.type==='complete'||event.type==='error')finished=true;
     setTurns(t=>applyEvent(t,event));
@@ -261,6 +277,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
     setTurns(t=>t.map(x=>x.id===id?{...x,status:'review' as const}:x));await showPlan({id,question:review.question,route:'chat',attachments:{notes:noteIdsOf(attachmentsOf(attach)),files:[],repo:false},review,notice:refusalText(e.code)});return;
    }
    fail(id,e instanceof ApiError&&knownCode(e.code)?e.code:'provider_failed',e instanceof ApiError?e.detail?.budget:undefined);
+   if(review.images&&e instanceof ApiError){setNotice(e.message);setDraft(review.question);}
   }finally{abort.current=null;if(alive.current)setBusy(false);setListRefresh(n=>n+1);}
  };
  /** Notes sent with a turn: the ones picked with "@" and the ones chosen in the Constellation. */
@@ -341,15 +358,21 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
  };
  const keyResize=(e:ReactKeyboardEvent<HTMLDivElement>)=>{const step=e.key==='ArrowLeft'?24:e.key==='ArrowRight'?-24:0;if(!step)return;e.preventDefault();const next=clampChatWidth(width+step,window.innerWidth);setStoredWidth(next);saveChatWidth(next);};
  const submit=async(again?:string)=>{
+  if(imageDraft.loading)return;
+  const imageIds=imageDraft.images.map(image=>image.id);
+  const a=attachmentsOf(attach);
+  if(imageIds.length&&(mode==='council'||a.repo||a.files.length)){
+   setNotice('Remove the attached images before sending to Council or Investigate.');return;
+  }
   if(mode==='council'&&again===undefined){councilReview.current?.();return;}
   const question=(again??draft).trim();if(!question||!path||busy||pending||planCard||nativeCard)return;
   if(blockedByRefusals(attach)){setNotice(refusalText('file_refused'));return;}
-  const a=attachmentsOf(attach),id=newTurnId();setNotice('');setBusy(true);stickLog.follow();
+  const id=newTurnId();setNotice('');setBusy(true);stickLog.follow();
   const native=isNativeAnswerer(await loadAnswerer()); // the saved setting, read fresh: it may have changed in Settings since the panel opened
   let conv=conversation,route=routeOf(a,!!conv);
   // Files or the repo need a conversation (the grant is kept on it): a one-off chat that carries them becomes one, named after this question. Codex and Kiro are approved per conversation, so they need one too.
   if((route==='investigate'||native)&&!conv){
-   try{const s=await api.harnessSessionCall('new',{mode:'chat',path,label:autoName(question)});justCreated.current=s.id;conv=s.id;setConversation(s.id,s);setCurrent(s);setListRefresh(n=>n+1);if(route==='one-off')route=routeOf(a,true);}
+   try{const s=await api.harnessSessionCall('new',{mode:'chat',path,label:imageIds.length?'Image chat':autoName(question)});justCreated.current=s.id;conv=s.id;setConversation(s.id,s);setCurrent(s);setListRefresh(n=>n+1);if(route==='one-off')route=routeOf(a,true);}
    catch(e){setNotice(e instanceof ApiError?e.message:'A conversation could not be started. Nothing was sent.');setBusy(false);return;}
   }
 
@@ -365,7 +388,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
   const info=infoFor(live,!!selection);
   try{
    const notes=noteIdsOf(a),fromMap=notes.length?[{moduleId:'other-notes' as const,ids:notes}]:[];
-   const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...fromMap,...sessionChoices(pickedSessions)],...(selection?{selection}:{}),...(conv?{session:conv}:{}),...(info?{editor:info}:{})});
+   const review=await api.chatCall<ChatReview>('review',{id,path,question,context:[...context,...fromMap,...sessionChoices(pickedSessions)],...(selection?{selection}:{}),...(conv?{session:conv}:{}),...(info?{editor:info}:{}),...(imageIds.length?{imageIds}:{})});
    if(review.normalPlan&&review.needsPlan){setNativeCard({id,question,review,...(turns.some(x=>x.message?.overCap)?{notice:APPROVAL_NOTICE}:{})});setBusy(false);return;} // Codex or Kiro: its own approval card, never Claude's
    if(needsCard({route,review})){await showPlan({id,question,route,attachments:{...a,files:[],repo:false},review});return;}
    if(review.requiresConfirmation){setPending(review);setBusy(false);return;}
@@ -454,7 +477,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
      {t.status==='review'&&planCard&&planCard.id===t.id&&<>{planCard.notice&&<p className="chat-notice chat-plan-notice" role="alert">{planCard.notice}</p>}
       <PlanCard plan={planCard.plan} resume={planCard.resume} busy={busy} onApprove={()=>void approvePlan()} onReplan={b=>void replanCard(b)} onCancel={cancelPlan}/></>}
      {t.status==='review'&&nativeCard&&nativeCard.id===t.id&&nativeCard.review.normalPlan&&<NativePlanCard plan={nativeCard.review.normalPlan} safetyLabel={safety[nativeCard.review.normalPlan.providers[0]]??''} notice={nativeCard.notice} busy={busy} onApprove={()=>void approveNative()} onCancel={cancelNative}/>}
-     {t.status==='review'&&pending&&pending.requestId===t.id&&<ReviewCard review={pending} stopAsking={stopAsking} setStopAsking={setStopAsking} onSend={()=>void send(pending,stopAsking)} onCancel={cancelReview}/>}
+     {t.status==='review'&&pending&&pending.requestId===t.id&&<ReviewCard key={pending.reviewId} review={pending} images={imageDraft.images} stopAsking={stopAsking} setStopAsking={setStopAsking} onSend={confirmed=>void send(pending,stopAsking,confirmed)} onCancel={cancelReview}/>}
      {t.inv?<>
       <InvestigateTurnView turn={t.inv} onOpen={(p,l)=>void openExcerpt(p,l)} onRestore={()=>void restore()} restoring={restoring} onContinue={()=>void continueTurn(t)}/>
       {t.status==='streaming'&&!t.inv.text&&!t.inv.trail.length&&!t.inv.thinking&&<p className="chat-wait" role="status" data-wait>{waitText(now-(t.sentAt??now))}</p>}
@@ -500,16 +523,31 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
      {!(c.kind==='repo'&&c.fixed)&&<button type="button" aria-label={`Remove ${label} from the next message`} onClick={()=>setAttach(a=>a.filter(x=>chipKey(x)!==chipKey(c)))}>×</button>}</span>;})}
    {switched&&<span className="chat-send-chip chat-switched" data-chip="switched" role="status"><span>{noteChangedText(switched.from,openTitle)}</span><button type="button" aria-label="Dismiss this notice" onClick={()=>setSwitched(null)}>×</button></span>}
   </div>}
-  <CouncilPanel open={mode==='council'} onSelected={setCouncilProviders} reviewRef={councilReview} conversation={conversation} note={openPath} notes={[...otherNotes,...attach.filter(c=>c.kind==='note').map(c=>(c as {path:string}).path)]} question={draft} disabled={composing||busy} onConversation={(id,home)=>{onConversation(id,home);setListRefresh(n=>n+1);}} onSent={asked=>{setDraft(current=>current.trim()===asked?'':current);setListRefresh(n=>n+1);}} onHistory={setCouncilRuns} onBusy={setBusy}/>
+  {imageDraft.images.length>0&&<ImageThumbnails images={imageDraft.images} onRemove={composing?undefined:imageDraft.remove}/>}
+  {mode==='council'&&imageDraft.images.length>0&&<p className="small muted">Remove the attached images before sending to Council.</p>}
+  <CouncilPanel open={mode==='council'} onSelected={setCouncilProviders} reviewRef={councilReview} conversation={conversation} note={openPath} notes={[...otherNotes,...attach.filter(c=>c.kind==='note').map(c=>(c as {path:string}).path)]} question={draft} disabled={composing||busy||imageDraft.images.length>0} onConversation={(id,home)=>{onConversation(id,home);setListRefresh(n=>n+1);}} onSent={asked=>{setDraft(current=>current.trim()===asked?'':current);setListRefresh(n=>n+1);}} onHistory={setCouncilRuns} onBusy={setBusy}/>
   </div>
   <p className="chat-investigate-hint" data-attached={attach.length>0||mode==='council'||undefined} title="Type @ to attach the repo or files for an investigation.">Type @ to attach the repo or files for an investigation.</p>
-  <form className="chat-composer" onSubmit={e=>{e.preventDefault();if(at&&atItems.length){pickAt(atItems[Math.min(at.index,atItems.length-1)]);return;}void submit();}}>
+  <form className="chat-composer" onSubmit={e=>{e.preventDefault();if(at&&atItems.length){pickAt(atItems[Math.min(at.index,atItems.length-1)]);return;}void submit();}}
+   onDragOver={e=>{if(e.dataTransfer.types.includes('Files'))e.preventDefault();}}
+   onDrop={e=>{
+    const files=clipboardImages(e.dataTransfer);
+    if(!e.dataTransfer.types.includes('Files'))return;
+    e.preventDefault();
+    if(mode==='chat'&&!composing)void imageDraft.add(files);
+   }}>
    {at&&<div className="chat-at" role="listbox" aria-label="Attach a note, a file or the repo" id="chat-at-list">
     {atItems.length===0?<p className="chat-at-none">Nothing matches “{at.query}”.</p>:atItems.map((it,i)=><button key={atItemKey(it)} type="button" role="option" aria-selected={i===at.index} tabIndex={-1} className="chat-at-opt" data-at={atItemKey(it)}
      onMouseDown={e=>e.preventDefault()} onClick={()=>pickAt(it)}><span className="chat-at-kind">{it.kind==='repo'?'Repo':it.kind==='note'?'Note':'File'}</span><span className="chat-at-name">{it.kind==='repo'?it.label:it.path}</span></button>)}
    </div>}
    <textarea ref={input} aria-label="Message Aitiarch AI" rows={1} placeholder={pending||planCard||nativeCard?'Review above, then send…':mode==='council'?'Ask the Council… (Enter reviews it first)':'Ask about this note… (@ to attach)'} value={draft} disabled={composing} onChange={e=>onDraft(e.target.value)}
     aria-controls={at?'chat-at-list':undefined} aria-expanded={at?true:undefined}
+    onPaste={e=>{
+     const files=clipboardImages(e.clipboardData);
+     if(!files.length)return;
+     e.preventDefault();
+     if(mode==='chat'&&!composing)void imageDraft.add(files);
+    }}
     onKeyDown={e=>{
      if(at){
       if(e.key==='ArrowDown'){e.preventDefault();setAt({...at,index:Math.min(at.index+1,Math.max(0,atItems.length-1))});return;}
@@ -521,6 +559,17 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
    <div className="chat-composer-bar">
     <ChatModeMenu value={mode} onChange={setMode} disabled={composing||busy}/>
     <div className="compose-right">
+     {mode==='chat'&&<>
+      <input ref={imageInput} type="file" hidden accept="image/png" multiple onChange={e=>{
+       const files=Array.from(e.target.files??[]);e.target.value='';if(!composing)void imageDraft.add(files);
+      }}/>
+      <button type="button" className="chat-ctl" aria-label="Attach images" title={imageDraft.support.reason??'Attach images'}
+       aria-disabled={composing||imageDraft.loading||!imageDraft.support.available} onClick={()=>{
+        if(composing||imageDraft.loading)return;
+        if(!imageDraft.support.available){setNotice(imageDraft.support.reason??'Images are unavailable.');return;}
+        imageInput.current?.click();
+       }}>Image</button>
+     </>}
      {mode==='chat'&&<ModelPicker view={setupView} onViewChange={onSetupChange} lastAnswer={lastAnswer} disabled={composing||busy} returnFocus={()=>input.current?.focus()} onChanged={()=>{if(pending)cancelReview();}}/>}
      <button type="submit" className="chat-send" aria-label="Send message" title={mode==='council'?'Review the Council question':undefined} disabled={!draft.trim()||composing}>
       <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 16V4M5 9l5-5 5 5"/></svg>

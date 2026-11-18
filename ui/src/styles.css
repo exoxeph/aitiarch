@@ -916,6 +916,11 @@ input.chat-ctl { background: var(--paper); cursor: text; }
 .chat-review-source { margin-top: 4px; }
 .chat-review-source summary { cursor: pointer; font-size: var(--text-control); }
 .chat-review-est { color: var(--muted); }
+.chat-image-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; list-style: none; }
+.chat-image-list li { display: grid; grid-template-columns: auto auto; align-items: center; gap: 4px; font-size: var(--text-meta); color: var(--muted); }
+.chat-image-list img { grid-column: 1 / -1; object-fit: contain; background: var(--paper); border-radius: 4px; }
+.chat-image-confirm { min-inline-size: 0; margin: 10px 0; border: 1px solid var(--accent-soft); border-radius: var(--radius-card); }
+.chat-image-confirm p { margin: 6px 0; }
 /* A blob can be moved: a quiet grip appears on hover or focus, and a blob being carried lifts above the rest. */
 .thought-grip { position: absolute; top: 0; left: calc(50% + var(--gutter, 0px) / 2); translate: -50% 0; z-index: 1; display: grid; place-items: center; width: 56px; height: 16px; padding: 0; border: 1px solid transparent; border-top: 0; border-radius: 0 0 9px 9px; background: none; color: var(--muted); opacity: 0; cursor: grab; touch-action: none; transition: opacity .15s ease-out, border-color .15s ease-out, background-color .15s ease-out; }
 /* Six dots drawn in CSS, not an svg: other checks and code count the svg inside a blob as the diagram. */

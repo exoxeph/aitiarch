@@ -2,6 +2,9 @@ import {activePipelineConfig} from '../shared/pipeline-config.ts';
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
 import {harnessDirectory,SessionIndex,SessionIndexError} from './harness/session-index.ts';import {ClaudeSessionRunner} from './harness/claude-session.ts';import {InvestigateError,InvestigateService} from './harness/investigate.ts';import {randomUUID} from 'node:crypto';import {ConversationGate,GateRefusal,carriedPairs,projectRepo} from './harness/conversation.ts';import {cleanAttachments} from '../shared/profile.ts';import {removeTranscript} from './harness/transcripts.ts';import {sweepStaleTurnFolders} from './harness/sweep.ts';import {QuestionStore} from './harness/questions.ts';
 import {ChatRuntime,ChatError} from './chat/runtime.ts';
+import {ImageStore} from './image-store.ts';
+import {IMAGE_MAX_BYTES} from '../shared/image-attachments.ts';
+import type {ChatImageDelivery} from './chat/image-review.ts';
 import {NormalChat} from './chat/normal-answerer.ts';
 import {whyOfError} from './chat/why.ts';
 import {CHAT_MESSAGES,budgetText} from '../shared/chat.ts';
@@ -66,6 +69,8 @@ export interface AppOptions {
   /** Front-door rules shared with a multi-project host; when absent this app makes its own. */
   security?: import("./security.ts").Security;
   provider?: Provider;
+  /** Opt-in isolated image transport. Ordinary installations have no verified transport yet. */
+  chatImageDelivery?:ChatImageDelivery;
   plan?: ChatGPTPlan;
   usage?: {summary():Promise<import('../shared/usage.ts').UsageSummary>};
   /** Where the Skill library looks. Tests pass temp folders; the real app uses the usual places under your home folder and this project. */
@@ -228,7 +233,8 @@ export function createApp(opts: AppOptions) {
   const councilIndexReady=opts.council?harnessReady.then(async h=>opts.council!.index??h?.index??await SessionIndex.open(harnessDirectory(store.rootReal))):Promise.resolve(null);
   const councilReady=opts.council?Promise.all([inkReady,councilIndexReady]).then(async([ink,index])=>new CouncilService({store,ink,index:index!,history:new CouncilHistory(index!,1024*1024,store.rootReal),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters,routing:opts.council!.routing})):Promise.resolve(null);
   const normalReady=Promise.all([councilIndexReady,councilReady]).then(([index,council])=>index&&council?new NormalChat({index,questions:new QuestionStore(index.dir),council,adapters:opts.council!.adapters,routing:opts.council!.routing}):undefined);
-  const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady,normalReady]).then(([ink,harness,normal])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages,normal);chatRef.resolve(runtime);return runtime;});
+  const stagedImages=new ImageStore(store.rootReal);
+  const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady,normalReady]).then(([ink,harness,normal])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages,normal,{store:stagedImages,delivery:opts.chatImageDelivery});chatRef.resolve(runtime);return runtime;});
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const councilInsertion=insertionsReady.then(insertions=>new CouncilInsertion(store,insertions));
   const investigateInsertion=insertionsReady.then(insertions=>new InvestigateInsertion(store,insertions));
@@ -562,6 +568,25 @@ export function createApp(opts: AppOptions) {
       return json(res,200,{...saved,messages:[...saved.messages,...runtime.memoryMessages(note)],persistence:await chatStore.status(),questionPlaceholder:'Question unavailable after reload.',usage:runtime.usage().find(c=>c.note===note&&c.session===(session||undefined))??null});
     }
     if(url.pathname==='/api/chat/modules'&&req.method==='GET')return json(res,200,await (await chatReady).modules(url.searchParams.get('path')??'',url.searchParams.get('sessions')==='1',url.searchParams.get('otherProjects')==='1'));
+    if(url.pathname==='/api/chat/image-availability'&&req.method==='GET')return json(res,200,await (await chatReady).imageAvailability());
+    if(url.pathname==='/api/chat/image-stage'){
+      if(req.method!=='PUT')return json(res,404,{error:'not_found'});
+      const support=await (await chatReady).imageAvailability();
+      if(!support.available)return json(res,409,{error:'disabled',message:support.reason});
+      const maxEncoded=4*Math.ceil(IMAGE_MAX_BYTES/3);
+      const body=await readBody(req,maxEncoded+128) as {data?:unknown}|null;
+      const data=body?.data;
+      if(typeof data!=='string'||!data.length||data.length>maxEncoded||data.length%4!==0||!/^[A-Za-z0-9+/]+={0,2}$/.test(data))
+        return json(res,400,{error:'invalid_image',message:'Attach a valid PNG of at most 5 MiB.'});
+      try{return json(res,200,await stagedImages.stage(Buffer.from(data,'base64')));}
+      catch{return json(res,409,{error:'invalid_image',message:'This image could not be staged. Check that it is a supported PNG and this notebook has verified private storage.'});}
+    }
+    if(url.pathname==='/api/chat/image-remove'&&req.method==='PUT'){
+      const body=await readBody(req,128) as {id?:unknown}|null;
+      if(typeof body?.id!=='string'||!/^[0-9a-f]{32}$/.test(body.id))return json(res,400,{error:'invalid_image',message:'Invalid staged image ID.'});
+      await stagedImages.discard(body.id).catch(()=>{});
+      return json(res,200,{});
+    }
     // SEND PATH 1 of 2. /api/chat/review + /api/chat/send run the one-off chat and conversation turns whose profile is "notes" (no tools) or "diagrams" (Read in the PNG folder); the review shows what is sent and
     // send re-asks the gate. A turn that carries files or the repo (profile "investigate") never goes through here: it goes through /api/conversation/plan, approve and turn (path 2).
     if(url.pathname.startsWith('/api/chat/')&&req.method==='PUT'){
@@ -596,7 +621,8 @@ export function createApp(opts: AppOptions) {
       }catch(e){
         if(res.headersSent)return res.end();
         const code=e instanceof ChatError?e.code:e instanceof ProviderError?'provider_failed':'invalid_chat';
-        return json(res,409,{error:code,message:e instanceof ChatError&&e.budget?budgetText(e.budget):CHAT_MESSAGES[code],...(e instanceof ChatError&&e.budget?{budget:e.budget}:{}),...(activePipelineConfig().normalAnswerer!=='claude'?whyOfError(code,e):{})});
+        const imageWhy=e instanceof ChatError&&e.why?.ruleId.startsWith('image_')?e.why:undefined;
+        return json(res,409,{error:code,message:imageWhy?.detail??(e instanceof ChatError&&e.budget?budgetText(e.budget):CHAT_MESSAGES[code]),...(e instanceof ChatError&&e.budget?{budget:e.budget}:{}),...(imageWhy??(activePipelineConfig().normalAnswerer!=='claude'?whyOfError(code,e):{}))});
       }
       throw new PathError(400,'bad_body','Unknown chat action.');
     }

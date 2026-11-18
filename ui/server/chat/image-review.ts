@@ -1,8 +1,16 @@
 import type {ImageStore} from '../image-store.ts';
 import type {ConfirmedImageSend,ReviewedImageManifest} from '../../shared/image-attachments.ts';
+import type {ModelEffort} from '../../shared/setup.ts';
+import type {Request} from '../providers/index.ts';
+import type {ProductResult} from '../product-validation.ts';
 
 type Binding=Pick<ConfirmedImageSend,'sendId'|'provider'|'model'>;
 type Reader=Pick<ImageStore,'readManifest'>;
+export interface ChatImageDelivery {
+ supports(provider:Binding['provider'],model:string):boolean;
+ /** Dedicated stateless, tool-less delivery. Never pass a named CLI session or a client path. */
+ send(input:{request:Request;selection:Readonly<ModelEffort>;approved:Awaited<ReturnType<typeof confirmImageManifest>>},signal:AbortSignal):Promise<ProductResult>;
+}
 const reReview=()=>Error('The images or selected model changed. Review again before sending.');
 
 function descriptors(images:Awaited<ReturnType<Reader['readManifest']>>):ReviewedImageManifest['images']{

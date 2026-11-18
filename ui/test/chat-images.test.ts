@@ -6,20 +6,26 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {finishReply,type ReplySources} from '../server/chat/reply.ts';
 import {hash} from '../server/chat/context.ts';
-import {ImageInterpretationNotice} from '../src/chat/ImageAttachments.tsx';
+import {ImageConfirmation,ImageInterpretationNotice,clipboardImages} from '../src/chat/ImageAttachments.tsx';
 import {ChatRuntime} from '../server/chat/runtime.ts';
 import {ChatStore} from '../server/chat/store.ts';
 import {Store} from '../server/store.ts';
 import {InkStore} from '../server/ink-store.ts';
 import type {ChatEvent} from '../shared/chat.ts';
-import {reviewImageManifest,confirmImageManifest} from '../server/chat/image-review.ts';
+import {reviewImageManifest,confirmImageManifest,type ChatImageDelivery} from '../server/chat/image-review.ts';
 import {once} from 'node:events';
-import {mkdtemp,readFile,realpath} from 'node:fs/promises';
+import {mkdtemp,readFile,realpath,writeFile} from 'node:fs/promises';
 import {claudeArguments} from '../server/providers/claude-arguments.ts';
 import {CODEX_FLAGS} from '../server/providers/tool-less-arguments.ts';
 import {runFakeImageTransport} from '../server/providers/image-transport.ts';
 import {resolveProjectStorage} from '../server/project-storage.ts';
 import {ImageStore} from '../server/image-store.ts';
+import {NoteWatcher} from '../server/watch.ts';
+import {createApp} from '../server/http.ts';
+import {defaultMachineSetup} from '../shared/setup.ts';
+import {descriptorFromAdapter,ProviderRegistry} from '../server/providers/registry.ts';
+import {saveMachineSetup} from '../server/setup-store.ts';
+import {SessionIndex} from '../server/harness/session-index.ts';
 
 const source={note:'The attached file has no matching quote in this note.',selection:'',decisions:[],diagrams:['D1']};
 const id='a'.repeat(32),sha256='b'.repeat(64);
@@ -35,6 +41,13 @@ afterEach(()=>vi.unstubAllEnvs());
 
 const fixture=path.resolve('test/fixtures/image-transport-cli.mjs');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==','base64');
+async function readFixtureOutput(child:Parameters<Parameters<typeof runFakeImageTransport>[1]>[0],stdin:string){
+ let stdout='';child.stdout.setEncoding('utf8').on('data',data=>stdout+=data);
+ child.stdin.on('error',()=>{});
+ child.stdin.end(stdin);
+ expect(await once(child,'close')).toEqual([0,null]);
+ return JSON.parse(stdout);
+}
 async function runImageFixture(provider:'claude'|'codex',change?:'bytes'|'model'|'executable'){
  const project=await mkdtemp(path.join(await realpath(process.env.AITIARCH_CONFIG_DIR!),'project-'));
  const root=path.join(project,'.aitiarch');
@@ -50,13 +63,7 @@ async function runImageFixture(provider:'claude'|'codex',change?:'bytes'|'model'
   return await runFakeImageTransport({
    provider,command:change==='executable'?'unverified-cli':process.execPath,prefixArgs:[fixture,provider],
    input:'Synthetic reviewed prompt',selection:{model:change==='model'?'other-model':model,effort:null},approved,
-  },async(child,stdin)=>{
-   let stdout='';child.stdout.setEncoding('utf8').on('data',data=>stdout+=data);
-   child.stdin.on('error',()=>{});
-   child.stdin.end(stdin);
-   expect(await once(child,'close')).toEqual([0,null]);
-   return {processed:approved.images[0].bytes.toString('base64'),...JSON.parse(stdout)};
-  });
+  },async(child,stdin)=>({processed:approved.images[0].bytes.toString('base64'),...await readFixtureOutput(child,stdin)}));
  }finally{
   await store.discard(staged.id);
  }
@@ -87,6 +94,76 @@ it.each(['claude','codex'] as const)('%s refuses transport after a reviewed mode
 
 it('does not enable the image transport for an unverified executable',async()=>{
  await expect(runImageFixture('codex','executable')).rejects.toThrow(/not been verified/);
+});
+
+it('leaves ordinary text paste alone and only captures file-backed images',()=>{
+ const pngFile={type:'image/png'} as File;
+ expect(clipboardImages({files:[],items:[{kind:'string',type:'text/plain'}]} as unknown as DataTransfer)).toEqual([]);
+ expect(clipboardImages({files:[pngFile]} as unknown as DataTransfer)).toEqual([pngFile]);
+});
+
+it('renders an unchecked per-send confirmation and the exact warning for reviewed thumbnails',()=>{
+ const html=renderToStaticMarkup(createElement(ImageConfirmation,{
+  checked:false,onChange:()=>{},images:[{id,width:1,height:1,byteLength:png.length,mime:'image/png',src:'blob:test'}],
+ }));
+ expect(html).toContain('images are sent as-is; secret exclusion cannot inspect them');
+ expect(html).toContain('Confirm sending these images');
+ expect(html).toContain('src="blob:test"');
+ expect(html).not.toContain('checked=""');
+});
+
+it('requires fresh image consent at the HTTP boundary even after enabling text bypass',async()=>{
+ const config=await realpath(process.env.AITIARCH_CONFIG_DIR!);
+ const project=await mkdtemp(path.join(config,'project-')),root=path.join(project,'.aitiarch');
+ expect(await resolveProjectStorage(root,{create:true})).toMatchObject({ok:true});
+ await writeFile(path.join(root,'fixture.md'),'# Synthetic image chat\n');
+ let model='synthetic-vision';
+ const registry=new ProviderRegistry([descriptorFromAdapter({id:'claude',label:'Claude',safetyLabel:'fenced',
+  async *startTurn(){throw new Error('Image turn must use its own tool-less delivery.');}},{detect:async()=>({available:true,reason:null})})]);
+ const setup=defaultMachineSetup();
+ setup.providers.claude.model=model;
+ await saveMachineSetup(config,setup);
+ const routing=()=>registry.snapshot(config);
+ const write=vi.fn<ChatImageDelivery['send']>(async({request,selection,approved})=>{
+  const report=await runFakeImageTransport({provider:'claude',command:process.execPath,prefixArgs:[fixture,'claude'],input:request.question,selection,approved},readFixtureOutput);
+  expect(report).toMatchObject({body:{message:{content:[
+   {type:'text',text:'Synthetic question'},
+   {type:'image',source:{data:png.toString('base64')}},
+  ]}}});
+  return {id:request.id,provider:'claude',model:null,answer:answer({none:'no_context_used'}),rawReply:true,claims:[],usage:null};
+ });
+ const store=await Store.open(root),watcher=new NoteWatcher(store);
+ const app=createApp({store,watcher,distDir:root,council:{adapters:[],routing,index:await SessionIndex.open(path.join(config,'sessions'))},
+  provider:{name:'claude',checkAvailability:async()=>({available:true}),invoke:async request=>({id:request.id,provider:'claude',model:null,answer:answer({none:'no_context_used'}),rawReply:true,claims:[],usage:null})},
+  chatImageDelivery:{supports:(_provider:string,value:string)=>value==='synthetic-vision',send:write},
+ });
+ try{
+  const base='http://127.0.0.1:'+await app.listen(0),cookie=(await fetch(base+'/api/session')).headers.get('set-cookie')!.split(';')[0];
+  const put=(endpoint:string,body:unknown)=>fetch(base+'/api/chat/'+endpoint,{method:'PUT',headers:{cookie,origin:base,'content-type':'application/json','x-aitiarch':'1'},body:JSON.stringify(body)});
+  const review=(id:string,imageIds?:string[])=>put('review',{id,path:'fixture.md',question:'Synthetic question',context:[],imageIds}).then(r=>r.json());
+  const noImage=await review('text');
+  expect(await (await put('send',{reviewId:noImage.reviewId,confirmed:true,dontAskAgain:true})).text()).toContain('event: complete');
+  expect((await review('text-bypass')).requiresConfirmation).toBe(false);
+  const stage=await put('image-stage',{data:png.toString('base64')});
+  expect(stage.status).toBe(200);
+  const image=await stage.json(),imageIds=[image.id];
+  expect(await fetch(base+'/api/chat/image-stage?id='+image.id,{headers:{cookie}}).then(r=>r.status)).toBe(404);
+  const first=await review('image-first',imageIds);
+  expect(first).toMatchObject({requiresConfirmation:true,images:{provider:'claude',model,images:[{id:image.id,sha256:expect.stringMatching(/^[a-f0-9]{64}$/)}]}});
+  expect((await put('send',{reviewId:first.reviewId,confirmed:true,imageIds})).status).toBe(409);
+  expect((await put('send',{reviewId:first.reviewId,confirmed:true,confirmImages:true,imageIds:['f'.repeat(32)]})).status).toBe(409);
+  expect(write).not.toHaveBeenCalled();
+  expect(await (await put('send',{reviewId:first.reviewId,confirmed:true,confirmImages:true,imageIds})).text()).toContain('"imageInterpretation":true');
+  expect(write).toHaveBeenCalledTimes(1);
+  expect(write.mock.calls[0][0].approved.images[0].bytes.equals(png)).toBe(true);
+  expect((await put('send',{reviewId:first.reviewId,confirmed:true,confirmImages:true,imageIds})).status).toBe(409);
+  const retained=await review('image-retained',imageIds);
+  expect(retained.requiresConfirmation).toBe(true);
+  model='other-model';
+  setup.providers.claude.model=model;await saveMachineSetup(config,setup);
+  expect((await put('send',{reviewId:retained.reviewId,confirmed:true,confirmImages:true,imageIds})).status).toBe(409);
+  expect(write).toHaveBeenCalledTimes(1);
+ }finally{watcher.stop();await app.close();}
 });
 
 it('binds an image reference to the confirmed current send and renders only an unverified notice',()=>{
