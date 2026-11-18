@@ -1,6 +1,7 @@
 import {DEFAULT_PIPELINE_CONFIG as defaults,activePipelineConfig,type PipelineConfig} from '../../shared/pipeline-config.ts';
 import {mkdtemp,mkdir,lstat,stat,readFile,writeFile,readdir} from 'node:fs/promises';import path from 'node:path';import os from 'node:os';
 import {killTree,spawnToolless} from './launcher.ts';import {cleanupProviderTemp} from './temp-cleanup.ts';import {StringDecoder} from 'node:string_decoder';
+import {discardTransportCopies,reviewedImageBuffers,type ImageDeliveryInput} from './image-transport.ts';
 import {chatSessionInstruction,turnMessage} from '../chat/request.ts';
 import {TurnFailure,type TurnAdapter,type TurnEvent,type TurnInput} from './turn.ts';
 import {protocolRefusal} from './claude-turn.ts';
@@ -77,8 +78,8 @@ async function capabilityOutput(config:CliTurnConfig,cwd:string,env:NodeJS.Proce
   child.once('close',async code=>{clearTimeout(timer);signal.removeEventListener('abort',abort);await killed;if(failed)reject(failed);else if(code!==0)reject(new TurnFailure('unsupported_cli','unavailable'));else resolve(text);});
  });
 }
-async function verifyCapabilities(config:CliTurnConfig,cwd:string,env:NodeJS.ProcessEnv,signal:AbortSignal,record:(v:string)=>void){
- const s=await stat(config.command),key=JSON.stringify([config.id,config.command,s.size,s.mtimeMs,config.prefixArgs,CODEX_FLAGS,config.selection?.model!=null]);
+async function verifyCapabilities(config:CliTurnConfig,cwd:string,env:NodeJS.ProcessEnv,signal:AbortSignal,record:(v:string)=>void,images:boolean){
+ const s=await stat(config.command),key=JSON.stringify([config.id,config.command,s.size,s.mtimeMs,config.prefixArgs,CODEX_FLAGS,config.selection?.model!=null,images]);
  if(verified.has(key)){const found=verified.get(key)!;record(found);return found;}
  const version=await capabilityOutput(config,cwd,env,signal,'version');
  const found=cliVersion(config.id,version),check=versionCheck(config.id,found);if(found)record(found);
@@ -86,14 +87,18 @@ async function verifyCapabilities(config:CliTurnConfig,cwd:string,env:NodeJS.Pro
  const help=await capabilityOutput(config,cwd,env,signal,'help');
  const assessed=assessToollessMetadata(config.id,version,help);if(!assessed.available)throw new TurnFailure('unsupported_cli','unavailable',assessed.reason!);
  if(config.id==='codex'&&config.selection?.model!=null&&!help.split(/\r?\n/).some(line=>/^\s*(?:-m,\s*)?--model(?=[\s=,]|$)/.test(line)))throw new TurnFailure('unsupported_cli','unavailable','Codex help does not declare --model. Use Default.');
+ if(images&&!help.split(/\r?\n/).some(line=>/^\s*(?:-i,\s*)?--image(?=[\s=,]|$)/.test(line)))throw new TurnFailure('unsupported_cli','unavailable','Codex help does not declare --image.');
  verified.set(key,found!); // Success only, in memory; binary changes invalidate. Never cache runtime isolation.
  return found!;
 }
 export function createCliAdapter(config:CliTurnConfig):TurnAdapter{
  config={...config,prefixArgs:config.prefixArgs?[...config.prefixArgs]:undefined,...(config.selection?{selection:Object.freeze({...config.selection})}:{})};
  const baseConfig=config,state:{version?:string;message?:string}={};
- return {id:config.id,label:config.id==='kiro'?'Kiro':'Codex',status:()=>({...state}),safetyLabel:defaults.safetyLabels[config.id],async *startTurn(input,signal){
+ async function* startTurn(input:Parameters<TurnAdapter['startTurn']>[0],signal:AbortSignal,images?:ImageDeliveryInput){
   const config={...baseConfig,...(input.selection?{selection:Object.freeze({...input.selection})}:{})};
+  if(images&&(config.id!=='codex'||input.outputFormat!=='assembled-chat'))throw new TurnFailure('invalid_image_profile','unavailable');
+  const buffers=images?reviewedImageBuffers('codex',config.selection?.model,images.approved):[];
+  const copies:Awaited<ReturnType<ImageDeliveryInput['storage']['copyForTransport']>>[]=[];
   const binding=config.id==='codex'&&config.selection?.effort!=null?config.codexCatalog?.():undefined;
   try{modelArguments(config.id,config.selection,binding!==undefined,binding?.catalog);}catch(e){throw new TurnFailure('invalid_model_settings','unavailable',(e as Error).message);}
   if((config.prefixArgs?.length||config.startupTimeoutMs!==undefined)&&config.command!==process.execPath)throw new TurnFailure('invalid_command','unavailable');
@@ -101,13 +106,21 @@ export function createCliAdapter(config:CliTurnConfig):TurnAdapter{
   let home:string|undefined;
   try{
    const env=environment();if(config.id==='kiro'){env.KIRO_HOME=await kiroHome(config.kiroHomeParent,p=>{home=p;});await config.onHome?.(env.KIRO_HOME);if((await readdir(env.KIRO_HOME)).some(n=>n!=='agents'))throw new TurnFailure('kiro_profile_not_clean','unavailable');if(JSON.stringify(JSON.parse(await readFile(path.join(env.KIRO_HOME,'agents',AGENT+'.json'),'utf8')))!==JSON.stringify(agentConfig))throw new TurnFailure('isolation','unavailable');}
-   const version=await verifyCapabilities(config,cwd,env,signal,v=>{state.version=v;state.message=versionCheck(config.id,v).notices[0]?.message;});
+   const version=await verifyCapabilities(config,cwd,env,signal,v=>{state.version=v;state.message=versionCheck(config.id,v).notices[0]?.message;},!!images);
    if(binding&&version!==binding.version)throw new TurnFailure('invalid_model_settings','unavailable','Codex version changed since the model catalog was checked. Restart Aitiarch before choosing an effort.');
+   if(images){
+    if(version!==images.version)throw new TurnFailure('unsupported_cli','unavailable','Codex version changed since image delivery was reviewed.');
+    for(const bytes of buffers){
+     signal.throwIfAborted();
+     copies.push(await images.storage.copyForTransport(bytes));
+    }
+   }
    if(signal.aborted)throw new TurnFailure('cancelled');
-   const child=spawnToolless(config,'isolated',{cwd,env},binding?.catalog);
+   const child=spawnToolless(config,'isolated',{cwd,env},binding?.catalog,copies.map(copy=>copy.file));
    let queue:TurnEvent[]=[],wake=()=>{},done=false,failure:TurnFailure|undefined,killing=Promise.resolve(),buf='',total=0,stderrBytes=0,acpPhase='initialize',seq=0,session='',collect=false,answer='',completed=false,blocked=0,credits:number|undefined;
    const decoder=new StringDecoder('utf8');
    let exitCode:number|null=null,lastError='';
+   const errorText=(value:unknown)=>images?'The CLI reported an error during image delivery.':redact(String(value??'Provider error')).slice(0,300);
    const emit=(e:TurnEvent)=>{queue.push(e);wake();};
    const stop=(e?:TurnFailure)=>{failure??=e;if(child.pid)killing=killTree(child.pid);};
    const abort=()=>stop(new TurnFailure('cancelled'));signal.addEventListener('abort',abort,{once:true});
@@ -126,11 +139,11 @@ export function createCliAdapter(config:CliTurnConfig):TurnAdapter{
    const codex=(e:any)=>{
     // Known fail-closed notice: record the attempt (a count, never content) and keep the turn running. Every other error below still kills it.
     if(isBlockedCodeAttempt(e)){if(completed)throw new TurnFailure('event_order');blocked++;emit({type:'blocked',count:blocked});if(blocked>CODEX_BLOCKED_ATTEMPT_LIMIT)throw new TurnFailure('blocked_attempt_limit','error',`Codex tried to run code ${blocked} times; blocked.`);return;}
-    if(e.item?.type==='error'){lastError=redact(String(e.item.message??'Codex runtime unavailable')).slice(0,300);throw new TurnFailure('codex_runtime_error','unavailable',lastError);}
+    if(e.item?.type==='error'){lastError=errorText(e.item.message??'Codex runtime unavailable');throw new TurnFailure('codex_runtime_error','unavailable',lastError);}
     if(protocolRefusal(e))emit({type:'refusal',code:'refusal'});
     if(e.item){const t=e.item.type;if(t!=='agent_message'&&t!=='reasoning')throw new TurnFailure('tool_attempt');if(e.type==='item.completed'&&t==='agent_message'){if(completed)throw new TurnFailure('event_order');answer+=e.item.text??'';emit({type:'delta',text:e.item.text??''});}}
     else if(!['thread.started','turn.started','turn.completed','turn.failed','error'].includes(e.type))throw new TurnFailure('unknown_event');
-    if(e.type==='turn.failed'||e.type==='error'){lastError=redact(String(e.error?.message??e.message??'Provider error')).slice(0,300);throw new TurnFailure('provider_error','error',lastError);}
+    if(e.type==='turn.failed'||e.type==='error'){lastError=errorText(e.error?.message??e.message);throw new TurnFailure('provider_error','error',lastError);}
     if(e.type==='turn.completed'){if(completed)throw new TurnFailure('event_order');if(blocked&&!answer.trim())throw new TurnFailure('blocked_no_answer','error','Codex tried to run code; blocked, and gave no answer.');completed=true;const u=e.usage;if(u&&Number.isFinite(u.input_tokens)&&Number.isFinite(u.output_tokens))emit({type:'usage',usage:{unit:'tokens',amount:u.input_tokens+u.output_tokens,afterTurn:true}});emit({type:'complete',answer});}
    };
    const acp=(e:any)=>{
@@ -157,10 +170,11 @@ export function createCliAdapter(config:CliTurnConfig):TurnAdapter{
    emit({type:'start'});if(config.id==='kiro')send('initialize',{protocolVersion:1,clientCapabilities:{fs:{readTextFile:false,writeTextFile:false},terminal:false},clientInfo:{name:'Aitiarch',version:'1'}});else child.stdin.end(turnPrompt(input));
    try{while(!done||queue.length){if(queue.length)yield queue.shift()!;else await new Promise<void>(r=>{wake=r;});}
     // Diagnostic extraction only: a final unterminated error is never accepted as a completion.
-    if(config.id==='codex'&&!lastError&&buf.trim()){try{const e=JSON.parse(buf);if(e.type==='error'||e.type==='turn.failed')lastError=redact(String(e.error?.message??e.message??'Provider error')).slice(0,300);}catch{/* Incomplete JSON has no trustworthy error event. */}}
+    if(config.id==='codex'&&!lastError&&buf.trim()){try{const e=JSON.parse(buf);if(e.type==='error'||e.type==='turn.failed')lastError=errorText(e.error?.message??e.message);}catch{/* Incomplete JSON has no trustworthy error event. */}}
     if(failure)throw config.id==='codex'?new TurnFailure(failure.code,failure.status,`Codex exit=${exitCode}; ${lastError||failure.message}`):failure;if(buf.trim())throw new TurnFailure('truncated_json','error',`Provider exit=${exitCode}; ${lastError||'stdout ended mid-line.'}`);}
    finally{clearTimeout(inventoryTimer);signal.removeEventListener('abort',abort);if(!done)stop();await killing;await closed;}
    if((await readdir(cwd)).length)throw new TurnFailure('scratch_changed');
-  }finally{console.info('Provider cleanup target:',cwd);await cleanupProviderTemp(cwd);if(home){console.info('Provider home cleanup target:',home);await cleanupProviderTemp(home,{tempRoot:path.dirname(home)});}}
- }};
+  }finally{await discardTransportCopies(copies);console.info('Provider cleanup target:',cwd);await cleanupProviderTemp(cwd);if(home){console.info('Provider home cleanup target:',home);await cleanupProviderTemp(home,{tempRoot:path.dirname(home)});}}
+ }
+ return {id:config.id,label:config.id==='kiro'?'Kiro':'Codex',status:()=>({...state}),safetyLabel:defaults.safetyLabels[config.id],startTurn,...(config.id==='codex'?{startImageTurn:startTurn}:{})};
 }

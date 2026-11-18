@@ -14,15 +14,16 @@ type FixtureInput={
  selection:Readonly<ModelEffort>;approved:Awaited<ReturnType<typeof confirmImageManifest>>;
  storage:Pick<ImageStore,'copyForTransport'>;signal?:AbortSignal;
 };
+export type ImageDeliveryInput={approved:FixtureInput['approved'];storage:FixtureInput['storage'];version:string};
 
-/** Transport proof for synthetic fixtures. Receives confirmed buffers, never client paths.
- * The regular launchers gain no image permissions and do not use this proof to enable vision. */
-export async function runFakeImageTransport<T>(options:FixtureInput,consume:(child:ReturnType<typeof spawnImageFixture>,stdin:string)=>Promise<T>):Promise<T>{
- const {provider,approved,selection,storage,signal}=options;
- signal?.throwIfAborted();
+// Record only an exact provider/version/model tuple demonstrated with the isolated live launcher.
+const verifiedImageModels:ReadonlyArray<readonly [FixtureInput['provider'],string,string]>=[];
+export function imageDeliveryVerified(provider:FixtureInput['provider'],version:string|undefined,model:string|null){
+ return verifiedImageModels.some(([id,release,verifiedModel])=>provider===id&&version===release&&model===verifiedModel);
+}
+
+export function reviewedImageBuffers(provider:FixtureInput['provider'],model:string|null|undefined,approved:FixtureInput['approved']){
  const fail=()=>Error('Confirmed image bytes or model no longer match the reviewed send.');
- if(options.command!==process.execPath||!options.prefixArgs.length)throw Error('Isolated image delivery has not been verified for this provider.');
- const model=selection.model;
  if(!model||approved.manifest.provider!==provider||approved.manifest.model!==model||
     !approved.images.length||approved.images.length>IMAGE_SEND_MAX_COUNT||approved.images.length!==approved.manifest.images.length)throw fail();
  const buffers=approved.images.map((image,index)=>{
@@ -32,6 +33,26 @@ export async function runFakeImageTransport<T>(options:FixtureInput,consume:(chi
   return Buffer.from(image.bytes);
  });
  if(buffers.reduce((sum,bytes)=>sum+bytes.length,0)>IMAGE_SEND_MAX_BYTES)throw fail();
+ return buffers;
+}
+
+export function claudeImageInput(text:string,buffers:readonly Buffer[]){
+ return JSON.stringify({type:'user',message:{role:'user',content:[
+  {type:'text',text},
+  ...buffers.map(bytes=>({type:'image',source:{type:'base64',media_type:'image/png',data:bytes.toString('base64')}})),
+ ]},parent_tool_use_id:null})+'\n';
+}
+
+export async function discardTransportCopies(copies:readonly Awaited<ReturnType<ImageStore['copyForTransport']>>[]){
+ for(const copy of copies)await copy.discard().catch(()=>{console.warn('An interrupted image delivery copy remains in private storage.');});
+}
+
+/** Transport proof for synthetic fixtures, using the production argument boundary. */
+export async function runFakeImageTransport<T>(options:FixtureInput,consume:(child:ReturnType<typeof spawnImageFixture>,stdin:string)=>Promise<T>):Promise<T>{
+ const {provider,approved,selection,storage,signal}=options;
+ signal?.throwIfAborted();
+ if(options.command!==process.execPath||!options.prefixArgs.length)throw Error('Isolated image delivery has not been verified for this provider.');
+ const buffers=reviewedImageBuffers(provider,selection.model,approved);
 
  const root=await realpath(os.tmpdir());
  const cwd=await mkdtemp(path.join(root,'aitiarch-headless-'));
@@ -47,10 +68,7 @@ export async function runFakeImageTransport<T>(options:FixtureInput,consume:(chi
     images.push(copy.file);
    }
   }else{
-   stdin=JSON.stringify({type:'user',message:{role:'user',content:[
-    {type:'text',text:stdin},
-    ...buffers.map(bytes=>({type:'image',source:{type:'base64',media_type:'image/png',data:bytes.toString('base64')}})),
-   ]},parent_tool_use_id:null})+'\n';
+   stdin=claudeImageInput(stdin,buffers);
   }
   signal?.throwIfAborted();
   const child=spawnImageFixture(options,{cwd,images});
@@ -67,7 +85,7 @@ export async function runFakeImageTransport<T>(options:FixtureInput,consume:(chi
    await closed;
   }
  }finally{
-  for(const copy of copies)await copy.discard().catch(()=>{console.warn('An interrupted image delivery copy remains in private storage.');});
+  await discardTransportCopies(copies);
   console.info('Provider cleanup target:',cwd);await cleanupProviderTemp(cwd);
  }
 }

@@ -18,6 +18,12 @@ import {once} from 'node:events';
 import {mkdtemp,readFile,readdir,realpath,writeFile} from 'node:fs/promises';
 import {claudeArguments} from '../server/providers/claude-arguments.ts';
 import {CODEX_FLAGS} from '../server/providers/tool-less-arguments.ts';
+import {spawnIsolated,spawnToolless} from '../server/providers/launcher.ts';
+import {createProvider,prepareRequest} from '../server/providers/index.ts';
+import {createCliAdapter} from '../server/providers/tool-less.ts';
+import {normalChatTurn} from '../server/chat/normal-answerer.ts';
+import {CHAT_HARD_RULES} from '../server/chat/request.ts';
+import {DEFAULT_PIPELINE_CONFIG} from '../shared/pipeline-config.ts';
 import {runFakeImageTransport} from '../server/providers/image-transport.ts';
 import {resolveProjectStorage} from '../server/project-storage.ts';
 import {ImageStore} from '../server/image-store.ts';
@@ -89,6 +95,71 @@ it('Claude sends exact reviewed bytes in user blocks with only the stream input 
   {type:'text',text:'Synthetic reviewed prompt'},
   {type:'image',source:{type:'base64',media_type:'image/png',data:result.processed}},
  ]},parent_tool_use_id:null});
+});
+
+it('adds only the image input arguments at the production process boundary',async()=>{
+ const parent=await realpath(tmpdir());
+ const cwd=await mkdtemp(path.join(parent,'aitiarch-image-argv-'));
+ const selection={model:'synthetic-vision',effort:null};
+ const claude={provider:'claude' as const,command:process.execPath,prefixArgs:[fixture,'claude'],selection};
+ const codex={id:'codex' as const,command:process.execPath,prefixArgs:[fixture,'codex'],selection};
+ const args=claudeArguments({stream:true,partial:true,hardening:['--max-turns','1'],selection});
+ const compare=async(child:ReturnType<typeof spawnIsolated>,expected:string[])=>{
+  child.stdout.resume();child.stderr.resume();child.stdin.on('error',()=>{});
+  const closed=once(child,'close');child.stdin.end();
+  await closed;
+  expect(child.spawnargs.slice(3)).toEqual(expected);
+ };
+ await compare(spawnIsolated(claude,args,{cwd}),args);
+ await compare(spawnIsolated(claude,args,{cwd},true),[...args,'--input-format','stream-json']);
+ const codexArgs=[...CODEX_FLAGS,'--model',selection.model,'-C',cwd];
+ const privateCopy=path.join(process.env.AITIARCH_CONFIG_DIR!,'synthetic.png');
+ await writeFile(privateCopy,png);
+ await compare(spawnToolless(codex,'isolated',{cwd}),[...codexArgs,'-']);
+ await compare(spawnToolless(codex,'isolated',{cwd},undefined,[privateCopy]),[...codexArgs,'--image',privateCopy,'-']);
+});
+
+it.each(['claude','codex'] as const)('delivers a confirmed manifest through the production %s driver and keeps its accounting',async provider=>{
+ const config=await realpath(process.env.AITIARCH_CONFIG_DIR!);
+ const root=path.join(await mkdtemp(path.join(config,'project-')),'.aitiarch');
+ expect(await resolveProjectStorage(root,{create:true})).toMatchObject({ok:true});
+ const storage=new ImageStore(root),staged=await storage.stage(png);
+ const selection={model:'synthetic-vision',effort:null};
+ const binding={sendId:'synthetic-review',provider,model:selection.model};
+ const review=await reviewImageManifest(storage,[staged.id],binding);
+ const approved=await confirmImageManifest(storage,review,binding,{confirmImages:true,imageIds:[staged.id]});
+ const request={id:'synthetic-image',chat:true as const,action:'ask' as const,question:'What is shown?',selection:'',note:'',decisions:[],turns:[]};
+ const record=path.join(config,'record.json');
+ const cli={command:process.execPath,prefixArgs:[fixture,provider,'record',record],selection};
+ const read=async()=>JSON.parse(await readFile(record,'utf8'));
+ const reviewedPrompt=prepareRequest(request,review).instruction;
+ expect(reviewedPrompt).toContain(review.images[0].sha256);
+ expect(reviewedPrompt.endsWith(CHAT_HARD_RULES)).toBe(true);
+ const version=provider==='claude'?'2.1.205':'0.167.0',images={approved,storage,version};
+ if(provider==='claude'){
+  const adapter=createProvider({...cli,provider,contract:'claude-canary-2.1.205'});
+  await adapter.invoke(request,{onTextDelta:()=>{}});
+  const plain=await read();
+  const result=await adapter.invoke(request,{onTextDelta:()=>{},imageInput:images});
+  const image=await read(),blocks=image.body.message.content;
+  expect(image.argv).toEqual([...plain.argv,'--input-format','stream-json']);
+  expect(JSON.parse(blocks[0].text).instruction).toBe(reviewedPrompt);
+  expect(blocks[1].source.data).toBe(approved.images[0].bytes.toString('base64'));
+  expect(result).toMatchObject({rawReply:true,costUsd:0.001,usage:{inputTokens:30,outputTokens:5}});
+ }else{
+  const adapter=createCliAdapter({...cli,id:provider});
+  const options={answerer:provider,cap:DEFAULT_PIPELINE_CONFIG.council.caps.codex};
+  expect(await normalChatTurn(request,[adapter],undefined,options)).toMatchObject({status:'ok'});
+  const plain=await read();
+  const result=await normalChatTurn(request,[adapter],undefined,{...options,images});
+  const image=await read();
+  const normalized=(args:string[])=>args.map((v,i)=>args[i-1]==='-C'?'<scratch>':v);
+  expect(normalized(image.argv)).toEqual([...normalized(plain.argv).slice(0,-1),'--image',image.image,'-']);
+  expect(image.body.endsWith(reviewedPrompt)).toBe(true);
+  expect(image.contents).toBe(approved.images[0].bytes.toString('base64'));
+  await expect(readFile(image.image)).rejects.toMatchObject({code:'ENOENT'});
+  expect(result).toMatchObject({status:'ok',usage:[{unit:'tokens',amount:35,afterTurn:true}]});
+ }
 });
 
 it('Codex receives only a host-owned copy of the reviewed image and keeps view_image disabled',async()=>{
@@ -273,6 +344,7 @@ it('rejects and never stores a fake provider reply that invents image consent',a
   async invoke(request){return {id:request.id,provider:'claude',model:null,answer:answer([reference]),rawReply:true,claims:[],usage:null};},
  },[]);
  try{
+  expect(await runtime.imageAvailability()).toEqual({available:false,reason:'image delivery not verified yet'});
   const review=await runtime.review({id:'request-1',path:note,question:'Summarize this.',context:[]});
   await expect(runtime.review({id:'request-image',path:note,question:'Summarize this.',context:[],imageIds:[id]})).rejects.toMatchObject({code:'disabled'});
   await expect(runtime.send({reviewId:review.reviewId,confirmed:true,confirmImages:true,imageIds:[id]},()=>{})).rejects.toMatchObject({code:'review_required'});

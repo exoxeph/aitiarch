@@ -8,7 +8,7 @@ export interface TurnInput {question:string;notes:readonly {id:string;label:stri
 /** `blocked` is a running COUNT of host-blocked code attempts (Codex Code Mode failing closed). It carries no content. */
 export type TurnEvent={type:'start'}|{type:'delta';text:string}|{type:'complete';answer:string;model?:string|null}|{type:'refusal';code:string}|{type:'error';code:string}|{type:'usage';usage:TurnUsage}|{type:'blocked';count:number};
 export const BLOCKED_NOTE='Codex tried to run code; blocked';
-export interface TurnAdapter {id:string;label:string;safetyLabel:SafetyLabel;status?:()=>{version?:string;message?:string};startTurn(input:TurnInput,signal:AbortSignal):AsyncIterable<TurnEvent>}
+export interface TurnAdapter {id:string;label:string;safetyLabel:SafetyLabel;status?:()=>{version?:string;message?:string};startTurn(input:TurnInput,signal:AbortSignal):AsyncIterable<TurnEvent>;startImageTurn?(input:TurnInput,signal:AbortSignal,images:import('./image-transport.ts').ImageDeliveryInput):AsyncIterable<TurnEvent>}
 export type TurnStatus='ok'|'refused'|'unavailable'|'timeout'|'error';
 export interface TurnResult {model?:string;provider:string;safetyLabel:SafetyLabel;status:TurnStatus;answer:string;usage:TurnUsage[];durationMs:number;code?:string;message?:string;/** How many code attempts the host blocked (count only). */blockedAttempts?:number;/** Set on an ok turn that had blocked attempts. */note?:string;overCap?:boolean;warning?:string}
 export class TurnFailure extends Error {code:string;status:TurnStatus;constructor(code:string,status:TurnStatus='error',message=code){super(message);this.code=code;this.status=status;}}

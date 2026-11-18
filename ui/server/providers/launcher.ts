@@ -30,14 +30,15 @@ export function spawnModelCatalog(config:{id:'claude'|'codex';command:string;pre
 
 /** Separate notes-only profiles. Never shares or alters the Claude/Investigate/diagram profiles below.
  * The host builds every argument; prompts go to stdin only. No shell or native prefix arguments. */
-export function spawnToolless(config:{id:'codex'|'kiro';command:string;prefixArgs?:string[];selection?:Readonly<ModelEffort>},mode:'version'|'metadata'|'isolated',options:SpawnOptionsWithoutStdio&{cwd:string},verifiedCatalog?:ModelCatalog){
+export function spawnToolless(config:{id:'codex'|'kiro';command:string;prefixArgs?:readonly string[];selection?:Readonly<ModelEffort>},mode:'version'|'metadata'|'isolated',options:SpawnOptionsWithoutStdio&{cwd:string},verifiedCatalog?:ModelCatalog,images:readonly string[]=[]){
   const reject=()=>{throw new Error('Provider launch rejected: invalid tool-less profile.');};
   if(config.id!=='codex'&&config.id!=='kiro')reject();
   if(config.prefixArgs?.length&&config.command!==process.execPath)reject();
   if(!path.isAbsolute(config.command)||/\.(cmd|bat|ps1)$/i.test(config.command)||/(?:^|[\\/])claude(?:\.exe)?$/i.test(config.command))reject();
   if(mode!=='version'&&mode!=='metadata'&&mode!=='isolated')reject();
+  if(images.length&&(config.id!=='codex'||mode!=='isolated'||images.some(file=>!path.isAbsolute(file))))reject();
   const selectionArgs=mode==='isolated'?modelArguments(config.id,config.selection,verifiedCatalog!==undefined,verifiedCatalog):[];
-  const args=mode==='version'?['--version']:mode==='metadata'?(config.id==='kiro'?['acp','--help']:['exec','--help']):config.id==='kiro'?['acp','--agent-engine','v2','--agent',TOOLLESS_AGENT]:codexPrintArguments(options.cwd,selectionArgs);
+  const args=mode==='version'?['--version']:mode==='metadata'?(config.id==='kiro'?['acp','--help']:['exec','--help']):config.id==='kiro'?['acp','--agent-engine','v2','--agent',TOOLLESS_AGENT]:codexPrintArguments(options.cwd,selectionArgs,images);
   // Reuse the existing empty, real OS-temp folder check; do not accept a repo or a linked folder.
   assertLaunch('codex','isolated',args,options.cwd);
   return spawn(config.command,[...(config.prefixArgs??[]),...args],{...options,shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:'pipe'});
@@ -72,10 +73,11 @@ export function metadataOutput(config: Target, args: string[], cwd: string, env:
     child.stdin?.on('error', () => {}); child.stdin?.end();
   });
 }
-export function spawnIsolated(config: Target, args: string[], options: SpawnOptionsWithoutStdio & { cwd: string }) {
+export function spawnIsolated(config: Target, args: string[], options: SpawnOptionsWithoutStdio & { cwd: string }, imageInput=false) {
   assertTarget(config);
   assertLaunch(config.provider, 'isolated', args, options.cwd,config.selection);
-  return spawn(config.command, [...(config.prefixArgs ?? []), ...args], { ...options, shell: false, windowsHide: true, stdio: 'pipe' });
+  if(imageInput&&(config.provider!=='claude'||args[args.indexOf('--output-format')+1]!=='stream-json'))throw Error('Invalid structured image input profile.');
+  return spawn(config.command, [...(config.prefixArgs ?? []), ...args,...(imageInput?['--input-format','stream-json']:[])], { ...options, shell: false, windowsHide: true, stdio: 'pipe' });
 }
 /** Image launch entry point for verified Node fixtures. Real vision stays disabled. */
 export function spawnImageFixture(config:Target,options:{cwd:string;images:readonly string[]}){
@@ -84,16 +86,10 @@ export function spawnImageFixture(config:Target,options:{cwd:string;images:reado
   assertTarget(config);
   const {cwd,images}=options;
   const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>/^(SYSTEMROOT|WINDIR|TEMP|TMP)$/i.test(key)));
-  let args:string[];
-  if(config.provider==='claude'){
-    args=claudeArguments({stream:true,selection:config.selection});
-    assertLaunch('claude','isolated',args,cwd,config.selection);
-    args.push('--input-format','stream-json');
-  }else{
-    args=codexPrintArguments(cwd,modelArguments('codex',config.selection,false),images);
-    assertLaunch('codex','isolated',args,cwd);
-  }
-  return spawn(config.command,[...config.prefixArgs,...args],{cwd,env,shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:'pipe'});
+  const spawnOptions={cwd,env,detached:process.platform!=='win32'};
+  return config.provider==='claude'
+    ?spawnIsolated(config,claudeArguments({stream:true,selection:config.selection}),spawnOptions,true)
+    :spawnToolless({...config,id:'codex'},'isolated',spawnOptions,undefined,images);
 }
 /** A chat harness session turn. The arguments are built here from the profile (never passed in), the working folder must be the project's
  *  registered, empty session folder, and the instruction file must live outside it. */

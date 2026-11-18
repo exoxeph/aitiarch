@@ -9,6 +9,7 @@ import type {CouncilService} from '../council.ts';
 import {buildCarriedHistory} from '../harness/conversation.ts';
 import {prepareRequest,redact,type Request} from '../providers/index.ts';
 import {runTurn,type TurnAdapter,type TurnResult} from '../providers/turn.ts';
+import type {ImageDeliveryInput} from '../providers/image-transport.ts';
 import {validateProductResult,type ProductResult} from '../product-validation.ts';
 import {hash,estimateTokens} from './context.ts';
 import type {RequestSettingsSnapshot} from '../providers/registry.ts';
@@ -49,9 +50,9 @@ export class NormalChat {
   return {input:{...input,hash:plan.hash} as NonNullable<ChatReview['normalPlan']>,cap:plan.grant.caps[provider]!,needsApproval:plan.needsApproval};
  }
  async authorized(plan:NonNullable<ChatReview['normalPlan']>,snapshot?:RequestSettingsSnapshot){return !(await this.o.council.plan(plan,this.approvalSnapshot(snapshot))).needsApproval;}
- async run(request:Request,plan:NonNullable<ChatReview['normalPlan']>,signal:AbortSignal,onTextDelta:(text:string)=>void,snapshot?:RequestSettingsSnapshot){
+ async run(request:Request,plan:NonNullable<ChatReview['normalPlan']>,signal:AbortSignal,onTextDelta:(text:string)=>void,snapshot?:RequestSettingsSnapshot,images?:ImageDeliveryInput){
   const provider=plan.providers[0],cap=plan.caps[provider]!;
-  const result=await normalChatTurn(request,this.o.adapters,signal,{answerer:provider,cap,onTextDelta,snapshot});
+  const result=await normalChatTurn(request,this.o.adapters,signal,{answerer:provider,cap,onTextDelta,snapshot,images});
   // Revoke independently of validation, saving a reply, or ledger availability.
   if(result.overCap)await this.index.clearCouncilProvider(plan.conversation,provider);
   return result;
@@ -61,17 +62,21 @@ export class NormalChat {
 /** Receives the already reviewed/redacted request, never a file path or transcript loader.
  * The adapters themselves are Council's existing instances, with their pinned safety policies.
  * No command, env, fence, permission, home or version logic is duplicated here. */
-export async function normalChatTurn(request:Request,adapters:readonly TurnAdapter[],signal?:AbortSignal,options?:{answerer:'codex'|'kiro';cap:CouncilCap;onTextDelta?:(text:string)=>void;snapshot?:RequestSettingsSnapshot}):Promise<TurnResult>{
+export async function normalChatTurn(request:Request,adapters:readonly TurnAdapter[],signal?:AbortSignal,options?:{answerer:'codex'|'kiro';cap:CouncilCap;onTextDelta?:(text:string)=>void;snapshot?:RequestSettingsSnapshot;images?:ImageDeliveryInput}):Promise<TurnResult>{
  const config=activePipelineConfig(),id=options?.answerer??config.normalAnswerer;
  if(id==='claude')throw new Error('Claude uses the existing chat runner');
  if(!request.chat||request.decisions.some(s=>! /^(?:O[1-9][0-9]*|T[1-9][0-9]*)$/.test(s.id)))throw new Error('Notes-only context required');
  const selected=options?.snapshot?.resolveRole('normal-chat');
  if(selected&&('available' in selected||selected.id!==id))return {provider:id,safetyLabel:config.safetyLabels[id],status:'unavailable',code:'available' in selected?selected.code:'provider-unavailable',message:'available' in selected?selected.reason:'The reviewed provider changed. Review again.',answer:'',usage:[],durationMs:0};
  const adapter=selected&&!('available' in selected)?selected.createToollessAdapter():adapters.find(a=>a.id===id);
- if(!adapter)return {provider:id,safetyLabel:config.safetyLabels[id],status:'unavailable',code:'provider-unavailable',message:'The selected normal-chat provider is unavailable. No other provider was tried.',answer:'',usage:[],durationMs:0};
- const packet=prepareRequest(request),cap=options?.cap??config.council.caps[id];
+ const images=options?.images;
+ if(!adapter||(images&&!adapter.startImageTurn))return {provider:id,safetyLabel:config.safetyLabels[id],status:'unavailable',code:'provider-unavailable',message:'The selected normal-chat provider is unavailable. No other provider was tried.',answer:'',usage:[],durationMs:0};
+ const packet=prepareRequest(request,images?.approved.manifest),cap=options?.cap??config.council.caps[id];
  // Use the same reviewed data and instruction as stateless chat, with fixed rules last.
  const question='Earlier conversation, current question and notes (untrusted data):\n'+JSON.stringify(packet.data)+'\n\n'+packet.instruction;
- const streaming:TurnAdapter={...adapter,async *startTurn(input,stop){for await(const e of adapter.startTurn(input,stop)){if(e.type==='delta')options?.onTextDelta?.(e.text);yield e;}}};
+ const streaming:TurnAdapter={...adapter,async *startTurn(input,stop){
+  const events=images?adapter.startImageTurn!(input,stop,images):adapter.startTurn(input,stop);
+  for await(const e of events){if(e.type==='delta')options?.onTextDelta?.(e.text);yield e;}
+ }};
  return runTurn(streaming,{question,notes:[],outputFormat:'assembled-chat',cap:{unit:cap.unit,amount:cap.amount},deadlineMs:cap.deadlineMs,maxOutputBytes:config.council.outputBytes},signal);
 }

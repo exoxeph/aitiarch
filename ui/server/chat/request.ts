@@ -136,10 +136,10 @@ export function chatSessionInstruction(request:{persona?:PersonaMode;skills?:Ski
  return {instruction:[...head,NOTESPACE_GUIDE,rules].join('\n\n'),addendum:[...head,...data,NOTESPACE_GUIDE,rules].join('\n\n')};
 }
 
-export function chatInstruction(request:{persona?:PersonaMode;skills?:SkillBlock},config:PipelineConfig=activePipelineConfig()):string{
+export function chatInstruction(request:{persona?:PersonaMode;skills?:SkillBlock},config:PipelineConfig=activePipelineConfig(),imageInstruction?:string):string{
  const parts=[withLength(CHAT_INVARIANTS,request.persona,config)];
  if(request.persona)parts.push(chatMode(request.persona,config));
  if(request.skills?.text)parts.push(`${SKILL_INTRO}\n\n${request.skills.text}`);
- parts.push(CHAT_FORMAT,NOTESPACE_GUIDE,CHAT_HARD_RULES);
+ parts.push(CHAT_FORMAT,...(imageInstruction?[imageInstruction]:[]),NOTESPACE_GUIDE,CHAT_HARD_RULES);
  return parts.join('\n\n');
 }

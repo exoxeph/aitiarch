@@ -30,6 +30,7 @@ const adapter={id:'claude',label:'Claude',safetyLabel:'fenced',async *startTurn(
 const registry=new ProviderRegistry([descriptorFromAdapter(adapter,{detect:async()=>({available:true,reason:null})})]);
 const store=await Store.open(root),watcher=new NoteWatcher(store);
 const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==';
+const metadata='SYNTHETIC_EXIF_MARKER';
 const result=(request,answer)=>({id:request.id,provider:'claude',model:null,answer,rawReply:true,claims:[],usage:null});
 let imageCalls=0,browser;
 const app=createApp({store,watcher,distDir:path.join(repo,'ui','dist'),
@@ -39,6 +40,7 @@ const app=createApp({store,watcher,distDir:path.join(repo,'ui','dist'),
   imageCalls++;
   assert.equal(approved.images.length,3);
   assert(approved.images.every(image=>image.bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))));
+  assert(approved.images.every(image=>!image.bytes.includes(Buffer.from(metadata))));
   assert.deepEqual(approved.images.map(({width,height})=>[width,height]),[[1,1],[3,2],[4,3]]);
   return result(request,'Synthetic image reply.\n<claims>{"none":"no_context_used"}</claims>');
  }},
@@ -72,13 +74,18 @@ try{
   input.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));
  },png);
  await panel.getByRole('img',{name:'Attached image 1'}).waitFor();
- await composer.evaluate(async input=>{
+ const originalJpeg=await composer.evaluate(async (input,metadata)=>{
   const canvas=document.createElement('canvas');canvas.width=3;canvas.height=2;
   canvas.getContext('2d').fillRect(0,0,3,2);
   const jpeg=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg'));
-  const data=new DataTransfer();data.items.add(new File([jpeg],'drop.jpg',{type:'image/jpeg'}));
+  const bytes=new Uint8Array(await jpeg.arrayBuffer()),exif=new TextEncoder().encode('Exif\0\0'+metadata);
+  const tagged=new Uint8Array(bytes.length+4+exif.length);
+  tagged.set(bytes.subarray(0,2));tagged.set([0xff,0xe1,0,2+exif.length],2);
+  tagged.set(exif,6);tagged.set(bytes.subarray(2),6+exif.length);
+  const data=new DataTransfer();data.items.add(new File([tagged],'drop.jpg',{type:'image/jpeg'}));
   input.dispatchEvent(new DragEvent('drop',{dataTransfer:data,bubbles:true,cancelable:true}));
- });
+  return Array.from(tagged);
+ },metadata);
  await panel.getByRole('img',{name:'Attached image 2'}).waitFor();
  const webp=await page.evaluate(async()=>{
   const canvas=document.createElement('canvas');canvas.width=4;canvas.height=3;
@@ -88,6 +95,12 @@ try{
  });
  await panel.locator('input[type=file][accept*="image/webp"]').setInputFiles({name:'picker.webp',mimeType:'image/webp',buffer:Buffer.from(webp)});
  await panel.getByRole('img',{name:'Attached image 3'}).waitFor();
+ for(const original of [originalJpeg,webp]){
+  const status=await page.evaluate(async data=>(await fetch('/api/chat/image-stage',{
+   method:'PUT',headers:{'content-type':'application/json','x-aitiarch':'1'},body:JSON.stringify({data}),
+  })).status,Buffer.from(original).toString('base64'));
+  assert.equal(status,409,'Only a processed PNG can be staged by the server.');
+ }
  await page.waitForFunction(()=>Array.from(document.querySelectorAll('.chat-image-list img')).every(img=>img.complete&&img.naturalWidth>0));
 
  for(let turn=1;turn<=2;turn++){

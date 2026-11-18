@@ -8,7 +8,7 @@ import type { Configuration, ErrorCode, CLIProviderName } from './index.ts';
 import {helpDeclaresEffort} from '../../shared/model-settings.ts';
 import {cliVersion,versionCheck,TESTED_VERSION,type CliNotice} from './cli-compatibility.ts';
 
-export type Availability = { available: true;version?:string;notices?:CliNotice[]; hardening?: string[]; warnings?: string[]; textStreaming?:boolean;effortSupported?:boolean } | {
+export type Availability = { available: true;version?:string;notices?:CliNotice[]; hardening?: string[]; warnings?: string[]; textStreaming?:boolean;effortSupported?:boolean;structuredInput?:true } | {
   available: false; code: ErrorCode; message: string; version?: string; warnings?: string[];
 };
 type Requirement = readonly [flag: string, meaning: RegExp];
@@ -68,7 +68,7 @@ export function assessCapabilities(config: Pick<Configuration, 'provider' | 'con
     message: `Provider disabled (${config.provider} ${version}): live isolation has not been verified; canary approval required.` };
   const maxTurns = blocks.get('--max-turns') ?? '';
   return config.provider === 'claude'
-    ? { available: true,version:version!,notices:check.notices,warnings:check.notices.map(n=>n.message), effortSupported:helpDeclaresEffort(help),textStreaming:/partial/i.test(blocks.get('--include-partial-messages')??''), hardening: /(?:max(?:imum)?|limit)[\s\S]*\bturns?\b/i.test(maxTurns) ? ['--max-turns', '1'] : [] }
+    ? { available: true,version:version!,notices:check.notices,warnings:check.notices.map(n=>n.message), effortSupported:helpDeclaresEffort(help),textStreaming:/partial/i.test(blocks.get('--include-partial-messages')??''), hardening: /(?:max(?:imum)?|limit)[\s\S]*\bturns?\b/i.test(maxTurns) ? ['--max-turns', '1'] : [],...(/\bstream-json\b/.test(blocks.get('--input-format')??'')?{structuredInput:true as const}:{}) }
     : { available: true,version:version!,notices:check.notices,warnings:check.notices.map(n=>n.message) };
 }
 

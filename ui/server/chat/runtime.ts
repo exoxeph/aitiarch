@@ -39,6 +39,7 @@ import {finishReply,InvalidImageReference} from './reply.ts';
 import type {ConfirmedImageSend} from '../../shared/image-attachments.ts';
 import {confirmImageManifest,reviewImageManifest,type ChatImageDelivery} from './image-review.ts';
 import type {ImageStore} from '../image-store.ts';
+import {imageDeliveryVerified,type ImageDeliveryInput} from '../providers/image-transport.ts';
 import {checkContract} from '../../shared/persona-contract.ts';
 import type {PersonaMode} from '../../shared/persona.ts';
 export class ChatError extends Error {code:ChatErrorCode;/** For budget_reached: the numbers the gate used. */budget?:BudgetDetail;/** Which rule said no, for the page's Why? line. Reporting only. */why?:ChatWhy;constructor(code:ChatErrorCode,budget?:BudgetDetail,why?:ChatWhy){super(code);this.code=code;if(budget)this.budget=budget;if(why)this.why=why;}}
@@ -86,15 +87,17 @@ export class ChatRuntime {
  constructor(store:Store,ink:InkStore,chats:ChatStore,provider?:Provider,sessions?:ContextModule[],extras?:ExtrasFor,harness?:ChatHarness,images?:DiagramImageStore,normal?:NormalChat,
   imageInput?:{store:ImageStore;delivery?:ChatImageDelivery}){this.imageInput=imageInput;this.normal=normal;this.images=images;this.harness=harness;this.extras=extras;this.store=store;this.ink=ink;this.chats=chats;this.provider=provider;this.ledger=new LedgerStore(store.rootReal);this.sessions=sessions??sessionModules({project:path.dirname(store.rootReal)});}
  private imageUnavailable(detail:string){return new ChatError('disabled',undefined,{ruleId:'image_input_unavailable',nodeId:'provider_contracts',detail});}
- private imageEligibility(provider:NormalAnswerer,model:string|null){
+ private imageEligibility(provider:NormalAnswerer,model:string|null,version?:string){
   if(provider==='kiro')return 'Kiro does not have a verified isolated image transport.';
-  if(!model||!this.imageInput?.delivery?.supports(provider,model))return 'Image delivery is unavailable for the selected provider and model until isolated delivery is verified.';
+  const verified=this.imageInput?.delivery?!!model&&this.imageInput.delivery.supports(provider,model):imageDeliveryVerified(provider,version,model);
+  if(!this.imageInput||!verified)return 'image delivery not verified yet';
   return null;
  }
  async imageAvailability(){
   const snapshot=await this.normal?.selection(),selected=snapshot?.resolveRole('normal-chat');
   if(selected&&'available' in selected)return {available:false,reason:selected.reason};
-  const reason=this.imageEligibility(selected?.id??activePipelineConfig().normalAnswerer,selected?.selection?.model??null);
+  const id=selected?.id??activePipelineConfig().normalAnswerer;
+  const reason=this.imageEligibility(id,selected?.selection?.model??null,snapshot?.providerVersions?.[id]);
   return {available:reason===null,reason};
  }
  memoryMessages(note:string){return structuredClone(this.ephemeral.get(note)??[]);}
@@ -134,7 +137,7 @@ export class ChatRuntime {
   const reviewId=randomUUID();
   let imageReview:ChatReview['images'];
   if(withImages){
-   const model=selected?.selection?.model??null,reason=this.imageEligibility(answerer,model);
+   const model=selected?.selection?.model??null,reason=this.imageEligibility(answerer,model,routing?.providerVersions?.[answerer]);
    if(reason||answerer==='kiro')throw this.imageUnavailable(reason??'This provider cannot accept images.');
    try{imageReview=await reviewImageManifest(this.imageInput!.store,input.imageIds!,{sendId:reviewId,provider:answerer,model});}
    catch{throw new ChatError('review_required',undefined,{ruleId:'image_review_required',nodeId:'permission_gate',detail:'A staged image could not be read. Attach it again before reviewing.'});}
@@ -217,7 +220,7 @@ export class ChatRuntime {
    ...(request.selection&&editor?.spans?{span:{from:editor.spans.from.map(x=>redact(x)),to:editor.spans.to.map(x=>redact(x))}}:{}),
    diagrams:diagramRefs.map(d=>({n:d.n,title:redact(d.title),...(withheldWhy.has(d.asset)?{withheld:withheldWhy.get(d.asset)!}:{})})),others:sessionSources.filter(x=>x.id!=='N1'&&x.id!=='S1'&&x.text.length>0).map(x=>({id:x.id,label:cleanLabel(x.label),chars:x.text.length}))});
   if(!session||native||withImages)request.editor=manifest;
-  const packet=prepareRequest(request);
+  const packet=prepareRequest(request,imageReview);
   const sessionText=!withImages&&!native&&session?chatSessionInstruction(request,sessionSources,{diagrams:diagramRefs.length>0,canOpen}):null;
   const settingsChanged=session?.normalSettingsKey?session.normalSettingsKey!==routing?.contextKey('normal-chat'):!!(selected&&!('available' in selected)&&selected.selection);
   const switching=!!(session&&routing&&(session.cli||session.turns>0)&&((session.normalAnswerer??'claude')!==answerer||settingsChanged));
@@ -281,11 +284,17 @@ export class ChatRuntime {
   if(s.usage.spent+frozen.reservation>s.usage.tokenBudget)throw new ChatError('budget_reached',{spent:s.usage.spent,next:frozen.reservation,budget:s.usage.tokenBudget});
   if([...(await this.chats.read(review.path)).messages,...this.memoryMessages(review.path)].some(m=>m.id===request.id))throw new ChatError('invalid_chat');
   let approvedImages:Awaited<ReturnType<typeof confirmImageManifest>>|undefined;
+  let imageInput:ImageDeliveryInput|undefined;
   if(review.images){
-   const model=selected?.selection?.model??null,reason=this.imageEligibility(answerer,model);
+   const version=current?.providerVersions?.[answerer];
+   const model=selected?.selection?.model??null,reason=this.imageEligibility(answerer,model,version);
    if(reason||answerer==='kiro')throw this.imageUnavailable(reason??'This provider cannot accept images.');
    try{approvedImages=await confirmImageManifest(this.imageInput!.store,review.images,{sendId:review.reviewId,provider:answerer,model},{confirmImages:input.confirmImages,imageIds:input.imageIds??[]});}
    catch{throw new ChatError('review_required',undefined,{ruleId:'image_review_required',nodeId:'permission_gate',detail:'Confirm the current images, or attach and review them again if they changed.'});}
+   if(!this.imageInput!.delivery){
+    if(!version)throw this.imageUnavailable('image delivery not verified yet');
+    imageInput={approved:approvedImages,storage:this.imageInput!.store,version};
+   }
   }
   // Reserve synchronously before availability/provider awaits; two requests cannot overspend one chat.
   if(s.running||s.serial!==frozen.serial)throw new ChatError('busy');
@@ -314,8 +323,8 @@ export class ChatRuntime {
     const delta=gate.push(text);if(delta&&!frozen.confirmedImages)emit({type:'delta',id:request.id,text:delta,provisional:true});
    };
    let nativeResult:TurnResult|undefined;
-   if(native&&!approvedImages){
-    nativeResult=await this.normal!.run(request,review.normalPlan!,controller.signal,onTextDelta,frozen.routing);
+   if(native&&(!approvedImages||imageInput)){
+    nativeResult=await this.normal!.run(request,review.normalPlan!,controller.signal,onTextDelta,frozen.routing,imageInput);
     await appendLedger(this.ledger,{id:randomUUID(),inkId:frozen.session!.id,requestId:request.id,note:review.path,event:'council_turn',at:new Date().toISOString(),council:{provider:answerer,status:nativeResult.status,usage:nativeResult.usage,durationMs:Math.round(nativeResult.durationMs),...(nativeResult.overCap?{overCap:true}:{}),...(nativeResult.blockedAttempts?{blockedAttempts:nativeResult.blockedAttempts}:{})}});
     s.usage.nativeUsage??=[];
     for(const u of nativeResult.usage){const have=s.usage.nativeUsage.find(x=>x.provider===answerer&&x.unit===u.unit&&x.afterTurn===u.afterTurn);if(have)have.amount+=u.amount;else s.usage.nativeUsage.push({provider:answerer,...u});}
@@ -324,8 +333,9 @@ export class ChatRuntime {
     if(controller.signal.aborted)throw new ChatError('cancelled');
     if(nativeResult.status!=='ok')throw new ChatError(nativeResult.status==='unavailable'?'disabled':'provider_failed',undefined,{ruleId:nativeResult.status==='unavailable'?'provider-unavailable':nativeResult.status==='refused'?'provider-refused':nativeResult.status==='timeout'?'provider-timeout':'provider-error',nodeId:'provider_contracts',detail:`${answerer}: ${safeName(nativeResult.code)}`});
    }
-   const reply:ProductResult=approvedImages?await this.imageInput!.delivery!.send({request,selection:review.modelSettings!,approved:approvedImages},controller.signal):
-    nativeResult?{id:request.id,provider:answerer,model:nativeResult.model??null,answer:nativeResult.answer,claims:[],usage:null,rawReply:true}:frozen.session?await this.sessionTurn(frozen,request,controller.signal,onTextDelta,facts,emit):await this.provider!.invoke(request,{signal:controller.signal,onTextDelta,...(review.modelSettings?{selection:review.modelSettings}:{})});
+   const fixtureDelivery=this.imageInput?.delivery;
+   const reply:ProductResult=approvedImages&&fixtureDelivery?await fixtureDelivery.send({request,selection:review.modelSettings!,approved:approvedImages},controller.signal):
+    nativeResult?{id:request.id,provider:answerer,model:nativeResult.model??null,answer:nativeResult.answer,claims:[],usage:null,rawReply:true}:frozen.session&&!imageInput?await this.sessionTurn(frozen,request,controller.signal,onTextDelta,facts,emit):await this.provider!.invoke(request,{signal:controller.signal,onTextDelta,...(review.modelSettings?{selection:review.modelSettings}:{}),...(imageInput?{imageInput}:{})});
    const result:ProductResult={...reply,answer:dropManifestEcho(reply.answer)}; // the editor line is the app's, never part of a reply, in a conversation or a one-off chat
    if(controller.signal.aborted)throw new ChatError('cancelled');
    if(result.usage){for(const n of Object.values(result.usage))if(typeof n!=='number'||!Number.isFinite(n)||n<0)throw new ChatError('validation',undefined,usageFault(result.usage));
@@ -335,6 +345,7 @@ export class ChatRuntime {
    }else if(!charged){s.usage.spent+=frozen.reservation;s.usage.estimated=(s.usage.estimated??0)+frozen.reservation;s.usage.unreportedCalls++;}charged=true;
    // Enforce exact keys for fake/adapted providers too; never accept owned fields or aliases.
    if(!Array.isArray(result.claims)||result.claims.some(c=>!c||typeof c!=='object'||Object.keys(c).sort().join()!=='quote,sourceId')||Object.keys(result).some(k=>!['id','provider','model','answer','claims','usage','rawReply','costUsd'].includes(k))||(Object.hasOwn(result,'costUsd')&&!(typeof result.costUsd==='number'&&Number.isFinite(result.costUsd)&&result.costUsd>=0)))throw new ChatError('validation',undefined,resultFault(result)); // costUsd is the CLI's own dollar figure (optional): a finite number of 0 or more, nothing else
+   if(approvedImages&&result.costUsd!==undefined)facts.costUsd=result.costUsd;
    // The output gate's final part: the body, each claim checked on its own, and whether the citations need attention.
    // A claim about a diagram's picture is accepted only for a diagram this conversation's stream shows a Read of: one opened in this turn, or in an earlier reply of the conversation (saved with it).
    const opened=new Set([...(frozen.diagrams?.earlier??[]),...facts.reads.map(r=>r.asset)]),claimable=(frozen.diagrams?.all??[]).filter(d=>opened.has(d.asset)).map(d=>'D'+d.n);
