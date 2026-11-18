@@ -1,6 +1,7 @@
 import {useEffect, useLayoutEffect, useRef, useState} from 'react';
 import {fetchSetup, refreshSetupModels, saveSetup} from '../api.ts';
 import {validModelId} from '../../shared/model-settings.ts';
+import {outOfView, placePopover} from '../../shared/popover-anchor.ts';
 import {applyChoice, chatChoiceModel, chipLabel, mergeModelCatalogs, roleModelLabel, type Pick} from '../../shared/model-choice.ts';
 import type {ModelRole, SetupProvider, SetupUpdate, SetupView} from '../../shared/setup.ts';
 
@@ -35,30 +36,49 @@ export function ModelPicker({role = 'normal-chat', provider, lastAnswer, onChang
  useLayoutEffect(() => {
   const popup = panel.current, chip = trigger.current;
   if (!open || !usable || !popup || !chip) return;
-  const position = (event?: Event) => {
-   if (event?.target instanceof Node && popup.contains(event.target)) return;
+  const sheet = window.matchMedia('(max-width: 640px)');
+  // The popover lives in the top layer, so nothing clips it: it must follow the chip itself. Every ancestor that can scroll or clip the chip is watched, and the
+  // popover closes (without taking focus back) once the chip has left their visible area, instead of floating over the page.
+  const clips: Element[] = [];
+  for (let el = chip.parentElement; el && el !== document.documentElement; el = el.parentElement) {
+   const style = getComputedStyle(el);
+   if (/(auto|scroll|hidden|clip|overlay)/.test(style.overflowX + style.overflowY)) clips.push(el);
+  }
+  let frame = 0;
+  const update = () => {
+   frame = 0;
    const rect = chip.getBoundingClientRect();
-   const width = document.documentElement.clientWidth;
-   const above = rect.top - 18, below = window.innerHeight - rect.bottom - 18;
-   const belowChip = above < 240 && below > above;
-   popup.style.setProperty('--picker-right', `${Math.max(12, Math.min(width - rect.right, width - popup.offsetWidth - 12))}px`);
-   popup.style.setProperty('--picker-top', belowChip ? `${rect.bottom + 6}px` : 'auto');
-   popup.style.setProperty('--picker-bottom', belowChip ? 'auto' : `${window.innerHeight - rect.top + 6}px`);
-   popup.style.setProperty('--picker-room', `${Math.max(0, belowChip ? below : above)}px`);
+   const bounds = clips.map(el => el.getBoundingClientRect()).filter(r => r.width > 0 && r.height > 0);
+   if (!sheet.matches && outOfView(rect, bounds)) {setOpen(false); setFilter(''); return;}
+   const place = placePopover(rect, {width: document.documentElement.clientWidth, height: window.innerHeight}, popup.offsetWidth);
+   popup.style.setProperty('--picker-right', `${place.right}px`);
+   popup.style.setProperty('--picker-top', place.top === null ? 'auto' : `${place.top}px`);
+   popup.style.setProperty('--picker-bottom', place.bottom === null ? 'auto' : `${place.bottom}px`);
+   popup.style.setProperty('--picker-room', `${place.room}px`);
+  };
+  const schedule = (event?: Event) => {
+   if (event?.target instanceof Node && popup.contains(event.target)) return;
+   if (!frame) frame = requestAnimationFrame(update);
   };
   popup.showPopover();
-  position();
+  update();
   const outside = (e: PointerEvent) => {if (!box.current?.contains(e.target as Node)) setOpen(false);};
   document.addEventListener('pointerdown', outside);
-  window.addEventListener('resize', position);
-  window.addEventListener('scroll', position, true);
+  window.addEventListener('resize', schedule);
+  window.addEventListener('scroll', schedule, true);
+  window.visualViewport?.addEventListener('resize', schedule);
+  const sizes = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => schedule());
+  for (const el of [chip, popup, ...clips]) sizes?.observe(el);
   const selected = popup.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]:not([disabled])');
   (selected ?? popup).focus();
   return () => {
+   if (frame) cancelAnimationFrame(frame);
+   sizes?.disconnect();
    if (popup.matches(':popover-open')) popup.hidePopover();
    document.removeEventListener('pointerdown', outside);
-   window.removeEventListener('resize', position);
-   window.removeEventListener('scroll', position, true);
+   window.removeEventListener('resize', schedule);
+   window.removeEventListener('scroll', schedule, true);
+   window.visualViewport?.removeEventListener('resize', schedule);
   };
  }, [open, usable]);
  useLayoutEffect(() => {

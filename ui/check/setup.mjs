@@ -314,6 +314,85 @@ try {
  await investigateRole.getByRole('button',{name:'Reset to default'}).click();
  await investigateRole.getByRole('button',{name:'Model: Claude · Default'}).waitFor();
 
+ // Slice 11c3: a model picker opened in the scrolling Setup pane stays attached to its chip.
+ {
+  const rects = () => page.evaluate(() => {
+   const chip = document.querySelector('.compose-model-btn[aria-expanded="true"]'), pop = document.querySelector('.compose-model-menu:popover-open');
+   if (!chip || !pop) return null;
+   const c = chip.getBoundingClientRect(), p = pop.getBoundingClientRect();
+   const gap = p.bottom <= c.top + 1 ? c.top - p.bottom : p.top >= c.bottom - 1 ? p.top - c.bottom : -1; // -1: it covers its own chip
+   return {gap, onScreen: p.top >= -1 && p.bottom <= innerHeight + 1 && p.left >= -1 && p.right <= innerWidth + 1, popBottom: p.bottom, innerHeight};
+  });
+  const settle = () => page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+  const picker = page.getByRole('menu', {name: 'Model and effort'});
+  const chipOf = () => investigateRole.getByRole('button', {name: /^Model: /});
+  const attached = async (label) => {
+   const r = await rects();
+   assert(r && r.gap >= 0 && r.gap <= 16 && r.onScreen, `${label}: the popover is not attached to its chip: ${JSON.stringify(r)}`);
+  };
+  const scrollTop = () => setupPane.evaluate(el => el.scrollTop);
+  for (const width of [1280, 640]) {
+   await page.setViewportSize({width, height: 420});
+   await chipOf().scrollIntoViewIfNeeded();
+   await chipOf().click();
+   await picker.waitFor();
+   if (width > 640) await attached(`${width}px opened`);
+   await shot(`picker-scroll-before-${width}.png`);
+   assert((await setupPane.evaluate(el => el.scrollHeight - el.clientHeight)) > 80, 'the Setup pane must scroll for this case');
+   const start = await scrollTop();
+   await setupPane.evaluate((el, dy) => el.scrollBy(0, dy), start >= 40 ? -40 : 40);
+   await settle();
+   if (width > 640) await attached(`${width}px after a small scroll`);
+   else assert.equal((await rects()).popBottom, (await rects()).innerHeight, '640px keeps its bottom sheet');
+   await shot(`picker-scroll-after-${width}.png`);
+   if (width > 640) {
+    // The chip leaves the visible area of the pane: the popover closes instead of floating.
+    await setupPane.evaluate(el => {
+     const chip = document.querySelector('.compose-model-btn[aria-expanded="true"]'), pane = el.getBoundingClientRect(), c = chip.getBoundingClientRect();
+     el.scrollTo(0, c.top > pane.top + pane.height / 2 ? 0 : el.scrollHeight);
+    });
+    await settle();
+    assert.equal(await chipOf().evaluate((chip, pane) => {
+     const c = chip.getBoundingClientRect(), p = pane.getBoundingClientRect();
+     return c.bottom <= p.top || c.top >= p.bottom;
+    }, await setupPane.elementHandle()), true, 'the chip must be out of the pane for this step');
+    const away = await rects();
+    await shot(`picker-scroll-away-${width}.png`);
+    await picker.waitFor({state: 'detached', timeout: 2000}).catch(() => assert.fail('the chip scrolled out of the pane but the popover stayed open: ' + JSON.stringify(away)));
+    // A resize repositions it.
+    await chipOf().scrollIntoViewIfNeeded();
+    await chipOf().click();
+    await picker.waitFor();
+    await page.setViewportSize({width: 1100, height: 440});
+    await settle();
+    await attached('after a resize');
+    // Wheel inside the popover's list does not scroll the pane behind it.
+    const list = picker.locator('.compose-model-list');
+    assert.equal(await list.evaluate(el => el.scrollHeight > el.clientHeight), true, 'the list must overflow for the wheel step');
+    const held = await scrollTop(), box = await list.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, 900);
+    await page.mouse.wheel(0, 900);
+    await settle();
+    assert.equal(await scrollTop(), held, 'wheel scrolling in the popover list must not scroll the pane behind it');
+    assert.equal(await list.evaluate(el => el.scrollTop > 0), true);
+    // Escape and an outside click close it.
+    await page.keyboard.press('Escape');
+    await picker.waitFor({state: 'detached'});
+    await chipOf().click();
+    await picker.waitFor();
+    const modal = await settings.boundingBox(), popup = await picker.boundingBox();
+    assert(modal.x + modal.width - 24 > popup.x + popup.width, 'the outside click target must be clear of the popover');
+    await page.mouse.click(modal.x + modal.width - 24, modal.y + modal.height - 24);
+    await picker.waitFor({state: 'detached'});
+   } else {
+    await page.keyboard.press('Escape');
+    await picker.waitFor({state: 'detached'});
+   }
+  }
+  await page.setViewportSize({width: 1280, height: 800});
+ }
+
  await settings.getByRole('tab',{name:'Text size'}).click();
  await settings.getByText('Choose the model in the chat box.').waitFor();
  assert.equal(await settings.getByText(/Models and effort|Save model|Inherit provider/).count(),0);
