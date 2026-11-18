@@ -134,4 +134,33 @@ describe('first-run setup endpoints', () => {
   expect(view.roles.find(r=>r.role==='investigate-read')).toMatchObject({provider:'claude',source:'explicit flag',reason:null});
   expect((await loadMachineSetup(dir)).roles['investigate-read']).toBe('codex');
  });
+ it('shows discovered paths separately from launch locks, and resets effective settings',async()=>{
+  const claude={...codex,id:'claude' as const};
+  const saved=defaultMachineSetup();
+  saved.providers.codex.enabled=true;
+  await saveMachineSetup(dir,saved);
+  const open=service([codex,claude]);
+  expect((await open.get()).providers[0].source).toBe('discovered');
+  await open.put({role:'normal-chat',provider:'codex'});
+  await open.put({role:'normal-chat',provider:'codex',selection:{model:'custom',effort:null}});
+  await open.put({role:'normal-chat',reset:true});
+  expect((await open.get()).roles.find(r=>r.role==='normal-chat')).toMatchObject({provider:'claude',source:'default'});
+  expect((await loadMachineSetup(dir)).providers.codex.roles['normal-chat']).toBeUndefined();
+  const locked=createSetupHttp({dir,project,providers:[codex,claude],overrides:{claude:claude.path!},ready:async()=>true});
+  expect((await locked.get()).roles.find(r=>r.role==='normal-chat')?.locked).toMatch(/set by launch flag/i);
+  await expect(locked.put({role:'normal-chat',provider:'codex'})).rejects.toThrow(/remove the flag/i);
+  expect((await loadMachineSetup(dir)).roles['normal-chat']).toBe('claude');
+ });
+ it('validates Council membership atomically and reset restores all enabled compatible providers',async()=>{
+  const saved=defaultMachineSetup();
+  saved.providers.codex.enabled=true;
+  await saveMachineSetup(dir,saved);
+  const council=service([codex,{...codex,id:'claude'}]);
+  await council.put({role:'council',participants:['codex']});
+  for(const participants of [['codex','codex'],['kiro'],['bad']])
+   await expect(council.put({role:'council',participants})).rejects.toThrow();
+  expect((await council.get()).roles.find(r=>r.role==='council')).toMatchObject({participants:['codex'],source:'saved choice'});
+  await council.put({role:'council',reset:true});
+  expect((await council.get()).roles.find(r=>r.role==='council')?.participants).toEqual(['codex','claude']);
+ });
 });

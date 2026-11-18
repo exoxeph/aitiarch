@@ -2,6 +2,7 @@
 // It reuses the 11b validation (model-settings.ts) and the existing SetupUpdate write path; it makes no request itself.
 import {CLAUDE_EFFORTS, CLAUDE_MODELS, reportedModelLabel, validModelId} from './model-settings.ts';
 import type {ModelRole, SetupProvider, SetupUpdate, SetupView} from './setup.ts';
+import {roleDefinition,type SetupRole} from './setup.ts';
 
 export interface ModelOption {id: string; label: string; model: string | null}
 export interface ProviderGroup {
@@ -22,15 +23,18 @@ const optionsFor = (id: SetupProvider): ModelOption[] =>
  id === 'claude' ? [DEFAULT, ...CLAUDE_MODELS.map(alias => ({id: alias, label: alias, model: alias as string}))] : [DEFAULT];
 
 /** Only compatible providers that can do the role are selectable; the rest stay listed, disabled, with the doctor's reason. */
-export function chatChoiceModel(view: SetupView, role: ModelRole = 'normal-chat'): ChoiceModel {
+export const roleModelLabel=(role:SetupRole)=>roleDefinition(role).label;
+export function chatChoiceModel(view: SetupView, role: ModelRole = 'normal-chat', scopedProvider?:SetupProvider): ChoiceModel {
  const info = view.roles.find(r => r.role === role);
  const capable = info?.capableProviders ?? [];
- const groups = view.providers.map(p => {
-  const available = p.compatible && capable.includes(p.id);
-  return {id: p.id, label: p.label || names[p.id], available, reason: available ? null : p.reason,
+ const groups = view.providers.filter(p=>!scopedProvider||p.id===scopedProvider).map(p => {
+  const pinned = role!=='council'&&p.source==='explicit flag'&&info?.provider!==p.id;
+  const available = p.compatible && capable.includes(p.id) && !info?.locked && !pinned;
+  return {id: p.id, label: p.label || names[p.id], available, reason: available ? null : info?.locked??(pinned?'Executable set by launch flag.':p.compatible?'This provider does not support this role.':p.reason),
    options: available ? optionsFor(p.id) : [], customAllowed: available && p.id !== 'kiro'};
  });
- const provider = info?.provider && groups.find(g => g.id === info.provider)?.available ? info.provider : null;
+ const selected = scopedProvider??info?.provider;
+ const provider = selected && capable.includes(selected) && view.providers.find(p=>p.id===selected)?.compatible ? selected : null;
  const entry = provider ? view.models.find(m => m.role === role && m.provider === provider) : undefined;
  const shown = entry ? entry.selection ?? entry.effective : null;
  return {role, groups,
@@ -43,8 +47,7 @@ const title = (value: string) => (CLAUDE_MODELS as readonly string[]).includes(v
 
 /** "Claude · Sonnet · Medium". After an answer, the model the CLI reported, or "model not reported"; never an alias guess. */
 export function chipLabel(model: ChoiceModel, lastAnswer?: {model: string | null} | null): string {
- if (!model.groups.some(g => g.available)) return 'AI off';
- if (!model.current) return 'Choose AI';
+ if (!model.current) return model.groups.some(g => g.available)?'Choose AI':'AI off';
  const {provider, model: id, effort} = model.current;
  const parts = [names[provider], id === null ? 'Default' : title(id), ...(effort === null ? [] : [title(effort)])];
  return parts.join(' · ') + (lastAnswer ? ` · ran ${reportedModelLabel(lastAnswer.model)}` : '');

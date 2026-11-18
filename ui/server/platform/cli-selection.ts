@@ -1,6 +1,7 @@
 import {resolveCli,type CliId,type DiscoveryOptions} from './cli-discovery.ts';
 import {execFile} from 'node:child_process';
 import {assessCapabilities} from '../providers/capabilities.ts';
+import {ROLE_REGISTRY} from '../../shared/setup.ts';
 import {assessToollessMetadata,cliVersion,compareVersions,type CliNotice} from '../providers/cli-compatibility.ts';
 import {helpDeclaresEffort} from '../../shared/model-settings.ts';
 import {loadMachineSetup} from '../setup-store.ts';
@@ -50,7 +51,10 @@ export async function selectClis(options:CliSelectionOptions):Promise<SelectedCl
    const compatible=assessed.available;
    provider.notices='notices' in assessed?assessed.notices:[];
    provider.code=compatible?'metadata_compatible':'profile_unverified';provider.isolation=compatible?'metadata-compatible':'unverified';
-   provider.roles=compatible?(id==='claude'?['normal-chat','invoked','thread-reply','council']:['normal-chat','council']):[];
+   // These describe the standalone discovery probe. The doctor role report also
+   // accounts for bridges and the saved assignment used by the application.
+   provider.roles=compatible?ROLE_REGISTRY.filter(({capability})=>capability==='normal-chat'||capability==='council'||
+    id==='claude'&&(capability==='invoked'||capability==='thread-reply')).map(role=>role.id):[];
    provider.reason=compatible?[...(provider.notices??[]).map(n=>n.message),'Metadata matches the tool-less profile. Runtime isolation, login and entitlement are not verified; existing turn checks still apply.'].join('; '):
     ('message' in assessed?assessed.message:'reason' in assessed?assessed.reason:null)??'CLI capabilities could not be verified. No request was sent.';
   }catch(e){provider.code=(e as Error).message;provider.reason='Metadata check failed, exceeded its output limit or timed out. Check the CLI installation; no request was sent.';}

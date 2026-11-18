@@ -46,7 +46,10 @@ export function SettingsDialog({onClose,onOpenStudio,onOpenSetup,setupError,pref
  useEffect(()=>{
   const el=dialog.current;
   const key=(e:KeyboardEvent)=>{
-   if(e.key==='Escape'){e.preventDefault();e.stopPropagation();onClose();return;}
+   if(e.key==='Escape'){
+    if(e.target instanceof Element&&e.target.closest('.compose-model')?.querySelector('[aria-expanded="true"]'))return;
+    e.preventDefault();e.stopPropagation();onClose();return;
+   }
    if(e.key!=='Tab'||!el)return;
    const focusable=[...el.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled])')].filter(x=>x.offsetParent!==null&&x.tabIndex>=0);
    if(!focusable.length)return;const first=focusable[0],last=focusable[focusable.length-1];

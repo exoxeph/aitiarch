@@ -1,7 +1,7 @@
 // Policy and request snapshots only. Existing adapters retain all runtime guards.
 // No spawn, read-tool harness constructor, prompt assembly or active global settings.
 import {createHash} from 'node:crypto';
-import {defaultMachineSetup,SETUP_PROVIDERS,SETUP_ROLES,type MachineSetup,type SetupRole,type SetupProvider} from '../../shared/setup.ts';
+import {defaultMachineSetup,SETUP_PROVIDERS,ROLE_REGISTRY,roleDefinition,type MachineSetup,type SetupRole,type SetupProvider} from '../../shared/setup.ts';
 import {loadMachineSetup} from '../setup-store.ts';
 import {SETUP_FILE} from '../setup-store.ts';
 import {lstat} from 'node:fs/promises';
@@ -77,8 +77,8 @@ export function descriptorFromAdapter(adapter:TurnAdapter,options:{detect:()=>Pr
 export function compatibleDefaults(providers:readonly ProviderDescriptor[]):MachineSetup {
  const setup=defaultMachineSetup();
  for(const id of SETUP_PROVIDERS)setup.providers[id].enabled=providers.some(p=>p.id===id);
- for(const role of SETUP_ROLES){const compatible=providers.filter(p=>p.capabilities[role]);
-  setup.roles[role]=compatible.find(p=>p.id==='claude')?.id??compatible[0]?.id??null;
+ for(const {id,capability} of ROLE_REGISTRY){const compatible=providers.filter(p=>p.capabilities[capability]);
+  setup.roles[id]=compatible.find(p=>p.id==='claude')?.id??compatible[0]?.id??null;
  }
  return setup;
 }
@@ -96,7 +96,7 @@ export class ProviderRegistry {
   if(!setup.providers[id].enabled)return unavailable(role,id,'provider-disabled','The selected provider is disabled. Enable it in machine setup; no other provider was tried.');
   const provider=this.providers.find(p=>p.id===id);
   if(!provider)return unavailable(role,id,'provider-unavailable','The selected provider has no registered adapter. Configure its CLI; no other provider was tried.');
-  if(!provider.capabilities[role])return unavailable(role,id,'role-unavailable',`${provider.label} is not available for ${role} through a verified bridge. No other provider was tried.`);
+  if(!provider.capabilities[roleDefinition(role).capability])return unavailable(role,id,'role-unavailable',`${provider.label} is not available for ${role} through a verified bridge. No other provider was tried.`);
   return provider;
  }
  async snapshot(dir:string,initial?:()=>Promise<MachineSetup>):Promise<RequestSettingsSnapshot>{
@@ -132,14 +132,18 @@ export class ProviderRegistry {
    },...(selected.createInvokedProvider?{createInvokedProvider:bind(selected.createInvokedProvider)}:{}),...(selected.createThreadProvider?{createThreadProvider:bind(selected.createThreadProvider)}:{})});
   };
   const council=()=>{
-   const providers=fault?[]:this.providers.filter(p=>frozen.providers[p.id].enabled&&p.capabilities.council&&states.get(p.id)?.available);
+   const providers=fault?[]:this.providers.filter(p=>frozen.providers[p.id].enabled&&p.capabilities.council&&states.get(p.id)?.available&&(!frozen.councilParticipants||frozen.councilParticipants.includes(p.id)));
    // Informational Council eligibility only: do not change the shared single-provider
    // approval service used by normal chat, or its grants/budget rules.
    return {available:providers.length>=2,providers:Object.freeze(providers),reason:providers.length>=2?null:fault?'Machine setup could not be read. No providers were selected.':'Council needs at least two enabled, available providers. Normal chat can use one compatible provider.'};
   };
-  return Object.freeze({settings:frozen,providerVersions,resolveRole:resolve,resolveParticipant:(id:SetupProvider)=>resolve('council',{...frozen,roles:{...frozen.roles,council:id}}),council,
+  const providerKey=(settings:MachineSetup,id:SetupProvider)=>versionKey(createHash('sha256').update(JSON.stringify(
+   settings.councilParticipants===undefined?settings.providers[id]:{provider:settings.providers[id],participants:settings.councilParticipants})).digest('hex'),id);
+  return Object.freeze({settings:frozen,providerVersions,resolveRole:resolve,resolveParticipant:(id:SetupProvider)=>frozen.councilParticipants&&!frozen.councilParticipants.includes(id)
+   ? unavailable('council',id,'role-unavailable','This provider is not selected in AI settings → Setup → Council participants.')
+   : resolve('council',{...frozen,roles:{...frozen.roles,council:id}}),council,
    contextKey:(role:SetupRole)=>versionKey(settingsKey(frozen,role,fault),frozen.roles[role]),currentContextKey:async(role:SetupRole)=>{const current=await readSettings();return versionKey(settingsKey(current,role),current.roles[role]);},
-   providerKey:(id:SetupProvider)=>versionKey(createHash('sha256').update(JSON.stringify(frozen.providers[id])).digest('hex'),id),
-   currentProviderKey:async(id:SetupProvider)=>versionKey(createHash('sha256').update(JSON.stringify((await readSettings()).providers[id])).digest('hex'),id)});
+   providerKey:(id:SetupProvider)=>providerKey(frozen,id),
+   currentProviderKey:async(id:SetupProvider)=>providerKey(await readSettings(),id)});
  }
 }

@@ -3,6 +3,7 @@ import {CouncilPanel,CouncilResults} from './CouncilPanel.tsx';
 import {selectionLabel,reportedModelLabel} from '../../shared/model-settings.ts';
 import {ChatModeMenu,type ChatMode} from './ChatMode.tsx';
 import {ModelPicker} from './ModelPicker.tsx';
+import type {SetupView} from '../../shared/setup.ts';
 import {useEffect,useMemo,useRef,useState,type CSSProperties,type FormEvent,type KeyboardEvent as ReactKeyboardEvent,type PointerEvent as ReactPointerEvent} from 'react';
 import {api,ApiError,streamChat,streamConversation,type ConversationBody} from '../api.ts';
 import type {InvestigateUsage} from '../../shared/usage.ts';
@@ -66,6 +67,8 @@ export interface ChatPanelProps {
  onShowQuote?:(quote:string)=>boolean;onCiteClaim?:(heading:{text:string;slug:string;level:number}|null)=>boolean;
  /** The Why? panel of a blocked reply: open the Pipeline Studio with the node that blocked it lit up. */
  onShowOnPipeline?:(nodeId:string)=>void;
+ setupView?:SetupView;
+ onSetupChange?:(view:SetupView)=>void;
 }
 
 /** The diagrams Claude opened in a turn, as rows on the Investigate trail's look: a green dot and "Opened D1 'title'". Live while the reply streams; kept with the reply. */
@@ -132,7 +135,7 @@ interface PendingPlan {plan:ConversationPlan;id:string;question:string;route:Rou
 type AtItem={kind:'repo';label:string;ready:boolean}|{kind:'note';path:string}|{kind:'file';path:string};
 const atItemKey=(i:AtItem)=>i.kind==='repo'?'repo':i.kind+':'+i.path;
 
-function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,extraNotes=[],onClearExtraNotes,onShowQuote=()=>false,onCiteClaim=()=>false,onShowOnPipeline,conversation,onConversation}:BodyProps){
+function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,extraNotes=[],onClearExtraNotes,onShowQuote=()=>false,onCiteClaim=()=>false,onShowOnPipeline,conversation,onConversation,setupView,onSetupChange}:BodyProps){
  const otherNotes=extraNotes.filter(p=>p!==openPath);
  const setConversation=(id:string,session?:HarnessSession)=>onConversation(id,session?.note??path??'');
  const [chips,setChips]=useState<ContextChip[]>(()=>DEFAULT_CONTEXT.map(c=>({...c}))),[turns,setTurns]=useState<Turn[]>([]),[draft,setDraft]=useState('');
@@ -371,10 +374,22 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
   await showPlan({id,question:CONTINUE_QUESTION,route:'investigate',attachments:a.repo||a.files.length?a:{...a,repo:true},resume:true});void t;};
  // What the last finished answer says it ran on: the chip shows the CLI's reported model, or "model not reported". Never an inferred alias.
  const lastDone=[...turns].reverse().find(t=>t.status==='complete'&&t.message),lastAnswer=lastDone?.message?{model:lastDone.message.model}:null;
- const cancelReview=()=>{
+ const discardReview=(restoreFocus:boolean)=>{
   if(!pending)return;const id=pending.requestId,q=questions.get(id)??'';
-  setTurns(t=>t.filter(x=>x.id!==id));questions.delete(id);setDraft(q);setPending(null);input.current?.focus();
+  setTurns(t=>t.filter(x=>x.id!==id));questions.delete(id);setDraft(q);setPending(null);if(restoreFocus)input.current?.focus();
  };
+ const cancelReview=()=>discardReview(true);
+ const normalProvider=setupView?.roles.find(role=>role.role==='normal-chat')?.provider;
+ const normalSettingsKey=setupView&&JSON.stringify([normalProvider,setupView.models.find(model=>model.role==='normal-chat'&&model.provider===normalProvider)?.effective]);
+ const lastNormalSettings=useRef(normalSettingsKey);
+ useEffect(()=>{
+  const previous=lastNormalSettings.current;
+  lastNormalSettings.current=normalSettingsKey;
+  if(previous!==undefined&&previous!==normalSettingsKey&&pending){
+   discardReview(false);
+   setNotice('AI settings changed. Review this message again before sending.');
+  }
+ },[normalSettingsKey]);
  // A double tap on Send (or Enter then a click) must not land on the Stop that takes its place: Stop ignores clicks for a moment after a send starts.
  const stop=(t?:Turn)=>{if(!path||Date.now()-sentAt.current<STOP_GUARD_MS)return;if(t?.inv&&conversation)void api.investigateCall('cancel',{session:conversation}).catch(()=>{});else void api.chatCall('cancel',{path}).catch(()=>{});};
  // A reply's source chips name the note its question was asked on, not the note that is open now: in a conversation that followed the person to another note, that can differ.
@@ -502,7 +517,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
    <div className="chat-composer-bar">
     <ChatModeMenu value={mode} onChange={setMode} disabled={composing||busy}/>
     <div className="compose-right">
-     {mode==='chat'&&<ModelPicker lastAnswer={lastAnswer} disabled={composing||busy} returnFocus={()=>input.current?.focus()} onChanged={()=>{if(pending)cancelReview();}}/>}
+     {mode==='chat'&&<ModelPicker view={setupView} onViewChange={onSetupChange} lastAnswer={lastAnswer} disabled={composing||busy} returnFocus={()=>input.current?.focus()} onChanged={()=>{if(pending)cancelReview();}}/>}
      <button type="submit" className="chat-send" aria-label="Send message" title={mode==='council'?'Review the Council question':undefined} disabled={!draft.trim()||composing}>
       <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 16V4M5 9l5-5 5 5"/></svg>
      </button>

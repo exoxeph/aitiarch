@@ -1,28 +1,29 @@
 import {useEffect, useRef, useState} from 'react';
 import {fetchSetup, saveSetup} from '../api.ts';
 import {CLAUDE_EFFORTS} from '../../shared/model-settings.ts';
-import {applyChoice, chatChoiceModel, chipLabel, type Pick} from '../../shared/model-choice.ts';
-import type {ModelRole, SetupUpdate, SetupView} from '../../shared/setup.ts';
+import {applyChoice, chatChoiceModel, chipLabel, roleModelLabel, type Pick} from '../../shared/model-choice.ts';
+import type {ModelRole, SetupProvider, SetupUpdate, SetupView} from '../../shared/setup.ts';
 
 interface Api {load: () => Promise<SetupView>; save: (update: SetupUpdate) => Promise<SetupView>}
 const realApi: Api = {load: fetchSetup, save: saveSetup};
 const caret = <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 10l4-4 4 4"/></svg>;
 
 /** The model and effort choice, where people type. It only reads and writes the machine setup: no provider call, no catalog. */
-export function ModelPicker({role = 'normal-chat', lastAnswer, onChanged, returnFocus, disabled = false, api = realApi, view: initial, defaultOpen = false}: {
- role?: ModelRole; lastAnswer?: {model: string | null} | null; onChanged?: () => void; returnFocus?: () => void;
+export function ModelPicker({role = 'normal-chat', provider, lastAnswer, onChanged, onViewChange, returnFocus, disabled = false, api = realApi, view: external, defaultOpen = false}: {
+ role?: ModelRole; provider?:SetupProvider; lastAnswer?: {model: string | null} | null; onChanged?: () => void; onViewChange?:(view:SetupView)=>void; returnFocus?: () => void;
  disabled?: boolean; api?: Api; view?: SetupView; defaultOpen?: boolean;
 }) {
- const [view, setView] = useState<SetupView | null>(initial ?? null);
+ const [loaded, setView] = useState<SetupView | null>(null);
+ const view=external??loaded;
  const [open, setOpen] = useState(defaultOpen), [busy, setBusy] = useState(false), [notice, setNotice] = useState('');
  const [custom, setCustom] = useState<Record<string, string>>({});
  const box = useRef<HTMLDivElement>(null);
  useEffect(() => {
-  if (initial) return;
+  if (external) return;
   let alive = true;
   api.load().then(next => {if (alive) setView(next);}).catch(() => {});
   return () => {alive = false;};
- }, []);
+ }, [external,api]);
  useEffect(() => {
   if (!open) return;
   const outside = (e: PointerEvent) => {if (!box.current?.contains(e.target as Node)) setOpen(false);};
@@ -31,7 +32,7 @@ export function ModelPicker({role = 'normal-chat', lastAnswer, onChanged, return
   return () => document.removeEventListener('pointerdown', outside);
  }, [open]);
  if (!view) return null;
- const model = chatChoiceModel(view, role);
+ const model = chatChoiceModel(view, role, provider);
  const usable = model.groups.some(g => g.available);
  const cur = model.current;
 
@@ -40,7 +41,7 @@ export function ModelPicker({role = 'normal-chat', lastAnswer, onChanged, return
   const outcome = await applyChoice(model, pick, update => api.save(update));
   setBusy(false);
   if (!outcome.ok) {setNotice(outcome.notice); return;}
-  if (outcome.view) setView(outcome.view);
+  if (outcome.view) {setView(outcome.view);onViewChange?.(outcome.view);}
   setOpen(false); returnFocus?.();
   if (outcome.invalidates) onChanged?.();
  }
@@ -58,7 +59,7 @@ export function ModelPicker({role = 'normal-chat', lastAnswer, onChanged, return
 
  return <div className="compose-mode compose-model" ref={box} onKeyDown={arrows}>
   <button type="button" className="compose-mode-btn compose-model-btn" aria-haspopup="menu" aria-expanded={open} aria-label={`Model: ${chipLabel(model, lastAnswer)}`}
-   title={usable ? 'Choose the AI and model for this chat' : 'No compatible AI was found'} disabled={disabled || busy || !usable} onClick={() => {setNotice(''); setOpen(v => !v);}}>
+   title={usable ? `Choose model and effort for ${roleModelLabel(role)}` : model.groups.find(g=>g.reason)?.reason??'No compatible AI was found'} disabled={disabled || busy || !usable} onClick={() => {setNotice(''); setOpen(v => !v);}}>
    <span className="compose-model-text">{chipLabel(model, lastAnswer)}</span>{caret}
   </button>
   {open && usable && <div className="compose-mode-menu compose-model-menu" role="menu" aria-label="Model and effort" aria-busy={busy}>

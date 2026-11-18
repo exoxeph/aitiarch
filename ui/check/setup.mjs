@@ -8,6 +8,8 @@ import {Store} from '../server/store.ts';
 import {NoteWatcher} from '../server/watch.ts';
 import {createApp} from '../server/http.ts';
 import {createSetupHttp} from '../server/setup-http.ts';
+import {compatibleDefaults,descriptorFromAdapter} from '../server/providers/registry.ts';
+import {saveMachineSetup} from '../server/setup-store.ts';
 
 const output = path.resolve(process.env.BATCH2A_OUTPUT ?? '');
 const relative = path.relative(path.resolve('..'), output);
@@ -77,6 +79,12 @@ try {
  providers.push({id:'claude',path:'C:/synthetic/claude.exe',version:'2.1.206',isolation:'metadata-compatible',
   reason:'Synthetic startup metadata',effort:true,effortCode:'help_flag_present',
   notices:[{level:'info',message:'untested version: tested 2.1.205, found 2.1.206'}]});
+ providers.push({id:'codex',path:'C:/synthetic/codex.exe',version:'0.167.0',isolation:'metadata-compatible',
+  reason:'Synthetic startup metadata',effort:null,effortCode:'not_applicable'});
+ const defaults=compatibleDefaults(providers.map(tool=>descriptorFromAdapter({
+  id:tool.id,label:tool.id,safetyLabel:'contained',async *startTurn(){throw Error('No provider should run during setup.');},
+ },{detect:async()=>({available:true,reason:null}),bridges:{invoked:true,'thread-reply':true,'investigate-read':true,'skill-diagram':true}})));
+ await saveMachineSetup(dir,{...defaults,setupSeen:true,defaultRoles:Object.keys(defaults.roles)});
  await page.reload();
  await page.getByRole('button',{name:'Notes menu',exact:true}).click();
  assert.equal(await dialog.count(),0);
@@ -92,12 +100,14 @@ try {
  const readCount = setupRequests.length;
  await setupPane.getByText('C:/synthetic/claude.exe',{exact:true}).waitFor();
  await setupPane.getByText(/untested version: tested 2.1.205/).waitFor();
- await setupPane.getByText('Council needs at least two enabled, compatible providers.').waitFor();
  await setupPane.getByText(/This feature uses the startup Claude configuration/).first().waitFor();
  await setupPane.getByText('Choose the model in the chat box.').waitFor();
- assert.equal(await setupPane.getByRole('combobox',{name:'Answers by default'}).inputValue(),'claude');
- assert.equal(await setupPane.getByRole('combobox').count(),1);
- assert.equal(await setupPane.getByText(/Save model|Custom model|Effort/).count(),0);
+ const normalRole=setupPane.locator('[data-role="normal-chat"]');
+ assert.equal(await setupPane.getByRole('combobox',{name:'Normal chat',exact:true}).inputValue(),'claude');
+ assert.equal(await setupPane.getByText('discovered',{exact:false}).count(),2);
+ const council=setupPane.getByRole('group',{name:'Council participants'});
+ assert.equal(await council.getByRole('checkbox',{name:'Claude'}).isChecked(),true);
+ assert.equal(await council.getByRole('checkbox',{name:'Codex'}).isChecked(),true);
  for(const width of [1280,640]){
   await page.setViewportSize({width,height:800});
   assert.equal(await setupPane.evaluate(el=>el.scrollWidth<=el.clientWidth),true);
@@ -107,6 +117,23 @@ try {
  }
  await page.setViewportSize({width:1280,height:800});
  assert.equal(setupRequests.length,readCount);
+ await council.getByRole('checkbox',{name:'Claude'}).uncheck();
+ await council.getByRole('button',{name:'Save participants'}).click();
+ await council.getByText('Council needs at least two enabled, compatible providers.').waitFor();
+ assert.deepEqual((await setup.get()).roles.find(r=>r.role==='council').participants,['codex']);
+ await council.getByRole('button',{name:'Reset to default'}).click();
+ await council.getByText('Answers the same question independently. · default').waitFor();
+ await normalRole.getByRole('button',{name:/Model: Claude/}).click();
+ const settingsPicker=normalRole.getByRole('menu',{name:'Model and effort'});
+ await settingsPicker.getByRole('menuitemradio',{name:'haiku',exact:true}).focus();
+ await page.keyboard.press('Escape');
+ await settingsPicker.waitFor({state:'hidden'});
+ assert.equal(await settings.isVisible(),true);
+ await normalRole.getByRole('button',{name:/Model: Claude/}).click();
+ await settingsPicker.getByRole('menuitemradio',{name:'haiku',exact:true}).click();
+ await normalRole.getByRole('button',{name:'Model: Claude · Haiku'}).waitFor();
+ await normalRole.getByRole('button',{name:'Reset to default'}).click();
+ await normalRole.getByRole('button',{name:'Model: Claude · Default'}).waitFor();
 
  await settings.getByRole('tab',{name:'Text size'}).click();
  await settings.getByText('Choose the model in the chat box.').waitFor();
@@ -132,6 +159,12 @@ try {
  assert.equal(await dialog.getByRole('combobox').count(),1);
  assert.equal(await dialog.getByText(/Effort|Models and effort|Save model|Custom ID/).count(),0);
  await atWidths('first-run-card');
+ const customize=dialog.getByText('Customize which AI does each job',{exact:true});
+ await customize.click();
+ assert.equal(await dialog.getByRole('combobox',{name:'Normal chat',exact:true}).inputValue(),'claude');
+ assert.equal(await dialog.getByRole('group',{name:'Council participants'}).getByRole('checkbox',{name:'Codex'}).isChecked(),true);
+ await atWidths('first-run-roles');
+ await customize.click();
  await dialog.getByRole('button',{name:'Continue',exact:true}).click();
  await dialog.waitFor({state:'detached'});
 
@@ -149,7 +182,7 @@ try {
  assert.equal(await menu.getByText(/starts a fresh conversation/).count(),1);
  // Claude is the default answerer and its CLI declares --effort, so the Effort section is offered; it is the only provider group with one.
  assert.equal(await menu.getByRole('group',{name:'Effort'}).count(),1);
- assert.equal(await menu.getByRole('group').count(),2);
+ assert.equal(await menu.getByRole('group').count(),3);
  await atWidths('composer-popover');
 
  // An invalid custom ID is refused with a notice and no write.

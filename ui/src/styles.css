@@ -1144,6 +1144,9 @@ button.claim-chip:focus-visible, .claim-action:focus-visible { outline: 2px soli
 .setup-path { overflow-wrap: anywhere; }
 .setup-model { min-inline-size: 0; margin: var(--space-3) 0; padding: var(--space-3); border: 1px solid var(--rule); }
 .setup-model label { display: block; margin-bottom: var(--space-2); }
+.setup-model select { max-width: 100%; }
+.setup-roles .compose-model { margin-block: var(--space-2); }
+.setup-roles .compose-model-menu { position: static; width: min(100%, 21rem); min-width: 0; box-shadow: none; }
 .settings-dialog button.setup-primary:not(.ghost) { border-color: var(--accent); background: var(--accent-soft); }
 .settings-close { font-size: 22px; line-height: 1; }
 .settings-body { display: grid; flex: 1; grid-template-columns: 200px minmax(0, 1fr); min-height: 0; }

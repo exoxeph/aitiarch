@@ -1,7 +1,8 @@
 import {useEffect, useRef, useState} from 'react';
 import {applyPrivateSetup, fetchSetup, saveSetup} from '../api.ts';
-import type {SetupView} from '../../shared/setup.ts';
+import type {SetupUpdate, SetupView} from '../../shared/setup.ts';
 import {DefaultAiSelect} from './DefaultAiSelect.tsx';
+import {RoleControls} from './RoleControls.tsx';
 
 /** First run: one small card. Which tools were found, which AI answers by default, how the notebook stays private. No model or effort here: that lives in the chat box. */
 export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(notice?:string)=>void;onPreferences?:(view:SetupView)=>void}) {
@@ -27,12 +28,17 @@ export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(n
   try {await saveSetup({seen:true}); onClose();}
   catch {onClose('Setup was skipped. The app could not remember that choice.');}
  });
+ const save = (body:SetupUpdate) => void perform(async()=>{
+  const next=await saveSetup(body);
+  setView(next);
+  onPreferences?.(next);
+ });
  return <div className="settings-scrim">
   <section ref={dialog} tabIndex={-1} className="settings-dialog setup-card" role="dialog" aria-modal="true" aria-labelledby="setup-title"
    onKeyDown={event=>{
     if(event.key==='Escape' && !busy){event.stopPropagation();onClose();}
     if(event.key!=='Tab') return;
-    const controls=[...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled), input:not(:disabled)')];
+    const controls=[...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled), input:not(:disabled), summary')].filter(control=>control.getClientRects().length);
     const first=controls[0],last=controls.at(-1);
     if(event.shiftKey && (document.activeElement===first||document.activeElement===dialog.current) && last){
      event.preventDefault();last.focus();
@@ -50,12 +56,11 @@ export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(n
       {!provider.compatible && <span className="settings-lead"> · {provider.reason}</span>}
       {provider.notices.map(notice=><p key={notice} className="settings-lead">{notice}</p>)}
      </li>)}</ul>
-     <DefaultAiSelect view={view} disabled={busy} onChange={provider=>void perform(async()=>{
-      const next=await saveSetup({role:'normal-chat',provider});
-      setView(next);
-      onPreferences?.(next);
-     })}/>
+     <DefaultAiSelect view={view} disabled={busy} onChange={provider=>save({role:'normal-chat',provider})}/>
      <p className="settings-lead">Choose the model in the chat box.</p>
+     <details><summary>Customize which AI does each job</summary>
+      <RoleControls view={view} busy={busy} customize save={save}/>
+     </details>
     </div>
     <div className="settings-section">
      <h3>Your notebook stays private</h3>

@@ -45,10 +45,12 @@ export class CouncilService {
   return {b:structuredClone(b),session,grant,sources,question:redact(b.question)};
  }
  async plan(raw:unknown,snapshot?:RequestSettingsSnapshot){snapshot??=await this.o.routing?.();const {b,session,grant}=await this.clean(raw);const have=session.councilGrant;
+  const participants=b.role?undefined:snapshot?.settings.councilParticipants;
+  if(participants&&b.providers.some(id=>!participants.includes(id)))throw Error('plan_changed');
   const selection=(id:CouncilProvider)=>{const p=b.role?snapshot?.resolveRole(b.role):snapshot?.resolveParticipant(id);if(p&&!('available' in p)&&p.id!==id)throw Error('plan_changed');return p;};
   // Effective selections, not the entire machine config: approving one role
   // cannot authorize a different unreviewed model in another role.
-  const settingsKeys=Object.fromEntries(grant.providers.flatMap(id=>{const p=selection(id),chosen=p&&!('available' in p)?p.selection??DEFAULT_SELECTION:DEFAULT_SELECTION,executable=snapshot?.settings.providers[id].executable??null;return chosen.model!==null||chosen.effort!==null||executable!==null?[[id,sha({chosen,executable})]]:[];}));
+  const settingsKeys=Object.fromEntries(grant.providers.flatMap(id=>{const p=selection(id),chosen=p&&!('available' in p)?p.selection??DEFAULT_SELECTION:DEFAULT_SELECTION,executable=snapshot?.settings.providers[id].executable??null;return chosen.model!==null||chosen.effort!==null||executable!==null||participants?[[id,sha({chosen,executable,participants})]]:[];}));
   if(Object.keys(settingsKeys).length)grant.settingsKeys=settingsKeys;
   const verified=have&&validCouncilGrant(have)&&have.project===this.project&&have.session===session.id&&sha(unsigned(have))===have.confirmed;
   const covered=verified&&grant.providers.every(id=>have.providers.includes(id)&&have.settingsKeys?.[id]===grant.settingsKeys?.[id]&&have.caps[id]!.unit===grant.caps[id]!.unit&&have.caps[id]!.amount>=grant.caps[id]!.amount&&have.caps[id]!.deadlineMs>=grant.caps[id]!.deadlineMs);

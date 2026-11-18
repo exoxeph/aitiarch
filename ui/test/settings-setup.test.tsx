@@ -36,13 +36,13 @@ it('places Setup after Usage and keeps Usage free of setup controls',()=>{
  expect(html).not.toMatch(/Open setup|Run first-time setup again|Tools found/);
 });
 
-it('shows detected tools, effective role sources, reasons, and only the default AI control',()=>{
+it('shows detected tools, effective role sources, reasons and scoped controls',()=>{
  const html=render('setup');
- for(const label of ['/fake/claude','2.1.206','untested version','Normal chat','saved choice','explicit flag','The saved provider is disabled.','Council participants','Investigate','Skill diagrams','startup Claude','Answers by default','Choose the model in the chat box.','Run first-time setup again']){
+ for(const label of ['/fake/claude','2.1.206','untested version','Normal chat','saved choice','explicit flag','The saved provider is disabled.','Council participants','Investigate','Skill diagrams','startup Claude','Reset to default','Choose the model in the chat box.','Run first-time setup again']){
   expect(html).toContain(label);
  }
- expect(html.match(/<select/g)).toHaveLength(1);
- expect(html).not.toMatch(/Save model|Effort|Custom model|type="number"/);
+ expect(html.match(/<select/g)).toHaveLength(5);
+ expect(html).toContain('aria-haspopup="menu"');
 });
 
 it('keeps Setup reachable when setup metadata is unavailable',()=>{

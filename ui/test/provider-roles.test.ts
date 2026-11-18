@@ -6,12 +6,32 @@ import {saveMachineSetup} from '../server/setup-store.ts';
 import {ProviderRegistry,descriptorFromAdapter,compatibleDefaults} from '../server/providers/registry.ts';
 import type {TurnAdapter} from '../server/providers/turn.ts';
 import {roleRouting} from '../server/providers/routing.ts';
+import {createSetupHttp} from '../server/setup-http.ts';
 
 let dir:string;
 beforeEach(async()=>{dir=await mkdtemp(path.join(os.tmpdir(),'aitiarch-roles-'));vi.stubEnv('AITIARCH_CONFIG_DIR',dir);});
 afterEach(()=>{vi.unstubAllEnvs();vi.restoreAllMocks();});
 const adapter=(id:'claude'|'codex'|'kiro',onRun=()=>{}):TurnAdapter=>({id,label:id,safetyLabel:id==='claude'?'fenced':id==='codex'?'contained':'host-gated',async *startTurn(){onRun();yield {type:'complete',answer:'Synthetic answer'};}});
 const descriptor=(id:'claude'|'codex'|'kiro')=>descriptorFromAdapter(adapter(id),{detect:async()=>({available:true,reason:null}),bridges:id==='claude'?{invoked:true,'thread-reply':true}:undefined});
+
+it('a saved role edit invalidates the old review context without starting any provider',async()=>{
+ let runs=0;
+ const registry=new ProviderRegistry(['claude','codex'].map(id=>descriptorFromAdapter(adapter(id as 'claude'|'codex',()=>runs++),{detect:async()=>({available:true,reason:null})})));
+ const saved=defaultMachineSetup();saved.providers.codex.enabled=true;
+ await saveMachineSetup(dir,saved);
+ const before=await registry.snapshot(dir);
+ const setup=createSetupHttp({dir,project:dir,ready:async()=>true,providers:['claude','codex'].map(id=>({id:id as 'claude'|'codex',path:'C:/synthetic/'+id+'.exe',version:null,isolation:'metadata-compatible',code:'fixture',reason:'Fixture',roles:[],effort:null,effortCode:'not_applicable'}))});
+ await setup.put({role:'normal-chat',provider:'codex'});
+ expect(await before.currentContextKey?.('normal-chat')).not.toBe(before.contextKey('normal-chat'));
+ expect(before.resolveRole('normal-chat')).toMatchObject({id:'claude'});
+ expect((await registry.snapshot(dir)).resolveRole('normal-chat')).toMatchObject({id:'codex'});
+ await setup.put({role:'council',participants:['codex']});
+ expect(await before.currentProviderKey?.('claude')).not.toBe(before.providerKey?.('claude'));
+ const after=await registry.snapshot(dir);
+ expect(after.resolveParticipant('claude')).toMatchObject({available:false,code:'role-unavailable'});
+ expect(after.resolveParticipant('codex')).toMatchObject({id:'codex'});
+ expect(runs).toBe(0);
+});
 
 it('runtime routing initializes compatible single-provider roles but never overrides a saved choice',async()=>{
  const d=adapter('codex'),snapshot=roleRouting({dir,adapters:[d],checks:[{...d,check:async()=>({available:true,reason:null})}],legacyAnswerer:()=> 'claude'});

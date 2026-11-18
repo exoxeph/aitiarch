@@ -21,7 +21,8 @@ it('works with zero providers: AI-off message, Continue and Skip, private note',
  expect(html).toContain('Skip');
  expect(html).toContain('filesystem-private');
  expect(html).toContain('verified on first use');
- expect(html).not.toContain('<select');
+ expect(html).toContain('<details><summary>Customize which AI does each job');
+ expect(html).not.toContain('Answers by default');
 });
 
 it('is one small card: tools found with version and untested notice, and one default-AI select of compatible providers', () => {
@@ -29,15 +30,16 @@ it('is one small card: tools found with version and untested notice, and one def
  expect(html).toContain('Codex');
  expect(html).toContain('0.167.1');
  expect(html).toContain('untested version');
- expect(html.match(/<select/g)).toHaveLength(1);
- expect(html.match(/<option value="codex"/g)).toHaveLength(1);
+ expect(html).toContain('Answers by default');
  expect(html).toContain('value="codex" selected');
- expect(html).not.toContain('<option value="kiro"');
+ expect(html).toContain('Kiro · Not compatible');
  expect(html.match(/role="dialog"/g)).toHaveLength(1);
 });
 
-it('has no model or effort controls and none of the old per-role selects', () => {
+it('has role selects inside collapsed customization without model or effort controls', () => {
  const html = render(one);
- for (const word of ['Effort', 'Models and effort', 'Save model', 'Custom ID', 'Inherit provider', 'Thread replies', 'Skill diagrams']) expect(html).not.toContain(word);
+ for (const word of ['Effort', 'Models and effort', 'Save model', 'Custom ID', 'Inherit provider']) expect(html).not.toContain(word);
+ expect(html).toContain('Thread replies');
+ expect(html).toContain('Skill diagrams');
  expect(html).not.toContain('type="number"');
 });
