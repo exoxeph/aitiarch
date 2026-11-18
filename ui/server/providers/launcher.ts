@@ -10,6 +10,10 @@ import type {ModelEffort} from '../../shared/setup.ts';
 import {modelArguments} from '../../shared/model-settings.ts';
 import type {ModelCatalog} from '../../shared/models.ts';
 
+const codexPrintArguments=(cwd:string,selectionArgs:readonly string[],images:readonly string[]=[])=>[
+ ...CODEX_FLAGS,...selectionArgs,'-C',cwd,...images.flatMap(image=>['--image',image]),'-',
+];
+
 /** Metadata only. Caller owns the fixed RPC sequence and never writes a prompt. */
 export function spawnModelCatalog(config:{id:'claude'|'codex';command:string;prefixArgs?:readonly string[]},cwd:string){
  if((config.id!=='claude'&&config.id!=='codex')||!path.isAbsolute(config.command)||/\.(cmd|bat|ps1)$/i.test(config.command)||
@@ -33,7 +37,7 @@ export function spawnToolless(config:{id:'codex'|'kiro';command:string;prefixArg
   if(!path.isAbsolute(config.command)||/\.(cmd|bat|ps1)$/i.test(config.command)||/(?:^|[\\/])claude(?:\.exe)?$/i.test(config.command))reject();
   if(mode!=='version'&&mode!=='metadata'&&mode!=='isolated')reject();
   const selectionArgs=mode==='isolated'?modelArguments(config.id,config.selection,verifiedCatalog!==undefined,verifiedCatalog):[];
-  const args=mode==='version'?['--version']:mode==='metadata'?(config.id==='kiro'?['acp','--help']:['exec','--help']):config.id==='kiro'?['acp','--agent-engine','v2','--agent',TOOLLESS_AGENT]:[...CODEX_FLAGS,...selectionArgs,'-C',options.cwd,'-'];
+  const args=mode==='version'?['--version']:mode==='metadata'?(config.id==='kiro'?['acp','--help']:['exec','--help']):config.id==='kiro'?['acp','--agent-engine','v2','--agent',TOOLLESS_AGENT]:codexPrintArguments(options.cwd,selectionArgs);
   // Reuse the existing empty, real OS-temp folder check; do not accept a repo or a linked folder.
   assertLaunch('codex','isolated',args,options.cwd);
   return spawn(config.command,[...(config.prefixArgs??[]),...args],{...options,shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:'pipe'});
@@ -72,6 +76,24 @@ export function spawnIsolated(config: Target, args: string[], options: SpawnOpti
   assertTarget(config);
   assertLaunch(config.provider, 'isolated', args, options.cwd,config.selection);
   return spawn(config.command, [...(config.prefixArgs ?? []), ...args], { ...options, shell: false, windowsHide: true, stdio: 'pipe' });
+}
+/** Image launch entry point for verified Node fixtures. Real vision stays disabled. */
+export function spawnImageFixture(config:Target,options:{cwd:string;images:readonly string[]}){
+  if(config.command!==process.execPath||!config.prefixArgs?.length||(config.provider!=='claude'&&config.provider!=='codex'))
+    throw new Error('Isolated image delivery has not been verified for this provider.');
+  assertTarget(config);
+  const {cwd,images}=options;
+  const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>/^(SYSTEMROOT|WINDIR|TEMP|TMP)$/i.test(key)));
+  let args:string[];
+  if(config.provider==='claude'){
+    args=claudeArguments({stream:true,selection:config.selection});
+    assertLaunch('claude','isolated',args,cwd,config.selection);
+    args.push('--input-format','stream-json');
+  }else{
+    args=codexPrintArguments(cwd,modelArguments('codex',config.selection,false),images);
+    assertLaunch('codex','isolated',args,cwd);
+  }
+  return spawn(config.command,[...config.prefixArgs,...args],{cwd,env,shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:'pipe'});
 }
 /** A chat harness session turn. The arguments are built here from the profile (never passed in), the working folder must be the project's
  *  registered, empty session folder, and the instruction file must live outside it. */
