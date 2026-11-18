@@ -78,14 +78,14 @@ const title = (value: string) => (CLAUDE_MODELS as readonly string[]).includes(v
  ? value[0].toUpperCase() + value.slice(1) : value;
 
 /** "Claude · Sonnet · Medium". After an answer, the model the CLI reported, or "model not reported"; never an alias guess. */
-export function chipLabel(model: ChoiceModel, lastAnswer?: {model: string | null} | null): string {
+export function chipLabel(model: ChoiceModel, lastAnswer?: {model: string | null} | null, showDefaultEffort=false): string {
  if (!model.current) return model.groups.some(g => g.available)?'Choose AI':'AI off';
  const {provider, model: id, effort} = model.current;
  const name=model.groups.find(g=>g.id===provider)?.catalog?.models.find(row=>row.id===id)?.name;
  const retired=model.modelNotice===DISCONTINUED_MODEL_NOTICE||model.modelNotice===DISCONTINUED_EFFORT_NOTICE;
  const parts = [names[provider], id === null ? 'Default' : name??title(id)];
  if(effort!==null)parts.push(title(effort));
- else if(model.modelNotice&&model.modelNotice!==DISCONTINUED_MODEL_NOTICE)parts.push('Default effort');
+ else if(showDefaultEffort||model.modelNotice&&model.modelNotice!==DISCONTINUED_MODEL_NOTICE)parts.push('Default effort');
  if(retired)parts.push('no longer listed');
  if(lastAnswer)parts.push(`ran ${reportedModelLabel(lastAnswer.model)}`);
  return parts.join(' · ');

@@ -4,10 +4,27 @@ import path from 'node:path';
 import {afterAll,beforeAll,expect,it} from 'vitest';
 import {DEFAULT_PIPELINE_CONFIG,applyOverrides,locked} from '../shared/pipeline-config.ts';
 import {WHY_RULE_IDS,whyRule} from '../shared/chat-why.ts';
-import {FIELDS,PIPELINE_NODES,edgesOf,fieldsOf,lockReason,nodeById,numberAt,safetyLabelOf} from '../shared/pipeline-nodes.ts';
+import {FIELDS,PIPELINE_NODES,edgesOf,fieldsOf,lockReason,nodeById,numberAt,safetyLabelOf,nodesWithRoles} from '../shared/pipeline-nodes.ts';
+import {ROLE_REGISTRY} from '../shared/setup.ts';
 
 const nested=(key:string,value:number)=>key.split('.').reduceRight<unknown>((inner,k)=>({[k]:inner}),value) as Record<string,unknown>;
 const ids=PIPELINE_NODES.map(x=>x.id);
+
+it('places every registered role on exactly one editable stage',()=>{
+ expect(PIPELINE_NODES.flatMap(node=>node.role?[node.role]:[]).sort()).toEqual(ROLE_REGISTRY.map(role=>role.id).sort());
+ expect(PIPELINE_NODES.filter(node=>node.role).every(node=>node.kind==='editable')).toBe(true);
+ expect(nodeById('normal-answerer')?.role).toBe('normal-chat');
+ expect(nodeById('diagram-route')?.role).toBeUndefined();
+ expect(nodeById('role-skill-diagram')?.role).toBe('skill-diagram');
+ expect(nodeById('investigate')?.role).toBe('investigate-read');
+ expect(nodeById('council')?.role).toBe('council');
+});
+
+it('shows a new role without a mapped stage in the AI roles group',()=>{
+ const role={id:'draft-review',label:'Draft review',help:'Reviews a draft.'} as const;
+ const nodes=nodesWithRoles([...ROLE_REGISTRY,role]);
+ expect(nodes.filter(node=>node.role===role.id)).toMatchObject([{label:role.label,group:'roles',kind:'editable'}]);
+});
 
 it('has unique node ids and every edge joins two real nodes',()=>{
  expect(new Set(ids).size).toBe(ids.length);
@@ -22,8 +39,8 @@ it('has a node for every node id the failure explainer can report, except an int
 });
 it('gives every locked node a reason and no editable fields, and every editable node something to edit',()=>{
  for(const node of PIPELINE_NODES){
-  if(node.kind==='locked'){expect(node.fields,node.id).toEqual([]);expect(node.answerer,node.id).toBeUndefined();expect(lockReason(node).length,node.id).toBeGreaterThan(20);}
-  else{expect(node.fields.length>0||node.answerer===true,node.id).toBe(true);expect(lockReason(node)).toBe('');}
+  if(node.kind==='locked'){expect(node.fields,node.id).toEqual([]);expect(node.role,node.id).toBeUndefined();expect(lockReason(node).length,node.id).toBeGreaterThan(20);}
+  else{expect(node.fields.length>0||!!node.role,node.id).toBe(true);expect(lockReason(node)).toBe('');}
   for(const k of node.fields)expect(FIELDS[k],`${node.id} field ${k}`).toBeDefined();
   expect(node.does.length&&node.receives.length&&node.sendsOn.length,node.id).toBeTruthy();
  }

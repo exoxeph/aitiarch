@@ -3,12 +3,13 @@
 // Ids match the pipeline config's locked-rule ids (permission_gate, fence_flags, exclusion_lists, hard_prompt_rules, redaction, protocol_limits, provider_contracts) and the failure
 // explainer's node ids (reply-integrity, token-budget, run-control, provider-run, request-intake, request-queue, chat-store, session-intake) wherever those exist.
 // Data only. Nothing here enforces anything or reads a file: the server stays the authority on what is accepted.
+import {ROLE_REGISTRY,type SetupRole} from './setup.ts';
 import {DEFAULT_PIPELINE_CONFIG,locked,type PipelineConfig,type PipelineSafetyLabel} from './pipeline-config.ts';
 
 export type NodeKind='editable'|'locked';
-export type NodeGroup='request'|'guard'|'answer'|'checks'|'investigate'|'council'|'records';
-export const GROUP_LABEL:Readonly<Record<NodeGroup,string>>=Object.freeze({request:'Your request',guard:'Guards',answer:'Answer',checks:'Checks on the reply',investigate:'Investigate',council:'Council',records:'Records'});
-export const GROUP_ORDER:readonly NodeGroup[]=['request','guard','answer','checks','investigate','council','records'];
+export type NodeGroup='request'|'guard'|'answer'|'checks'|'investigate'|'council'|'records'|'roles';
+export const GROUP_LABEL:Readonly<Record<NodeGroup,string>>=Object.freeze({request:'Your request',guard:'Guards',answer:'Answer',checks:'Checks on the reply',investigate:'Investigate',council:'Council',records:'Records',roles:'AI roles'});
+export const GROUP_ORDER:readonly NodeGroup[]=['request','guard','answer','checks','investigate','council','records','roles'];
 
 /** A numeric setting a node exposes. `key` is a path in the pipeline config; the range is the server's own (a test holds this table to the real validator). */
 export interface FieldSpec {key:string;label:string;unit:string;min:number;max:number;/** Decimals allowed (the validator accepts non-integers for these). */fractional?:boolean;help?:string}
@@ -40,14 +41,16 @@ export const FIELDS:Readonly<Record<string,FieldSpec>>=Object.freeze(Object.from
  {key:'council.caps.kiro.deadlineMs',label:'Kiro deadline',unit:'ms',min:100,max:180000},
 ] as FieldSpec[]).map(f=>[f.key,Object.freeze(f)])));
 
-export interface PipelineNode {
+export interface PipelineNode<Role extends string=SetupRole> {
  id:string;label:string;kind:NodeKind;group:NodeGroup;
  /** What it does, what it receives, what it sends on: plain language, top to bottom on the card. */
  does:string;receives:string;sendsOn:string;
  /** Config keys of the numeric settings this node exposes (each is a key of FIELDS). Empty for a locked node. */
  fields:readonly string[];
- /** The node that chooses who answers Normal chat: it edits `normalAnswerer` rather than a number. */
- answerer?:true;
+ /** Machine role settings exposed by this stage. */
+ role?:Role;
+ /** Name this run after the provider assigned to the linked role. */
+ runOf?:Role;
  /** The provider whose safety label (from the config) this node carries. */
  provider?:'claude'|'codex'|'kiro';
  /** A locked node says why: either the id of a locked rule in the pipeline config (its own sentence is used), or its own reason. */
@@ -59,9 +62,9 @@ export interface PipelineNode {
  /** Default place on the canvas (world units). */
  x:number;y:number;
 }
-const n=(node:PipelineNode):PipelineNode=>Object.freeze({...node,fields:Object.freeze([...node.fields]),edges:Object.freeze([...node.edges]),source:Object.freeze([...node.source])});
+const n=<Role extends string=SetupRole>(node:PipelineNode<Role>):PipelineNode<Role>=>Object.freeze({...node,fields:Object.freeze([...node.fields]),edges:Object.freeze([...node.edges]),source:Object.freeze([...node.source])});
 
-export const PIPELINE_NODES:readonly PipelineNode[]=Object.freeze([
+const STAGES:readonly PipelineNode[]=Object.freeze([
  n({id:'request-intake',label:'Your note and mode',kind:'editable',group:'request',x:32,y:200,
   does:'Gathers the open note, your selection, your question and anything you attach into one request. A note over its size limit, or a question that is too long, is refused before anything is sent. You also choose the thinking-partner mode here (Plan, Grill or Explain).',
   receives:'Your question, the open note, the selection, notes you attach with @, and the mode you picked.',sendsOn:'One request to the redaction pass.',
@@ -98,7 +101,7 @@ export const PIPELINE_NODES:readonly PipelineNode[]=Object.freeze([
   does:'Keeps each chat inside its token budget and its hourly request cap. Before a send it refuses when this message would pass either. While a reply streams it ends the run when the reply no longer fits.',
   receives:'The approved request and what this chat has used so far.',sendsOn:'The request to the answerer.',
   fields:['chat.tokenBudget','chat.rollingRequestCap','estimates.replyAllowance','estimates.cacheReadWeight','estimates.bytesPerToken'],edges:['normal-answerer'],source:['server/chat/runtime.ts','shared/chat.ts']}),
- n({id:'normal-answerer',label:'Normal chat answerer',kind:'editable',group:'answer',x:576,y:584,answerer:true,
+ n({id:'normal-answerer',label:'Normal chat answerer',kind:'editable',group:'answer',x:576,y:584,role:'normal-chat',
   does:'Chooses who writes the reply to a Normal chat message: Claude, Codex or Kiro. Codex and Kiro get your notes, the selection and earlier exchanges, but no repo, files or sessions, under a cap you approve per conversation. If the chosen provider fails, no other provider is tried.',
   receives:'The checked request and the fixed prompt rules.',sendsOn:'The request to the chosen provider: Claude’s run, or Codex or Kiro through their provider contracts.',
   fields:[],edges:['provider-run','provider_contracts'],source:['server/chat/normal-answerer.ts','server/chat/runtime.ts','shared/pipeline-config.ts']}),
@@ -110,9 +113,9 @@ export const PIPELINE_NODES:readonly PipelineNode[]=Object.freeze([
   does:'The pinned way Claude is started: its flags, its tool set and its isolation. A CLI version the diagram fence was not verified on is flagged in Settings.',
   receives:'A turn to run.',sendsOn:'The run, inside the fence.',
   fields:[],edges:['provider-run','investigate'],source:['server/providers/claude-arguments.ts','server/providers/launcher.ts','shared/diagram-fence.ts']}),
- n({id:'provider-run',label:'Claude run',kind:'locked',group:'answer',x:848,y:456,provider:'claude',lockedBy:'fence_flags',
-  does:'Claude answers through the no-tools fence. A run that does not finish is reported with its reason: not set up, flag rejected, timeout, login, exited, unreadable reply, output or context limit, cost cap or the fence.',
-  receives:'The request, from the answerer or the fence.',sendsOn:'Claude’s reply to the reply integrity check.',
+ n({id:'provider-run',label:'Provider run',kind:'locked',group:'answer',x:848,y:456,runOf:'normal-chat',lockedBy:'fence_flags',
+  does:'The title identifies the Normal chat answerer. The diagram route continues through its own Claude fence. The provider runs with the isolation required for that turn. A run that does not finish is reported with its reason: not set up, flag rejected, timeout, login, exited, unreadable reply, output or context limit, cost cap or the fence.',
+  receives:'The request, from the answerer or the fence.',sendsOn:'The provider’s reply to the reply integrity check.',
   fields:[],edges:['reply-integrity'],source:['server/providers/claude-turn.ts','server/providers/tool-less.ts','shared/chat-why.ts','src/chat/council-view.ts']}),
  n({id:'provider_contracts',label:'Provider contracts',kind:'locked',group:'answer',x:848,y:712,lockedBy:'provider_contracts',
   does:'What Codex and Kiro are allowed to do: they get your notes, the selection, the editor line and earlier exchanges, with no repo, files, diagrams or sessions. Their safety label describes how they are contained; it does not confine them. A provider that is unavailable, refuses or fails is reported with no fallback.',
@@ -142,15 +145,15 @@ export const PIPELINE_NODES:readonly PipelineNode[]=Object.freeze([
   does:'Investigate reads a copy of your repo made by Aitiarch: only files git knows about, never files named like secrets or keys, tooling folders or state, never links, never very large files. Only names are checked: the contents of copied files are not scanned.',
   receives:'Your repo.',sendsOn:'A read-only copy to Investigate.',
   fields:[],edges:['investigate'],source:['server/harness/snapshot.ts']}),
- n({id:'investigate',label:'Investigate',kind:'editable',group:'investigate',x:1392,y:656,
-  does:'Claude reads the read-only copy of your repo with Read, Grep and Glob and explains the code. Each message has a cost cap and a time limit. Its answerer is Claude; choosing another provider for it is not available yet.',
+ n({id:'investigate',label:'Investigate',kind:'editable',group:'investigate',x:1392,y:656,role:'investigate-read',
+  does:'Reads the read-only copy of your repo with Read, Grep and Glob and explains the code. Each message has a cost cap and a time limit.',
   receives:'An approved plan, the repo copy and your question.',sendsOn:'An answer with its trail of tool calls, then to the tripwire and the ledger.',
   fields:['investigate.budgetUsd','investigate.timeoutMs','conversation.budgetUsd'],edges:['tripwire','ledger'],source:['server/harness/investigate.ts','server/harness/conversation.ts','server/pipeline-config-store.ts']}),
  n({id:'tripwire',label:'Watcher and tripwire',kind:'locked',group:'investigate',x:1392,y:784,lockedReason:'It compares the notebook folder before and after every investigation run. No setting exists for it, and restoring is always an action you take.',
   does:'Before an investigation it hashes the notebook folder and keeps a copy of each file up to 8 MB; after, it lists in the chat what changed, was added or was removed. The app’s own state and .git are not compared. Restoring is your action: it puts changed and removed files back and deletes added ones, and a file over 8 MB cannot be put back.',
   receives:'The notebook folder before and after a run.',sendsOn:'The list of changes, to the chat.',
   fields:[],edges:[],source:['server/harness/tripwire.ts','server/harness/investigate.ts']}),
- n({id:'council',label:'Council',kind:'editable',group:'council',x:1120,y:200,
+ n({id:'council',label:'Council',kind:'editable',group:'council',x:1120,y:200,role:'council',
   does:'Asks the providers you choose (one to three of Claude, Codex and Kiro) the same question about your notes only. Each answers in its own column, with its own usage. A reply whose quotes cannot be verified, or that has no valid claims block, is discarded. You choose which reply, if any, to add to your note.',
   receives:'Your question and the notes you attach, after you approve the plan.',sendsOn:'The question to each chosen provider. Each turn’s status and usage go to the ledger; the replies go to Council history, not the ledger.',
   fields:['council.outputBytes'],edges:['council-claude','council-codex','council-kiro'],source:['server/council.ts','shared/council.ts','src/chat/CouncilPanel.tsx']}),
@@ -171,6 +174,19 @@ export const PIPELINE_NODES:readonly PipelineNode[]=Object.freeze([
   receives:'Events from saved replies, Investigate turns and every Council provider.',sendsOn:'Nothing. It is the end of the flow.',
   fields:[],edges:[],source:['server/ledger-store.ts','server/chat/runtime.ts','server/council.ts']}),
 ]);
+
+/** Roles without a stage appear together without inventing edges to the chat flow. */
+export function nodesWithRoles<Role extends string>(registry:readonly {id:Role;label:string;help:string}[]):readonly PipelineNode<Role|SetupRole>[] {
+ const attached=new Set<string>(STAGES.flatMap(stage=>stage.role?[stage.role]:[]));
+ const extra=registry.filter(role=>!attached.has(role.id)).map((role,index)=>n<Role>({
+  id:`role-${role.id}`,role:role.id,label:role.label,kind:'editable',group:'roles',
+  x:32+(index%3)*272,y:928+Math.floor(index/3)*128,
+  does:role.help,receives:'The input approved for this role.',sendsOn:'The reply for this role.',
+  fields:[],edges:[],source:['shared/setup.ts'],
+ }));
+ return [...STAGES,...extra];
+}
+export const PIPELINE_NODES=Object.freeze(nodesWithRoles(ROLE_REGISTRY));
 
 const BY_ID=new Map(PIPELINE_NODES.map(x=>[x.id,x]));
 export const nodeById=(id:string|undefined|null):PipelineNode|undefined=>id?BY_ID.get(id):undefined;

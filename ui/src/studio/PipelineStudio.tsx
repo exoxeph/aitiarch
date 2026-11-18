@@ -1,10 +1,12 @@
 import {useEffect,useMemo,useRef,useState,type KeyboardEvent as ReactKey,type PointerEvent as ReactPointer} from 'react';
 import {api,type PipelineView} from '../api.ts';
-import type {Availability} from '../../server/providers/council-availability.ts';
+import type {SetupView} from '../../shared/setup.ts';
+import {RoleControls,useRoleWrites} from '../setup/RoleControls.tsx';
+import {studioNodeLabel,studioRoleChips} from './studio-roles.ts';
 import {DEFAULT_PIPELINE_CONFIG} from '../../shared/pipeline-config.ts';
 import {GROUP_LABEL,GROUP_ORDER,PIPELINE_NODES,edgesOf,fieldsOf,lockReason,nodeById,numberAt,safetyLabelOf,type NodeGroup,type PipelineNode} from '../../shared/pipeline-nodes.ts';
-import {ANSWERERS,availabilityStatus,isAnswerer,overridesFor,saveErrorText,type Answerer} from '../chat/normal-provider.ts';
-import {providerName,safetyHelp} from '../chat/council-view.ts';
+import {saveErrorText} from '../chat/normal-provider.ts';
+import {safetyHelp} from '../chat/council-view.ts';
 import {pathData,routeEdges,simpleRoute} from './route.ts';
 import {PromptPreview,WordingFields} from './WordingEditor.tsx';
 import {customizedKeys,isCustomized,settingLabel,textAt,wordingKeys,wordingOf} from './studio-wording.ts';
@@ -17,48 +19,53 @@ const Lock=()=><svg className="studio-lock" viewBox="0 0 16 16" width="13" heigh
 const Badge=({label}:{label:string})=><span className="council-badge" data-safety={label} title={safetyHelp(label)}>{label}</span>;
 
 /** The detailed card for a node, top to bottom: what it does, what it receives, what it sends on, its safety label, its editable fields, and whether it is locked and why. */
-function NodeCard({node,view,id}:{node:PipelineNode;view:PipelineView|null;id?:string}){
- const config=view?.effective??DEFAULT_PIPELINE_CONFIG,label=safetyLabelOf(node,config),fields=fieldsOf(node),chosen=config.normalAnswerer,changed=customizedKeys(view?.overrides,node),wording=wordingOf(node.id);
- return <div className="studio-card" id={id} role="region" aria-label={`Details: ${node.label}`} data-card={node.id}>
-  <h3>{node.kind==='locked'&&<Lock/>}{node.label}{changed.length>0&&<span className="studio-custom-tag" data-card="customized-tag">Customized</span>}</h3><p className="studio-card-group">{GROUP_LABEL[node.group]}</p>
+function NodeCard({node,view,setup,id}:{node:PipelineNode;view:PipelineView|null;setup?:SetupView|null;id?:string}){
+ const config=view?.effective??DEFAULT_PIPELINE_CONFIG,label=safetyLabelOf(node,config),fields=fieldsOf(node),chosen=setup?.roles.find(role=>role.role===(node.runOf??node.role))?.provider,changed=customizedKeys(view?.overrides,node),wording=wordingOf(node.id),title=studioNodeLabel(node,setup);
+ return <div className="studio-card" id={id} role="region" aria-label={`Details: ${title}`} data-card={node.id}>
+  <h3>{node.kind==='locked'&&<Lock/>}{title}{changed.length>0&&<span className="studio-custom-tag" data-card="customized-tag">Customized</span>}</h3><p className="studio-card-group">{GROUP_LABEL[node.group]}</p>
   <dl>
    <dt>What it does</dt><dd>{node.does}</dd>
    <dt>What it receives</dt><dd>{node.receives}</dd>
    <dt>What it sends on</dt><dd>{node.sendsOn}</dd>
-   <dt>Safety label</dt><dd data-card="safety">{label?<><Badge label={label}/> {safetyHelp(label)}</>:node.answerer?<>Follows your choice: {providerName(chosen)} <Badge label={config.safetyLabels[chosen]}/></>:'None. This is not a provider.'}</dd>
-   <dt>Editable fields</dt><dd data-card="fields">{fields.length?<ul>{fields.map(f=><li key={f.key}>{f.label}: {fmt(numberAt(config,f.key)??0,f.unit)}</li>)}{wording?.groups.map((g,i)=><li key={'w'+i}>{g.title?`${g.title} wording`:g.fields[0].label}</li>)}</ul>:wording?<ul>{wording.groups.map((g,i)=><li key={i}>{g.title?`${g.title} wording`:g.fields[0].label}</li>)}</ul>:node.answerer?'Who answers Normal chat.':'None.'}</dd>
+   <dt>Safety label</dt><dd data-card="safety">{label?<><Badge label={label}/> {safetyHelp(label)}</>:chosen?<>{setup?.providers.find(tool=>tool.id===chosen)?.label} <Badge label={config.safetyLabels[chosen]}/></>:'None for this step.'}</dd>
+   <dt>Editable fields</dt><dd data-card="fields">{fields.length||wording||node.role?<ul>
+    {node.role&&<li>Provider, model and effort <RoleChips node={node} setup={setup}/></li>}
+    {fields.map(f=><li key={f.key}>{f.label}: {fmt(numberAt(config,f.key)??0,f.unit)}</li>)}
+    {wording?.groups.map((g,i)=><li key={i}>{g.title?`${g.title} wording`:g.fields[0].label}</li>)}
+   </ul>:'None.'}</dd>
    <dt>{node.kind==='locked'?'Locked':'Editable'}</dt><dd data-card="lock">{node.kind==='locked'?lockReason(node):'Editable here. Click the node to change it.'}</dd>
    {changed.length>0&&<><dt>Changed from the default</dt><dd data-card="customized"><ul>{changed.map(k=><li key={k}>{settingLabel(k)}</li>)}</ul></dd></>}
   </dl></div>;
 }
 
 /** The inline editor for one node: only the settings the config API already accepts, within the server's ranges. Locked nodes show a padlock and the reason, with nothing to edit. */
-function NodeEditor({node,view,avail,onChanged,onClose}:{node:PipelineNode;view:PipelineView|null;avail:Availability[]|null|undefined;onChanged:(v:PipelineView)=>void;onClose:()=>void}){
+function NodeEditor({node,view,setup,onSetupChange,onChanged,onClose}:{node:PipelineNode;view:PipelineView|null;setup?:SetupView|null;onSetupChange?:(view:SetupView)=>void;onChanged:(v:PipelineView)=>void;onClose:()=>void}){
  const fields=fieldsOf(node),config=view?.effective??DEFAULT_PIPELINE_CONFIG,wording=wordingOf(node.id),wkeys=wordingKeys(node.id);
  const initial=()=>Object.fromEntries(fields.map(f=>[f.key,String(numberAt(config,f.key)??'')]));
  const savedTexts=()=>Object.fromEntries(wkeys.map(k=>[k,textAt(config,k)??'']));
- const [draft,setDraft]=useState<Record<string,string>>(initial),[who,setWho]=useState<Answerer>(isAnswerer(config.normalAnswerer)?config.normalAnswerer:'claude'),[texts,setTexts]=useState<Record<string,string>>(savedTexts);
+ const [draft,setDraft]=useState<Record<string,string>>(initial),[texts,setTexts]=useState<Record<string,string>>(savedTexts);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[done,setDone]=useState('');
- useEffect(()=>{setDraft(initial());setTexts(savedTexts());setWho(isAnswerer(config.normalAnswerer)?config.normalAnswerer:'claude');},[view,node.id]);
- const dirty=fields.some(f=>draft[f.key]!==String(numberAt(config,f.key)??''))||(!!node.answerer&&who!==config.normalAnswerer)||wkeys.some(k=>texts[k]!==(textAt(config,k)??''));
+ useEffect(()=>{setDraft(initial());setTexts(savedTexts());},[view,node.id]);
+ const dirty=fields.some(f=>draft[f.key]!==String(numberAt(config,f.key)??''))||wkeys.some(k=>texts[k]!==(textAt(config,k)??''));
  const run=async(job:()=>Promise<PipelineView>,ok:string)=>{if(!view||busy)return;setBusy(true);setError('');setDone('');try{const next=await job();onChanged(next);setDone(ok);window.dispatchEvent(new Event('aitiarch:pipeline-changed'));}catch(e){setError(saveErrorText(e as {message?:string}));}finally{setBusy(false);}};
  const save=()=>{
   const values:Record<string,number|string>={};
   for(const f of fields){const v=parseField(draft[f.key]??'');if(v===null){setError(`Enter a number for “${f.label}”.`);setDone('');return;}values[f.key]=v;}
   for(const k of wkeys)values[k]=texts[k]??''; // wording goes to the server as typed; it says in its own words if it is refused
-  let next=overridesWith(view?.overrides??{},values,view?.defaults??DEFAULT_PIPELINE_CONFIG);if(node.answerer)next=overridesFor(next,who);
+  const next=overridesWith(view?.overrides??{},values,view?.defaults??DEFAULT_PIPELINE_CONFIG);
   void run(()=>api.pipelineSave(next),'Saved.');
  };
  const reset=()=>{const next=overridesWithout(view?.overrides??{},node,wkeys);void run(()=>Object.keys(next).length?api.pipelineSave(next):api.pipelineReset(),'This node is back to its defaults.');};
- const statusOf=(id:Answerer)=>availabilityStatus(avail,id).word;
- return <section className="studio-editor" aria-label={`Edit ${node.label}`} data-editor={node.id}>
-  <header><h3>{node.kind==='locked'&&<Lock/>}{node.label}</h3><button type="button" className="ghost studio-x" aria-label="Close editor" onClick={onClose}>×</button></header>
+ const roleWrite=useRoleWrites(onSetupChange),title=studioNodeLabel(node,setup);
+ return <section className="studio-editor" aria-label={`Edit ${title}`} data-editor={node.id}>
+  <header><h3>{node.kind==='locked'&&<Lock/>}{title}</h3><button type="button" className="ghost studio-x" aria-label="Close editor" onClick={onClose}>×</button></header>
   {node.kind==='locked'
    ?<div className="studio-locked" data-locked="true"><p><strong>Locked.</strong> {lockReason(node)}</p><p className="studio-hint">No editable fields.</p></div>
    :<>
-    {node.answerer&&<div className="pipeline-field"><label htmlFor="studio-answerer">Normal chat is answered by</label>
-     <select id="studio-answerer" className="chat-ctl" value={who} disabled={busy||!view} onChange={e=>{if(isAnswerer(e.target.value)){setWho(e.target.value);setDone('');setError('');}}}>{ANSWERERS.map(a=><option key={a} value={a}>{providerName(a)} · {config.safetyLabels[a]}</option>)}</select>
-     <ul className="pipeline-providers" aria-label="Providers for Normal chat">{ANSWERERS.map(a=><li key={a} data-provider={a} data-chosen={a===who||undefined}><span className="pipeline-name">{providerName(a)}</span><Badge label={config.safetyLabels[a]}/><span className="pipeline-status" data-state={statusOf(a)==='Available'?'ok':undefined}>{statusOf(a)}</span></li>)}</ul></div>}
+    {node.role&&(setup?<RoleControls view={setup} only={node.role} busy={roleWrite.busy||!onSetupChange} save={roleWrite.save} onChange={onSetupChange}/>
+     :<p className="settings-lead">Setup information is unavailable.</p>)}
+    {roleWrite.notice&&<p className="settings-warn" role="alert">{roleWrite.notice}</p>}
+    {(fields.length>0||wording)&&<>
     {fields.map(f=>{const def=numberAt(view?.defaults??DEFAULT_PIPELINE_CONFIG,f.key);return <div className="studio-field" key={f.key}>
      <label htmlFor={`studio-${f.key}`}>{f.label}</label>
      <div className="studio-input"><input id={`studio-${f.key}`} data-field={f.key} type="number" inputMode="decimal" min={f.min} max={f.max} step={f.fractional?'any':1} value={draft[f.key]??''} disabled={busy||!view} onChange={e=>{setDraft(d=>({...d,[f.key]:e.target.value}));setDone('');setError('');}}/><span>{f.unit}</span></div>
@@ -69,13 +76,23 @@ function NodeEditor({node,view,avail,onChanged,onClose}:{node:PipelineNode;view:
     <div className="pipeline-actions"><button type="button" className="chat-ctl inv-confirm" disabled={!view||!dirty||busy} onClick={save}>Save</button><button type="button" className="chat-ctl chat-ctl-quiet" disabled={!view||busy} onClick={reset}>Reset this node</button>
      {dirty&&<span className="studio-unsaved" data-unsaved="node" role="status"><i aria-hidden="true"/>Unsaved changes</span>}</div>
     {wording&&<PromptPreview surface={wording.surface} view={view} unsaved={dirty}/>}
+    </>}
    </>}
  </section>;
 }
 
-export default function PipelineStudio({highlight,onClose}:{highlight?:string;onClose:()=>void}){
+function RoleChips({node,setup}:{node:PipelineNode;setup?:SetupView|null}){
+ const chips=studioRoleChips(node,setup);
+ if(!node.role)return null;
+ return <span className="studio-role-chips">
+  {chips?.labels.map(label=><span key={label} title={label}>{label}</span>)}
+  <span className="studio-role-source">{chips?(chips.labels.length?chips.source:`AI off · ${chips.source}`):'Setup unavailable'}</span>
+ </span>;
+}
+
+export default function PipelineStudio({highlight,onClose,setup,onSetupChange}:{highlight?:string;onClose:()=>void;setup?:SetupView|null;onSetupChange?:(view:SetupView)=>void}){
  const flagged=nodeById(highlight)?highlight:undefined;
- const [view,setView]=useState<PipelineView|null>(null),[loadFailed,setLoadFailed]=useState(false),[avail,setAvail]=useState<Availability[]|null|undefined>(undefined);
+ const [view,setView]=useState<PipelineView|null>(null),[loadFailed,setLoadFailed]=useState(false);
  const [layout,setLayout]=useState<Layout>(()=>loadLayout()),layoutRef=useRef(layout);layoutRef.current=layout;
  const [cam,setCam]=useState<Camera>({x:16,y:16,k:.75}),camRef=useRef(cam);camRef.current=cam;
  const [selected,setSelected]=useState<string|null>(null),selectedRef=useRef<string|null>(null);selectedRef.current=selected;
@@ -85,12 +102,22 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
  const fileInput=useRef<HTMLInputElement>(null);
  const [narrow,setNarrow]=useState(()=>isNarrow(window.innerWidth));
  const root=useRef<HTMLElement>(null),port=useRef<HTMLDivElement>(null),drag=useRef<{id:string;sx:number;sy:number;from:{x:number;y:number};before:Layout;moved:boolean}|null>(null),laneDrag=useRef<{group:NodeGroup;sx:number;sy:number;origin:Layout;before:Layout;moved:boolean}|null>(null),cancelDrag=useRef<()=>boolean>(()=>false),afterCancel=useRef(false),pan=useRef<{sx:number;sy:number;cx:number;cy:number;moved:boolean}|null>(null),swallow=useRef(false);
- useEffect(()=>{let off=false;api.pipelineConfig().then(v=>{if(!off)setView(v);}).catch(()=>{if(!off)setLoadFailed(true);});api.councilAvailability().then(d=>{if(!off)setAvail(d.providers);}).catch(()=>{if(!off)setAvail(null);});return()=>{off=true;};},[]);
+ useEffect(()=>{let off=false;api.pipelineConfig().then(v=>{if(!off)setView(v);}).catch(()=>{if(!off)setLoadFailed(true);});return()=>{off=true;};},[]);
  useEffect(()=>{const on=()=>setNarrow(isNarrow(window.innerWidth));window.addEventListener('resize',on);return()=>window.removeEventListener('resize',on);},[]);
+ function closeEditor(){
+  const id=selectedRef.current;
+  setSelected(null);
+  if(id&&nodeById(id)?.role)requestAnimationFrame(()=>root.current?.querySelector<HTMLElement>(`.studio-node[data-node="${id}"], [data-node="${id}"] > .studio-row`)?.focus());
+ }
+ useEffect(()=>{
+  if(selected&&nodeById(selected)?.role)root.current?.querySelector<HTMLElement>('[data-editor] .studio-x')?.focus();
+ },[selected]);
  // Escape closes the editor first, then the Studio; nothing underneath also hears it. Tab stays inside.
  useEffect(()=>{
   const el=root.current,key=(e:KeyboardEvent)=>{
-   if(e.key==='Escape'){e.preventDefault();e.stopPropagation();if(cancelDrag.current())return;if(confirmRef.current){setConfirm(null);return;}if(selectedRef.current)setSelected(null);else onClose();return;} // a drag in progress is cancelled first
+   if(e.key==='Escape'){
+    if(e.target instanceof Element&&e.target.closest('.compose-model')?.querySelector('[aria-expanded="true"]'))return;
+    e.preventDefault();e.stopPropagation();if(cancelDrag.current())return;if(confirmRef.current){setConfirm(null);return;}if(selectedRef.current)closeEditor();else onClose();return;} // a drag in progress is cancelled first
    if(e.key!=='Tab'||!el)return;const f=[...el.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select:not([disabled])')].filter(x=>x.offsetParent!==null);if(!f.length)return;
    const first=f[0],last=f[f.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
   };
@@ -176,7 +203,7 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
   finally{setConfirm(null);}
  };
  const selectedNode=nodeById(selected),peekNode=nodeById(peek),flaggedNode=nodeById(flagged);
- const editor=selectedNode&&<NodeEditor key={selectedNode.id} node={selectedNode} view={view} avail={avail} onChanged={setView} onClose={()=>setSelected(null)}/>;
+ const editor=selectedNode&&<NodeEditor key={selectedNode.id} node={selectedNode} view={view} setup={setup} onSetupChange={onSetupChange} onChanged={setView} onClose={closeEditor}/>;
  return <section ref={root} className="studio" role="dialog" aria-modal="true" aria-labelledby="studio-title" data-view={narrow?'list':'canvas'}>
   <header className="studio-bar">
    <h2 id="studio-title">Pipeline Studio</h2>
@@ -196,11 +223,11 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
   {notice&&<p className="studio-notice" role={notice.kind==='error'?'alert':'status'} data-notice={notice.kind==='error'?'studio-notice-error':'studio-notice-ok'}>{notice.text}<button type="button" className="ghost" aria-label="Dismiss this message" onClick={()=>setNotice(null)}>×</button></p>}
   {loadFailed&&<p className="settings-warn" role="alert">The pipeline settings could not be loaded. You can still read every node.</p>}
   {view?.warning&&<p className="settings-warn" role="status">{view.warning}</p>}
-  {flaggedNode&&<p className="studio-banner" role="status" data-banner="show-on-pipeline">Showing <strong>{flaggedNode.label}</strong> on the pipeline: this is the step that stopped your reply.</p>}
+  {flaggedNode&&<p className="studio-banner" role="status" data-banner="show-on-pipeline">Showing <strong>{studioNodeLabel(flaggedNode,setup)}</strong> on the pipeline: this is the step that stopped your reply.</p>}
   {narrow
-   ?<div className="studio-list" data-list="true">{GROUP_ORDER.map(g=>{const nodes=PIPELINE_NODES.filter(n=>n.group===g);return <section key={g} aria-label={GROUP_LABEL[g]}><h3>{GROUP_LABEL[g]}</h3><ul>{nodes.map(n=><li key={n.id} data-node={n.id} data-kind={n.kind} data-highlight={n.id===flagged||undefined} tabIndex={-1}>
-     <button type="button" className="studio-row" aria-expanded={selected===n.id} onClick={()=>setSelected(s=>s===n.id?null:n.id)}><span>{n.kind==='locked'&&<Lock/>}{n.label}</span><span className="studio-row-kind">{isCustomized(view?.overrides,n)&&<em className="studio-custom-tag" data-custom="true">Customized</em>}{n.kind==='locked'?'Locked':'Editable'}</span></button>
-     {selected===n.id&&<div className="studio-row-body"><NodeCard node={n} view={view}/>{editor}</div>}</li>)}</ul></section>;})}</div>
+   ?<div className="studio-list" data-list="true">{GROUP_ORDER.map(g=>{const nodes=PIPELINE_NODES.filter(n=>n.group===g);return <section key={g} aria-label={GROUP_LABEL[g]}><h3>{GROUP_LABEL[g]}</h3><ul>{nodes.map(n=><li key={n.id} data-node={n.id} data-role-node={n.role} data-kind={n.kind} data-highlight={n.id===flagged||undefined} tabIndex={-1}>
+     <button type="button" className="studio-row" aria-expanded={selected===n.id} onClick={()=>setSelected(s=>s===n.id?null:n.id)}><span>{n.kind==='locked'&&<Lock/>}{studioNodeLabel(n,setup)}</span><span className="studio-row-kind">{isCustomized(view?.overrides,n)&&<em className="studio-custom-tag" data-custom="true">Customized</em>}{n.kind==='locked'?'Locked':'Editable'}</span><RoleChips node={n} setup={setup}/></button>
+     {selected===n.id&&<div className="studio-row-body"><NodeCard node={n} view={view} setup={setup}/>{editor}</div>}</li>)}</ul></section>;})}</div>
    :<div className="studio-body">
     <div ref={port} className="studio-viewport" data-viewport="true" style={{backgroundPosition:STAR_DEPTH.map(f=>`${cam.x*f}px ${cam.y*f}px`).join(',')}} onScroll={e=>{e.currentTarget.scrollTop=0;e.currentTarget.scrollLeft=0;}} onPointerDown={onPortDown} onPointerMove={onPortMove} onPointerUp={onPortUp} onPointerCancel={onPortUp}>
      <div className="studio-world" style={{transform:`translate(${cam.x}px,${cam.y}px) scale(${cam.k})`}}>
@@ -217,16 +244,16 @@ export default function PipelineStudio({highlight,onClose}:{highlight?:string;on
          ?<g key={key} data-stitch="true" data-limb={route.to} data-active={on||undefined} data-dim={(!!active&&!on)||undefined}><path d={d} data-edge={key} className="stitch-seam" {...common} markerEnd="url(#studio-arrow)"/><path d={d} className="stitch-ticks" {...common}/></g>
          :<path key={key} d={d} data-edge={key} {...common} markerEnd="url(#studio-arrow)"/>;
        })}</svg>
-      {PIPELINE_NODES.map(n=>{const p=place(n),badge=safetyLabelOf(n,view?.effective??DEFAULT_PIPELINE_CONFIG),onPath=!active||!around||n.id===active||(fullPath?around.up.has(n.id)||around.down.has(n.id):neighbours.has(n.id));return <button key={n.id} type="button" className="studio-node" data-node={n.id} data-kind={n.kind} data-group={n.group} data-provider={n.provider} data-main={MAIN_NODES.has(n.id)||undefined} data-dim={!onPath||undefined} data-selected={selected===n.id||undefined} data-highlight={n.id===flagged||undefined} aria-pressed={selected===n.id} aria-describedby={peek===n.id?'studio-peek':undefined}
-        data-customized={isCustomized(view?.overrides,n)||undefined} aria-label={`${n.label}, ${n.kind==='locked'?'locked':'editable'}${badge?', '+badge:''}${isCustomized(view?.overrides,n)?', customized':''}`} style={{left:p.x,top:p.y,width:NODE_W,minHeight:nodeH(n.id),height:nodeH(n.id)}}
+      {PIPELINE_NODES.map(n=>{const p=place(n),badge=safetyLabelOf(n,view?.effective??DEFAULT_PIPELINE_CONFIG),chips=studioRoleChips(n,setup),onPath=!active||!around||n.id===active||(fullPath?around.up.has(n.id)||around.down.has(n.id):neighbours.has(n.id));return <button key={n.id} type="button" className="studio-node" data-node={n.id} data-role-node={n.role} data-kind={n.kind} data-group={n.group} data-provider={n.provider} data-main={MAIN_NODES.has(n.id)||undefined} data-dim={!onPath||undefined} data-selected={selected===n.id||undefined} data-highlight={n.id===flagged||undefined} aria-pressed={selected===n.id} aria-describedby={peek===n.id?'studio-peek':undefined}
+        data-customized={isCustomized(view?.overrides,n)||undefined} aria-label={`${studioNodeLabel(n,setup)}, ${n.kind==='locked'?'locked':'editable'}${badge?', '+badge:''}${isCustomized(view?.overrides,n)?', customized':''}${chips?', '+[...chips.labels,chips.source].join(', '):''}`} style={{left:p.x,top:p.y,width:NODE_W,minHeight:nodeH(n.id),height:nodeH(n.id)}}
         onPointerDown={e=>onNodeDown(e,n)} onPointerMove={onNodeMove} onPointerUp={onNodeUp} onPointerCancel={onNodeUp} onClick={()=>choose(n.id)} onKeyDown={e=>onNodeKey(e,n)}
         onPointerEnter={()=>setPeek(n.id)} onPointerLeave={()=>setPeek(c=>c===n.id?(flagged??null):c)} onFocus={e=>{setPeek(n.id);reveal(e,n);}} onBlur={()=>setPeek(c=>c===n.id?(flagged??null):c)}>
-        <span className="studio-node-title">{n.kind==='locked'&&<Lock/>}{n.label}</span>
-        <span className="studio-node-meta"><span className="studio-kind" data-kind={n.kind}>{n.kind==='editable'&&<i className="studio-dot" aria-hidden="true"/>}{n.kind==='locked'?'Locked':'Editable'}</span>{badge&&<Badge label={badge}/>}</span>{isCustomized(view?.overrides,n)&&<span className="studio-custom" data-custom="true" title="You changed this from the default">Customized</span>}</button>;})}
+        <span className="studio-node-title">{n.kind==='locked'&&<Lock/>}{studioNodeLabel(n,setup)}</span>
+        <span className="studio-node-meta"><span className="studio-kind" data-kind={n.kind}>{n.kind==='editable'&&<i className="studio-dot" aria-hidden="true"/>}{n.kind==='locked'?'Locked':'Editable'}</span>{badge&&<Badge label={badge}/>}</span><RoleChips node={n} setup={setup}/>{isCustomized(view?.overrides,n)&&<span className="studio-custom" data-custom="true" title="You changed this from the default">Customized</span>}</button>;})}
      </div>
-     {peekNode&&!selectedNode&&<NodeCard node={peekNode} view={view} id="studio-peek"/>}
+     {peekNode&&!selectedNode&&<NodeCard node={peekNode} view={view} setup={setup} id="studio-peek"/>}
     </div>
-    {selectedNode&&<aside className="studio-side" aria-label="Node editor">{editor}<NodeCard node={selectedNode} view={view}/></aside>}
+    {selectedNode&&<aside className="studio-side" aria-label="Node editor">{editor}<NodeCard node={selectedNode} view={view} setup={setup}/></aside>}
    </div>}
  </section>;
 }

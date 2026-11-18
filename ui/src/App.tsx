@@ -661,7 +661,7 @@ export default function App() {
       {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); burgerRef.current?.focus(); }} onOpenStudio={() => { setSettingsOpen(false); setStudio({}); }} onOpenSetup={()=>void reopenSetup()} setupError={setupError} preferences={setupPreferences} onPreferences={setSetupPreferences} />}
       {setup && <Setup data={setup} onPreferences={setSetupPreferences} onClose={message=>{setSetup(null);if(message)setNotice(message);burgerRef.current?.focus();}}/>}
       {studio && <Suspense fallback={<section className="studio" role="status" aria-label="Pipeline Studio"><p className="cn-empty">Drawing the pipeline…</p></section>}>
-        <PipelineStudio highlight={studio.highlight} onClose={() => { setStudio(null); studioButtonRef.current?.focus(); }} />
+        <PipelineStudio highlight={studio.highlight} setup={setupPreferences} onSetupChange={setSetupPreferences} onClose={() => { setStudio(null); studioButtonRef.current?.focus(); }} />
       </Suspense>}
       {toast&&<div className="thought-toast" role="status"><span>{toast.text}</span><button onClick={()=>void thoughtAction(toast.id,toast.undo)}>Undo</button><button aria-label="Close notice" onClick={()=>setToast(null)}>Close</button></div>}
       {added&&<div className="thought-toast" role="status"><span>{added.text}<span className="toast-hint"> · Undo (Ctrl+Z)</span></span><details className="added-detail"><summary>What was added</summary><pre>{added.detail}</pre></details><button onClick={()=>{const h=active?panes.current.get(active):undefined;if(h){undo(h.view);h.view.focus();}setAdded(null);}}>Undo</button><button aria-label="Close notice" onClick={()=>setAdded(null)}>Close</button></div>}

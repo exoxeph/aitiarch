@@ -25,7 +25,7 @@ it('holds the 2,000-character cap to the real validator: 2,000 is accepted, 2,00
 it('marks a node customized only when one of its own settings is in the saved overrides',()=>{
  const answerer=nodeById('normal-answerer')!,budget=nodeById('token-budget')!,gate=nodeById('permission_gate')!;
  expect(isCustomized({},answerer)).toBe(false);
- expect(customizedKeys({normalAnswerer:'codex'},answerer)).toEqual(['normalAnswerer']);
+ expect(customizedKeys({normalAnswerer:'codex'},answerer)).toEqual([]);
  expect(customizedKeys({prompts:{chatLength:'Be brief.'}},answerer)).toEqual(['prompts.chatLength']);
  expect(isCustomized({prompts:{chatLength:'Be brief.'}},nodeById('council')!)).toBe(true);
  expect(customizedKeys({chat:{tokenBudget:60000}},budget)).toEqual(['chat.tokenBudget']);
@@ -33,6 +33,6 @@ it('marks a node customized only when one of its own settings is in the saved ov
  expect(isCustomized({normalAnswerer:'codex',chat:{tokenBudget:1}},gate)).toBe(false);
 });
 it('names a changed setting in plain words',()=>{
- expect(settingLabel('normalAnswerer')).toBe('Who answers Normal chat');expect(settingLabel('chat.tokenBudget')).toBe('Token budget per chat');
+ expect(settingLabel('chat.tokenBudget')).toBe('Token budget per chat');
  expect(settingLabel('prompts.personas.grill.instruction')).toMatch(/^Grill me: /);
 });

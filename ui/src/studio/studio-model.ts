@@ -2,16 +2,16 @@
 import {GROUP_ORDER,PIPELINE_NODES,numberAt,type NodeGroup,type PipelineNode} from '../../shared/pipeline-nodes.ts';
 
 export const LAYOUT_KEY='aitiarch.pipeline.layout';
-export const NODE_W=184,NODE_H=88,WORLD_W=1900,WORLD_H=1100;
+export const NODE_W=184,NODE_H=88,WORLD_W=1900,WORLD_H=Math.max(1100,...PIPELINE_NODES.map(n=>n.y+NODE_H+32));
 /** The Ledger takes in six edges, so its box is taller: each arrowhead gets its own clear spot on its left side. */
 export const LEDGER_H=136;
-export const nodeH=(id:string)=>id==='ledger'?LEDGER_H:NODE_H;
+export const nodeH=(id:string)=>id==='ledger'?LEDGER_H:id==='council'?112:NODE_H;
 export type Place={x:number;y:number};
 export type Layout=Record<string,Place>;
 export interface Camera {x:number;y:number;k:number}
 export const MIN_ZOOM=.4,MAX_ZOOM=2;
 /** At or below this width the canvas gives way to a readable list of the same nodes. */
-export const NARROW_PX=480;
+export const NARROW_PX=640;
 export const isNarrow=(width:number)=>width<=NARROW_PX;
 
 const known=new Set(PIPELINE_NODES.map(n=>n.id));
@@ -102,7 +102,7 @@ export function overridesWith(saved:Tree,values:Record<string,number|string>,def
  return next;
 }
 /** The saved overrides without this node's settings (back to the defaults for that node only). `more` names extra keys, such as its wording. */
-export function overridesWithout(saved:Tree,node:Pick<PipelineNode,'fields'|'answerer'>,more:readonly string[]=[]):Tree{
+export function overridesWithout(saved:Tree,node:Pick<PipelineNode,'fields'>,more:readonly string[]=[]):Tree{
  let next=saved;for(const k of [...node.fields,...more])next=deletePath(next,k);
- if(node.answerer)next=deletePath(next,'normalAnswerer');return next;
+ return next;
 }

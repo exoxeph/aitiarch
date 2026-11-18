@@ -1,5 +1,6 @@
 import {useState} from 'react';
-import {CAPABILITY_NEEDS,ROLE_REGISTRY,type SetupProvider,type SetupUpdate,type SetupView} from '../../shared/setup.ts';
+import {CAPABILITY_NEEDS,ROLE_REGISTRY,type SetupProvider,type SetupRole,type SetupUpdate,type SetupView} from '../../shared/setup.ts';
+import {saveSetup} from '../api.ts';
 import {ModelPicker} from '../chat/ModelPicker.tsx';
 
 type Tool=SetupView['providers'][number];
@@ -29,11 +30,23 @@ function CouncilChoices({tools,role,disabled,needs,save}:{
  </>;
 }
 
-export function RoleControls({view,busy,customize=false,save,onChange}:{
- view:SetupView;busy:boolean;customize?:boolean;save:(update:SetupUpdate)=>void;onChange?:(view:SetupView)=>void;
+export function useRoleWrites(onChange?: (view:SetupView)=>void){
+ const [busy,setBusy]=useState(false),[notice,setNotice]=useState('');
+ const save=async (body:SetupUpdate)=>{
+  setBusy(true);
+  setNotice('');
+  try {onChange?.(await saveSetup(body));}
+  catch(error){setNotice(error instanceof Error?error.message:'The role setting could not be saved.');}
+  finally{setBusy(false);}
+ };
+ return {busy,notice,save};
+}
+
+export function RoleControls({view,busy,customize=false,save,onChange,only}:{
+ view:SetupView;busy:boolean;customize?:boolean;save:(update:SetupUpdate)=>void;onChange?:(view:SetupView)=>void;only?:SetupRole;
 }){
  return <div className="setup-roles">
-  {ROLE_REGISTRY.map(def=>{
+  {ROLE_REGISTRY.filter(def=>!only||def.id===only).map(def=>{
    const role=view.roles.find(item=>item.role===def.id);
    const needs=CAPABILITY_NEEDS[def.capability];
    const selected=role?.provider??null;

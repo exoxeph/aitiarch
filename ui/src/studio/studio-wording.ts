@@ -35,14 +35,13 @@ export function textAt(config:unknown,key:string):string|undefined{
 const hasPath=(tree:unknown,key:string)=>{let v:any=tree;for(const k of key.split('.')){if(v==null||typeof v!=='object'||!Object.hasOwn(v,k))return false;v=v[k];}return true;};
 
 /** The settings of a node that differ from the defaults. The server keeps only values that differ in the saved overrides, so a key being there means it was changed. */
-export function customizedKeys(overrides:unknown,node:{id:string;kind:string;fields:readonly string[];answerer?:true}):string[]{
+export function customizedKeys(overrides:unknown,node:{id:string;kind:string;fields:readonly string[]}):string[]{
  if(node.kind!=='editable')return [];
- return [...node.fields,...wordingKeys(node.id),...(node.answerer?['normalAnswerer']:[])].filter(k=>hasPath(overrides,k));
+ return [...node.fields,...wordingKeys(node.id)].filter(k=>hasPath(overrides,k));
 }
 export const isCustomized=(overrides:unknown,node:Parameters<typeof customizedKeys>[1])=>customizedKeys(overrides,node).length>0;
 /** A plain name for a changed setting, for the card. */
 export function settingLabel(key:string):string{
- if(key==='normalAnswerer')return 'Who answers Normal chat';
  const f=FIELDS[key];if(f)return f.label;
  for(const w of Object.values(WORDING))for(const g of w.groups)for(const x of g.fields)if(x.key===key)return g.title?`${g.title}: ${x.label}`:x.label;
  return key;

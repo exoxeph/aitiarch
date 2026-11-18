@@ -1729,6 +1729,14 @@ p.chat-wait { margin: 4px 0 0; }
 .studio-node[data-provider="kiro"] { --g: var(--ai-ink); }
 .studio-node-title { display: flex; align-items: center; gap: 6px; font-weight: 600; }
 .studio-node-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 5px; }
+.studio-role-chips { display: grid; gap: 1px; min-width: 0; font: var(--text-meta)/1.1 var(--font-ui); }
+.studio-role-chips > span { min-width: 0; }
+.studio-node .studio-role-chips { width: 100%; }
+.studio-node .studio-role-chips > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.studio-role-source { color: var(--muted); }
+.studio-row .studio-role-chips { flex-basis: 100%; overflow-wrap: anywhere; }
+.studio-row:has(.studio-role-chips) { flex-wrap: wrap; }
+.studio-editor .setup-model { margin-top: 0; }
 .studio-kind { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 999px; font: 600 14px/1.35 var(--font-ui); letter-spacing: .01em; }
 .studio-kind[data-kind="editable"] { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ink-text); }
 .studio-kind[data-kind="locked"] { border: 1px dashed var(--muted); color: var(--muted); }

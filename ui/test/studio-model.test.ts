@@ -51,14 +51,14 @@ it('fits every place in the view, centred, and never past 1:1',()=>{
  const withLane=fitCamera(places,{w:1400,h:780},12,[{x:10,y:-30,w:300,h:200}]);expect(-30*withLane.k+withLane.y).toBeGreaterThanOrEqual(0);
  expect(fitCamera([{x:0,y:0}],{w:2000,h:2000}).k).toBe(1);expect(fitCamera([],{w:10,h:10}).k).toBe(.75);
 });
-it('switches to the list at 480 px and below',()=>{expect(isNarrow(360)).toBe(true);expect(isNarrow(480)).toBe(true);expect(isNarrow(481)).toBe(false);});
+it('uses the readable list at 640 px and below',()=>{expect(isNarrow(360)).toBe(true);expect(isNarrow(640)).toBe(true);expect(isNarrow(641)).toBe(false);});
 it('edits nested overrides without touching the rest and drops values equal to the default',()=>{
  const base={chat:{tokenBudget:60000},normalAnswerer:'codex'};
  expect(setPath(base,'council.caps.codex.amount',5000)).toEqual({...base,council:{caps:{codex:{amount:5000}}}});
  expect(deletePath({council:{caps:{codex:{amount:5000}}}},'council.caps.codex.amount')).toEqual({});
  expect(overridesWith(base,{'chat.tokenBudget':DEFAULT_PIPELINE_CONFIG.chat.tokenBudget,'chat.rollingRequestCap':7},DEFAULT_PIPELINE_CONFIG)).toEqual({normalAnswerer:'codex',chat:{rollingRequestCap:7}});
  expect(overridesWithout({chat:{tokenBudget:60000,historyPairs:2},normalAnswerer:'kiro'},nodeById('token-budget')!)).toEqual({chat:{historyPairs:2},normalAnswerer:'kiro'});
- expect(overridesWithout({normalAnswerer:'kiro'},nodeById('normal-answerer')!)).toEqual({});
+ expect(overridesWithout({normalAnswerer:'kiro'},nodeById('normal-answerer')!)).toEqual({normalAnswerer:'kiro'});
 });
 it('parses a typed number and leaves range checks to the server',()=>{
  expect(parseField(' 12 ')).toBe(12);expect(parseField('')).toBeNull();expect(parseField('abc')).toBeNull();expect(parseField('99999999')).toBe(99999999);

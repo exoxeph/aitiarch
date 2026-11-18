@@ -12,6 +12,9 @@ import {createApp} from '../server/http.ts';
 import {ProviderError} from '../server/providers/index.ts';
 import {SessionIndex} from '../server/harness/session-index.ts';
 import {locked} from '../shared/pipeline-config.ts';
+import {ROLE_REGISTRY,defaultMachineSetup} from '../shared/setup.ts';
+import {createSetupHttp} from '../server/setup-http.ts';
+import {saveMachineSetup} from '../server/setup-store.ts';
 import {PIPELINE_NODES,edgesOf,nodeById} from '../shared/pipeline-nodes.ts';
 const output=path.resolve(process.env.BATCH2A_OUTPUT??'');assert(process.env.BATCH2A_OUTPUT&&!output.toLowerCase().startsWith(path.resolve('..').toLowerCase()),'BATCH2A_OUTPUT must be a folder outside the repo');await mkdir(output,{recursive:true});
 const base=await mkdtemp(path.join(os.tmpdir(),'aitiarch-pipeline-studio-')),notes=path.join(base,'notes'),settings=path.join(base,'settings'),configFile=path.join(settings,'pipeline-config.json');await mkdir(notes);
@@ -20,7 +23,15 @@ const index=await SessionIndex.open(path.join(base,'harness'));
 const adapters=['codex','kiro','claude'].map(id=>({id,label:id==='codex'?'Codex':id==='kiro'?'Kiro':'Claude',safetyLabel:id==='codex'?'contained':id==='kiro'?'host-gated':'fenced',async *startTurn(){throw new Error('A live provider call is forbidden in this check.');}}));
 const provider={name:'claude',async checkAvailability(){return {available:true};},async invoke(){throw new ProviderError('timeout');}};
 const store=await Store.open(notes),watcher=new NoteWatcher(store);await watcher.start();
-const app=createApp({store,watcher,distDir:path.resolve('dist'),provider,pipelineConfigDir:settings,council:{index,adapters,availabilityChecks:adapters.map(a=>({...a,check:async()=>({available:true,reason:null})}))},harness:{command:process.execPath,prefixArgs:[path.resolve('test/fixtures/harness-cli.mjs')],dir:index.dir}});
+const initialSetup=defaultMachineSetup();
+initialSetup.providers.codex.enabled=true;
+initialSetup.providers.kiro.enabled=true;
+initialSetup.setupSeen=true;initialSetup.defaultRoles=ROLE_REGISTRY.map(role=>role.id);
+for(const role of ROLE_REGISTRY)initialSetup.roles[role.id]='claude';
+await saveMachineSetup(process.env.AITIARCH_CONFIG_DIR,initialSetup);
+const setup=createSetupHttp({dir:process.env.AITIARCH_CONFIG_DIR,project:notes,ready:async()=>true,
+ providers:adapters.map(({id})=>({id,path:null,version:'99.0.0',isolation:'metadata-compatible',code:'ok',reason:'Fake metadata check passed.',roles:[],effort:id==='claude'?true:null,effortCode:id==='claude'?'help_flag_present':'not_applicable'}))});
+const app=createApp({setup,store,watcher,distDir:path.resolve('dist'),provider,pipelineConfigDir:settings,council:{index,adapters,availabilityChecks:adapters.map(a=>({...a,check:async()=>({available:true,reason:null})}))},harness:{command:process.execPath,prefixArgs:[path.resolve('test/fixtures/harness-cli.mjs')],dir:index.dir}});
 const saved=async()=>JSON.parse(await readFile(configFile,'utf8')).overrides;
 let browser;
 try{
@@ -38,7 +49,7 @@ try{
  assert((await studio.locator('.studio-edges path').count())>=30,'edges show the flow');
  await page.screenshot({path:path.join(output,'studio-canvas.png')});
  // 1b. Polish: groups read as groups, editable and locked differ at a glance, the Council is stitched from three labelled limbs, the main path stands out, the Ledger trunk is faint.
- assert.deepEqual(await studio.locator('.studio-region-label').allInnerTexts(),['YOUR REQUEST','GUARDS','ANSWER','CHECKS ON THE REPLY','INVESTIGATE','COUNCIL','RECORDS'].map(s=>s),'one labelled lane per group, in order');
+ assert.deepEqual(await studio.locator('.studio-region-label').allInnerTexts(),['YOUR REQUEST','GUARDS','ANSWER','CHECKS ON THE REPLY','INVESTIGATE','COUNCIL','RECORDS','AI ROLES'].map(s=>s),'one labelled lane per group, in order');
  for(const n of PIPELINE_NODES){const kind=node(n.id).locator('.studio-kind');assert.equal((await kind.innerText()).trim(),n.kind==='editable'?'Editable':'Locked',`${n.id} says what it is in words`);
   assert.equal(await node(n.id).locator('.studio-dot').count(),n.kind==='editable'?1:0,`${n.id}: the editable mark is only on editable nodes`);
   assert.equal(await node(n.id).evaluate(e=>getComputedStyle(e).borderTopStyle),n.kind==='locked'?'dashed':'solid',`${n.id}: locked is dashed, editable is solid`);}
@@ -66,7 +77,7 @@ try{
   for(const p of document.querySelectorAll('.studio-edges path[data-edge]')){const [from,to]=p.dataset.edge.split('>'),len=p.getTotalLength();
    for(let t=0;t<=len;t+=4){const q=p.getPointAtLength(t);for(const n of nodes){if(n.id===from||n.id===to)continue;const w=world[n.id];if(q.x>w.x-4&&q.x<w.x+184+4&&q.y>w.y-4&&q.y<w.y+n.h+4){problems.push(`edge ${p.dataset.edge} runs through ${n.id}`);break;}}}}
   return {k,minTitle:Math.min(...titles),minMeta:Math.min(...meta),problems:[...new Set(problems)]};
- },{nodes:PIPELINE_NODES.map(n=>({id:n.id,group:n.group,x:n.x,y:n.y,h:n.id==='ledger'?136:88})),margin:0});
+ },{nodes:PIPELINE_NODES.map(n=>({id:n.id,group:n.group,x:n.x,y:n.y,h:n.id==='ledger'?136:n.role==='council'?112:88})),margin:0});
  const m1440=await measure();assert.deepEqual(m1440.problems,[],'the 1440 layout is spread out and clear: '+JSON.stringify(m1440.problems));
  assert(m1440.minTitle>=12,`node text is at least 12px at the default fit at 1440 (smallest title ${m1440.minTitle.toFixed(1)}px, tags ${m1440.minMeta.toFixed(1)}px, zoom ${m1440.k.toFixed(2)})`);
  await page.screenshot({path:path.join(output,'layout-1440.png')});
@@ -142,7 +153,8 @@ try{
   await node('request-intake').click();await studio.getByRole('region',{name:'Edit Your note and mode'}).waitFor();
   assert.deepEqual(await clipped(),[],`nothing is clipped with the panel open at ${w}`);
   await page.screenshot({path:path.join(output,`panel-open-${w}.png`)});
-  await page.mouse.click(Math.round(w*.3),h-40);await page.waitForTimeout(150);
+  await studio.getByRole('button',{name:'Close editor'}).click();
+  await studio.getByRole('region',{name:'Edit Your note and mode'}).waitFor({state:'detached'});
  }
  await page.setViewportSize({width:1440,height:900});await studio.getByRole('button',{name:'Reset layout'}).click();await page.waitForTimeout(250);
  // 4. Dragging moves a node and the place is remembered; Reset layout puts everything back.
@@ -169,7 +181,11 @@ try{
   }
   return [...new Set(bad)];
  });
- assert.equal(await studio.locator('.studio-region-handle').count(),7,'every lane has a handle');
+ assert.deepEqual(
+  await studio.locator('.studio-region-handle').evaluateAll(handles=>handles.map(handle=>handle.dataset.group).sort()),
+  [...new Set(PIPELINE_NODES.map(n=>n.group))].sort(),
+  'every lane has a handle',
+ );
  const before=await posOf(allIds),k=await node('redaction').evaluate(e=>e.getBoundingClientRect().width/e.offsetWidth);
  let hb=await handle('guard').boundingBox();const grab={x:hb.x+hb.width-30,y:hb.y+14};
  await page.mouse.move(grab.x,grab.y);await page.mouse.down();await page.mouse.move(grab.x+24,grab.y+70,{steps:8});
@@ -221,20 +237,91 @@ try{
  const err=panel.locator('.chat-error');await err.waitFor();await err.locator('summary',{hasText:'Why?'}).click();
  const link=err.getByRole('button',{name:'Show on pipeline'});await link.waitFor();const target=await link.getAttribute('data-why-link');assert(nodeById(target),'the link names a real node: '+target);
  await link.click();await studio.waitFor();const lit=studio.locator('.studio-node[data-highlight]');await lit.waitFor();assert.equal(await lit.count(),1);assert.equal(await lit.getAttribute('data-node'),target,'the blocked step is highlighted');
- assert.match(await studio.locator('[data-banner=show-on-pipeline]').innerText(),new RegExp(nodeById(target).label));await page.screenshot({path:path.join(output,'studio-show-on-pipeline.png')});
+ assert.equal(await studio.locator('[data-banner=show-on-pipeline]').innerText(),`Showing ${await lit.locator('.studio-node-title').innerText()} on the pipeline: this is the step that stopped your reply.`);await page.screenshot({path:path.join(output,'studio-show-on-pipeline.png')});
  await page.keyboard.press('Escape');await studio.waitFor({state:'detached'});await page.getByRole('button',{name:'Close chat'}).click();
- // 6. The answerer saves through the server and is still there after a reload.
- await openStudio();await node('normal-answerer').click();const ans=studio.getByRole('region',{name:'Edit Normal chat answerer'});await ans.waitFor();
- assert.match(await ans.innerText(),/Available/);const pick=ans.getByLabel('Normal chat is answered by');assert.equal(await pick.inputValue(),'claude');
- await pick.selectOption('codex');await ans.getByRole('button',{name:'Save'}).click();await ans.getByText('Saved.').waitFor();assert.deepEqual(await saved(),{normalAnswerer:'codex'});await page.screenshot({path:path.join(output,'studio-editor.png')});
- await boot();await openStudio();await node('normal-answerer').click();assert.equal(await studio.getByLabel('Normal chat is answered by').inputValue(),'codex','the answerer is still Codex after a reload');
+ // 6. Studio and Setup edit the same machine roles through the same endpoint.
+ const roleRequests=[];
+ const capture=request=>roleRequests.push({url:new URL(request.url()),method:request.method()});
+ page.on('request',capture);
+ const openSettings=async()=>{
+  await page.getByRole('button',{name:'Notes menu',exact:true}).click();
+  await page.getByRole('button',{name:'AI settings'}).click();
+  const dialog=page.getByRole('dialog',{name:'AI settings'});await dialog.getByRole('tab',{name:'Setup'}).click();return dialog;
+ };
+ const saveRole=async action=>{
+  const [response]=await Promise.all([page.waitForResponse(r=>new URL(r.url()).pathname==='/api/setup'&&r.request().method()==='PUT'),action()]);
+  assert(response.ok(),`Setup write failed: ${response.status()} ${await response.text()}`);
+ };
+ const editRole=async id=>{await node(id).focus();await page.keyboard.press('Enter');const editor=studio.locator('[data-editor="'+id+'"]');await editor.waitFor();return editor;};
+ await openStudio();
+ const roles=await studio.locator('[data-role-node]').evaluateAll(els=>els.map(el=>el.dataset.roleNode).sort());
+ assert.deepEqual(roles,ROLE_REGISTRY.map(role=>role.id).sort());
+ assert.equal(await node('provider-run').locator('.studio-node-title').innerText(),'Claude run');
+ const ans=await editRole('normal-answerer');
+ const pick=ans.getByLabel('Normal chat',{exact:true});
+ assert.equal(await pick.inputValue(),'claude');
+ await saveRole(()=>pick.selectOption('codex'));
+ await node('provider-run').getByText('Codex run',{exact:true}).waitFor();
+ assert.match(await node('normal-answerer').locator('.studio-role-chips').innerText(),/Codex.*Default[\s\S]*saved choice/);
+ await page.keyboard.press('Escape');await ans.waitFor({state:'detached'});
+ await page.waitForFunction(()=>document.activeElement?.getAttribute('data-node')==='normal-answerer');
+ await page.keyboard.press('Escape');await studio.waitFor({state:'detached'});
+ let setupDialog=await openSettings();
+ const normalInSetup=setupDialog.getByLabel('Normal chat',{exact:true});assert.equal(await normalInSetup.inputValue(),'codex');
+ await saveRole(()=>normalInSetup.selectOption('kiro'));
+ await setupDialog.getByRole('button',{name:'Close AI settings'}).click();
+ await boot();await openStudio();
+ assert.equal(await (await editRole('normal-answerer')).getByLabel('Normal chat',{exact:true}).inputValue(),'kiro');
+ await page.keyboard.press('Escape');
+ const skill=await editRole('role-skill-diagram');
+ const disabledCodex=skill.getByLabel('Skill diagrams',{exact:true}).locator('option[value="codex"]');
+ assert.equal(await disabledCodex.isDisabled(),true);
+ assert.match(await disabledCodex.textContent(),/Needs the Skill workflow/);
+ const modelChip=skill.getByRole('button',{name:/^Model:/});
+ await modelChip.click();
+ const modelMenu=page.getByRole('menu',{name:'Model and effort'});
+ await modelMenu.waitFor();
+ const sonnet=modelMenu.getByRole('menuitemradio',{name:'sonnet',exact:true});
+ await saveRole(()=>sonnet.click());
+ await node('role-skill-diagram').getByText(/Claude.*Sonnet/i).waitFor();
+ await page.keyboard.press('Escape');
+ await studio.getByRole('button',{name:'Close Pipeline Studio'}).click();
+ setupDialog=await openSettings();
+ const skillInSetup=setupDialog.locator('[data-role="skill-diagram"]');
+ await skillInSetup.getByRole('button',{name:/^Model: Claude.*Sonnet/i}).waitFor();
+ await saveRole(()=>skillInSetup.getByRole('button',{name:'Reset to default',exact:true}).click());
+ await skillInSetup.getByRole('button',{name:/^Model: Claude.*Default/}).waitFor();
+ await setupDialog.getByRole('button',{name:'Close AI settings'}).click();
+ await openStudio();
+ for(const width of [1280,640]){
+  await page.setViewportSize({width,height:900});
+  const narrow=width===640;
+  const narrowRole=id=>studio.locator(`.studio-list [data-node="${id}"] > button`);
+  if(narrow)await narrowRole('role-invoked').scrollIntoViewIfNeeded();
+  else await studio.getByRole('button',{name:'Reset layout'}).click();
+  assert.deepEqual(await studio.locator('[data-role-node]').evaluateAll(els=>els.map(el=>el.dataset.roleNode).sort()),roles);
+  await page.screenshot({path:path.join(output,`studio-role-nodes-${width}.png`)});
+  if(narrow)await narrowRole('role-skill-diagram').press('Enter');
+  const roleEditor=narrow?studio.locator('[data-editor="role-skill-diagram"]'):await editRole('investigate');
+  if(narrow)await roleEditor.scrollIntoViewIfNeeded();
+  const rect=await roleEditor.boundingBox();assert(rect&&rect.x>=0&&rect.x+rect.width<=width);
+  await page.screenshot({path:path.join(output,`studio-role-editor-${width}.png`)});
+  await page.keyboard.press('Escape');await roleEditor.waitFor({state:'detached'});
+ }
+ await page.setViewportSize({width:1440,height:900});
+ // No inference request or external network is made by inspecting/editing machine roles.
+ assert(roleRequests.some(r=>r.url.pathname==='/api/setup'&&r.method==='PUT'));
+ assert(roleRequests.every(r=>r.url.origin===url&&!/\/api\/(?:chat|conversation|council|harness)\/(?:send|turn|run)$/.test(r.url.pathname)));
+ page.off('request',capture);
+ assert.equal(await page.evaluate(async()=>Object.hasOwn((await (await fetch('/api/pipeline-config')).json()).overrides,'normalAnswerer')),false);
  // 7. A numeric limit edits per node, keeps the other saved settings, and resets only its own node.
  await node('token-budget').click();const tb=studio.getByRole('region',{name:'Edit Token budget'});await tb.waitFor();
- await tb.locator('[data-field="chat.rollingRequestCap"]').fill('7');await tb.getByRole('button',{name:'Save'}).click();await tb.getByText('Saved.').waitFor();assert.deepEqual(await saved(),{normalAnswerer:'codex',chat:{rollingRequestCap:7}});
+ await tb.locator('[data-field="chat.rollingRequestCap"]').fill('7');await tb.getByRole('button',{name:'Save'}).click();await tb.getByText('Saved.').waitFor();assert.deepEqual(await saved(),{chat:{rollingRequestCap:7}});
  // 8. A value the server refuses shows the server's own sentence and changes nothing.
  await tb.locator('[data-field="chat.tokenBudget"]').fill('99999999');await tb.getByRole('button',{name:'Save'}).click();const bad=tb.locator('[data-notice=studio-error]');await bad.waitFor();
- assert.equal((await bad.innerText()).trim(),'This value is out of range or not allowed.');assert.deepEqual(await saved(),{normalAnswerer:'codex',chat:{rollingRequestCap:7}},'a refused save changes nothing on disk');
- await tb.getByRole('button',{name:'Reset this node'}).click();await tb.getByText('This node is back to its defaults.').waitFor();assert.deepEqual(await saved(),{normalAnswerer:'codex'},'only this node was reset');
+ assert.equal((await bad.innerText()).trim(),'This value is out of range or not allowed.');assert.deepEqual(await saved(),{chat:{rollingRequestCap:7}},'a refused save changes nothing on disk');
+ await tb.getByRole('button',{name:'Reset this node'}).click();await tb.getByText('This node is back to its defaults.').waitFor();await assert.rejects(readFile(configFile),{code:'ENOENT'},'resetting the last override removes the empty override file');
+ assert.deepEqual(await page.evaluate(async()=>(await (await fetch('/api/pipeline-config')).json()).overrides),{},'there are no pipeline overrides after resetting the only changed node');
  await page.keyboard.press('Escape');await page.keyboard.press('Escape');await studio.waitFor({state:'detached'});
  // 9. Settings keeps its plain form, with a link to the Studio.
  // Hold its config response so this also covers the first render before settings have loaded.
@@ -247,7 +334,7 @@ try{
  resumeSettings();
  await page.waitForFunction(()=>{const select=document.querySelector('#pipeline-answerer');return select&&!select.disabled;});
  await page.unroute('**/api/pipeline-config');
- assert.equal(await dialog.getByLabel('Normal chat is answered by').inputValue(),'codex','the plain form still works');await dialog.getByRole('button',{name:'Open Pipeline Studio'}).click();await studio.waitFor();assert.equal(await dialog.count(),0,'Settings closed');
+ assert.equal(await dialog.getByLabel('Normal chat is answered by').inputValue(),'claude','the plain form still reads its separate pipeline setting');await dialog.getByRole('button',{name:'Open Pipeline Studio'}).click();await studio.waitFor();assert.equal(await dialog.count(),0,'Settings closed');
  // 10. At phone width the canvas gives way to a readable list of the same nodes.
  await page.setViewportSize({width:360,height:740});await studio.locator('[data-list=true]').waitFor();
  assert.equal(await studio.locator('.studio-row').count(),PIPELINE_NODES.length,'every node is in the list');assert.equal(await studio.locator('.studio-node').count(),0);assert.equal(await studio.locator('.studio-region-handle').count(),0,'the list has no lane handles: moving lanes is a canvas feature');
