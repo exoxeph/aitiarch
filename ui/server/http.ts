@@ -23,7 +23,7 @@ import { readFile } from "node:fs/promises";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
-import { normalizeRel, isNotePath, PathError } from "./paths.ts";
+import { normalizeRel, isNotePath, PathError, canonicalAncestor, canonicalPath, isLocalAbsolute, isLocalRelative, isLocalRequestUrl } from "./paths.ts";
 import { Explorer } from "./explorer.ts";
 import { backlinks, noteIndex } from "./citations.ts";
 import { buildGraph, handoffDocument, HandoffError, writeHandoff } from "./graph.ts";
@@ -116,14 +116,22 @@ export async function serveDist(distDir: string, res: http.ServerResponse, url: 
     res.writeHead(400);
     return res.end();
   }
+  if(isLocalRelative(rel)||isLocalAbsolute(rel)||rel.includes(':')){res.writeHead(404);return res.end();}
   let file = path.join(dist, rel === "/" ? "index.html" : rel);
-  if (path.relative(dist, file).startsWith("..") || !existsSync(file)) {
-    if (path.extname(rel)) {
-      res.writeHead(404);
-      return res.end();
+  const confined=(base:string,target:string)=>{
+    const relative=path.relative(base,target);
+    return !relative.startsWith('..')&&!path.isAbsolute(relative)&&!isLocalAbsolute(target)&&!isLocalRelative(relative);
+  };
+  try{
+    const base=await canonicalPath(dist);
+    if(!confined(dist,file))throw Error('Outside UI assets');
+    if(!existsSync(file)){
+      if(path.extname(rel)||!confined(base,await canonicalAncestor(file)))throw Error('Not found');
+      file=path.join(dist,'index.html');
     }
-    file = path.join(dist, "index.html");
-  }
+    file=await canonicalPath(file);
+    if(!confined(base,file))throw Error('Outside UI assets');
+  }catch{res.writeHead(404);return res.end();}
   const data = await readFile(file);
   res.writeHead(200, {
     "Content-Type": MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream",
@@ -766,6 +774,7 @@ export function createApp(opts: AppOptions) {
       res.setHeader("Referrer-Policy", "no-referrer");
       res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
       const url = new URL(req.url ?? "/", "http://localhost");
+      if(isLocalRequestUrl(req.url??'/')){res.writeHead(404);return res.end();}
       if (!url.pathname.startsWith("/api/")) {
         // The launcher opens /?launch=<token>; the token becomes the cookie and leaves the address bar at once.
         const launched = security.launch(url);

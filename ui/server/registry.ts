@@ -1,9 +1,10 @@
 // The projects registry: which project folders this user has opened. It lives in the user's config folder, never in a repository,
 // and removing a project only forgets it: nothing on disk is deleted.
 import {createHash,randomBytes} from 'node:crypto';
-import {lstat,mkdir,readFile,realpath,rename,rm,writeFile} from 'node:fs/promises';
+import {lstat,mkdir,readFile,rename,rm,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {canonicalPath,isLocalAbsolute} from './paths.ts';
 
 export type RegistryCode='not_absolute'|'missing'|'not_initialized'|'unknown'|'corrupt'|'test_guard';
 export class RegistryError extends Error {code:RegistryCode;constructor(code:RegistryCode,message:string){super(message);this.code=code;}}
@@ -54,7 +55,7 @@ export class Registry {
  /** Registers a project folder that already has a .aitiarch folder. Adding the same folder twice returns the existing entry. */
  async add(folder:string):Promise<ProjectEntry>{
   if(!path.isAbsolute(folder))throw new RegistryError('not_absolute','Enter an absolute folder path.');
-  let root:string;try{root=await realpath(folder);if(!(await lstat(root)).isDirectory())throw new Error();}catch{throw new RegistryError('missing','That folder does not exist.');}
+  let root:string;try{if(isLocalAbsolute(folder))throw new Error();root=await canonicalPath(folder);if(isLocalAbsolute(root))throw new Error();if(!(await lstat(root)).isDirectory())throw new Error();}catch{throw new RegistryError('missing','That folder does not exist.');}
   const notes=path.join(root,'.aitiarch');
   try{const s=await lstat(notes);if(!s.isDirectory()||s.isSymbolicLink())throw new Error();}catch{throw new RegistryError('not_initialized','This folder has no .aitiarch notebook yet.');}
   const id=projectId(root),existing=this.get(id);if(existing)return existing;

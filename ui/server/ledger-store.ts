@@ -1,6 +1,6 @@
 import { link, lstat, open, readFile, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
+import {projectLedgerIdentity,resolvePrivateProjectPath} from './project-storage.ts';
 import {isAbortCause,type AbortCause} from '../shared/chat.ts';
 import type {TurnUsage,TurnStatus} from './providers/turn.ts';
 import {validInvokedUsage,type InvokedUsage} from '../shared/invoked-usage.ts';
@@ -99,17 +99,20 @@ export function judgeLock(raw: string, now: number, alive: (pid: number) => bool
 }
 export class LedgerStore {
   private tail: Promise<unknown> = Promise.resolve();
-  private file: string;
-  constructor(root: string) { this.file = path.join(root, 'ledger.json'); }
+  private readonly root: string;
+  constructor(root:string) { this.root=root; }
   /** Recovery is shared by stores for this same file, not by a chat or provider. */
-  get auditKey(): string { const key=path.resolve(this.file);return process.platform==='win32'?key.toLowerCase():key; }
-  private async safe() {
-    try { const s = await lstat(this.file); if (!s.isFile() || s.isSymbolicLink()) throw new Error('Invalid ledger path.'); }
+  get auditKey(): string { const key=projectLedgerIdentity(this.root);return process.platform==='win32'?key.toLowerCase():key; }
+  private async safe(file:string) {
+    try { const s = await lstat(file); if (!s.isFile() || s.isSymbolicLink() || s.nlink!==1) throw new Error('Invalid ledger path.'); }
     catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
   }
   async read(): Promise<Ledger> {
-    await this.safe(); let text: string;
-    try { text = await retried(() => readFile(this.file, 'utf8')); }
+    return this.readAt((await resolvePrivateProjectPath(this.root,'ledger')).file);
+  }
+  private async readAt(file:string): Promise<Ledger> {
+    await this.safe(file); let text: string;
+    try { text = await retried(() => readFile(file, 'utf8')); }
     catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { v: 1, events: [] }; throw e; }
     const d = JSON.parse(text);
     // Additive invoked audit branch; the exact-key legacy validators below stay
@@ -192,16 +195,17 @@ export class LedgerStore {
     if(event.event==='conversation_turn'&&!validConversationTurn(event.conv))return Promise.reject(new Error('Invalid conversation turn metadata.'));
     if(event.event==='context_read'&&(contextReadKeys(event)===''||!validContextRead(event)))return Promise.reject(new Error('Invalid context metadata.'));
     const job = this.tail.catch(() => {}).then(async () => {
-      await this.safe(); const lockPath = this.file + '.lock';
-      const mine = await this.lock(lockPath), temp = this.file + '.' + randomUUID() + '.tmp';
+      const {file}=await resolvePrivateProjectPath(this.root,'ledger');
+      await this.safe(file); const lockPath = file + '.lock';
+      const mine = await this.lock(lockPath), temp = file + '.' + randomUUID() + '.tmp';
       try {
-        const d = await this.read();
+        const d = await this.readAt(file);
         if (d.events.some(e => ['context_read','investigation','investigate_turn','diagram_read','cli_version','conversation_turn','council_turn'].includes(event.event)?e.id===event.id:e.inkId === event.inkId && e.requestId === event.requestId && e.event === event.event)) return;
         d.events.push(event);
         const f = await open(temp, 'wx', 0o600);
         try { await f.writeFile(JSON.stringify(d, null, 2) + '\n'); await f.sync(); } finally { await f.close(); }
         if (!await this.owns(lockPath, mine)) throw new Error('The ledger lock was taken over; nothing was written.');
-        await this.safe(); await retried(() => rename(temp, this.file));
+        await this.safe(file); await retried(() => rename(temp, file));
       } finally { await unlink(temp).catch(() => {}); if (await this.owns(lockPath, mine)) await retried(() => unlink(lockPath)).catch(() => {}); } // the event is saved: a lock that cannot be removed now is only left behind (as a crash would leave it)
     });
     this.tail = job; return job;

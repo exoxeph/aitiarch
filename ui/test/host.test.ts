@@ -49,6 +49,19 @@ describe('the session and the project list',()=>{
   const {port,security}=await setup(),r=await req(port,'/api/projects/add',{method:'PUT',headers:auth(security,port,true),body:{path:'relative/dir'}});
   expect(r.status).toBe(400);expect(JSON.parse(r.body).error).toBe('not_absolute');
  });
+ it('leaves local out of folder lists and rejects browsing or initializing private paths',async()=>{
+  const {port,security,ea}=await setup(),headers=auth(security,port,true);
+  const local=path.join(ea.notes,'local');
+  await mkdir(local);
+  await mkdir(path.join(local,'internal'));
+  const browse=(folder:string)=>req(port,'/api/projects/folders?path='+encodeURIComponent(folder),{headers});
+  expect(JSON.parse((await browse(ea.notes)).body).entries).toEqual([]);
+  const existing=await browse(local),missing=await browse(path.join(local,'missing'));
+  expect(existing.status).toBe(404);
+  expect(existing.body).toBe(missing.body);
+  expect((await req(port,'/api/projects/init',{method:'PUT',headers,body:{path:local}})).status).toBe(404);
+  expect(await readdir(local)).toEqual(['internal']);
+ });
  it('refuses a write from a foreign origin',async()=>{
   const {port,security,c}=await setup(),r=await req(port,'/api/projects/add',{method:'PUT',headers:{...auth(security,port,true),origin:'http://evil.example'},body:{path:c}});
   expect(r.status).toBe(403);

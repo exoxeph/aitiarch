@@ -210,9 +210,13 @@ async function checkGitFirstRun(){
  const gitApp=createApp({store:gitStore,watcher:gitWatcher,distDir:path.resolve('dist'),pipelineConfigDir:gitConfig,setup:gitSetup});
  const page=await browser.newPage({viewport:{width:1280,height:800}});
  try{
+  await writeFile(path.join(initialized.root,'local','test-private.md'),'synthetic private storage');
   await page.goto('http://127.0.0.1:'+await gitApp.listen(0)+'/?debug=1');
   const card=page.getByRole('dialog',{name:'Set up Aitiarch'});
   await card.getByText(/Required ignore rule verified/).waitFor();
+  const blocked=await page.request.get(new URL('/api/file?path=LOCAL%2Ftest-private.md',page.url()).href);
+  assert.equal(blocked.status(),404);
+  assert(!((await blocked.text()).includes('synthetic private storage')));
   assert.equal((await gitSetup.get()).privacy.sharedReady,false);
   await page.screenshot({path:path.join(output,'first-run-private-git.png')});
   console.log('Git first run passed: verified local ignore and shared readiness remains off.');
@@ -244,6 +248,8 @@ try {
   response.request().method()==='PUT' && response.ok());
  await page.goto(url+'/?debug=1');
  await firstTabSave;
+ await writeFile(path.join(notes,'local','test-private.md'),'synthetic private storage');
+ assert.equal((await page.request.get(url+'/api/file?path=local%2Ftest-private.md')).status(),404);
  const dialog = page.getByRole('dialog',{name:'Set up Aitiarch'});
  assert.equal(await dialog.count(),0);
  const baseline = await readdir(project,{recursive:true});

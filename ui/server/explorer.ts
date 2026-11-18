@@ -4,9 +4,11 @@
 import {randomBytes} from 'node:crypto';
 import {lstat,mkdir,open,readdir,readFile,realpath,rename,rm} from 'node:fs/promises';
 import path from 'node:path';
+import * as fs from 'node:fs/promises';
+import {assertStoragePath,resolvePrivateProjectPath} from './project-storage.ts';
 import {relocate} from '../shared/links.ts';
 import {serializeInk,type InkDocument} from '../shared/ink.ts';
-import {HIDDEN_DIRS,PathError,isNotePath,normalizeRel} from './paths.ts';
+import {HIDDEN_DIRS,PathError,canonicalPath,isLocalAbsolute,isLocalRelative,isNotePath,normalizeRel,noteNotFound,resolveNote} from './paths.ts';
 import {MAX_NOTE_BYTES,type TreeNode} from './store.ts';
 
 export interface MovePlan {moves:{from:string;to:string}[];changes:{path:string;newPath:string;links:number}[]}
@@ -25,6 +27,7 @@ export class Explorer {
 
  /** A folder or note path inside the notebook: normalized, no hidden or sidecar segments. */
  private rel(input:unknown,kind:'note'|'dir'|'any'):string{
+  if(isLocalRelative(input))throw noteNotFound();
   const rel=normalizeRel(input);
   if(rel.split('/').some(hiddenSeg))throw bad();
   if(kind==='note'&&!isNotePath(rel))throw bad();
@@ -35,7 +38,7 @@ export class Explorer {
  /** Refuses a path whose existing ancestors include a link or junction, so nothing outside the root is touched. */
  private async confined(rel:string){
   let cur=this.rootReal;
-  for(const seg of rel.split('/')){cur=path.join(cur,seg);let s;try{s=await lstat(cur);}catch(e){if(missing(e))return;throw e;}if(s.isSymbolicLink())throw new PathError(403,'outside_root','Linked folders are not followed.');}
+  for(const seg of rel.split('/')){cur=path.join(cur,seg);let s;try{s=await lstat(cur);}catch(e){if(missing(e))return;throw e;}if(isLocalAbsolute(await canonicalPath(cur)))throw noteNotFound();if(s.isSymbolicLink())throw new PathError(403,'outside_root','Linked folders are not followed.');}
  }
  private async kind(rel:string):Promise<'file'|'dir'|null>{
   try{const s=await lstat(this.abs(rel));if(s.isSymbolicLink())return null;return s.isDirectory()?'dir':s.isFile()?'file':null;}catch(e){if(missing(e))return null;throw e;}
@@ -48,7 +51,7 @@ export class Explorer {
    for(const e of entries){
     if(++count>5000)return;if(e.isSymbolicLink())continue;
     const rel=node.path?`${node.path}/${e.name}`:e.name;
-    if(e.isDirectory()){if(hiddenSeg(e.name))continue;const d:TreeNode={name:e.name,path:rel,type:'dir',children:[]};node.children!.push(d);await walk(d,path.join(dir,e.name),depth+1);}
+    if(e.isDirectory()){if(hiddenSeg(e.name)||isLocalRelative(rel))continue;const d:TreeNode={name:e.name,path:rel,type:'dir',children:[]};node.children!.push(d);await walk(d,path.join(dir,e.name),depth+1);}
     else if(e.isFile()&&isNotePath(rel))node.children!.push({name:e.name,path:rel,type:'file'});
    }
    node.children!.sort((a,b)=>a.type===b.type?a.name.localeCompare(b.name,undefined,{sensitivity:'base'}):a.type==='dir'?-1:1);
@@ -73,7 +76,7 @@ export class Explorer {
  /** Every note's text, read as raw UTF-8 so a BOM and line endings survive the round trip. Unreadable notes are skipped. */
  async noteTexts():Promise<{path:string;text:string}[]>{
   const out:{path:string;text:string}[]=[];
-  const visit=async(n:TreeNode)=>{for(const c of n.children??[]){if(c.type==='dir')await visit(c);else{try{const b=await readFile(this.abs(c.path));if(b.length<=MAX_NOTE_BYTES)out.push({path:c.path,text:utf8.decode(b)});}catch{/* not UTF-8 or vanished */}}}};
+  const visit=async(n:TreeNode)=>{for(const c of n.children??[]){if(c.type==='dir')await visit(c);else{try{const {abs}=await resolveNote(this.rootReal,c.path);const b=await readFile(abs);if(b.length<=MAX_NOTE_BYTES)out.push({path:c.path,text:utf8.decode(b)});}catch{/* not UTF-8 or vanished */}}}};
   await visit(await this.tree());return out;
  }
 
@@ -100,16 +103,19 @@ export class Explorer {
   for(const c of changed)await this.atomicWrite(c.path,Buffer.from(c.text,'utf8'));
   await mkdir(path.dirname(this.abs(m.to)),{recursive:true});
   await rename(this.abs(m.from),this.abs(m.to));
+  const chat=await resolvePrivateProjectPath(this.rootReal,'chat').catch(()=>null);
+  const chatRel=chat&&path.relative(this.rootReal,chat.file).split(path.sep).join('/');
   for(const [f,t] of Object.entries(m.moves)){
    await this.moveSidecar(`ink/${f.slice(0,-3)}.ink.json`,`ink/${t.slice(0,-3)}.ink.json`,t,d=>serializeInk(d as InkDocument));
-   await this.moveSidecar(`chat/${f}.chat.json`,`chat/${t}.chat.json`,t,d=>JSON.stringify(d));
+   if(chatRel)await this.moveSidecar(`${chatRel}/${f}.chat.json`,`${chatRel}/${t}.chat.json`,t,d=>JSON.stringify(d),true);
   }
   return Explorer.plan(m.moves,changed);
  }
 
- private async moveSidecar(fromRel:string,toRel:string,note:string,serialize:(d:unknown)=>string){
+ private async moveSidecar(fromRel:string,toRel:string,note:string,serialize:(d:unknown)=>string,privateFile=false){
   const src=this.abs(fromRel),dst=this.abs(toRel);
-  try{if((await lstat(src)).isSymbolicLink())return;}catch(e){if(missing(e))return;throw e;}
+  if(privateFile){await assertStoragePath(fs,src);await assertStoragePath(fs,dst);}
+  try{const entry=await lstat(src);if(entry.isSymbolicLink()||privateFile&&(!entry.isFile()||entry.nlink!==1))return;}catch(e){if(missing(e))return;throw e;}
   await mkdir(path.dirname(dst),{recursive:true});
   await rename(src,dst); // rename first: a case-only rename on Windows is the same physical file
   const doc=JSON.parse(utf8.decode(await readFile(dst)));

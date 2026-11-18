@@ -7,6 +7,7 @@ import {CITATION_ISSUES,NO_CITATION_REASONS,validClaims,validDiagramMisses,valid
 import {isPersona} from '../../shared/persona.ts';
 import {validSessionId} from '../../shared/harness.ts';
 import {validContract} from '../../shared/persona-contract.ts';
+import {resolvePrivateProjectPath} from '../project-storage.ts';
 const exec=promisify(execFile),missing=(e:unknown)=>(e as NodeJS.ErrnoException).code==='ENOENT';
 export interface ChatDocument {v:1;note:string;messages:ChatMessage[]}
 export class ChatStore {
@@ -16,6 +17,11 @@ export class ChatStore {
  private note(note:string){if(!this.validNote(note))throw new Error('Invalid chat note.');return note;}
  private async confined(rel:string,create=false){
   const segments=rel.split('/');let file=this.root;
+  if(segments[0]==='chat'){
+   const {file:chat}=await resolvePrivateProjectPath(this.root,'chat');
+   const localParts=path.relative(this.root,chat).split(path.sep);
+   segments.splice(0,1,...localParts);
+  }
   for(let n=0;n<segments.length;n++){
    file=path.join(file,segments[n]);
    let s;try{s=await lstat(file);}catch(e){if(!missing(e))throw e;if(create&&n<segments.length-1){await mkdir(file,{mode:0o700}).catch(async e=>{if(e.code!=='EEXIST')throw e;});s=await lstat(file);}}
@@ -25,6 +31,8 @@ export class ChatStore {
  // This record never holds questions (the notice below says so, and it applies to the one-off chat). A named conversation (harness session) keeps
  // its questions separately, in the app's own folder outside the repo (server/harness/questions.ts), and Delete conversation removes them.
  async status(){let enabled=false;try{
+  const chat=await resolvePrivateProjectPath(this.root,'chat');
+  if(chat.managed)return {enabled:true,ignoreLine:'*',ignoreFile:path.join(path.dirname(chat.file),'.gitignore'),notice:null};
   await this.confined('chat/ignore-probe.chat.json');
   for(const rel of ['chat/ignore-probe.chat.json','chat/ignore-probe.chat.json.atomic.tmp'])await exec('git',['check-ignore','-q','--',rel],{cwd:this.root,windowsHide:true,timeout:3000});
   const tracked=await exec('git',['ls-files','--','chat'],{cwd:this.root,windowsHide:true,timeout:3000});
@@ -32,6 +40,7 @@ export class ChatStore {
  }catch{}return {enabled,ignoreLine:'/chat/',ignoreFile:path.join(this.root,'.gitignore'),notice:enabled?null:'Chat replies stay in memory until /chat/ is verified git-ignored. In a one-off chat, questions and resend history are never saved; a named conversation keeps its questions in Aitiarch\'s own folder outside the repo.'};}
  /** Explicit authenticated button only. Existing bytes, including BOM and CRLF, survive. */
  async enablePersistence(){return this.serial(async()=>{
+  await resolvePrivateProjectPath(this.root,'chat');
   if((await this.status()).enabled)return this.status();
   const file=await this.confined('.gitignore'),lockFile=await this.confined('.gitignore.aitiarch.lock');
   const lock=await open(lockFile,'wx',0o600),temp=file+'.'+randomUUID()+'.tmp';
@@ -75,7 +84,7 @@ export class ChatStore {
   if(!(await this.status()).enabled)return removed;
   const file=await this.confined('chat/'+note+'.chat.json',true),lock=await open(await this.confined('chat/'+note+'.chat.json.lock'),'wx',0o600),temp=file+'.'+randomUUID()+'.tmp';
   try{
-   for(const target of [file,temp])await exec('git',['check-ignore','-q','--',target],{cwd:this.root,windowsHide:true,timeout:3000});
+   if(!(await resolvePrivateProjectPath(this.root,'chat')).managed)for(const target of [file,temp])await exec('git',['check-ignore','-q','--',target],{cwd:this.root,windowsHide:true,timeout:3000});
    if(!keep.length){await unlink(file).catch(e=>{if(!missing(e))throw e;});return removed;} // nothing left: the record goes, it is not kept empty
    const doc:ChatDocument={v:1,note,messages:keep};this.validate(doc,note);
    const f=await open(temp,'wx',0o600);try{await f.writeFile(JSON.stringify(doc,null,2)+'\n');await f.sync();}finally{await f.close();}
@@ -94,7 +103,7 @@ export class ChatStore {
   this.memory.set(note,structuredClone(d));
   if(!file||!temp||!(await this.status()).enabled)return 'memory' as const;
    // Recheck exact target and temporary coverage, not only a directory probe.
-   for(const target of [file,temp])await exec('git',['check-ignore','-q','--',target],{cwd:this.root,windowsHide:true,timeout:3000});
+   if(!(await resolvePrivateProjectPath(this.root,'chat')).managed)for(const target of [file,temp])await exec('git',['check-ignore','-q','--',target],{cwd:this.root,windowsHide:true,timeout:3000});
    await this.confined('chat/'+note+'.chat.json');
    const f=await open(temp,'wx',0o600);try{await f.writeFile(JSON.stringify(d,null,2)+'\n');await f.sync();}finally{await f.close();}
    await this.confined('chat/'+note+'.chat.json');await rename(temp,file);return 'private' as const;

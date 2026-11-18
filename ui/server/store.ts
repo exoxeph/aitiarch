@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { open, readdir, readFile, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { decode, encode, eolLabel, NotUtf8Error, versionOf, type Decoded, type EolLabel } from "./codec.ts";
-import { HIDDEN_DIRS, isNotePath, PathError, resolveNote } from "./paths.ts";
+import { HIDDEN_DIRS, isNotePath, isLocalRelative, PathError, resolveNote } from "./paths.ts";
 import { resolveRoot } from "./root.ts";
 
 export const MAX_NOTE_BYTES = 2 * 1024 * 1024;
@@ -64,7 +64,7 @@ export class Store {
         if (e.isSymbolicLink()) continue;
         const r = rel ? `${rel}/${e.name}` : e.name;
         if (e.isDirectory()) {
-          if (HIDDEN_DIRS.has(e.name.toLowerCase()) || e.name.startsWith(".")) continue;
+          if (isLocalRelative(r) || HIDDEN_DIRS.has(e.name.toLowerCase()) || e.name.startsWith(".")) continue;
           await walk(path.join(dir, e.name), r, depth + 1);
         } else if (e.isFile() && isNotePath(r)) {
           try {

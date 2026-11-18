@@ -8,6 +8,7 @@ import {CSP,serveDist} from './http.ts';
 import {RegistryError,type ProjectEntry,type Registry} from './registry.ts';
 import type {Security} from './security.ts';
 import {listFolders} from './folders.ts';
+import {isLocalRequestUrl} from './paths.ts';
 import {InitError,initPlan,initialize} from './project-init.ts';
 import {summarize} from './project-summary.ts';
 import type {ServerIdentity} from './launch.ts';
@@ -48,7 +49,7 @@ export function createHost(o:HostOptions){
     }
     return json(res,404,{error:'not_found'});
    }
-  }catch(e){if(e instanceof RegistryError)return json(res,400,{error:e.code,message:e.message});throw e;}
+  }catch(e){if(e instanceof RegistryError)return json(res,e.code==='missing'?404:400,{error:e.code,message:e.message});throw e;}
   if(req.method!=='PUT')return json(res,405,{error:'method'});
   let b:any;try{b=await readBody(req);}catch(e){return json(res,400,{error:(e as Error).message});}
   try{
@@ -61,7 +62,7 @@ export function createHost(o:HostOptions){
      const app=apps.get(e.id);apps.delete(e.id);if(app)await (await app).close().catch(()=>{});return json(res,200,{});} // forgets only; never deletes a file
    }
   }catch(e){
-   if(e instanceof RegistryError)return json(res,e.code==='unknown'?404:400,{error:e.code,message:e.message});
+   if(e instanceof RegistryError)return json(res,e.code==='unknown'||e.code==='missing'?404:400,{error:e.code,message:e.message});
    if(e instanceof InitError)return json(res,409,{error:e.code,message:e.message});throw e;
   }
   return json(res,404,{error:'not_found'});
@@ -72,6 +73,7 @@ export function createHost(o:HostOptions){
    if(!security.hostOk(req.headers.host)){res.writeHead(421,{'Content-Type':'text/plain'});return res.end('Misdirected request');}
    res.setHeader('Content-Security-Policy',CSP);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Cross-Origin-Resource-Policy','same-origin');
    const url=new URL(req.url??'/','http://localhost');
+   if(isLocalRequestUrl(req.url??'/')){res.writeHead(404);return res.end();}
    if(!url.pathname.startsWith('/api/')){
     const launched=security.launch(url);
     if(launched==='bad'){res.writeHead(403,{'Content-Type':'text/plain; charset=utf-8'});return res.end('This launch link is not valid. Open Aitiarch from its launcher again.');}

@@ -1,7 +1,7 @@
 import {execFileSync} from 'node:child_process';
 import {UiStateStore} from '../server/ui-state-store.ts';
 import http from "node:http";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -12,6 +12,8 @@ import { NoteWatcher } from "../server/watch.ts";
 const tmp = realpathSync(mkdtempSync(path.join(tmpdir(), "aitiarch-http-")));
 const root = path.join(tmp, ".aitiarch");
 mkdirSync(path.join(root, "runs"), { recursive: true });
+mkdirSync(path.join(root, "local"));
+writeFileSync(path.join(root, "local", "sentinel.md"), "private-sentinel");
 writeFileSync(path.join(root, "notebook.md"), "# T\n\nPara A.\n\nPara B.\n");
 writeFileSync(path.join(root, "runs", "private.md"), "private");
 
@@ -93,6 +95,42 @@ describe("auth", () => {
 });
 
 describe("file API", () => {
+  it("returns 404 for local file requests regardless of spelling, existence, or a linked alias",async()=>{
+    for(const input of ["local/sentinel.md","LOCAL/sentinel.md","local/missing.md","local\\sentinel.md","local/../sentinel.md","other/../local/sentinel.md","../.aitiarch/local/sentinel.md","LOCAL~1/sentinel.md","local/sentinel.md:stream"]){
+      const r=await call("GET","/api/file?path="+encodeURIComponent(input),{headers:authed()});
+      expect(r.status,input).toBe(404);
+      expect(r.body,input).not.toContain("private-sentinel");
+    }
+    const tree=await call("GET","/api/tree",{headers:authed()});
+    expect(tree.body).not.toContain("sentinel.md");
+  });
+  it("blocks symlink aliases through the note and static handlers",async()=>{
+    // This fixture has a junction on Windows. Leave it out of the recursive
+    // cleanup used by the rest of this file.
+    const scratch=realpathSync(mkdtempSync(path.join(tmpdir(),"aitiarch-http-local-links-")));
+    const notes=path.join(scratch,".aitiarch"),local=path.join(notes,"local"),dist=path.join(scratch,"dist");
+    mkdirSync(local,{recursive:true});mkdirSync(dist);
+    writeFileSync(path.join(local,"sentinel.md"),"private-sentinel");
+    writeFileSync(path.join(dist,"index.html"),"public");
+    for(const dir of [notes,dist])symlinkSync(local,path.join(dir,"alias"),process.platform==="win32"?"junction":"dir");
+    const store=await Store.open(notes),watch=new NoteWatcher(store);
+    const linked=createApp({store,watcher:watch,distDir:dist});
+    try{
+      const base='http://127.0.0.1:'+await linked.listen(0);
+      const session=await fetch(base+'/api/session');
+      const headers={cookie:(session.headers.get('set-cookie')??'').split(';')[0]};
+      for(const target of ['/api/file?path=alias%2Fsentinel.md','/api/file?path=alias%2Fmissing.md','/alias/sentinel.md','/alias/missing.md','/alias/missing/path']){
+        const result=await fetch(base+target,{headers});
+        expect(result.status,target).toBe(404);
+        expect(await result.text()).not.toContain('private-sentinel');
+      }
+    }finally{watch.stop();await linked.close();}
+  });
+  it("rejects private paths before a static URL or traversal can fall back to the app",async()=>{
+    for(const input of ["/.aitiarch/local/","/.aitiarch%2Flocal%5Csentinel.md","/local/%2e%2e/","/.aitiarch/LOCAL~1/sentinel.md:stream"]){
+      expect((await call("GET",input)).status,input).toBe(404);
+    }
+  });
   it('round-trips smart correction preferences and rejects unsafe personal words',async()=>{
     execFileSync('git',['init','-q'],{cwd:tmp,stdio:'pipe'});writeFileSync(path.join(root,'.gitignore'),'/ui-state.json*\n');
     const body={v:1,tabs:[],active:null,smartCorrections:false,neverCorrect:['helo']};

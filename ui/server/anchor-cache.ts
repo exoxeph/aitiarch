@@ -3,6 +3,7 @@ import { lstat, mkdir, open, readFile, rename, unlink, writeFile } from "node:fs
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import {resolvePrivateProjectPath} from "./project-storage.ts";
 const exec = promisify(execFile);
 
 export const textHash = (text: string) => createHash("sha256").update(text, "utf8").digest("hex");
@@ -12,6 +13,7 @@ export class AnchorCache {
   constructor(root: string) { this.root = root; }
   /** Called only by the explicit, authenticated cache-setup button. */
   async enable() {
+    await resolvePrivateProjectPath(this.root,"cache");
     if ((await this.status()).enabled) return this.status();
     const file = path.join(this.root, ".gitignore"), lockPath = file + ".aitiarch.lock";
     const lock = await open(lockPath, "wx", 0o600);
@@ -40,29 +42,32 @@ export class AnchorCache {
     }
   }
   async status(note?: string) {
+    const result={enabled:false,ignoreLine:"/.cache/",ignoreFile:path.join(this.root,".gitignore")};
     let enabled = false;
     try {
+      const cache=await resolvePrivateProjectPath(this.root,"cache");
+      if(cache.managed)return {...result,enabled:true,ignoreLine:"*",ignoreFile:path.join(path.dirname(cache.file),".gitignore")};
       const file = path.join(this.root, ".gitignore");
       if (!(await lstat(file)).isSymbolicLink()) {
         const patterns = (await readFile(file, "utf8")).split(/\r?\n/).map(l => l.trim());
         enabled = patterns.some(l => l === "/.cache/" || l === ".cache/") && !patterns.some(l => l.startsWith("!"));
         // Git is authoritative inside a repository, including parent patterns and negations.
-        try { await exec("git", ["check-ignore", "-q", "--", path.join(this.root, ".cache", "anchors", note ? textHash(note) + ".json" : "ignore-probe.json")], { cwd: this.root, windowsHide: true }); enabled = true; }
+        try { await exec("git", ["check-ignore", "-q", "--", path.join(cache.file, "anchors", note ? textHash(note) + ".json" : "ignore-probe.json")], { cwd: this.root, windowsHide: true }); enabled = true; }
         catch (e) { if ((e as { code?: number }).code === 1) enabled = false; }
       }
     } catch { /* opt in through the displayed ignore line */ }
-    return { enabled, ignoreLine: "/.cache/", ignoreFile: path.join(this.root, ".gitignore") };
+    return {...result,enabled};
   }
   private async file(note: string, create: boolean) {
-    let folder = this.root;
-    for (const part of [".cache", "anchors"]) {
-      folder = path.join(folder, part);
-      if (create) await mkdir(folder).catch(e => { if (e.code !== "EEXIST") throw e; });
-      const info = await lstat(folder);
+    const {file:cache}=await resolvePrivateProjectPath(this.root,"cache");
+    const folder=path.join(cache,"anchors");
+    for (const dir of [cache,folder]) {
+      if (create) await mkdir(dir).catch(e => { if (e.code !== "EEXIST") throw e; });
+      const info = await lstat(dir);
       if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Linked anchor cache rejected.");
     }
     const file = path.join(folder, textHash(note) + ".json");
-    try { if ((await lstat(file)).isSymbolicLink()) throw new Error("Linked snapshot rejected."); }
+    try { const info=await lstat(file);if (!info.isFile()||info.isSymbolicLink()||info.nlink!==1) throw new Error("Linked snapshot rejected."); }
     catch (e) { if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e; }
     return file;
   }

@@ -6,6 +6,7 @@
 // Paths are real paths, compared the way the platform does (case-insensitive on Windows).
 import path from 'node:path';
 import {harnessDenied,repoDenied} from '../../shared/harness.ts';
+import {isLocalAbsolute,isLocalRelative} from '../paths.ts';
 export type Deny=(rel:string)=>boolean;
 const fold=(p:string)=>{const r=path.resolve(p);return process.platform==='win32'?r.toLowerCase():r;};
 /** The relative path from `base` to `target` as forward slashes, '' when they are the same place, or null when `target` is not inside `base`. */
@@ -16,12 +17,13 @@ function within(base:string,target:string):string|null{
  return rel.split(path.sep).join('/');
 }
 export function repoDeny(repo:string,notebook?:string):Deny{
- if(!notebook)return repoDenied;
+ if(isLocalAbsolute(repo))return ()=>true;
+ if(!notebook)return rel=>isLocalAbsolute(rel)||repoDenied(rel);
  const nbInRepo=within(repo,notebook),repoInNb=within(notebook,repo);
  return (rel:string)=>{
-  if(repoDenied(rel))return true;
+  if(repoDenied(rel)||isLocalAbsolute(rel))return true;
   const clean=rel.replace(/\\/g,'/').split('/').filter(Boolean).join('/');
-  if(repoInNb!==null)return harnessDenied(repoInNb?repoInNb+'/'+clean:clean); // the repo is the notebook, or sits inside it
+  if(repoInNb!==null)return isLocalRelative(repoInNb||clean)||harnessDenied(repoInNb?repoInNb+'/'+clean:clean); // the repo is the notebook, or sits inside it
   if(nbInRepo)return clean===nbInRepo||clean.startsWith(nbInRepo+'/');       // the notebook sits inside the repo: all of it
   return false;
  };

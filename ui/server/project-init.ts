@@ -1,8 +1,9 @@
 // Initialize: what turning a folder into an Aitiarch project creates. The preview and the action share one plan,
 // so the home screen shows exactly what a click will write, and nothing is written until that click.
-import {lstat,mkdir,open,realpath,rm} from 'node:fs/promises';
+import {lstat,mkdir,open,rm} from 'node:fs/promises';
 import path from 'node:path';
 import {RegistryError} from './registry.ts';
+import {canonicalPath,isLocalAbsolute} from './paths.ts';
 
 export const IGNORE_LINES=['/ui-state.json*','/chat/','/pipeline.local.json'] as const;
 export interface InitPlan {folder:string;name:string;initialized:boolean;creates:{path:string;lines:string[]}[]}
@@ -10,7 +11,7 @@ export class InitError extends Error {code:'already_initialized';constructor(mes
 
 async function folderOf(input:string):Promise<string>{
  if(typeof input!=='string'||!path.isAbsolute(input))throw new RegistryError('not_absolute','Enter an absolute folder path.');
- try{const real=await realpath(input);if(!(await lstat(real)).isDirectory())throw new Error();return real;}
+ try{if(isLocalAbsolute(input))throw new Error();const real=await canonicalPath(input);if(isLocalAbsolute(real)||!(await lstat(real)).isDirectory())throw new Error();return real;}
  catch{throw new RegistryError('missing','That folder does not exist.');}
 }
 const exists=async(p:string)=>{try{await lstat(p);return true;}catch{return false;}};
