@@ -12,6 +12,7 @@ import {investigateLine} from './investigate-usage.ts';
 import {whyRule,whyText} from '../../shared/chat-why.ts';
 import {nodeById} from '../../shared/pipeline-nodes.ts';
 import {CHAT_MESSAGES,type BudgetDetail,type ChatErrorCode,type ChatEvent,type ChatMessage,type ChatReview,type ChatUsage} from '../../shared/chat.ts';
+import {ImageInterpretationNotice} from './ImageAttachments.tsx';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
 import {SessionPicker} from './SessionPicker.tsx';
 import {sessionChoices,type PickedSession} from './session-picker-model.ts';
@@ -466,11 +467,12 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
       {t.text?<div className="chat-stream"><LiveMarkdown text={t.text} profile={profileForRole("normal-chat")} live/></div>:<div className="chat-thinking"><Thinking/><span className="chat-wait" role="status" data-wait>{waitText(now-(t.sentAt??now))}</span></div>}
       <div className="chat-message-tools"><button type="button" className="chat-stop" onClick={()=>stop(t)}>Stop</button></div></div>}
      {t.status==='complete'&&<div className="chat-message chat-ai" data-from="ai" data-provider={t.message?.provider}><span className="chat-who">{aiLabel(t.message?.provider)} · {reportedModelLabel(t.message?.model)}</span><ReplyMarkdown text={t.text} profile={profileForRole("normal-chat",t.message?.persona)}/>{t.message?.unstructured&&<p className="chat-unstructured">{UNSTRUCTURED_LABEL}</p>}{t.message?.echo&&<p className="chat-flag chat-echo">{ECHO_LABEL}</p>}
+      <ImageInterpretationNotice shown={t.message?.imageInterpretation}/>
       {t.message&&<ReplyNotes message={t.message} question={t.question} busy={composing} onAskAgain={q=>void submit(q)} note={asked(t.message)}/>}<UsedSkills names={t.message?.skills}/>{t.message?.costUsd!==undefined&&<p className="chat-turn-cost">{turnCostText(t.message.costUsd)}</p>}
       {isNativeAnswerer(t.message?.provider)&&nativeUsageText(t.message?.nativeUsage)&&<p className="chat-turn-cost" data-usage="native">{nativeUsageText(t.message?.nativeUsage)}</p>}
       {t.message?.overCap&&<p className="council-calm council-overcap" role="alert" data-notice="over-cap"><span aria-hidden="true">!</span> {t.message.warning??OVER_CAP_TEXT}</p>}
-      {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
-      <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}><i className="add-icon" aria-hidden="true"/></button></div></div>}
+      {t.message?.insertionBlocked&&<p className="chat-warn" role="note"><span aria-hidden="true">⚠ </span>{t.message.imageInterpretation?'This image reply is kept in memory only.':t.message.ephemeral?SESSION_NOTICES.privacy:errorText('secrets_blocked')}</p>}
+      <div className="chat-message-tools"><button type="button" className="chat-add" aria-label="Add to note" title={t.message?.imageInterpretation?'Image replies stay in chat':t.message?.insertionBlocked?errorText('secrets_blocked'):'Add this reply to the note'} disabled={!!t.message?.insertionBlocked||adding===t.id} onClick={()=>void add(t.id)}><i className="add-icon" aria-hidden="true"/></button></div></div>}
      {t.status==='error'&&t.error&&<div className="chat-error" role="alert"><p>{errorText(t.error.code,t.error.reason,t.error.errorName,t.error)}</p><button type="button" className="ghost" onClick={()=>setTurns(list=>list.filter(x=>x.id!==t.id))}>Dismiss</button><details className="chat-why"><summary>Why?</summary><div className="chat-why-text">{whyText({ruleId:t.error.ruleId,detail:t.error.detail},t.error.code)}</div>{(()=>{const node=nodeById(whyRule(t.error.ruleId,t.error.code)?.nodeId);return node&&onShowOnPipeline?<button type="button" className="ghost chat-why-link" data-why-link={node.id} onClick={()=>onShowOnPipeline(node.id)}>Show on pipeline</button>:null;})()}</details></div>}
      </>}
     </div>)}

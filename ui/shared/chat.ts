@@ -66,6 +66,8 @@ export interface ChatMessage {
  unstructured?:true;
  /** Every claim from the reply's claims block with its source and match status. Absent in older files. */
  claims?:ChatClaim[];
+ /** This reply interpreted the user's image. Its reference identifiers are never retained in the reply. */
+ imageInterpretation?:true;
  /** The reason the reply gave for citing nothing. */
  noCitation?:NoCitationReason;
  /** Set when the reply's citations need the person's attention; shown in words, with Ask again. */

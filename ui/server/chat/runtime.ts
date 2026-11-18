@@ -35,11 +35,14 @@ import type {ChatWhy} from '../../shared/chat-why.ts';
 import type {ExtrasFor} from '../node-settings.ts';
 import {describeFailure} from '../../shared/chat-failure.ts';
 import {StreamGate,dropManifestEcho,echoes} from './gate.ts';
-import {finishReply} from './reply.ts';
+import {finishReply,InvalidImageReference} from './reply.ts';
+import type {ConfirmedImageSend} from '../../shared/image-attachments.ts';
 import {checkContract} from '../../shared/persona-contract.ts';
 import type {PersonaMode} from '../../shared/persona.ts';
 export class ChatError extends Error {code:ChatErrorCode;/** For budget_reached: the numbers the gate used. */budget?:BudgetDetail;/** Which rule said no, for the page's Why? line. Reporting only. */why?:ChatWhy;constructor(code:ChatErrorCode,budget?:BudgetDetail,why?:ChatWhy){super(code);this.code=code;if(budget)this.budget=budget;if(why)this.why=why;}}
 interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true;answerer:NormalAnswerer;normalReset?:boolean;routing?:RequestSettingsSnapshot;
+ /** Set only by the send path after explicit image confirmation and stage revalidation. */
+ confirmedImages?:ConfirmedImageSend;
  /** A harness session turn: the session id and the exact file text the CLI gets (instruction, sources, rules last). */
  session?:{id:string};addendum?:string;
  /** What this turn may do (tool-less or Read in the diagram folder), as the gate saw it at review; and the cap the grant gives it, set at send. */
@@ -268,7 +271,7 @@ export class ChatRuntime {
     json+=text;if(json.length>100000)throw new ProviderError('output_limit');
     if(estimateTokens(json)>outputRoom){s.abortCause??='budget_gate';controller.abort();return;} // the reply no longer fits the budget: end the CLI; the partial reply is never kept
     // Only what the output gate lets through reaches the page. The final, validated message replaces it.
-    const delta=gate.push(text);if(delta)emit({type:'delta',id:request.id,text:delta,provisional:true});
+    const delta=gate.push(text);if(delta&&!frozen.confirmedImages)emit({type:'delta',id:request.id,text:delta,provisional:true});
    };
    let nativeResult:TurnResult|undefined;
    if(native){
@@ -295,19 +298,26 @@ export class ChatRuntime {
    // A claim about a diagram's picture is accepted only for a diagram this conversation's stream shows a Read of: one opened in this turn, or in an earlier reply of the conversation (saved with it).
    const opened=new Set([...(frozen.diagrams?.earlier??[]),...facts.reads.map(r=>r.asset)]),claimable=(frozen.diagrams?.all??[]).filter(d=>opened.has(d.asset)).map(d=>'D'+d.n);
    let finished;
-   try{finished=finishReply({text:result.answer,legacy:result.rawReply!==true,claims:result.claims},{note:request.note,selection:request.selection,decisions:request.decisions,...(claimable.length?{diagrams:claimable}:{})},hash,redact);}
+   try{
+    const confirmed=frozen.confirmedImages;
+    if(confirmed&&answerer==='kiro')throw new InvalidImageReference();
+    const imageTurn=confirmed&&answerer!=='kiro'?{confirmed,sendId:review.reviewId,provider:answerer,model:review.modelSettings?.model??null}:undefined;
+    finished=finishReply({text:result.answer,legacy:result.rawReply!==true,claims:result.claims},{note:request.note,selection:request.selection,decisions:request.decisions,...(claimable.length?{diagrams:claimable}:{}),...(imageTurn?{imageTurn}:{})},hash,redact);
+   }
    catch(error){const shape:Record<string,string>={'Invalid answer shape.':'the reply was JSON with the wrong fields','Invalid answer formatting.':'the reply looked like JSON but was incomplete or malformed'};
+    if(error instanceof InvalidImageReference)throw new ChatError('validation',undefined,{ruleId:'validation',nodeId:'provider_contracts',detail:error.message});
     const failure=new ProviderError('invalid_response');failure.reason={kind:'unparseable',detail:error instanceof Error&&shape[error.message]?shape[error.message]:'the reply could not be read'};throw failure;}
    const validated=validateProductResult({...result,answer:finished.body,claims:[]},request.id,request,redact,hash,answerer);
    const message:ChatMessage={id:request.id,role:'assistant',body:validated.body,at:new Date().toISOString(),provider:answerer,model:validated.model,...(nativeResult?{nativeUsage:nativeResult.usage,...(nativeResult.overCap?{overCap:true as const,warning:nativeResult.warning}:{} )}:{}),evidence:finished.claims.flatMap(c=>c.status==='found'&&c.source!=='file'&&c.sourceHash?[{sourceId:c.sourceId,sourceHash:c.sourceHash,quote:c.quote}]:[]),usage:result.usage,insertionBlocked:!!s.privateContext||secretKinds(result.answer).length>0||secretKinds(validated.body).length>0,
    claims:finished.claims,...(finished.noCitation?{noCitation:finished.noCitation}:{}),...(finished.citation?{citation:finished.citation}:{}),...(request.persona?{persona:request.persona,contract:checkContract(request.persona,validated.body)}:{}),...(gate.echo||echoes(validated.body,review.instruction)?{echo:true as const}:{}),...(frozen.skillNames.length?{skills:frozen.skillNames}:{}),...(frozen.session?{session:frozen.session.id}:{}),...(facts.reads.length?{diagramReads:facts.reads}:{}),...(facts.misses.length?{diagramMisses:facts.misses}:{}),...(facts.costUsd!==null?{costUsd:facts.costUsd}:{}),...(review.editor&&review.editor.path!==review.path?{askedOn:review.editor.path}:{}),...(s.privateContext?{ephemeral:true as const}:{})};
+   if(finished.imageInterpretation){message.imageInterpretation=true;message.ephemeral=true;message.insertionBlocked=true;}
    stage='save'; // from here on, a failure is about saving the reply
    let persistence:'memory'|'private';
-   if(s.privateContext){const messages=this.ephemeral.get(review.path)??[];if(messages.length>=200)throw new ChatError('budget_reached');messages.push(message);this.ephemeral.set(review.path,messages);persistence='memory';}
+   if(s.privateContext||finished.imageInterpretation){const messages=this.ephemeral.get(review.path)??[];if(messages.length>=200)throw new ChatError('budget_reached');messages.push(message);this.ephemeral.set(review.path,messages);persistence='memory';}
    else persistence=await this.chats.append(review.path,message);
-   if(native&&frozen.session){await this.normal!.questions.add(frozen.session.id,request.id,request.question);await this.normal!.index.touch(frozen.session.id);}
+   if(native&&frozen.session&&!finished.imageInterpretation){await this.normal!.questions.add(frozen.session.id,request.id,request.question);await this.normal!.index.touch(frozen.session.id);}
    await this.audit(review.path,request.id,'chat_completed');
-   if(!frozen.session)s.history.push({id:request.id,user:request.question,assistant:message.body,...(request.persona?{persona:request.persona}:{})}); // a session keeps its own
+   if(!frozen.session&&!finished.imageInterpretation)s.history.push({id:request.id,user:request.question,assistant:message.body,...(request.persona?{persona:request.persona}:{})}); // a session keeps its own
    while(s.history.length>4||s.history.reduce((n,p)=>n+p.user.length+p.assistant.length,0)>4000){s.history.shift();s.omittedPairs++;}
    emit({type:'complete',id:request.id,message,persistence,usage:{...s.usage,reserved:0}});
   }catch(e){

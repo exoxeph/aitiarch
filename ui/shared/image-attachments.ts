@@ -11,3 +11,11 @@ export interface StagedImage {
  width:number;
  height:number;
 }
+
+/** Server-owned snapshot of the images confirmed for a single review/send. */
+export interface ConfirmedImageSend {
+ sendId:string;
+ provider:'claude'|'codex';
+ model:string|null;
+ images:readonly {id:string;sha256:string}[];
+}
