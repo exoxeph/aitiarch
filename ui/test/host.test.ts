@@ -1,6 +1,6 @@
 import {afterEach,describe,expect,it} from 'vitest';
 import http from 'node:http';
-import {mkdtemp,mkdir,readdir,rm,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,readdir,rm,writeFile} from 'node:fs/promises';
 import os from 'node:os';import path from 'node:path';
 import {createHost} from '../server/host.ts';
 import {Registry} from '../server/registry.ts';
@@ -109,11 +109,12 @@ describe('adding a project from the home screen',()=>{
   expect(list.entries.filter((e:{initialized:boolean})=>e.initialized).map((e:{name:string})=>e.name)).toEqual(['alpha','beta','gamma']);
   const fresh=path.join(base,'delta');await mkdir(fresh);
   const preview=JSON.parse((await req(port,`/api/projects/preview?path=${encodeURIComponent(fresh)}`,{headers:auth(security,port)})).body);
-  expect(preview.creates.map((c:{path:string})=>c.path)).toEqual(['.aitiarch/index.md','.aitiarch/.gitignore']);
+  expect(preview.creates).toContain('.aitiarch/Welcome.md');
   expect(await readdir(fresh)).toEqual([]);
   expect((await req(port,'/api/projects/init',{method:'PUT',headers:auth(security,port),body:{path:fresh}})).status).toBe(403); // a write needs the write headers
   const made=await req(port,'/api/projects/init',{method:'PUT',headers:w,body:{path:fresh}});expect(made.status).toBe(200);
-  expect(JSON.parse(made.body)).toMatchObject({name:'delta'});expect((await readdir(path.join(fresh,'.aitiarch'))).sort()).toEqual(['.gitignore','index.md']);
+  expect(JSON.parse(made.body)).toMatchObject({project:{name:'delta'},result:{sharing:'private',protection:'filesystem-private',privatePersistence:true}});
+  expect(await readFile(path.join(fresh,'.aitiarch','local','.gitignore'),'utf8')).toBe('*\n');
   expect((await req(port,'/api/projects/init',{method:'PUT',headers:w,body:{path:fresh}})).status).toBe(409);
  });
  it('summarizes a project for its card: notes, open threads and the link graph',async()=>{

@@ -2,6 +2,7 @@ import {useCallback,useEffect,useRef,useState,type KeyboardEvent} from 'react';
 import {api,ApiError,type FolderListing,type InitPlan,type ProjectEntry} from '../api.ts';
 import {parentFolder} from './home-model.ts';
 import {useDialog} from './useDialog.ts';
+import {PrivacyConsent} from '../setup/PrivacyConsent.tsx';
 
 const explain=(e:unknown)=>e instanceof ApiError?e.message:'Something went wrong. Nothing was changed.';
 
@@ -10,9 +11,10 @@ export function AddProject({onClose,onAdded}:{onClose:()=>void;onAdded:(p:Projec
  const box=useRef<HTMLElement>(null),list=useRef<HTMLUListElement>(null);
  const [listing,setListing]=useState<FolderListing|null>(null),[typed,setTyped]=useState(''),[plan,setPlan]=useState<InitPlan|null>(null);
  const [problem,setProblem]=useState(''),[busy,setBusy]=useState(false),[chosen,setChosen]=useState<string|null>(null),seq=useRef(0),typedByUser=useRef(false);
+ const [completed,setCompleted]=useState<Awaited<ReturnType<typeof api.initProject>>|null>(null);
  useDialog(box,onClose);
  const go=useCallback(async(path?:string)=>{
-  setProblem('');setChosen(null);const n=++seq.current; // only the newest request may change what is shown
+  setProblem('');setCompleted(null);setChosen(null);const n=++seq.current; // only the newest request may change what is shown
   if(path!==undefined)typedByUser.current=false; // navigating on purpose hands the field back to the listing
   try{const l=await api.folders(path);if(n!==seq.current)return;setListing(l);if(!typedByUser.current)setTyped(l.path);}catch(e){if(n===seq.current)setProblem(explain(e));}
  },[]);
@@ -24,6 +26,12 @@ export function AddProject({onClose,onAdded}:{onClose:()=>void;onAdded:(p:Projec
   return()=>{live=false;};
  },[listing,chosen]);
  const finish=async(run:()=>Promise<ProjectEntry>)=>{setBusy(true);setProblem('');try{onAdded(await run());}catch(e){setProblem(explain(e));setBusy(false);}};
+ const initialize=async(folder:string,confirmIgnore:boolean)=>{
+  setBusy(true);setProblem('');
+  try{setCompleted(await api.initProject(folder,confirmIgnore));}
+  catch(e){setProblem(explain(e));}
+  finally{setBusy(false);}
+ };
  const arrows=(e:KeyboardEvent)=>{
   if(e.key!=='ArrowDown'&&e.key!=='ArrowUp')return;e.preventDefault();
   const items=[...(list.current?.querySelectorAll<HTMLElement>('button')??[])],at=items.indexOf(document.activeElement as HTMLElement);
@@ -51,9 +59,15 @@ export function AddProject({onClose,onAdded}:{onClose:()=>void;onAdded:(p:Projec
      <button type="button" className="primary" disabled={busy} onClick={()=>void finish(()=>api.addProject(listing.path))}>Add this project</button></>}
     {listing&&!listing.initialized&&chosen!==listing.path&&<><p>This folder is not an Aitiarch notebook yet. Browse to the folder you want, then choose it.</p>
      <button type="button" onClick={()=>setChosen(listing.path)}>Use this folder</button></>}
-    {listing&&!listing.initialized&&chosen===listing.path&&plan&&plan.folder===listing.path&&<><p><strong>{plan.name}</strong> is not a notebook yet. Initialize creates exactly this, and nothing else:</p>
-     <ul className="plan-list">{plan.creates.map(c=><li key={c.path}><code>{c.path}</code><span>{c.path.endsWith('.gitignore')?`Keeps private files out of git: ${c.lines.join(', ')}`:`Your main note, starting as “${c.lines[0]}”`}</span></li>)}</ul>
-     <button type="button" className="primary" disabled={busy} onClick={()=>void finish(()=>api.initProject(listing.path))}>Initialize and add</button></>}
+    {listing&&!listing.initialized&&chosen===listing.path&&plan&&plan.folder===listing.path&&!completed&&<>
+     <p>Initialize <strong>{plan.name}</strong> as a private notebook.</p>
+     <ul className="plan-list">{plan.creates.map(file=><li key={file}><code>{file}</code></li>)}</ul>
+     {!plan.ignoreRule&&<p>filesystem-private: no Git repository detected.</p>}
+     <PrivacyConsent key={plan.folder} rule={plan.ignoreRule} disabled={busy} label="Initialize and add" onApply={confirmed=>void initialize(plan.folder,confirmed)}/>
+    </>}
+    {completed&&<><p role="status">{completed.result.messages.join(' ')}</p>
+     {completed.project&&<button type="button" className="primary" onClick={()=>completed.project&&onAdded(completed.project)}>Done</button>}
+    </>}
    </div>
    {problem&&<p className="dialog-problem" role="alert">{problem}</p>}
   </section>

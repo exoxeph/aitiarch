@@ -257,7 +257,7 @@ export const api = {
   initPreview: (path: string) => ok<InitPlan>("GET", `/api/projects/preview?path=${encodeURIComponent(path)}`),
   projectSummary: (id: string) => ok<ProjectSummary>("GET", `/api/projects/summary?id=${id}`),
   addProject: (path: string) => ok<ProjectEntry>("PUT", "/api/projects/add", { path }),
-  initProject: (path: string) => ok<ProjectEntry>("PUT", "/api/projects/init", { path }),
+  initProject: (path: string, confirmIgnore: boolean) => ok<{project:ProjectEntry|null;result:import('../server/init.ts').InitResult}>("PUT", "/api/projects/init", { path, confirmIgnore }),
   openProject: (id: string) => ok<ProjectEntry>("PUT", "/api/projects/open", { id }),
   pinProject: (id: string, pinned: boolean) => ok<ProjectEntry>("PUT", "/api/projects/pin", { id, pinned }),
   removeProject: (id: string) => ok<unknown>("PUT", "/api/projects/remove", { id }),

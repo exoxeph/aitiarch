@@ -141,12 +141,14 @@ try {
   await page.waitForSelector('.add-detail strong:text("gamma")');
   await page.waitForSelector(".plan-list li");
   const plan = await page.locator(".plan-list li code").allTextContents();
-  check("Initialize previews exactly what it will create", plan.join() === ".aitiarch/index.md,.aitiarch/.gitignore", plan.join());
+  check("Initialize previews managed private storage", plan.includes(".aitiarch/Welcome.md") && plan.includes(".aitiarch/local/.gitignore"), plan.join());
   check("nothing was written by the preview", readdirSync(C).length === 0);
   await page.screenshot({ path: path.join(shots, "add-project.png") });
   await page.click('button:has-text("Initialize and add")');
+  await page.getByRole("status").filter({hasText:"filesystem-private"}).waitFor();
+  await page.getByRole("button", {name:"Done",exact:true}).click();
   check("the new project is on the list", await until(async () => (await page.locator(".project-card").count()) === 3));
-  check("Initialize creates only the planned files", readdirSync(path.join(C, ".aitiarch")).sort().join() === ".gitignore,index.md");
+  check("Initialize creates the planned notebook", readdirSync(path.join(C, ".aitiarch")).sort().join() === ".local-storage-v1,Welcome.md,decisions,ink,local");
 
   // ---- remove forgets, never deletes
   const gamma = page.locator('.project-card:has-text("gamma")');

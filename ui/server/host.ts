@@ -3,6 +3,7 @@
 // The old unprefixed /api/... routes go to the project opened with --root, so a single-project launch keeps working.
 import http from 'node:http';
 import os from 'node:os';
+import path from 'node:path';
 import type {AddressInfo} from 'node:net';
 import {CSP,serveDist} from './http.ts';
 import {RegistryError,type ProjectEntry,type Registry} from './registry.ts';
@@ -55,7 +56,12 @@ export function createHost(o:HostOptions){
   try{
    switch(url.pathname){
     case '/api/projects/add':if(typeof b?.path!=='string')return json(res,400,{error:'bad_body'});return json(res,200,await registry.add(b.path));
-    case '/api/projects/init':{if(typeof b?.path!=='string')return json(res,400,{error:'bad_body'});const plan=await initialize(b.path);return json(res,200,await registry.add(plan.folder));}
+    case '/api/projects/init':{
+     if(typeof b?.path!=='string'||(b.confirmIgnore!==undefined&&typeof b.confirmIgnore!=='boolean'))return json(res,400,{error:'bad_body'});
+     const result=await initialize(b.path,b.confirmIgnore===true);
+     const project=result.privatePersistence?await registry.add(path.dirname(result.root)):null;
+     return json(res,200,{project,result});
+    }
     case '/api/projects/open':{const e=entryOf(b?.id);if(!e)return json(res,404,{error:'unknown_project'});await registry.touch(e.id);return json(res,200,registry.get(e.id));}
     case '/api/projects/pin':{const e=entryOf(b?.id);if(!e||typeof b.pinned!=='boolean')return json(res,404,{error:'unknown_project'});await registry.pin(e.id,b.pinned);return json(res,200,registry.get(e.id));}
     case '/api/projects/remove':{const e=entryOf(b?.id);if(!e)return json(res,404,{error:'unknown_project'});await registry.remove(e.id);

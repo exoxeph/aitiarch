@@ -3,7 +3,8 @@ import {constants} from 'node:fs';
 import path from 'node:path';
 import {assertStoragePath as safePath,hasGitMarker as gitProject,resolveProjectStorage,storageEntry as entry,storageErrorCode as errorCode} from './project-storage.ts';
 
-export interface InitOptions {project:string;sharing:'private'|'shared';confirmIgnore:boolean|((line:string)=>Promise<boolean>)}
+export interface InitOptions {project:string;sharing:'private'|'shared';confirmIgnore:boolean|((line:string)=>Promise<boolean>);newOnly?:boolean}
+export class AlreadyInitialized extends Error {constructor(){super('This folder already has a .aitiarch notebook.');}}
 export interface InitResult {root:string;sharing:'private'|'shared';protection:'git-ignored'|'filesystem-private'|'unverified';privatePersistence:boolean;privateLocation:string|null;sharedReady:false;created:string[];messages:string[]}
 /** Filesystem operations can be injected. Git checks are read-only and init never discovers a provider. */
 export type InitFilesystem=Pick<typeof nodeFs,'lstat'|'readFile'|'mkdir'|'writeFile'|'open'>;
@@ -65,6 +66,7 @@ export async function initProject(options:InitOptions,fs:InitFilesystem=nodeFs):
  const inGit=await gitProject(fs,project),ignore=path.join(project,'.gitignore');if(inGit)await regular(fs,ignore);
  const result:InitResult={root,sharing:options.sharing,protection:inGit?'unverified':'filesystem-private',privatePersistence:false,privateLocation:null,sharedReady:false,created:[],messages:[]};
  let layout=await resolveProjectStorage(root,{create:true,fs});
+ if(options.newOnly&&!layout.created.includes(root))throw new AlreadyInitialized();
  result.created.push(...layout.created.map(file=>path.relative(project,file)));
  if(!layout.ok&&layout.code!=='git-unverified'&&!layout.created.includes(root)){
   result.messages.push(layout.reason,protectionMessage(result.protection),'Private persistence is disabled. Existing files were preserved.');

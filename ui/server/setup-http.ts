@@ -12,6 +12,8 @@ const wiredBridges = {invoked:true, 'thread-reply':true, 'investigate-read':true
 const writes = new Map<string, Promise<unknown>>();
 
 export class SetupRequestError extends Error {}
+export const setupInit=(project:string,confirmIgnore:boolean,newOnly=false)=>
+ initProject({project,sharing:'private',confirmIgnore,newOnly});
 
 /** Called behind the ordinary project API session and origin guards. */
 export function createSetupHttp(options: {
@@ -172,7 +174,7 @@ export function createSetupHttp(options: {
   if (!body || typeof body!=='object' || Object.keys(body).length!==1 ||
       !('confirmIgnore' in body) || body.confirmIgnore!==true)
    throw new SetupRequestError('Confirm the private Git ignore rule before applying it.');
-  return initProject({project:options.project, sharing:'private', confirmIgnore:true});
+  return setupInit(options.project,true);
  }
  async function refreshModels(body:unknown){
   if(!body||typeof body!=='object'||Object.keys(body).length!==1||!('force' in body)||typeof body.force!=='boolean')
