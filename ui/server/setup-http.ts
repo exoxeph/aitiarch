@@ -2,7 +2,7 @@ import type {SelectedCli} from './platform/cli-selection.ts';
 import {providerCapabilities} from './providers/registry.ts';
 import {loadMachineSetup, saveMachineSetup, SetupError} from './setup-store.ts';
 import {initProject, privateProtection} from './init.ts';
-import {MODEL_ROLES, ROLE_REGISTRY, SETUP_PROVIDERS, SETUP_ROLES, roleDefinition, validCouncilParticipants, type MachineSetup, type ModelEffort, type SetupProvider, type SetupRole, type SetupView} from '../shared/setup.ts';
+import {CAPABILITY_NEEDS, MODEL_ROLES, ROLE_REGISTRY, SETUP_PROVIDERS, SETUP_ROLES, roleDefinition, validCouncilParticipants, type MachineSetup, type ModelEffort, type SetupProvider, type SetupRole, type SetupView} from '../shared/setup.ts';
 import {modelArguments, modelSelection} from '../shared/model-settings.ts';
 import type {createModelCatalogs} from './providers/model-catalog.ts';
 import {catalogEntry,effectiveCatalogSelection} from '../shared/models.ts';
@@ -18,14 +18,27 @@ export function createSetupHttp(options: {
  dir:string;
  project:string;
  providers:readonly SelectedCli[];
+ capabilities?:(id:SetupProvider)=>ReturnType<typeof providerCapabilities>;
  overrides?:Partial<Record<SetupProvider,string>>;
  catalogs?:Pick<ReturnType<typeof createModelCatalogs>,'view'|'refresh'>;
  ready:()=>Promise<boolean>;
 }) {
- const capable = (role:SetupRole) => options.providers.filter(p =>
-  p.isolation==='metadata-compatible' && providerCapabilities(p.id, wiredBridges)[roleDefinition(role).capability]
- ).map(p => p.id);
  const binaryPinned = (provider:SetupProvider) => options.overrides?.[provider]!==undefined;
+ const hasCapability = (id:SetupProvider, capability:SetupRole) =>
+  (options.capabilities?.(id)??providerCapabilities(id,wiredBridges))[capability];
+ const capable = (role:SetupRole) => options.providers.filter(p =>
+  p.isolation==='metadata-compatible' && hasCapability(p.id,roleDefinition(role).capability)
+ ).map(p => p.id);
+ const whyUnavailable=(p:SelectedCli,capability:SetupRole,setup:MachineSetup)=>{
+  if(p.isolation!=='metadata-compatible'){
+   if(binaryPinned(p.id))return `The explicit binary is incompatible. ${p.reason}`;
+   if(!p.path&&p.code==='not_found')return `${labels[p.id]} is not installed or was not found.`;
+   return p.reason;
+  }
+  if(!hasCapability(p.id,capability))return CAPABILITY_NEEDS[capability];
+  if(!setup.providers[p.id].enabled)return 'This provider is disabled by you.';
+  return null;
+ };
  const defaultOrder = [...new Set([...SETUP_PROVIDERS.filter(binaryPinned),...SETUP_PROVIDERS])];
  const enabledCouncil = (setup:MachineSetup) => capable('council').filter(id=>setup.providers[id].enabled);
  const effortSupported = (id:SetupProvider) => options.providers.some(p=>p.id===id&&(
@@ -59,6 +72,11 @@ export function createSetupHttp(options: {
     const role=def.id;
     const routingNote='routingNote' in def ? def.routingNote : undefined;
     const capableProviders = capable(role);
+    const providerReasons:NonNullable<SetupView['roles'][number]['providerReasons']>={};
+    for(const tool of options.providers){
+     const unavailable=whyUnavailable(tool,def.capability,setup);
+     if(unavailable)providerReasons[tool.id]=unavailable;
+    }
     const provider = routingNote ? capableProviders.includes('claude') ? 'claude' : null : setup.roles[role];
     const savedChoice = provider!==null && !setup.defaultRoles?.includes(role);
     const source = def.multiple
@@ -72,7 +90,7 @@ export function createSetupHttp(options: {
     else if (provider === null) reason = 'No provider is assigned to this role.';
     else if (!capableProviders.includes(provider)) reason = 'The saved provider is unavailable for this role.';
     else if (!routingNote && !setup.providers[provider].enabled) reason = 'The saved provider is disabled.';
-    return {role, provider, capableProviders, reason, source, ...(participants ? {participants,eligibleParticipants} : {}),
+    return {role, provider, capableProviders, providerReasons, reason, source, ...(participants ? {participants,eligibleParticipants} : {}),
      ...(routingNote ? {routingNote} : {})};
    }),
    privacy:{mode:'private', sharedReady:protection.sharedReady, notice:protection.messages.join(' ')},

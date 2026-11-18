@@ -262,6 +262,10 @@ try {
  await setupPane.getByText('C:/synthetic/claude.exe',{exact:true}).waitFor();
  await setupPane.getByText(/untested version: tested 2.1.205/).waitFor();
  await setupPane.getByText(/This feature uses the startup Claude configuration/).first().waitFor();
+ const investigate=setupPane.getByRole('combobox',{name:'Investigate',exact:true});
+ const unavailableCodex=investigate.locator('option[value="codex"]');
+ assert.equal(await unavailableCodex.isDisabled(),true);
+ assert.match(await unavailableCodex.textContent(),/Needs the approved read-only project workflow/);
  await setupPane.getByText('Choose the model in the chat box.').waitFor();
  const normalRole=setupPane.locator('[data-role="normal-chat"]');
  assert.equal(await setupPane.getByRole('combobox',{name:'Normal chat',exact:true}).inputValue(),'claude');

@@ -12,6 +12,14 @@ export const ROLE_REGISTRY=[
 ] as const;
 export type RoleDefinition=typeof ROLE_REGISTRY[number];
 export type SetupRole=RoleDefinition['id'];
+export const CAPABILITY_NEEDS:Record<RoleDefinition['capability'],string>={
+ 'normal-chat':'Needs support for ordinary chat turns.',
+ invoked:'Needs the Think and Ask response workflow.',
+ 'thread-reply':'Needs the thread reply workflow.',
+ council:'Needs support for independent Council turns.',
+ 'investigate-read':'Needs the approved read-only project workflow and its file tools.',
+ 'skill-diagram':'Needs the Skill workflow, including tools unavailable to tool-less profiles.',
+};
 export const SETUP_ROLES=ROLE_REGISTRY.map(role=>role.id);
 export const roleDefinition=(id:SetupRole)=>ROLE_REGISTRY.find(role=>role.id===id)!;
 export const MODEL_ROLES=ROLE_REGISTRY.flatMap(role=>role.modelSettings?[role.id]:[]);
@@ -50,7 +58,7 @@ export interface SetupView {
  fontSize:number|null;
  models:RoleModelPreference[];
  providers:{id:SetupProvider;label:string;path:string|null;version:string|null;notices:string[];reason:string;compatible:boolean;source:SetupSource;catalog?:ModelCatalog}[];
- roles:{role:SetupRole;provider:SetupProvider|null;capableProviders:SetupProvider[];reason:string|null;source:RoleSource;routingNote?:string;participants?:SetupProvider[];eligibleParticipants?:SetupProvider[]}[];
+ roles:{role:SetupRole;provider:SetupProvider|null;capableProviders:SetupProvider[];providerReasons?:Partial<Record<SetupProvider,string>>;reason:string|null;source:RoleSource;routingNote?:string;participants?:SetupProvider[];eligibleParticipants?:SetupProvider[]}[];
  privacy:{mode:'private';sharedReady:false;notice:string};
 }
 /** New object per call: editing preferences cannot mutate defaults in another request. */

@@ -23,6 +23,33 @@ beforeEach(async () => {
 const service = (providers = [codex]) => createSetupHttp({dir, project, providers, ready:async () => true});
 
 describe('first-run setup endpoints', () => {
+ it('publishes distinct role availability reasons from discovery, preferences and declared capabilities', async () => {
+  const saved=defaultMachineSetup();
+  saved.providers.codex.enabled=false;
+  await saveMachineSetup(dir,saved);
+  const reasonFor=async(provider:SelectedCli, role='normal-chat', overrides={})=>{
+   const api=createSetupHttp({dir,project,providers:[provider],overrides,ready:async()=>true});
+   return (await api.get()).roles.find(row=>row.role===role)?.providerReasons?.[provider.id];
+  };
+  expect(await reasonFor(codex)).toMatch(/disabled by you/i);
+  expect(await reasonFor({...codex,path:null,isolation:'unverified',code:'not_found',reason:'Codex was not found.'})).toBe('Codex is not installed or was not found.');
+  expect(await reasonFor({...codex,isolation:'unverified',reason:'Codex version is older than the minimum.'})).toBe('Codex version is older than the minimum.');
+  expect(await reasonFor({...codex,isolation:'unverified',reason:'Missing a required flag.'},'normal-chat',{codex:codex.path!})).toBe('The explicit binary is incompatible. Missing a required flag.');
+  expect(await reasonFor(codex,'skill-diagram')).toMatch(/needs.*skill workflow/i);
+ });
+
+ it('makes a newly declared capability selectable without changing the Setup UI',async()=>{
+  const saved=defaultMachineSetup();
+  saved.providers.codex.enabled=true;
+  await saveMachineSetup(dir,saved);
+  const {providerCapabilities}=await import('../server/providers/registry.ts');
+  const api=createSetupHttp({dir,project,providers:[codex],ready:async()=>true,
+   capabilities:id=>({...providerCapabilities(id),'skill-diagram':true})});
+  const role=(await api.get()).roles.find(row=>row.role==='skill-diagram');
+  expect(role?.capableProviders).toEqual(['codex']);
+  expect(role?.providerReasons?.codex).toBeUndefined();
+  await expect(api.put({role:'skill-diagram',provider:'codex'})).resolves.toBeUndefined();
+ });
  it('round-trips an explicit Default override separately from inheritance and persists font size', async () => {
   const defaults=defaultMachineSetup();
   defaults.providers.codex.model='custom-1';
