@@ -8,6 +8,7 @@ import type { Configuration, ProviderName } from './index.ts';
 import {CODEX_FLAGS,TOOLLESS_AGENT} from './tool-less-arguments.ts';
 import type {ModelEffort} from '../../shared/setup.ts';
 import {modelArguments} from '../../shared/model-settings.ts';
+import type {ModelCatalog} from '../../shared/models.ts';
 
 /** Metadata only. Caller owns the fixed RPC sequence and never writes a prompt. */
 export function spawnModelCatalog(config:{id:'claude'|'codex';command:string;prefixArgs?:readonly string[]},cwd:string){
@@ -25,13 +26,13 @@ export function spawnModelCatalog(config:{id:'claude'|'codex';command:string;pre
 
 /** Separate notes-only profiles. Never shares or alters the Claude/Investigate/diagram profiles below.
  * The host builds every argument; prompts go to stdin only. No shell or native prefix arguments. */
-export function spawnToolless(config:{id:'codex'|'kiro';command:string;prefixArgs?:string[];selection?:Readonly<ModelEffort>},mode:'version'|'metadata'|'isolated',options:SpawnOptionsWithoutStdio&{cwd:string}){
+export function spawnToolless(config:{id:'codex'|'kiro';command:string;prefixArgs?:string[];selection?:Readonly<ModelEffort>},mode:'version'|'metadata'|'isolated',options:SpawnOptionsWithoutStdio&{cwd:string},verifiedCatalog?:ModelCatalog){
   const reject=()=>{throw new Error('Provider launch rejected: invalid tool-less profile.');};
   if(config.id!=='codex'&&config.id!=='kiro')reject();
   if(config.prefixArgs?.length&&config.command!==process.execPath)reject();
   if(!path.isAbsolute(config.command)||/\.(cmd|bat|ps1)$/i.test(config.command)||/(?:^|[\\/])claude(?:\.exe)?$/i.test(config.command))reject();
   if(mode!=='version'&&mode!=='metadata'&&mode!=='isolated')reject();
-  const selectionArgs=mode==='isolated'?modelArguments(config.id,config.selection):[];
+  const selectionArgs=mode==='isolated'?modelArguments(config.id,config.selection,verifiedCatalog!==undefined,verifiedCatalog):[];
   const args=mode==='version'?['--version']:mode==='metadata'?(config.id==='kiro'?['acp','--help']:['exec','--help']):config.id==='kiro'?['acp','--agent-engine','v2','--agent',TOOLLESS_AGENT]:[...CODEX_FLAGS,...selectionArgs,'-C',options.cwd,'-'];
   // Reuse the existing empty, real OS-temp folder check; do not accept a repo or a linked folder.
   assertLaunch('codex','isolated',args,options.cwd);

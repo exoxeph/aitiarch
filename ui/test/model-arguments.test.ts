@@ -71,6 +71,28 @@ it('Claude rejects configured effort when its own help did not declare the flag'
  await expect(readFile(record)).rejects.toMatchObject({code:'ENOENT'});
 });
 const turnInput={question:'Synthetic question',notes:[],deadlineMs:3000,maxOutputBytes:2000,cap:{unit:'tokens' as const,amount:1000}};
+const codexCatalog={source:'cli' as const,checkedAt:100,models:[
+ {id:'synthetic-codex',name:'Synthetic Codex',default:true,efforts:['medium']},
+ {id:'other-codex',name:'Other Codex',default:false,efforts:['high']},
+]};
+it('binds an advertised Codex effort to the exact tool-less model argv',async()=>{
+ const record=path.join(dir,'codex-effort.json');
+ const adapter=createCliAdapter({id:'codex',command:process.execPath,prefixArgs:[fixture,'codex',record],
+  codexCatalog:()=>({version:'0.167.0',catalog:codexCatalog})});
+ const result=await runTurn(adapter,{...turnInput,selection:{model:'synthetic-codex',effort:'medium'}});
+ expect(result.status).toBe('ok');
+ const args=JSON.parse(await readFile(record,'utf8'));
+ expect(args).toEqual([...CODEX_FLAGS,'--model','synthetic-codex','-c','model_reasoning_effort="medium"','-C',expect.any(String),'-']);
+});
+it.each([['0.167.0','high'],['0.168.0','medium']])('refuses a Codex effort with the wrong catalog binding (%s/%s)',async(version,effort)=>{
+ const record=path.join(dir,'blocked-effort.json');
+ const adapter=createCliAdapter({id:'codex',command:process.execPath,prefixArgs:[fixture,'codex',record],
+  codexCatalog:()=>({version,catalog:codexCatalog})});
+ const result=await runTurn(adapter,{...turnInput,selection:{model:'synthetic-codex',effort}});
+ expect(result.status).toBe('unavailable');
+ expect(result.message).toMatch(/effort|version/i);
+ await expect(readFile(record)).rejects.toMatchObject({code:'ENOENT'});
+});
 it('Codex uses the documented model flag without changing its pinned prefix and freezes input',async()=>{
  const record=path.join(dir,'codex.json'),selection={model:'synthetic-codex',effort:null};
  const adapter=createCliAdapter({id:'codex',command:process.execPath,prefixArgs:[fixture,'codex',record],selection} as any);

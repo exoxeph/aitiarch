@@ -222,19 +222,25 @@ try {
  assert.deepEqual(saved.models.find(m=>m.role==='normal-chat').selection,{model:'sonnet',effort:'low'});
 
  const fake=path.join(output,'setup-model-cli.mjs');
+ const catalogState=path.join(dir,'synthetic-model-list.txt');
+ await writeFile(catalogState,'active');
  await writeFile(fake,`import {createInterface} from 'node:readline';
+ import {readFileSync} from 'node:fs';
  if(process.argv.includes('--version')){console.log(process.argv[2]);process.exit(0);}
+ const state=readFileSync(process.argv[3],'utf8');
  const send=message=>console.log(JSON.stringify(message));
  for await(const line of createInterface({input:process.stdin})){
   const m=JSON.parse(line);
   if(m.type==='control_request'&&m.request?.subtype==='initialize'){
-   const model={resolvedModel:'demo-claude',description:'Synthetic model',supportsEffort:true,supportedEffortLevels:['low','high']};
+   const model={resolvedModel:state==='model-retired'?'demo-claude-next':'demo-claude',description:'Synthetic model',
+    supportsEffort:true,supportedEffortLevels:state==='active'?['low','high']:['low']};
    send({type:'control_response',response:{subtype:'success',request_id:m.request_id,response:{models:[{...model,value:'default',displayName:'Default'},{...model,value:'alias',displayName:'Claude Demo Model'}]}}});
   }else if(m.method==='initialize')send({id:m.id,result:{userAgent:'fake',platformFamily:'windows',platformOs:'windows'}});
   else if(m.method==='model/list')send({id:m.id,result:{nextCursor:null,data:[{id:'demo-codex',model:'demo-codex',displayName:'Codex Demo Model',hidden:false,isDefault:false,supportedReasoningEfforts:[{reasoningEffort:'medium',description:'Synthetic effort'}]}]}});
   else if(m.method!=='initialized')process.exit(91);
  }`);
- modelCatalogs=createModelCatalogs(dir,providers,{read:(source,options)=>readCatalog({...source,path:process.execPath},{...options,prefixArgs:[fake,source.id==='claude'?source.version+' (Claude Code)':'codex-cli '+source.version]})});
+ modelCatalogs=createModelCatalogs(dir,providers,{read:(source,options)=>readCatalog({...source,path:process.execPath},
+  {...options,prefixArgs:[fake,source.id==='claude'?source.version+' (Claude Code)':'codex-cli '+source.version,catalogState]})});
  const refreshed=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/setup/models'&&r.ok());
  await page.reload();
  const chatButton=page.getByRole('button',{name:'Chat',exact:true});
@@ -247,11 +253,26 @@ try {
  await menu.getByRole('group',{name:'Effort'}).getByRole('menuitemradio',{name:'high',exact:true}).waitFor();
  assert.equal(await menu.getByRole('menuitemradio',{name:'medium',exact:true}).count(),0);
  await shot('catalog-claude-1280.png');
+ await menu.getByRole('group',{name:'Effort'}).getByRole('menuitemradio',{name:'high',exact:true}).click();
+ await page.getByRole('button',{name:/^Model: Claude .*Claude Demo Model.*High/}).waitFor();
+ await chip.click();
+ await writeFile(catalogState,'effort-retired');
+ await menu.getByRole('button',{name:'Refresh model lists'}).click();
+ await page.getByRole('button',{name:/Claude Demo Model.*Default effort.*no longer listed/}).waitFor();
+ await menu.getByText('This effort is no longer listed for the model.',{exact:false}).waitFor();
+ assert.equal(await menu.getByRole('menuitemradio',{name:'high',exact:true}).count(),0);
+ await writeFile(catalogState,'model-retired');
+ await menu.getByRole('button',{name:'Refresh model lists'}).click();
+ await page.getByRole('button',{name:/^Model: Claude .*Default.*no longer listed/}).waitFor();
+ await menu.getByText('This model is no longer listed.',{exact:false}).waitFor();
+ assert.equal(await menu.getByRole('group',{name:'Claude'}).getByRole('menuitemradio',{name:/^Default/}).getAttribute('aria-checked'),'true');
  await menu.getByRole('menuitemradio',{name:'Codex Demo Model',exact:true}).click();
  await chip.click();
  const codexEffort=menu.getByRole('group',{name:'Effort'}).getByRole('menuitemradio',{name:'medium',exact:true});
- await codexEffort.waitFor();
- assert.equal(await codexEffort.isEnabled(),false);
+ await codexEffort.click();
+ await page.getByRole('button',{name:/^Model: Codex .*Codex Demo Model.*Medium/}).waitFor();
+ await chip.click();
+ assert.equal(await codexEffort.getAttribute('aria-checked'),'true');
  assert.equal(await menu.getByRole('menuitemradio',{name:'Default (Codex Demo Model)',exact:true}).count(),0);
  await shot('catalog-codex-1280.png');
  const forced=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/setup/models'&&r.request().postDataJSON()?.force===true&&r.ok());

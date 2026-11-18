@@ -3,7 +3,7 @@ import {mkdtemp,realpath,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {readCatalog,createModelCatalogs} from '../server/providers/model-catalog.ts';
-import {chatChoiceModel,chipLabel,planChoice} from '../shared/model-choice.ts';
+import {chatChoiceModel,chipLabel,planChoice,mergeModelCatalogs} from '../shared/model-choice.ts';
 import type {SetupView} from '../shared/setup.ts';
 import {defaultMachineSetup} from '../shared/setup.ts';
 import {applyCatalogAvailability} from '../shared/models.ts';
@@ -77,11 +77,42 @@ describe('metadata-only catalogs',()=>{
  });
  it('uses only catalog entries, model-specific effort and explicit default markers in the picker',()=>{
   const view={providers:[{id:'codex',label:'Codex',compatible:true,catalog:{source:'cli',models:[{id:'advertised',name:row.displayName,default:true,efforts:['medium']}],checkedAt:100}}],
-   roles:[{role:'normal-chat',provider:'codex',capableProviders:['codex']}],models:[{role:'normal-chat',provider:'codex',selection:{model:'advertised',effort:'medium'}}]} as SetupView;
+   roles:[{role:'normal-chat',provider:'codex',capableProviders:['codex']}],models:[{role:'normal-chat',provider:'codex',effortSupported:true,selection:{model:'advertised',effort:'medium'}}]} as SetupView;
   const model=chatChoiceModel(view);
   expect(model.groups[0].options.map(o=>o.label)).toEqual(['Default (A model from the CLI)',row.displayName]);
   expect(chipLabel(model)).toBe('Codex · A model from the CLI · Medium');
   expect(planChoice(model,{provider:'codex',model:'advertised',effort:'high'}).ok).toBe(false);
+  expect(planChoice(model,{provider:'codex',model:'advertised',effort:'medium'}).ok).toBe(true);
+ });
+ it('updates the request and chip when a model or effort retires in a refresh without reload',()=>{
+  const requested={model:'advertised',effort:'medium'};
+  const view={providers:[{id:'claude',label:'Claude',path:'fake',version:'3.0.0',compatible:true,catalog:{
+   source:'cli',models:[{id:'advertised',name:'Advertised',default:true,efforts:['medium']}],checkedAt:100}}],
+   roles:[{role:'normal-chat',provider:'claude',capableProviders:['claude']}],models:[{role:'normal-chat',provider:'claude',
+    effortSupported:true,listed:true,selection:requested,requested,effective:requested}]} as SetupView;
+  const fresh=structuredClone(view);
+  fresh.providers[0].catalog!.models[0].efforts=['high'];
+  const effort=chatChoiceModel(mergeModelCatalogs(view,fresh));
+  expect(effort.current).toMatchObject({model:'advertised',effort:null});
+  expect(effort.modelNotice).toMatch(/effort.*no longer listed/i);
+  expect(chipLabel(effort)).toMatch(/Advertised.*Default effort.*no longer listed/);
+  fresh.providers[0].catalog!.models[0].id='replacement';
+  const model=chatChoiceModel(mergeModelCatalogs(view,fresh));
+  expect(model.current).toMatchObject({model:null,effort:null});
+  expect(chipLabel(model)).toMatch(/Default.*no longer listed/);
+  expect(planChoice(model,{provider:'claude',model:null,effort:null})).toMatchObject({ok:true,startsFresh:true});
+ });
+ it('shows Default effort while the Codex catalog is unavailable and allows saving Default explicitly',()=>{
+  const requested={model:'advertised',effort:'medium'};
+  const view:SetupView={ready:true,seen:true,fontSize:null,privacy:{mode:'private',sharedReady:false,notice:''},
+   providers:[{id:'codex',label:'Codex',path:'synthetic',version:'0.167.0',source:'default',notices:[],reason:'',compatible:true,
+    catalog:{source:'fallback',models:[],checkedAt:null}}],
+   roles:[{role:'normal-chat',provider:'codex',capableProviders:['codex'],reason:null,source:'default'}],
+   models:[{role:'normal-chat',provider:'codex',effortSupported:true,selection:requested,requested,effective:requested}]};
+  const model=chatChoiceModel(mergeModelCatalogs(view,view));
+  expect(chipLabel(model)).toBe('Codex · advertised · Default effort');
+  expect(model.modelNotice).toMatch(/until the model list/);
+  expect(planChoice(model,{provider:'codex',model:'advertised',effort:null})).toMatchObject({ok:true,startsFresh:true});
  });
  it('sends only advertised Claude effort without changing the stored preference',()=>{
   const setup=defaultMachineSetup();
@@ -108,19 +139,25 @@ describe('metadata-only catalogs',()=>{
   const settings=defaultMachineSetup();settings.providers.codex.enabled=true;settings.roles['normal-chat']='codex';
   await saveMachineSetup(dir,settings);
   const cli={...source(),code:'metadata_compatible',reason:'Fake CLI',roles:['normal-chat'],effort:null,effortCode:'not_applicable' as const};
-  const catalog={source:'cli' as const,models:[{id:'advertised',name:row.displayName,default:false,efforts:[]}],checkedAt:Date.now()};
+  const catalog={source:'cli' as const,models:[{id:'advertised',name:row.displayName,default:false,efforts:['medium']}],checkedAt:Date.now()};
   const setup=createSetupHttp({dir,project:dir,providers:[cli],ready:async()=>true,catalogs:{view:()=>catalog,refresh:async()=>[]}});
-  await setup.put({role:'normal-chat',provider:'codex',selection:{model:'advertised',effort:null},catalogModel:true});
+  const update=(effort:string)=>({role:'normal-chat',provider:'codex',selection:{model:'advertised',effort},catalogModel:true});
+  await expect(setup.put(update('high'))).rejects.toThrow('Choose an effort listed for this model.');
+  expect((await loadMachineSetup(dir)).providers.codex.roles['normal-chat']).toBeUndefined();
+  await setup.put(update('medium'));
   const registry=new ProviderRegistry([descriptorFromAdapter({id:'codex',label:'Codex',safetyLabel:'contained',async *startTurn(){throw Error('Metadata never runs a turn.');}},{detect:async()=>({available:true,reason:null})})]);
   const first=await registry.snapshot(dir,undefined,()=>catalog);
-  expect(first.resolveRole('normal-chat')).toMatchObject({selection:{model:'advertised',effort:null}});
+  expect(first.resolveRole('normal-chat')).toMatchObject({selection:{model:'advertised',effort:'medium'}});
+  catalog.models[0].efforts=[];
+  expect(await first.currentContextKey!('normal-chat')).not.toBe(first.contextKey('normal-chat'));
+  expect((await registry.snapshot(dir,undefined,()=>catalog)).resolveRole('normal-chat')).toMatchObject({selection:{model:'advertised',effort:null}});
   catalog.models=[{id:'replacement',name:'Replacement',default:true,efforts:[]}];
   expect(first.currentContextKey).toBeTypeOf('function');
   expect(await first.currentContextKey!('normal-chat')).not.toBe(first.contextKey('normal-chat'));
-  expect(first.resolveRole('normal-chat')).toMatchObject({selection:{model:'advertised',effort:null}});
+  expect(first.resolveRole('normal-chat')).toMatchObject({selection:{model:'advertised',effort:'medium'}});
   const next=await registry.snapshot(dir,undefined,()=>catalog);
   expect(next.resolveRole('normal-chat')).not.toHaveProperty('selection');
-  expect((await setup.get()).models[0]).toMatchObject({selection:{model:'advertised',effort:null},effective:{model:null,effort:null},modelNotice:expect.stringContaining('no longer listed')});
+  expect((await setup.get()).models[0]).toMatchObject({selection:{model:'advertised',effort:'medium'},effective:{model:null,effort:null},modelNotice:expect.stringContaining('no longer listed')});
   expect((await loadMachineSetup(dir)).providers.codex.catalogChoices?.['normal-chat']).toBe('advertised');
   const stale={...catalog,checkedAt:Date.now()-90*60_000,notice:'The refresh timed out.'};
   const unchanged=await registry.snapshot(dir,undefined,()=>stale);

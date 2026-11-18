@@ -3,7 +3,7 @@
 import {CLAUDE_EFFORTS, CLAUDE_MODELS, reportedModelLabel, validModelId} from './model-settings.ts';
 import type {ModelRole, SetupProvider, SetupUpdate, SetupView} from './setup.ts';
 import {roleDefinition,type SetupRole} from './setup.ts';
-import {catalogEntry,type ModelCatalog} from './models.ts';
+import {catalogEntry,DISCONTINUED_EFFORT_NOTICE,DISCONTINUED_MODEL_NOTICE,effectiveCatalogSelection,type ModelCatalog} from './models.ts';
 
 export interface ModelOption {id: string; label: string; model: string | null; detail?:string}
 export interface ProviderGroup {
@@ -29,8 +29,23 @@ function optionsFor(id:SetupProvider,catalog?:ModelCatalog):ModelOption[]{
  return id==='claude'?[DEFAULT,...CLAUDE_MODELS.map(alias=>({id:alias,label:alias,model:alias}))]:[DEFAULT];
 }
 function effortsFor(group:ProviderGroup|undefined,model:string|null):string[]{
+ if(!group?.effortFlag)return [];
  if(group?.catalog?.source==='cli')return catalogEntry(group.catalog,model)?.efforts??[];
- return group?.effortFlag?[...CLAUDE_EFFORTS]:[];
+ return group.id==='claude'?[...CLAUDE_EFFORTS]:[];
+}
+
+/** Refresh metadata without undoing choices saved while the refresh was in flight. */
+export function mergeModelCatalogs(base:SetupView,refreshed:SetupView):SetupView {
+ const providers=base.providers.map(provider=>{
+  const candidate=refreshed.providers.find(p=>p.id===provider.id&&p.path===provider.path&&p.version===provider.version)?.catalog;
+  return candidate&&(candidate.checkedAt??0)>=(provider.catalog?.checkedAt??0)?{...provider,catalog:candidate}:provider;
+ });
+ const models=base.models.map(preference=>{
+  const catalog=providers.find(p=>p.id===preference.provider)?.catalog;
+  return {...preference,...effectiveCatalogSelection(preference.provider,
+   preference.requested??preference.selection??preference.effective,preference.listed===true,catalog)};
+ });
+ return {...base,providers,models};
 }
 
 /** Only compatible providers that can do the role are selectable; the rest stay listed, disabled, with the doctor's reason. */
@@ -43,18 +58,20 @@ export function chatChoiceModel(view: SetupView, role: ModelRole = 'normal-chat'
   const available = p.compatible && capable.includes(p.id) && !info?.locked && !pinned;
   return {id: p.id, label: p.label || names[p.id], available, reason: available ? null : info?.locked??(pinned?'Executable set by launch flag.':p.compatible?'This provider does not support this role.':p.reason),
    options: available ? optionsFor(p.id,p.catalog) : [], customAllowed: available && p.id !== 'kiro',catalog:p.catalog,
-   effortFlag:p.id==='claude'&&view.models.some(m=>m.role===role&&m.provider===p.id&&m.effortSupported)};
+   effortFlag:view.models.some(m=>m.role===role&&m.provider===p.id&&m.effortSupported)};
  });
  const selected = scopedProvider??info?.provider;
  const provider = selected && capable.includes(selected) && view.providers.find(p=>p.id===selected)?.compatible ? selected : null;
  const entry = provider ? view.models.find(m => m.role === role && m.provider === provider) : undefined;
- const shown = entry ? entry.selection ?? entry.effective : null;
+ const shown = entry ? entry.effective ?? entry.selection : null;
  const group=groups.find(g=>g.id===provider),efforts=effortsFor(group,shown?.model??null);
  return {role, groups,
-  current: provider ? {provider, model: shown?.model ?? null, effort: (entry?.effective ?? shown)?.effort ?? null, explicit: entry?.selection != null,...(entry?.listed?{listed:true as const}:{})} : null,
+  current: provider ? {provider, model: shown?.model ?? null, effort: shown?.effort ?? null, explicit: entry?.selection != null,
+   ...(entry?.listed&&shown?.model!==null?{listed:true as const}:{})} : null,
   modelNotice:entry?.modelNotice,
   efforts,effortSupported:group?.effortFlag===true&&efforts.length>0,
-  effortReason:provider==='codex'&&efforts.length?'Codex lists these efforts. This app currently sends the CLI default effort.':
+  effortReason:provider==='codex'&&!group?.effortFlag?'Effort not supported by this Codex version.':
+   provider==='codex'&&group?.catalog?.source!=='cli'?'Effort choices need a verified Codex model list.':
    provider&&group?.catalog?.source==='cli'&&!efforts.length?'The CLI lists no effort levels for this choice.':undefined};
 }
 
@@ -66,8 +83,13 @@ export function chipLabel(model: ChoiceModel, lastAnswer?: {model: string | null
  if (!model.current) return model.groups.some(g => g.available)?'Choose AI':'AI off';
  const {provider, model: id, effort} = model.current;
  const name=model.groups.find(g=>g.id===provider)?.catalog?.models.find(row=>row.id===id)?.name;
- const parts = [names[provider], id === null ? 'Default' : name??title(id), ...(effort === null ? [] : [title(effort)])];
- return parts.join(' · ') + (model.modelNotice?' · no longer listed':'')+(lastAnswer ? ` · ran ${reportedModelLabel(lastAnswer.model)}` : '');
+ const retired=model.modelNotice===DISCONTINUED_MODEL_NOTICE||model.modelNotice===DISCONTINUED_EFFORT_NOTICE;
+ const parts = [names[provider], id === null ? 'Default' : name??title(id)];
+ if(effort!==null)parts.push(title(effort));
+ else if(model.modelNotice&&model.modelNotice!==DISCONTINUED_MODEL_NOTICE)parts.push('Default effort');
+ if(retired)parts.push('no longer listed');
+ if(lastAnswer)parts.push(`ran ${reportedModelLabel(lastAnswer.model)}`);
+ return parts.join(' · ');
 }
 
 /** Turns a pick into the machine-setup writes it needs, or refuses it. Default is an explicit null pair, never an inherit. */
@@ -81,7 +103,7 @@ export function planChoice(model: ChoiceModel, pick: Pick): Plan {
  if (pick.effort !== null && !(pick.provider === model.current?.provider && group.effortFlag && effortsFor(group,pick.model).includes(pick.effort)))
   return {ok: false, notice: 'Effort is not available for this provider.'};
  const cur = model.current;
- if (cur && cur.explicit && cur.provider === pick.provider && cur.model === pick.model && cur.effort === pick.effort&&cur.listed===pick.catalogModel)
+ if (cur && !model.modelNotice && cur.explicit && cur.provider === pick.provider && cur.model === pick.model && cur.effort === pick.effort&&cur.listed===pick.catalogModel)
   return {ok: true, updates: [], startsFresh: false};
  const updates: SetupUpdate[] = [];
  if (cur?.provider !== pick.provider) updates.push({role: model.role, provider: pick.provider});

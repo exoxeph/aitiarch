@@ -1,8 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {fetchSetup, refreshSetupModels, saveSetup} from '../api.ts';
 import {validModelId} from '../../shared/model-settings.ts';
-import {catalogMissing,DISCONTINUED_MODEL_NOTICE} from '../../shared/models.ts';
-import {applyChoice, chatChoiceModel, chipLabel, roleModelLabel, type Pick} from '../../shared/model-choice.ts';
+import {applyChoice, chatChoiceModel, chipLabel, mergeModelCatalogs, roleModelLabel, type Pick} from '../../shared/model-choice.ts';
 import type {ModelRole, SetupProvider, SetupUpdate, SetupView} from '../../shared/setup.ts';
 
 interface Api {load: () => Promise<SetupView>; save: (update: SetupUpdate) => Promise<SetupView>; refresh?:(force:boolean)=>Promise<SetupView>}
@@ -41,18 +40,10 @@ export function ModelPicker({role = 'normal-chat', provider, lastAnswer, onChang
   try{
    const result=await api.refresh(force),base=latest.current;
    if(!base)return;
-   const providers=base.providers.map(p=>{
-    const candidate=result.providers.find(next=>next.id===p.id&&next.path===p.path&&next.version===p.version)?.catalog;
-    return candidate&&(candidate.checkedAt??0)>=(p.catalog?.checkedAt??0)?{...p,catalog:candidate}:p;
-   });
-   // Merge catalog metadata into the latest view. An in-flight refresh must not restore old role assignments or picks.
-   const models=base.models.map(m=>{
-    if(!m.listed||!m.selection?.model)return m;
-    const missing=catalogMissing(m.selection.model,providers.find(p=>p.id===m.provider)?.catalog);
-    return {...m,effective:missing?{model:null,effort:null}:m.selection,modelNotice:missing?DISCONTINUED_MODEL_NOTICE:undefined};
-   });
-   const next={...base,providers,models};
+   const next=mergeModelCatalogs(base,result);
+   const before=chatChoiceModel(base,role,provider).current,after=chatChoiceModel(next,role,provider).current;
    latest.current=next;setView(next);onViewChange?.(next);
+   if(before?.model!==after?.model||before?.effort!==after?.effort)onChanged?.();
   }
   catch{setNotice('The model list could not be refreshed.');}
   finally{setRefreshing(false);}

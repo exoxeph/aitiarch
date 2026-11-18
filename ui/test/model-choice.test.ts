@@ -50,9 +50,12 @@ it('puts Default first for every provider; Claude has the four aliases and a cus
  expect(kiro.customAllowed).toBe(false);
 });
 
-it('offers the Effort section only for Claude with a declared --effort flag', () => {
+it('hides effort when its CLI transport is unsupported, even when Codex advertises levels', () => {
  expect(chatChoiceModel(view()).effortSupported).toBe(true);
  expect(chatChoiceModel(codexView()).effortSupported).toBe(false);
+ const codex=codexView();
+ codex.providers.find(p=>p.id==='codex')!.catalog={source:'cli',checkedAt:100,models:[{id:'fake',name:'Fake',default:true,efforts:['medium']}]};
+ expect(chatChoiceModel(codex)).toMatchObject({efforts:[],effortReason:'Effort not supported by this Codex version.'});
  const undeclared = view({models: [{role: 'normal-chat', provider: 'claude', effortSupported: false, selection: null, effective: {model: null, effort: null}}]});
  expect(chatChoiceModel(undeclared).effortSupported).toBe(false);
  const kiroOnly = view({providers: [provider('kiro', true, 'Compatible')], roles: [role('normal-chat', null, ['kiro'])], models: []});

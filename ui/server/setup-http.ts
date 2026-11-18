@@ -5,7 +5,7 @@ import {initProject, privateProtection} from './init.ts';
 import {LAUNCH_ROLE_LOCK, MODEL_ROLES, ROLE_REGISTRY, SETUP_PROVIDERS, SETUP_ROLES, roleDefinition, validCouncilParticipants, type MachineSetup, type ModelEffort, type SetupProvider, type SetupRole, type SetupView} from '../shared/setup.ts';
 import {modelArguments, modelSelection} from '../shared/model-settings.ts';
 import type {createModelCatalogs} from './providers/model-catalog.ts';
-import {applyCatalogAvailability,catalogEntry,DISCONTINUED_MODEL_NOTICE,discontinuedModel} from '../shared/models.ts';
+import {catalogEntry,effectiveCatalogSelection} from '../shared/models.ts';
 
 const labels = {claude:'Claude', codex:'Codex', kiro:'Kiro'};
 const wiredBridges = {invoked:true, 'thread-reply':true, 'investigate-read':true, 'skill-diagram':true};
@@ -27,15 +27,15 @@ export function createSetupHttp(options: {
  ).map(p => p.id);
  const launchLocked = (provider:SetupProvider|null) => provider!==null && options.overrides?.[provider]!==undefined;
  const enabledCouncil = (setup:MachineSetup) => capable('council').filter(id=>setup.providers[id].enabled);
- const effortSupported = (id:SetupProvider) => id==='claude' && options.providers.some(p =>
-  p.id===id && p.effort===true && p.effortCode==='help_flag_present');
+ const effortSupported = (id:SetupProvider) => options.providers.some(p=>p.id===id&&(
+  id==='claude'?p.effort===true&&p.effortCode==='help_flag_present':
+  id==='codex'&&p.isolation==='metadata-compatible'&&p.version!==null));
  const catalogFor=(id:SetupProvider)=>{const p=options.providers.find(p=>p.id===id);return p&&options.catalogs?.view(p);};
 
  async function get():Promise<SetupView> {
   const [setup, protection, ready] = await Promise.all([
    loadMachineSetup(options.dir), privateProtection(options.project), options.ready(),
   ]);
-  const effective=applyCatalogAvailability(setup,catalogFor);
   return {
    ready, seen:setup.setupSeen===true,
    fontSize:setup.fontSizeConfigured||setup.fontSize!==16 ? setup.fontSize : null,
@@ -43,11 +43,11 @@ export function createSetupHttp(options: {
     .filter(provider=>role==='council'||provider===setup.roles[role])
     .map(provider=>{
      const selection=setup.providers[provider].roles[role]??null;
-     const missing=discontinuedModel(setup,provider,role,catalogFor(provider));
-     return {role,provider,effortSupported:effortSupported(provider),selection,
-      effective:modelSelection(effective,role,provider),
-      ...(setup.providers[provider].catalogChoices?.[role]?{listed:true as const}:{}),
-      ...(missing?{modelNotice:DISCONTINUED_MODEL_NOTICE}:{})};
+     const requested=modelSelection(setup,role,provider);
+     const listed=setup.providers[provider].catalogChoices?.[role]===requested.model;
+     return {role,provider,effortSupported:effortSupported(provider),selection,requested,
+      ...effectiveCatalogSelection(provider,requested,listed,catalogFor(provider)),
+      ...(listed?{listed:true as const}:{})};
     })),
    providers:options.providers.map(p => ({
     id:p.id, label:labels[p.id], path:p.path, version:p.version, reason:p.reason,
@@ -106,9 +106,10 @@ export function createSetupHttp(options: {
   if (model && selection!==null) {
    if (!selection || typeof selection!=='object' || Array.isArray(selection))
     throw new SetupRequestError('Invalid model selection.');
-   try {modelArguments(provider,selection,effortSupported(provider));}
+   const catalog=catalogFor(provider);
+   try {modelArguments(provider,selection,effortSupported(provider),catalog);}
    catch (error) {throw new SetupRequestError((error as Error).message);}
-   const catalog=catalogFor(provider),entry=catalogEntry(catalog,selection.model);
+   const entry=catalogEntry(catalog,selection.model);
    if((catalogModel||selection.model?.endsWith('[1m]'))&&(!entry||selection.model===null))throw new SetupRequestError('Choose this model from the CLI list.');
    if(selection.effort!==null&&catalog?.source==='cli'&&!entry?.efforts.includes(selection.effort))
     throw new SetupRequestError('Choose an effort listed for this model.');

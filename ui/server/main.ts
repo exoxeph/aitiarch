@@ -105,7 +105,7 @@ const openProject = async (entry: ProjectEntry) => {
   if (plan) plans.add(plan);
   const usage = new UsageLogs({ notebookRoot: store.rootReal });
   const provider = plan ?? (claudeCommand ? createProvider({ provider: defaults.roles.chat, command: claudeCommand, contract: "claude-canary-2.1.205", usageLog: usage }) : undefined);
-  const adapters=selectedCouncilAdapters(runtime.providers),availabilityChecks=runtime.availabilityChecks;
+  const adapters=selectedCouncilAdapters(runtime.providers,catalogs.view),availabilityChecks=runtime.availabilityChecks;
   const routing=roleRouting({dir:configFolder,adapters,checks:availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!claudeCommand,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true,
    catalogFor:id=>{const provider=runtime.providers.find(p=>p.id===id);return provider&&catalogs.view(provider);}});
   const setup = createSetupHttp({dir:configFolder, project:entry.root, providers:runtime.providers,catalogs,

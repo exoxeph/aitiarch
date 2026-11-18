@@ -35,6 +35,7 @@ export interface RoleModelPreference {
  provider:SetupProvider;
  effortSupported:boolean;
  selection:ModelEffort|null;
+ requested?:ModelEffort;
  effective:ModelEffort;
  listed?:true;
  modelNotice?:string;

@@ -4,12 +4,16 @@ import {validateCodexCommand} from './codex-command.ts';
 import type {SelectedCli} from '../platform/cli-selection.ts';
 import {TurnFailure} from './turn.ts';
 import {DEFAULT_PIPELINE_CONFIG} from '../../shared/pipeline-config.ts';
+import type {ModelCatalog} from '../../shared/models.ts';
 /** Startup has already selected one executable per provider. Never rediscover here. */
-export function selectedCouncilAdapters(providers:readonly SelectedCli[]):TurnAdapter[]{return providers.map(p=>{
+export function selectedCouncilAdapters(providers:readonly SelectedCli[],catalogFor?:(p:SelectedCli)=>ModelCatalog|undefined):TurnAdapter[]{return providers.map(p=>{
  if(p.isolation!=='metadata-compatible'||!p.path)return {id:p.id,label:p.id==='claude'?'Claude':p.id==='codex'?'Codex':'Kiro',safetyLabel:DEFAULT_PIPELINE_CONFIG.safetyLabels[p.id],
   async *startTurn(){throw new TurnFailure('unsupported_cli','unavailable',p.reason);}};
  return p.id==='claude'?claudeTurn(createProvider({provider:'claude',command:p.path,contract:'claude-canary-2.1.205'})):
-  createCliAdapter({id:p.id,command:p.path});
+  createCliAdapter({id:p.id,command:p.path,codexCatalog:()=>{
+   const catalog=catalogFor?.(p);
+   return p.id==='codex'&&p.version&&catalog?.source==='cli'?{version:p.version,catalog}:undefined;
+  }});
 });}
 /** Native executables only: no shell, npm shim or credential/config discovery. */
 function nativeCommand(name:string){
