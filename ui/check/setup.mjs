@@ -1,6 +1,6 @@
 import './config-isolation.mjs';
 import assert from 'node:assert/strict';
-import {copyFile, mkdtemp, mkdir, readdir, readFile, writeFile} from 'node:fs/promises';
+import {copyFile, mkdtemp, mkdir, readdir, readFile, utimes, writeFile} from 'node:fs/promises';
 import {execFile, spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {createInterface} from 'node:readline';
@@ -15,6 +15,7 @@ import {createSetupHttp} from '../server/setup-http.ts';
 import {initProject} from '../server/init.ts';
 import {SkillDiagramStore} from '../server/skill-diagram-store.ts';
 import {InkStore} from '../server/ink-store.ts';
+import {LedgerStore} from '../server/ledger-store.ts';
 import {captureAnchor} from '../shared/anchors.ts';
 import {skillPreviewUrl,SKILL_DIAGRAM_URL} from '../shared/skill-diagram.ts';
 import {compatibleDefaults,descriptorFromAdapter} from '../server/providers/registry.ts';
@@ -201,17 +202,31 @@ async function checkLaunches() {
 async function checkSkillStages(base,store,notePath,kind){
  const files=new SkillDiagramStore(store.rootReal),ink=await InkStore.open(store.rootReal);
  const svg='<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><text x="10" y="25">Private preview</text></svg>';
+ const local=path.join(store.rootReal,'local');
+ const interrupted=await files.saveSvg(svg.replace('Private preview','Interrupted preview'));
+ const candidate=path.join(local,'skill-diagrams',interrupted.stage+'-'+interrupted.asset);
+ const exited=spawn(process.execPath,['-e',''],{windowsHide:true});
+ const pid=exited.pid;
+ assert.deepEqual(await once(exited,'exit'),[0,null]);
+ await writeFile(candidate,'<svg>unfinished');
+ await writeFile(candidate+'.owner',String(pid)+'\n');
+ const lock=path.join(local,'ledger.json.lock');
+ await writeFile(lock,'unfinished lock');
+ await utimes(lock,new Date(0),new Date(0));
  const note=await store.read(notePath),from=note.text.indexOf('Private fixture anchor');
  assert(from>=0);
  const anchor=captureAnchor(note.text,from,from+'Private fixture anchor'.length);
  const snapshot=await ink.read(notePath);
+ const reopened=new SkillDiagramStore(store.rootReal);
  for(const id of ['publish-fixture','discard-fixture']){
-  const skillDiagram=await files.saveSvg(svg);
+  const skillDiagram=await reopened.saveSvg(svg);
   snapshot.document.items.push({id,kind:'answer',body:'A synthetic Skill diagram.',skillDiagram,
    anchor,originalAnchor:anchor,attachment:{status:'attached',...anchor.position},
    generation:{provider:'claude',model:null,requestId:id,action:'ask',status:'complete',createdAt:new Date().toISOString(),evidence:[],dismissed:false}});
  }
  await ink.write(notePath,snapshot.document,snapshot.version);
+ await assert.rejects(readFile(candidate),{code:'ENOENT'});
+ await assert.rejects(readFile(candidate+'.owner'),{code:'ENOENT'});
  const [first,second]=snapshot.document.items.slice(-2);
  const preview=item=>skillPreviewUrl(item.skillDiagram.asset,item.skillDiagram.stage);
  const publicPath=SKILL_DIAGRAM_URL(first.skillDiagram.asset);
@@ -236,6 +251,9 @@ async function checkSkillStages(base,store,notePath,kind){
   assert.match(await image.getAttribute('src'),/skill-diagram-preview/);
   assert.equal((await request(publicPath)).status(),404);
   assert.equal((await request(preview(first))).status(),200);
+  assert.equal((await request(skillPreviewUrl(interrupted.asset,interrupted.stage))).status(),404);
+  await new LedgerStore(store.rootReal).append({id:'checked-recovery',event:'shown',inkId:'check-recovery',requestId:'check-recovery',note:notePath,at:new Date().toISOString()});
+  await assert.rejects(readFile(lock),{code:'ENOENT'});
   await page.screenshot({path:path.join(output,'private-skill-'+kind+'.png')});
   const completion=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/threads/bring-complete');
   const [response]=await Promise.all([completion,firstCard.getByRole('button',{name:'Add to note'}).click()]);
@@ -248,7 +266,7 @@ async function checkSkillStages(base,store,notePath,kind){
   assert.equal((await discarded).status(),200);
   assert.equal((await request(preview(second))).status(),404);
   assert.equal(await (await request(publicPath)).text(),svg);
-  console.log('Private Skill '+kind+': rendered, published on insertion, discarded its own stage.');
+  console.log('Private Skill '+kind+': recovered crash leftovers, rendered, published on insertion, discarded its own stage.');
  }catch(error){
   await page.screenshot({path:path.join(output,'private-skill-'+kind+'-failure.png')});
   console.error('Private Skill browser evidence:',kind,JSON.stringify(steps),await page.getByRole('alert').allTextContents(),await page.getByRole('dialog').allTextContents());
@@ -654,8 +672,11 @@ try {
  const codexEffort=menu.getByRole('group',{name:'Effort'}).getByRole('menuitemradio',{name:'medium',exact:true});
  await codexEffort.click();
  await page.getByRole('button',{name:/^Model: Codex .*Codex Demo Model.*Medium/}).waitFor();
+ const themeSaved=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/ui-state' &&
+  response.request().method()==='PUT' && response.request().postDataJSON()?.theme==='moss' && response.ok());
  await page.getByRole('combobox',{name:'Theme',exact:true}).selectOption('moss');
  await page.waitForFunction(()=>document.documentElement.dataset.theme==='moss');
+ await themeSaved;
  await chip.click();
  assert.equal(await codexEffort.getAttribute('aria-checked'),'true');
  assert.equal(await menu.getByRole('menuitemradio',{name:'Default (Codex Demo Model)',exact:true}).count(),0);

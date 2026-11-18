@@ -5,10 +5,12 @@ import {constants} from 'node:fs';
 import {lstat,mkdir,open,unlink} from 'node:fs/promises';
 import path from 'node:path';
 import {resolvePrivateProjectPath} from './project-storage.ts';
+import {recoverSkillStages} from './skill-stage-recovery.ts';
 import {SKILL_STAGE_PATTERN,SKILL_ASSET_PATTERN,SKILL_DIAGRAM_MAX_BYTES,injectCsp,type SkillDiagramRef} from '../shared/skill-diagram.ts';
 const sha=(bytes:Buffer|string)=>createHash('sha256').update(bytes).digest('hex');
 export class SkillDiagramStore {
  private root:string;
+ private recovery?:Promise<void>;
  constructor(root:string){this.root=root;}
  /** `<root>/assets/<name>`, created if asked, refusing links and anything that is not a plain directory or file. */
  private async confined(name:string,create=false){
@@ -40,9 +42,17 @@ export class SkillDiagramStore {
    await this.write(asset,bytes);return {asset,bytes:bytes.length};
   }
   const stage=randomBytes(16).toString('hex'),file=await this.stageFile(asset,stage,true);
+  // A lease is written before the stage so a later process can distinguish an interrupted write from a human file.
+  this.recovery??=recoverSkillStages(this.root,path.dirname(file)).catch(()=>{});
+  await this.recovery;
+  const owner=file+'.owner',lease=await open(owner,'wx',0o600);
+  try{await lease.writeFile(String(process.pid)+'\n');await lease.sync();}finally{await lease.close();}
   const handle=await open(file,'wx',0o600);
   try{try{await handle.writeFile(bytes);await handle.sync();}finally{await handle.close();}}
   catch(error){await unlink(file).catch(()=>{});throw error;}
+  // Retire the write lease before returning a reference. A crash after this point can leave a valid
+  // preview, but a later process cannot prove it is safe to delete while the reference may move.
+  await unlink(owner);
   return {asset,bytes:bytes.length,stage};
  }
  private async verified(file:string,asset:string){

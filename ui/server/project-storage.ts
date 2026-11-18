@@ -27,12 +27,12 @@ type StorageResult={ok:false;code:StorageFailure;reason:string;created:string[]}
 };
 
 export const storageErrorCode=(error:unknown)=>(error as NodeJS.ErrnoException)?.code;
-export async function storageEntry(fs:StorageFilesystem,file:string):Promise<Stats|null>{
+export async function storageEntry(fs:Pick<StorageFilesystem,'lstat'>,file:string):Promise<Stats|null>{
  try{return await fs.lstat(file);}catch(error){if(storageErrorCode(error)==='ENOENT')return null;throw error;}
 }
 
 /** Reject links in existing components, including Windows junctions. */
-export async function assertStoragePath(fs:StorageFilesystem,target:string){
+export async function assertStoragePath(fs:Pick<StorageFilesystem,'lstat'>,target:string){
  const base=path.parse(target).root;let current=base;
  for(const part of path.relative(base,target).split(path.sep).filter(Boolean)){
   current=path.join(current,part);const entry=await storageEntry(fs,current);
