@@ -17,6 +17,7 @@ import {SkillDiagramStore} from '../server/skill-diagram-store.ts';
 import {Store} from '../server/store.ts';
 import {UiStateStore} from '../server/ui-state-store.ts';
 import {NoteWatcher} from '../server/watch.ts';
+import {ImageStore} from '../server/image-store.ts';
 import {captureAnchor} from '../shared/anchors.ts';
 import {skillPreviewUrl,SKILL_DIAGRAM_URL} from '../shared/skill-diagram.ts';
 
@@ -25,9 +26,15 @@ const markers={
  draft:'draft-'+randomUUID(),ledger:'ledger-'+randomUUID(),cache:'cache-'+randomUUID(),
  chat:'chat-'+randomUUID(),journal:'journal-'+randomUUID(),diagram:'diagram-'+randomUUID(),
 };
+const imageFixture=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==','base64');
 const html=(body:string)=>'<html><body>'+body+'</body></html>';
+const assertNoImage=(bytes:Buffer,label:string)=>{
+ expect(bytes.includes(imageFixture),label+' contains the staged image').toBe(false);
+ expect(bytes.includes(imageFixture.toString('base64')),label+' contains the staged image as base64').toBe(false);
+};
 const assertPublic=(bytes:Buffer,label:string)=>{
  for(const marker of Object.values(markers))expect(bytes.includes(marker),label+' contains '+marker).toBe(false);
+ assertNoImage(bytes,label);
 };
 
 async function fixture(managed:boolean){
@@ -88,6 +95,12 @@ it('recovers interrupted atomic writes before checking the shareable tree, hando
  const linked=privateTempPath(path.join(local,'ui-state.json'),deadPid);
  await link(human,linked);
  const {files,staged,diagrams,insertions,existing}=await writePrivate(f);
+ const images=new ImageStore(root);
+ const image=await images.stage(imageFixture);
+ expect((await images.read(image.id)).bytes).toEqual(imageFixture);
+ const imageCopy=await images.copyForTransport(imageFixture);
+ const imageFiles=[`images/stage-${process.pid}-${image.id}.png`,'images/'+path.basename(imageCopy.file)];
+ for(const imageFile of imageFiles)expect(await readFile(path.join(local,imageFile))).toEqual(imageFixture);
  for(const temp of abandoned)await expect(readFile(temp),temp).rejects.toMatchObject({code:'ENOENT'});
  for(const target of [live,unknown,human,linked])expect(await readFile(target,'utf8')).toBe('Preserve these bytes.');
  const ownerlessLocks=['ui-state.json.lock','chat/'+note+'.chat.json.lock'];
@@ -107,7 +120,7 @@ it('recovers interrupted atomic writes before checking the shareable tree, hando
   const base='http://127.0.0.1:'+await app.listen(0);
   const cookie=(await fetch(base+'/api/session')).headers.get('set-cookie')!.split(';')[0];
   const get=(url:string)=>fetch(base+url,{headers:{cookie}});
-  for(const relative of Object.keys(expected)){
+  for(const relative of [...Object.keys(expected),...imageFiles]){
    const privatePath='local/'+relative;
    expect(git('check-ignore','--','.aitiarch/'+privatePath).toString()).toContain(privatePath);
    for(const url of ['/api/file?path='+encodeURIComponent(privatePath),'/'+privatePath]){
@@ -152,6 +165,13 @@ it('recovers interrupted atomic writes before checking the shareable tree, hando
   expect(handoff.status).toBe(200);
   assertPublic(Buffer.from(await handoff.arrayBuffer()),'handoff preview');
   expect((await fetch(base+'/api/handoff/write',{method:'PUT',headers:{cookie,origin:base,'x-aitiarch':'1','content-type':'application/json'},body:'{}'})).status).toBe(200);
+  const chat=await get('/api/chat?path='+encodeURIComponent(note));
+  expect(chat.status).toBe(200);
+  assertNoImage(Buffer.from(await chat.arrayBuffer()),'authenticated chat history');
+  const imageRead=await get('/api/chat/image-stage?id='+image.id);
+  expect(imageRead.status).toBe(404);
+  assertPublic(Buffer.from(await imageRead.arrayBuffer()),'image stage read');
+  assertNoImage(await readFile(path.join(local,'ledger.json')),'ledger');
  }finally{watcher.stop();await app.close();}
  for(const entry of await readdir(root,{recursive:true,withFileTypes:true})){
   if(!entry.isFile()||path.relative(root,entry.parentPath).split(path.sep)[0]==='local')continue;
@@ -169,6 +189,8 @@ it('recovers interrupted atomic writes before checking the shareable tree, hando
  expect(zip.includes('Public archive fixture')).toBe(true);
  expect(zip.includes('.aitiarch/local/')).toBe(false);
  assertPublic(zip,'Git ZIP');
+ await imageCopy.discard();
+ await images.discard(image.id);
 },30_000);
 
 it('keeps each private writer on its legacy path for a legacy notebook',async()=>{

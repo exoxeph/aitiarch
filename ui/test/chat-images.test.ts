@@ -180,6 +180,7 @@ it('requires fresh image consent at the HTTP boundary even after enabling text b
   expect(await (await put('send',{reviewId:first.reviewId,confirmed:true,confirmImages:true,imageIds})).text()).toContain('"imageInterpretation":true');
   expect(write).toHaveBeenCalledTimes(1);
   expect(write.mock.calls[0][0].approved.images[0].bytes.equals(png)).toBe(true);
+  expect((await new ChatStore(root).read('fixture.md')).messages.map(message=>message.id)).not.toContain('image-first');
   const ledger=await new LedgerStore(root).read();
   const imageAudits=ledger.events.filter(event=>event.requestId==='image-first'&&event.event==='chat_started');
   expect(imageAudits).toEqual([expect.objectContaining({images:{count:1,bytes:png.length}})]);

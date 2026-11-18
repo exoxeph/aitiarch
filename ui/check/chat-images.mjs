@@ -1,0 +1,108 @@
+import './config-isolation.mjs';
+import assert from 'node:assert/strict';
+import {mkdir,mkdtemp,readdir,realpath,writeFile} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {chromium} from 'playwright-core';
+import {createApp} from '../server/http.ts';
+import {Store} from '../server/store.ts';
+import {NoteWatcher} from '../server/watch.ts';
+import {resolveProjectStorage} from '../server/project-storage.ts';
+import {SessionIndex} from '../server/harness/session-index.ts';
+import {descriptorFromAdapter,ProviderRegistry} from '../server/providers/registry.ts';
+import {defaultMachineSetup} from '../shared/setup.ts';
+import {saveMachineSetup} from '../server/setup-store.ts';
+
+const repo=path.resolve(import.meta.dirname,'../..');
+const output=process.env.BATCH2A_OUTPUT;
+const relative=path.relative(repo,path.resolve(output??'.'));
+assert(output&&(path.isAbsolute(relative)||relative.startsWith('..'+path.sep)),'Set BATCH2A_OUTPUT outside the repository.');
+await mkdir(output,{recursive:true});
+const project=await mkdtemp(path.join(await realpath(os.tmpdir()),'aitiarch-chat-images-ui-'));
+const root=path.join(project,'.aitiarch');
+assert((await resolveProjectStorage(root,{create:true})).ok);
+await writeFile(path.join(root,'fixture.md'),'# Synthetic image review\n');
+const config=process.env.AITIARCH_CONFIG_DIR,setup=defaultMachineSetup();
+setup.providers.claude.model='synthetic-vision';
+setup.tour.completed=true;
+await saveMachineSetup(config,setup);
+const adapter={id:'claude',label:'Claude',safetyLabel:'fenced',async *startTurn(){throw Error('Unexpected generic turn.');}};
+const registry=new ProviderRegistry([descriptorFromAdapter(adapter,{detect:async()=>({available:true,reason:null})})]);
+const store=await Store.open(root),watcher=new NoteWatcher(store);
+const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==';
+const result=(request,answer)=>({id:request.id,provider:'claude',model:null,answer,rawReply:true,claims:[],usage:null});
+let imageCalls=0,browser;
+const app=createApp({store,watcher,distDir:path.join(repo,'ui','dist'),
+ council:{adapters:[adapter],routing:()=>registry.snapshot(config),index:await SessionIndex.open(path.join(config,'sessions'))},
+ provider:{name:'claude',checkAvailability:async()=>({available:true}),invoke:async request=>result(request,'Synthetic text reply.\n<claims>{"none":"no_context_used"}</claims>')},
+ chatImageDelivery:{supports:(id,model)=>id==='claude'&&model==='synthetic-vision',async send({request,approved}){
+  imageCalls++;
+  assert.equal(approved.images.length,3);
+  assert(approved.images.every(image=>image.bytes.toString('base64')===png));
+  return result(request,'Synthetic image reply.\n<claims>{"none":"no_context_used"}</claims>');
+ }},
+});
+try{
+ const url=`http://127.0.0.1:${await app.listen(0)}/`;
+ for(const channel of ['msedge','chrome']){try{browser=await chromium.launch({channel,headless:true});break;}catch{/* try the next installed browser */}}
+ assert(browser,'Edge or Chrome is required.');
+ const page=await browser.newPage({viewport:{width:1280,height:900}});
+ page.setDefaultTimeout(8000);
+ await page.goto(url);
+ await page.waitForSelector('.cm-editor');
+ await page.getByRole('button',{name:/^Chat/}).click();
+ const panel=page.locator('#chat-panel'),composer=panel.getByRole('textbox',{name:'Message Aitiarch AI'});
+ const review=panel.getByRole('region',{name:'What will be sent'});
+ const send=review.getByRole('button',{name:'Send to Claude',exact:true});
+ const ask=async text=>{await composer.fill(text);await composer.press('Enter');};
+ await ask('Enable text review bypass');
+ await review.getByLabel(/ask again this session/i).check();
+ await send.click();
+ await panel.getByText('Synthetic text reply.',{exact:true}).waitFor();
+
+ await page.waitForFunction(()=>document.querySelector('[aria-label="Attach images"]')?.getAttribute('aria-disabled')==='false');
+ assert(await composer.evaluate(input=>{
+  const data=new DataTransfer();data.setData('text/plain','ordinary text');
+  return input.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));
+ }),'Ordinary text paste must keep its browser default.');
+ await composer.evaluate((input,png)=>{
+  const bytes=Uint8Array.from(atob(png),char=>char.charCodeAt(0)),data=new DataTransfer();
+  data.items.add(new File([bytes],'paste.png',{type:'image/png'}));
+  input.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));
+ },png);
+ await panel.getByRole('img',{name:'Attached image 1'}).waitFor();
+ await composer.evaluate((input,png)=>{
+  const bytes=Uint8Array.from(atob(png),char=>char.charCodeAt(0)),data=new DataTransfer();
+  data.items.add(new File([bytes],'drop.png',{type:'image/png'}));
+  input.dispatchEvent(new DragEvent('drop',{dataTransfer:data,bubbles:true,cancelable:true}));
+ },png);
+ await panel.getByRole('img',{name:'Attached image 2'}).waitFor();
+ await panel.locator('input[type=file][accept="image/png"]').setInputFiles({name:'picker.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+ await panel.getByRole('img',{name:'Attached image 3'}).waitFor();
+ await page.waitForFunction(()=>Array.from(document.querySelectorAll('.chat-image-list img')).every(img=>img.complete&&img.naturalWidth===1));
+
+ for(let turn=1;turn<=2;turn++){
+  await ask('Review retained images '+turn);
+  const confirm=review.getByRole('checkbox',{name:'Confirm sending these images'});
+  await confirm.waitFor();
+  await review.getByText('images are sent as-is; secret exclusion cannot inspect them',{exact:true}).waitFor();
+  assert.equal(await confirm.isChecked(),false);
+  assert.equal(await send.isEnabled(),false);
+  assert.equal(imageCalls,turn-1);
+  if(turn===1)await page.screenshot({path:path.join(output,'chat-image-review.png')});
+  await confirm.check();
+  await send.click();
+  await panel.getByText('interpretation of your image, not verified',{exact:true}).nth(turn-1).waitFor();
+ }
+ assert.equal(imageCalls,2);
+ for(let index=3;index>=1;index--){
+  const remove=panel.getByRole('button',{name:'Remove image '+index,exact:true});
+  const deleted=page.waitForResponse(response=>response.url().endsWith('/api/chat/image-remove'));
+  await remove.click();
+  assert((await deleted).ok());
+ }
+ assert.deepEqual(await readdir(path.join(root,'local','images')),[]);
+ console.log('Chat images passed: paste, drop, file picker, two distinct confirmations, and removal.');
+}finally{
+ await browser?.close();watcher.stop();await app.close();
+}
