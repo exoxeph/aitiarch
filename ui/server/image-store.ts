@@ -1,6 +1,6 @@
 import {createHash,randomBytes} from 'node:crypto';
 import {constants,type Stats} from 'node:fs';
-import {lstat,mkdir,open,unlink} from 'node:fs/promises';
+import {lstat,mkdir,open,opendir,unlink} from 'node:fs/promises';
 import path from 'node:path';
 import {promisify} from 'node:util';
 import {crc32,deflate,inflate} from 'node:zlib';
@@ -9,6 +9,7 @@ import {assertStoragePath,resolveProjectStorage,storageErrorCode} from './projec
 
 const SIGNATURE=Buffer.from('89504e470d0a1a0a','hex');
 const ID=/^[a-f0-9]{32}$/;
+const OWNED_IMAGE=/^(?:stage|delivery)-([1-9][0-9]{0,9})-[a-f0-9]{32}\.png$/;
 const LIFETIME_MS=15*60*1000;
 const MAX_STAGED=IMAGE_SEND_MAX_COUNT*2;
 const inflateRows=promisify(inflate);
@@ -87,23 +88,79 @@ function sameEntry(stat:Stats,expected:Stats){
  return stat.isFile()&&stat.nlink===1&&stat.ino===expected.ino&&stat.dev===expected.dev&&stat.birthtimeMs===expected.birthtimeMs;
 }
 
+function ownerAlive(pid:number){
+ try{process.kill(pid,0);return true;}
+ catch(error){return storageErrorCode(error)!=='ESRCH';}
+}
+
+async function removeOwned(file:string,entry:Stats){
+ await assertStoragePath({lstat},file);
+ if(!sameEntry(await lstat(file),entry))throw Error('Staged image changed.');
+ await unlink(file);
+}
+
 export class ImageStore {
  private readonly root:string;
  private readonly now:()=>number;
+ private readonly isAlive:typeof ownerAlive;
  private readonly stages=new Map<string,Stage>();
  private staging=false;
- constructor(root:string,now=Date.now){this.root=root;this.now=now;}
+ constructor(root:string,now=Date.now,isAlive=ownerAlive){this.root=root;this.now=now;this.isAlive=isAlive;}
 
- private async stagePath(id:string,create=false){
-  if(!ID.test(id))throw Error('Invalid staged image ID.');
+ private async imageDirectory(create=false){
   const layout=await resolveProjectStorage(this.root);
-  if(!layout.ok)throw Error(layout.reason);
+  if(!layout.ok){if(create)throw Error(layout.reason);return null;}
   const dir=layout.privatePaths.images;
   await assertStoragePath({lstat},dir);
   if(create)await mkdir(dir,{mode:0o700}).catch(error=>{if(storageErrorCode(error)!=='EEXIST')throw error;});
-  const file=path.join(dir,id+'.png');
+  return dir;
+ }
+
+ private async ownedPath(kind:'stage'|'delivery',id:string,create=false){
+  if(!ID.test(id))throw Error('Invalid staged image ID.');
+  const dir=await this.imageDirectory(create);
+  if(!dir)throw Error('Private image storage is unavailable.');
+  const file=path.join(dir,`${kind}-${process.pid}-${id}.png`);
   await assertStoragePath({lstat},file);
   return file;
+ }
+
+ async recoverAbandoned(){
+  const dir=await this.imageDirectory();
+  if(!dir)return;
+  const entries=await opendir(dir).catch(error=>{if(storageErrorCode(error)==='ENOENT')return null;throw error;});
+  if(!entries)return;
+  let scanned=0;
+  for await(const entry of entries){
+   if(++scanned>4096)break;
+   const owner=OWNED_IMAGE.exec(entry.name);
+   if(!owner||!entry.isFile()||this.isAlive(Number(owner[1])))continue;
+   const file=path.join(dir,entry.name);
+   try{
+    const stat=await lstat(file);
+    if(stat.isFile()&&stat.nlink===1)await removeOwned(file,stat);
+   }catch{/* Changed, inaccessible or held files remain private. */}
+  }
+ }
+
+ private async writeOwned(kind:'stage'|'delivery',id:string,bytes:Buffer){
+  const file=await this.ownedPath(kind,id,true),handle=await open(file,'wx',0o600);
+  let entry:Stats|undefined;
+  try{
+   try{entry=await handle.stat();await handle.writeFile(bytes);}
+   finally{await handle.close();}
+  }catch(error){
+   if(entry)await removeOwned(file,entry).catch(()=>{});
+   throw error;
+  }
+  return {file,entry};
+ }
+
+ /** Provider copies use the same project-private ownership and startup sweep as stages. */
+ async copyForTransport(bytes:Buffer){
+  if(!bytes.length||bytes.length>IMAGE_MAX_BYTES)throw Error('Invalid transport image size.');
+  const {file,entry}=await this.writeOwned('delivery',randomBytes(16).toString('hex'),bytes);
+  return {file,discard:()=>removeOwned(file,entry)};
  }
 
  async stage(input:Buffer):Promise<StagedImage>{
@@ -111,19 +168,7 @@ export class ImageStore {
   this.staging=true;
   try{
    const {width,height,bytes}=await canonicalPng(input);
-   const id=randomBytes(16).toString('hex'),file=await this.stagePath(id,true);
-   const handle=await open(file,'wx',0o600);
-   let entry:Stats|undefined;
-   try{
-    try{entry=await handle.stat();await handle.writeFile(bytes);}
-    finally{await handle.close();}
-   }catch(error){
-    if(entry){
-     const current=await lstat(file).catch(()=>null);
-     if(current&&sameEntry(current,entry))await unlink(file).catch(()=>{});
-    }
-    throw error;
-   }
+   const id=randomBytes(16).toString('hex'),{entry}=await this.writeOwned('stage',id,bytes);
    const descriptor:StagedImage={id,mime:'image/png',width,height,byteLength:bytes.length};
    const timer=setTimeout(()=>void this.discard(id).catch(()=>{}),LIFETIME_MS);
    timer.unref();
@@ -139,7 +184,7 @@ export class ImageStore {
    await this.discard(id);
    throw Error('Staged image expired.');
   }
-  const file=await this.stagePath(id);
+  const file=await this.ownedPath('stage',id);
   const handle=await open(file,constants.O_RDONLY|(constants.O_NOFOLLOW??0));
   try{
    const stat=await handle.stat();
@@ -170,9 +215,7 @@ export class ImageStore {
   const record=this.stages.get(id);
   if(!record)return;
   try{
-   const file=await this.stagePath(id);
-   if(!sameEntry(await lstat(file),record.entry))throw Error('Staged image changed.');
-   await unlink(file);
+   await removeOwned(await this.ownedPath('stage',id),record.entry);
   }catch(error){if(storageErrorCode(error)!=='ENOENT')throw error;}
   finally{clearTimeout(record.timer);this.stages.delete(id);}
  }

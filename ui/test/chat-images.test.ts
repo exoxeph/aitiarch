@@ -14,7 +14,7 @@ import {InkStore} from '../server/ink-store.ts';
 import type {ChatEvent} from '../shared/chat.ts';
 import {reviewImageManifest,confirmImageManifest,type ChatImageDelivery} from '../server/chat/image-review.ts';
 import {once} from 'node:events';
-import {mkdtemp,readFile,realpath,writeFile} from 'node:fs/promises';
+import {mkdtemp,readFile,readdir,realpath,writeFile} from 'node:fs/promises';
 import {claudeArguments} from '../server/providers/claude-arguments.ts';
 import {CODEX_FLAGS} from '../server/providers/tool-less-arguments.ts';
 import {runFakeImageTransport} from '../server/providers/image-transport.ts';
@@ -50,7 +50,7 @@ async function readFixtureOutput(child:Parameters<Parameters<typeof runFakeImage
  expect(await once(child,'close')).toEqual([0,null]);
  return JSON.parse(stdout);
 }
-async function runImageFixture(provider:'claude'|'codex',change?:'bytes'|'model'|'executable'){
+async function runImageFixture(provider:'claude'|'codex',change?:'bytes'|'model'|'executable'|'error'|'cancel'){
  const project=await mkdtemp(path.join(await realpath(process.env.AITIARCH_CONFIG_DIR!),'project-'));
  const root=path.join(project,'.aitiarch');
  expect(await resolveProjectStorage(root,{create:true})).toMatchObject({ok:true});
@@ -61,13 +61,23 @@ async function runImageFixture(provider:'claude'|'codex',change?:'bytes'|'model'
  const review=await reviewImageManifest(store,[staged.id],binding);
  const approved=await confirmImageManifest(store,review,binding,{confirmImages:true,imageIds:[staged.id]});
  if(change==='bytes')approved.images[0].bytes[0]^=0xff;
+ const cancel=new AbortController();
  try{
   return await runFakeImageTransport({
    provider,command:change==='executable'?'unverified-cli':process.execPath,prefixArgs:[fixture,provider],
-   input:'Synthetic reviewed prompt',selection:{model:change==='model'?'other-model':model,effort:null},approved,
-  },async(child,stdin)=>({processed:approved.images[0].bytes.toString('base64'),...await readFixtureOutput(child,stdin)}));
+   input:'Synthetic reviewed prompt',selection:{model:change==='model'?'other-model':model,effort:null},approved,storage:store,signal:cancel.signal,
+  },async(child,stdin)=>{
+   if(change==='error'||change==='cancel'){
+    expect(await readFile(child.spawnargs.at(-2)!)).toEqual(approved.images[0].bytes);
+    if(change==='error')throw Error('Synthetic fixture failure.');
+    const closed=once(child,'close');
+    cancel.abort(Error('Synthetic fixture cancellation.'));
+    await closed;
+   }else return {processed:approved.images[0].bytes.toString('base64'),...await readFixtureOutput(child,stdin)};
+  });
  }finally{
   await store.discard(staged.id);
+  expect(await readdir(path.join(root,'local','images'))).toEqual([]);
  }
 }
 
@@ -86,7 +96,12 @@ it('Codex receives only a host-owned copy of the reviewed image and keeps view_i
  expect(result.body).toBe('Synthetic reviewed prompt');
  expect(result.contents).toBe(result.processed);
  expect(path.dirname(result.image)).not.toBe(result.cwd);
+ expect(path.dirname(result.image).endsWith(path.join('.aitiarch','local','images'))).toBe(true);
  await expect(readFile(result.image)).rejects.toMatchObject({code:'ENOENT'});
+});
+
+it.each(['error','cancel'] as const)('Codex removes its private argument copy after %s',async failure=>{
+ await expect(runImageFixture('codex',failure)).rejects.toThrow(failure==='error'?'Synthetic fixture failure.':'Synthetic fixture cancellation.');
 });
 
 it.each(['claude','codex'] as const)('%s refuses transport after a reviewed model or byte change',async provider=>{
@@ -130,9 +145,9 @@ it('requires fresh image consent at the HTTP boundary even after enabling text b
  setup.providers.kiro.enabled=true;
  await saveMachineSetup(config,setup);
  const routing=()=>registry.snapshot(config);
- const write=vi.fn<ChatImageDelivery['send']>(async({request,selection,approved})=>{
+ const write=vi.fn<ChatImageDelivery['send']>(async({request,selection,approved},signal)=>{
   const provider=approved.manifest.provider;
-  const report=await runFakeImageTransport({provider,command:process.execPath,prefixArgs:[fixture,provider],input:request.question,selection,approved},readFixtureOutput);
+  const report=await runFakeImageTransport({provider,command:process.execPath,prefixArgs:[fixture,provider],input:request.question,selection,approved,storage:new ImageStore(root),signal},readFixtureOutput);
   if(provider==='claude')expect(report).toMatchObject({body:{message:{content:[
    {type:'text',text:'Synthetic question'},
    {type:'image',source:{data:png.toString('base64')}},

@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {mkdtemp,realpath,writeFile} from 'node:fs/promises';
+import {mkdtemp,realpath} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {IMAGE_MAX_BYTES,IMAGE_SEND_MAX_BYTES,IMAGE_SEND_MAX_COUNT} from '../../shared/image-attachments.ts';
@@ -7,16 +7,19 @@ import type {ModelEffort} from '../../shared/setup.ts';
 import type {confirmImageManifest} from '../chat/image-review.ts';
 import {killTree,spawnImageFixture} from './launcher.ts';
 import {cleanupProviderTemp} from './temp-cleanup.ts';
+import type {ImageStore} from '../image-store.ts';
 
 type FixtureInput={
  provider:'claude'|'codex';command:string;prefixArgs:readonly string[];input:string;
  selection:Readonly<ModelEffort>;approved:Awaited<ReturnType<typeof confirmImageManifest>>;
+ storage:Pick<ImageStore,'copyForTransport'>;signal?:AbortSignal;
 };
 
 /** Transport proof for synthetic fixtures. Receives confirmed buffers, never client paths.
  * The regular launchers gain no image permissions and do not use this proof to enable vision. */
 export async function runFakeImageTransport<T>(options:FixtureInput,consume:(child:ReturnType<typeof spawnImageFixture>,stdin:string)=>Promise<T>):Promise<T>{
- const {provider,approved,selection}=options;
+ const {provider,approved,selection,storage,signal}=options;
+ signal?.throwIfAborted();
  const fail=()=>Error('Confirmed image bytes or model no longer match the reviewed send.');
  if(options.command!==process.execPath||!options.prefixArgs.length)throw Error('Isolated image delivery has not been verified for this provider.');
  const model=selection.model;
@@ -32,16 +35,16 @@ export async function runFakeImageTransport<T>(options:FixtureInput,consume:(chi
 
  const root=await realpath(os.tmpdir());
  const cwd=await mkdtemp(path.join(root,'aitiarch-headless-'));
- let staging:string|undefined;
+ const copies:Awaited<ReturnType<ImageStore['copyForTransport']>>[]=[];
  try{
   const images:string[]=[];
   let stdin=options.input;
   if(provider==='codex'){
-   staging=await mkdtemp(path.join(root,'aitiarch-headless-'));
-   for(const [index,bytes] of buffers.entries()){
-    const image=path.join(staging,`image-${index}.png`);
-    await writeFile(image,bytes,{flag:'wx',mode:0o600});
-    images.push(image);
+   for(const bytes of buffers){
+    signal?.throwIfAborted();
+    const copy=await storage.copyForTransport(bytes);
+    copies.push(copy);
+    images.push(copy.file);
    }
   }else{
    stdin=JSON.stringify({type:'user',message:{role:'user',content:[
@@ -49,15 +52,22 @@ export async function runFakeImageTransport<T>(options:FixtureInput,consume:(chi
     ...buffers.map(bytes=>({type:'image',source:{type:'base64',media_type:'image/png',data:bytes.toString('base64')}})),
    ]},parent_tool_use_id:null})+'\n';
   }
+  signal?.throwIfAborted();
   const child=spawnImageFixture(options,{cwd,images});
   const closed=new Promise<void>(resolve=>child.once('close',()=>resolve()));
-  try{return await consume(child,stdin);}
+  let killing:Promise<void>|undefined;
+  const abort=()=>{if(child.pid&&child.exitCode===null&&child.signalCode===null)killing??=killTree(child.pid);};
+  signal?.addEventListener('abort',abort,{once:true});
+  if(signal?.aborted)abort();
+  try{const result=await consume(child,stdin);signal?.throwIfAborted();return result;}
   finally{
-   if(child.pid&&child.exitCode===null&&child.signalCode===null)await killTree(child.pid);
+   signal?.removeEventListener('abort',abort);
+   abort();
+   await killing;
    await closed;
   }
  }finally{
-  if(staging){console.info('Provider image cleanup target:',staging);await cleanupProviderTemp(staging);}
+  for(const copy of copies)await copy.discard().catch(()=>{console.warn('An interrupted image delivery copy remains in private storage.');});
   console.info('Provider cleanup target:',cwd);await cleanupProviderTemp(cwd);
  }
 }

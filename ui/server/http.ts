@@ -234,6 +234,7 @@ export function createApp(opts: AppOptions) {
   const councilReady=opts.council?Promise.all([inkReady,councilIndexReady]).then(async([ink,index])=>new CouncilService({store,ink,index:index!,history:new CouncilHistory(index!,1024*1024,store.rootReal),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters,routing:opts.council!.routing})):Promise.resolve(null);
   const normalReady=Promise.all([councilIndexReady,councilReady]).then(([index,council])=>index&&council?new NormalChat({index,questions:new QuestionStore(index.dir),council,adapters:opts.council!.adapters,routing:opts.council!.routing}):undefined);
   const stagedImages=new ImageStore(store.rootReal);
+  const imageRecovery=stagedImages.recoverAbandoned().catch(()=>{console.warn('Private image recovery was unavailable for this notebook.');});
   const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady,normalReady]).then(([ink,harness,normal])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages,normal,{store:stagedImages,delivery:opts.chatImageDelivery});chatRef.resolve(runtime);return runtime;});
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const councilInsertion=insertionsReady.then(insertions=>new CouncilInsertion(store,insertions));
@@ -578,7 +579,7 @@ export function createApp(opts: AppOptions) {
       const data=body?.data;
       if(typeof data!=='string'||!data.length||data.length>maxEncoded||data.length%4!==0||!/^[A-Za-z0-9+/]+={0,2}$/.test(data))
         return json(res,400,{error:'invalid_image',message:'Attach a valid PNG of at most 5 MiB.'});
-      try{return json(res,200,await stagedImages.stage(Buffer.from(data,'base64')));}
+      try{await imageRecovery;return json(res,200,await stagedImages.stage(Buffer.from(data,'base64')));}
       catch{return json(res,409,{error:'invalid_image',message:'This image could not be staged. Check that it is a supported PNG and this notebook has verified private storage.'});}
     }
     if(url.pathname==='/api/chat/image-remove'&&req.method==='PUT'){
