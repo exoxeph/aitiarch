@@ -6,6 +6,7 @@ import {isAbortCause,type AbortCause} from '../shared/chat.ts';
 import type {TurnUsage,TurnStatus} from './providers/turn.ts';
 import {validInvokedUsage,type InvokedUsage} from '../shared/invoked-usage.ts';
 import {validCatalogModelId} from '../shared/models.ts';
+import {IMAGE_SEND_MAX_BYTES,IMAGE_SEND_MAX_COUNT} from '../shared/image-attachments.ts';
 export interface InvokedAudit extends InvokedUsage {status:TurnStatus;durationMs:number}
 export function validInvokedAudit(v:unknown):v is InvokedAudit {
  if(!validInvokedUsage(v))return false;const x=v as InvokedAudit;
@@ -59,6 +60,8 @@ export interface LedgerEvent { id: string; inkId: string; requestId: string; not
   /** context_read only, all optional (older lines have none). `path` is the note whose text was read, which in a conversation can differ from `note` (the chat's note); `chars` is the size of the source as sent;
    *  `selection` is the selection that went with the request. A context_read without `chars` is the attempt written before the read; the one with `chars` is written after it. */
   path?:string;chars?:number;selection?:ContextSelectionAudit;
+  /** chat_started only: number and total size of reviewed, staged attachments. */
+  images?:{count:number;bytes:number};
   /** chat_failed only: why a running request was stopped (a person pressing Stop, the server closing, a stream limit, the budget gate, the page going away). Absent for other failures. */cause?:AbortCause }
 /** One conversation turn's profile and attachments, as counts: the conversation, the profile it ran at, how many files and notes it carried, whether the repo and how many diagrams, whether it started a fresh CLI session, and the cap it had. */
 export interface ConversationTurnAudit {session:string;profile:'notes'|'diagrams'|'investigate';files:number;notes:number;repo:boolean;diagrams:number;fresh:boolean;budgetUsd:number}
@@ -119,6 +122,13 @@ export class LedgerStore {
     // Additive invoked audit branch; the exact-key legacy validators below stay
     // unchanged. Do not disguise an invoked turn as Council or Claude dollars.
     const checked=Array.isArray(d.events)?d.events.filter((e:LedgerEvent)=>{
+      if(e?.event==='chat_started'&&Object.hasOwn(e,'images')){
+       const images=e.images;
+       if(Object.keys(e).sort().join()!=='at,event,id,images,inkId,note,requestId'||![e.id,e.inkId,e.requestId,e.note,e.at].every(v=>typeof v==='string')||
+        !images||typeof images!=='object'||Object.keys(images).sort().join()!=='bytes,count'||
+        !whole(images.count,1,IMAGE_SEND_MAX_COUNT)||!whole(images.bytes,1,IMAGE_SEND_MAX_BYTES))throw new Error('Invalid ledger; original preserved.');
+       return false;
+      }
       if(e?.event==='skill_diagram_turn'){
        if(Object.keys(e).sort().join()!=='at,event,id,inkId,note,requestId,skillTurn'||![e.id,e.inkId,e.requestId,e.note,e.at].every(v=>typeof v==='string')||!validSkillTurn(e.skillTurn))throw new Error('Invalid ledger; original preserved.');
        return false;

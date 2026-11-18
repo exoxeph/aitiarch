@@ -26,6 +26,8 @@ import {defaultMachineSetup} from '../shared/setup.ts';
 import {descriptorFromAdapter,ProviderRegistry} from '../server/providers/registry.ts';
 import {saveMachineSetup} from '../server/setup-store.ts';
 import {SessionIndex} from '../server/harness/session-index.ts';
+import {LedgerStore} from '../server/ledger-store.ts';
+import type {TurnAdapter} from '../server/providers/turn.ts';
 
 const source={note:'The attached file has no matching quote in this note.',selection:'',decisions:[],diagrams:['D1']};
 const id='a'.repeat(32),sha256='b'.repeat(64);
@@ -118,28 +120,35 @@ it('requires fresh image consent at the HTTP boundary even after enabling text b
  expect(await resolveProjectStorage(root,{create:true})).toMatchObject({ok:true});
  await writeFile(path.join(root,'fixture.md'),'# Synthetic image chat\n');
  let model='synthetic-vision';
- const registry=new ProviderRegistry([descriptorFromAdapter({id:'claude',label:'Claude',safetyLabel:'fenced',
-  async *startTurn(){throw new Error('Image turn must use its own tool-less delivery.');}},{detect:async()=>({available:true,reason:null})})]);
+ const unused=async function*(){throw new Error('Image turn must use its own tool-less delivery.');};
+ const adapters:TurnAdapter[]=[{id:'claude',label:'Claude',safetyLabel:'fenced',startTurn:unused},
+  {id:'codex',label:'Codex',safetyLabel:'contained',startTurn:unused},{id:'kiro',label:'Kiro',safetyLabel:'host-gated',startTurn:unused}];
+ const registry=new ProviderRegistry(adapters.map(adapter=>descriptorFromAdapter(adapter,{detect:async()=>({available:true,reason:null})})));
  const setup=defaultMachineSetup();
  setup.providers.claude.model=model;
+ setup.providers.codex.enabled=true;
+ setup.providers.kiro.enabled=true;
  await saveMachineSetup(config,setup);
  const routing=()=>registry.snapshot(config);
  const write=vi.fn<ChatImageDelivery['send']>(async({request,selection,approved})=>{
-  const report=await runFakeImageTransport({provider:'claude',command:process.execPath,prefixArgs:[fixture,'claude'],input:request.question,selection,approved},readFixtureOutput);
-  expect(report).toMatchObject({body:{message:{content:[
+  const provider=approved.manifest.provider;
+  const report=await runFakeImageTransport({provider,command:process.execPath,prefixArgs:[fixture,provider],input:request.question,selection,approved},readFixtureOutput);
+  if(provider==='claude')expect(report).toMatchObject({body:{message:{content:[
    {type:'text',text:'Synthetic question'},
    {type:'image',source:{data:png.toString('base64')}},
   ]}}});
-  return {id:request.id,provider:'claude',model:null,answer:answer({none:'no_context_used'}),rawReply:true,claims:[],usage:null};
+  else expect(report).toMatchObject({body:'Synthetic question',contents:png.toString('base64')});
+  return {id:request.id,provider,model:null,answer:answer({none:'no_context_used'}),rawReply:true,claims:[],usage:null};
  });
  const store=await Store.open(root),watcher=new NoteWatcher(store);
- const app=createApp({store,watcher,distDir:root,council:{adapters:[],routing,index:await SessionIndex.open(path.join(config,'sessions'))},
+ const app=createApp({store,watcher,distDir:root,council:{adapters,routing,index:await SessionIndex.open(path.join(config,'sessions'))},
   provider:{name:'claude',checkAvailability:async()=>({available:true}),invoke:async request=>({id:request.id,provider:'claude',model:null,answer:answer({none:'no_context_used'}),rawReply:true,claims:[],usage:null})},
   chatImageDelivery:{supports:(_provider:string,value:string)=>value==='synthetic-vision',send:write},
  });
  try{
   const base='http://127.0.0.1:'+await app.listen(0),cookie=(await fetch(base+'/api/session')).headers.get('set-cookie')!.split(';')[0];
-  const put=(endpoint:string,body:unknown)=>fetch(base+'/api/chat/'+endpoint,{method:'PUT',headers:{cookie,origin:base,'content-type':'application/json','x-aitiarch':'1'},body:JSON.stringify(body)});
+  const putAt=(endpoint:string,body:unknown)=>fetch(base+'/api/'+endpoint,{method:'PUT',headers:{cookie,origin:base,'content-type':'application/json','x-aitiarch':'1'},body:JSON.stringify(body)});
+  const put=(endpoint:string,body:unknown)=>putAt('chat/'+endpoint,body);
   const review=(id:string,imageIds?:string[])=>put('review',{id,path:'fixture.md',question:'Synthetic question',context:[],imageIds}).then(r=>r.json());
   const noImage=await review('text');
   expect(await (await put('send',{reviewId:noImage.reviewId,confirmed:true,dontAskAgain:true})).text()).toContain('event: complete');
@@ -156,6 +165,11 @@ it('requires fresh image consent at the HTTP boundary even after enabling text b
   expect(await (await put('send',{reviewId:first.reviewId,confirmed:true,confirmImages:true,imageIds})).text()).toContain('"imageInterpretation":true');
   expect(write).toHaveBeenCalledTimes(1);
   expect(write.mock.calls[0][0].approved.images[0].bytes.equals(png)).toBe(true);
+  const ledger=await new LedgerStore(root).read();
+  const imageAudits=ledger.events.filter(event=>event.requestId==='image-first'&&event.event==='chat_started');
+  expect(imageAudits).toEqual([expect.objectContaining({images:{count:1,bytes:png.length}})]);
+  expect(JSON.stringify(ledger)).not.toMatch(new RegExp(`${image.id}|${first.images.images[0].sha256}`));
+  expect(JSON.stringify(ledger)).not.toContain(png.toString('base64'));
   expect((await put('send',{reviewId:first.reviewId,confirmed:true,confirmImages:true,imageIds})).status).toBe(409);
   const retained=await review('image-retained',imageIds);
   expect(retained.requiresConfirmation).toBe(true);
@@ -163,6 +177,21 @@ it('requires fresh image consent at the HTTP boundary even after enabling text b
   setup.providers.claude.model=model;await saveMachineSetup(config,setup);
   expect((await put('send',{reviewId:retained.reviewId,confirmed:true,confirmImages:true,imageIds})).status).toBe(409);
   expect(write).toHaveBeenCalledTimes(1);
+  setup.roles['normal-chat']='kiro';
+  await saveMachineSetup(config,setup);
+  expect(await review('kiro-image',imageIds)).toMatchObject({message:expect.stringContaining('Kiro does not have a verified isolated image transport')});
+
+  setup.roles['normal-chat']='codex';
+  setup.providers.codex.model='synthetic-vision';
+  await saveMachineSetup(config,setup);
+  const conversation=await (await putAt('harness/sessions/new',{mode:'chat',path:'fixture.md',label:'Synthetic images'})).json();
+  const native=await (await put('review',{id:'codex-image',path:'fixture.md',question:'Synthetic question',context:[],session:conversation.id,imageIds})).json();
+  expect(native).toMatchObject({provider:'codex',needsPlan:true,images:{provider:'codex',model:'synthetic-vision'}});
+  expect((await putAt('council/plan',{...native.normalPlan,approve:true})).status).toBe(200);
+  const codexEvents=await (await put('send',{reviewId:native.reviewId,confirmed:true,confirmImages:true,imageIds})).text();
+  expect(codexEvents).toContain('"imageInterpretation":true');
+  expect(codexEvents).toContain(`"estimated":${native.normalPlan.caps.codex.amount}`);
+  expect(codexEvents).toContain('"unreportedCalls":1');
  }finally{watcher.stop();await app.close();}
 });
 

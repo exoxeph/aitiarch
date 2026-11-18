@@ -4,7 +4,7 @@ import path from 'node:path';
 import {sessionModules} from './ide-sessions.ts';
 import {SESSION_NOTICES} from '../../shared/ide-sessions.ts';
 import {CHAT_LIMITS,budgetTokens,isAbortCause,nextTurnEstimate,type AbortCause,type BudgetDetail} from '../../shared/chat.ts';
-import {Store} from '../store.ts';import {InkStore} from '../ink-store.ts';import {LedgerStore,appendLedger} from '../ledger-store.ts';
+import {Store} from '../store.ts';import {InkStore} from '../ink-store.ts';import {LedgerStore,appendLedger,type LedgerEvent} from '../ledger-store.ts';
 import {ChatStore} from './store.ts';import {contextModules,hash,estimateTokens} from './context.ts';import {secretKinds} from './secrets.ts';
 import {prepareRequest,ProviderError,redact,type Provider,type Request,type Result} from '../providers/index.ts';
 import {CHAT_HARD_RULES,chatSessionInstruction,editorManifest,turnMessage} from './request.ts';
@@ -230,14 +230,17 @@ export class ChatRuntime {
   // The next message's cost, the same number the review shows and the gate uses: what is sent now in full, the conversation already in a session at the cache weight, room for the reply.
   const estimate=nextTurnEstimate(sent,!native&&session?this.replay.get(session.id)??0:0).total;
   const privateContext=!!s.privateContext||sources.some(x=>x.ephemeral);
-  const review:ChatReview={reviewId,requestId:input.id,path:input.path,question:request.question,selection:request.selection,sources:sources.map(x=>({id:x.id,label:x.label,text:x.text,characters:x.text.length,estimatedTokens:estimateTokens(x.text)})),historyPairs:history.length,omittedPairs:session?0:s.omittedPairs+sameMode.length-history.length,...(otherModePairs&&!session?{otherModePairs}:{}),instruction:sessionText?.instruction??packet.instruction,history:structuredClone(packet.data.turns),estimatedTokens:estimate,budget:{spent:s.usage.spent,next:estimate,budget:s.usage.tokenBudget},requiresConfirmation:withImages||privateContext||!this.dontAsk,...(imageReview?{images:imageReview}:{})};
+  const budget={spent:s.usage.spent,next:estimate,budget:s.usage.tokenBudget};
+  const review:ChatReview={reviewId,requestId:input.id,path:input.path,question:request.question,selection:request.selection,sources:sources.map(x=>({id:x.id,label:x.label,text:x.text,characters:x.text.length,estimatedTokens:estimateTokens(x.text)})),historyPairs:history.length,omittedPairs:session?0:s.omittedPairs+sameMode.length-history.length,...(otherModePairs&&!session?{otherModePairs}:{}),instruction:sessionText?.instruction??packet.instruction,history:structuredClone(packet.data.turns),estimatedTokens:estimate,budget,requiresConfirmation:withImages||privateContext||!this.dontAsk,...(imageReview?{images:imageReview}:{})};
   review.provider=answerer;if(selected&&!('available' in selected))review.modelSettings=selected.selection??{model:null,effort:null};if(!native&&!session&&this.provider?.demo===true)review.demo=true;
   if(switching)review.continuityNotice='Provider, model or effort changed. A fresh CLI context will be used; only the reviewed app-kept history is carried over.';
   if(carriedHistory!==undefined)review.carriedHistory=carriedHistory;
   if(extra?.review)review.skills=extra.review;
   if(privateContext)review.ephemeral=true;
   if(session)review.session={id:session.id,label:session.label,turns:session.turns};
-  if(native&&session){const plan=await this.normal!.plan(session.id,answerer,request.question,routing);review.normalPlan=plan.input;profile='notes';needsPlan=plan.needsApproval;}
+  if(native&&session){const plan=await this.normal!.plan(session.id,answerer,request.question,routing);review.normalPlan=plan.input;profile='notes';needsPlan=plan.needsApproval;
+   if(imageReview&&plan.cap.unit==='tokens')budget.next=Math.max(budget.next,plan.cap.amount);
+  }
   if(profile){review.profile=profile;if(needsPlan)review.needsPlan=true;}
   if(excluded.length)review.excluded=excluded;
   review.manifest=manifest;if(editor)review.editor=editor;
@@ -245,7 +248,7 @@ export class ChatRuntime {
   if(prepared.withheld.length)review.diagramsWithheld=prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title),why:WITHHELD_WORDS[w.reason]}));
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');
-  this.reviews.set(review.reviewId,{routing,answerer,review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(profile?{profile}:{}),...(privateContext?{privateContext:true as const}:{}),...(session&&(native||withImages)?{session:{id:session.id}}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
+  this.reviews.set(review.reviewId,{routing,answerer,review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:budget.next,...(profile?{profile}:{}),...(privateContext?{privateContext:true as const}:{}),...(session&&(native||withImages)?{session:{id:session.id}}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
   return review;
  }
  async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean;confirmImages?:boolean;imageIds?:readonly string[]},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
@@ -297,7 +300,8 @@ export class ChatRuntime {
    if(!native){const available=await this.provider!.checkAvailability();if(!available.available||available.textStreaming===false)throw new ChatError('disabled');}
    if(this.normal&&frozen.session&&!approvedImages)frozen.normalReset=await this.normal.index.selectNormalAnswerer(frozen.session.id,answerer,frozen.routing?.contextKey('normal-chat'),!frozen.routing||!('selection' in frozen.routing.resolveRole('normal-chat')));
    if(controller.signal.aborted)throw new ChatError('cancelled');
-   await this.audit(review.path,request.id,'chat_started');
+   const imageAudit=approvedImages&&{count:approvedImages.manifest.images.length,bytes:approvedImages.manifest.images.reduce((total,image)=>total+image.byteLength,0)};
+   await this.audit(review.path,request.id,'chat_started',undefined,imageAudit);
    if(input.dontAskAgain===true&&!frozen.privateContext&&!approvedImages)this.dontAsk=true;
    if(frozen.privateContext)s.privateContext=true;
    s.calls.push(Date.now());s.usage.calls++;called=true;emit({type:'start',id:request.id,...(frozen.profile?{profile:frozen.profile}:{})});
@@ -426,7 +430,7 @@ export class ChatRuntime {
    return {id:request.id,provider:'claude',model:r.model??null,answer:dropManifestEcho(r.answer),claims:[],usage:r.usage,rawReply:true};
   }finally{await Promise.allSettled(audits);if(started)await h.index.touch(session.id).catch(()=>{});} // the CLI now knows this id: the next turn must resume it
  }
- private audit(note:string,id:string,event:'chat_started'|'chat_completed'|'chat_failed',cause?:AbortCause){return appendLedger(this.ledger,{id:randomUUID(),inkId:'chat-'+hash(note),requestId:id,note,event,at:new Date().toISOString(),...(cause?{cause}:{})});}
+ private audit(note:string,id:string,event:'chat_started'|'chat_completed'|'chat_failed',cause?:AbortCause,images?:LedgerEvent['images']){return appendLedger(this.ledger,{id:randomUUID(),inkId:'chat-'+hash(note),requestId:id,note,event,at:new Date().toISOString(),...(cause?{cause}:{}),...(images?{images}:{})});}
  private rememberReplay(id:string,tokens:number){this.replay.delete(id);this.replay.set(id,tokens);while(this.replay.size>200)this.replay.delete(this.replay.keys().next().value as string);}
  /**
   * The diagrams of a note as a conversation turn about it would see them, decided here from the note, never taken from the page: `note` must be a real note of this project (a path the store accepts,
