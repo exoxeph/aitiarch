@@ -133,6 +133,8 @@ export type ChatEvent=
   /** For a turn that may open diagrams and was stopped by the fence: why (see shared/diagram-fence.ts), what the CLI said it had cost so far, and the cap it had. */fence?:import('./diagram-fence.ts').FenceCode;costUsd?:number;capUsd?:number;
   /** For a stopped request (cancelled, or budget_reached part-way): what stopped it. Absent when it is not known. */cause?:AbortCause;/** For budget_reached: the numbers. */budget?:BudgetDetail};
 export interface ChatInput {id:string;path:string;question:string;selection?:string;context:ContextChoice[];
+ /** Ordered IDs of staged images, when isolated vision is available for this chat. */
+ imageIds?:string[];
  /** A harness chat session (the app's id) to send this message in. Absent: the classic one-shot chat. */
  session?:string;
  /** What this turn carries beyond the open note (other notes, repo files, the repo). The server derives the profile from it and checks it against what the conversation was approved for. */
@@ -143,6 +145,7 @@ export interface ChatInput {id:string;path:string;question:string;selection?:str
  editor?:EditorInfo}
 
 export interface ChatReview {
+ images?:import('./image-attachments.ts').ReviewedImageManifest;
  modelSettings?:import('./setup.ts').ModelEffort;
  continuityNotice?:string;
  /** Exact bounded/redacted app-kept history included in a fresh Claude context. */

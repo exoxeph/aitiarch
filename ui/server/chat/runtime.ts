@@ -113,6 +113,10 @@ export class ChatRuntime {
   const routing=await this.normal?.selection(),selected=routing?.resolveRole('normal-chat');
   if(selected&&'available' in selected)throw new ChatError('disabled',undefined,{ruleId:selected.code,nodeId:'provider_contracts',detail:selected.reason});
   const answerer=selected&&!('available' in selected)?selected.id:activePipelineConfig().normalAnswerer,native=answerer!=='claude'&&!!this.normal;
+  if(input.imageIds!==undefined){
+   if(!Array.isArray(input.imageIds))throw new ChatError('invalid_chat');
+   if(input.imageIds.length)throw new ChatError('disabled',undefined,{ruleId:'provider-unavailable',nodeId:'provider_contracts',detail:'Image input is unavailable until isolated delivery is verified.'});
+  }
   if(answerer!=='claude'){
    const att=cleanAttachments(input.attachments);
    if(input.context.some(c=>!['this-note','other-notes'].includes(c?.moduleId))||!att.ok||att.value.files.length||att.value.repo)throw new ChatError('invalid_chat',undefined,{ruleId:'normal-notes-only',nodeId:'provider_contracts'});
@@ -222,8 +226,9 @@ export class ChatRuntime {
   this.reviews.set(review.reviewId,{routing,answerer,review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:estimate,...(profile?{profile}:{}),...(privateContext?{privateContext:true as const}:{}),...(session&&native?{session:{id:session.id}}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
   return review;
  }
- async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
+ async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean;confirmImages?:boolean;imageIds?:readonly string[]},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
   const frozen=this.reviews.get(input.reviewId);if(!frozen)throw new ChatError('review_required');
+  if(input.confirmImages===true||input.imageIds?.length)throw new ChatError('review_required');
   const current=await this.normal?.selection();
   if(frozen.routing&&current?.currentContextKey&&frozen.routing.contextKey('normal-chat')!==await current.currentContextKey('normal-chat'))throw new ChatError('stale_review',undefined,{ruleId:'stale_review',nodeId:'permission_gate'});
   if(frozen.routing? !current||frozen.routing.contextKey('normal-chat')!==current.contextKey('normal-chat'):frozen.answerer!==activePipelineConfig().normalAnswerer)throw new ChatError('stale_review',undefined,{ruleId:'stale_review',nodeId:'permission_gate'});

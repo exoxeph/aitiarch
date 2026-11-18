@@ -12,6 +12,7 @@ import {ChatStore} from '../server/chat/store.ts';
 import {Store} from '../server/store.ts';
 import {InkStore} from '../server/ink-store.ts';
 import type {ChatEvent} from '../shared/chat.ts';
+import {reviewImageManifest,confirmImageManifest} from '../server/chat/image-review.ts';
 
 const source={note:'The attached file has no matching quote in this note.',selection:'',decisions:[],diagrams:['D1']};
 const id='a'.repeat(32),sha256='b'.repeat(64);
@@ -75,6 +76,8 @@ it('rejects and never stores a fake provider reply that invents image consent',a
  },[]);
  try{
   const review=await runtime.review({id:'request-1',path:note,question:'Summarize this.',context:[]});
+  await expect(runtime.review({id:'request-image',path:note,question:'Summarize this.',context:[],imageIds:[id]})).rejects.toMatchObject({code:'disabled'});
+  await expect(runtime.send({reviewId:review.reviewId,confirmed:true,confirmImages:true,imageIds:[id]},()=>{})).rejects.toMatchObject({code:'review_required'});
   const events:ChatEvent[]=[];
   await runtime.send({reviewId:review.reviewId,confirmed:true},event=>events.push(event));
   expect(events.at(-1)).toMatchObject({type:'error',code:'validation',detail:expect.stringMatching(/confirmed send/)});
@@ -82,4 +85,23 @@ it('rejects and never stores a fake provider reply that invents image consent',a
   expect((await chats.read(note)).messages).toEqual([]);
   expect(runtime.memoryMessages(note)).toEqual([]);
  }finally{await runtime.close();}
+});
+
+it('binds review thumbnails and every confirmation to current staged bytes and routing',async()=>{
+ const bytes=Buffer.from('synthetic processed image');
+ const first={id,mime:'image/png' as const,width:1,height:2,byteLength:bytes.length,sha256:hash(bytes.toString()),bytes};
+ const reader={readManifest:vi.fn(async()=>[first])};
+ const reviewed=await reviewImageManifest(reader,[id],send);
+ const binding={sendId:send.sendId,provider:send.provider,model:send.model};
+ expect(reviewed.images).toEqual([{id,mime:'image/png',width:1,height:2,byteLength:bytes.length,sha256:first.sha256}]);
+ expect(JSON.stringify(reviewed)).not.toContain(bytes.toString());
+ for(const changed of [{sendId:'other'}, {provider:'codex' as const},{model:'opus'}]){
+  await expect(confirmImageManifest(reader,reviewed,{...binding,...changed},{confirmImages:true,imageIds:[id]})).rejects.toThrow(/review again/i);
+ }
+ await expect(confirmImageManifest(reader,reviewed,binding,{imageIds:[id]})).rejects.toThrow(/confirm/i);
+ await expect(confirmImageManifest(reader,reviewed,binding,{confirmImages:true,imageIds:['other']})).rejects.toThrow(/review again/i);
+ expect((await confirmImageManifest(reader,reviewed,binding,{confirmImages:true,imageIds:[id]})).manifest).toEqual(reviewed);
+ await expect(confirmImageManifest(reader,reviewed,binding,{imageIds:[id]})).rejects.toThrow(/confirm/i);
+ reader.readManifest.mockResolvedValueOnce([{...first,sha256:'c'.repeat(64)}]);
+ await expect(confirmImageManifest(reader,reviewed,binding,{confirmImages:true,imageIds:[id]})).rejects.toThrow(/review again/i);
 });

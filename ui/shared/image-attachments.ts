@@ -19,3 +19,7 @@ export interface ConfirmedImageSend {
  model:string|null;
  images:readonly {id:string;sha256:string}[];
 }
+
+export interface ReviewedImageManifest extends ConfirmedImageSend {
+ images:readonly (StagedImage&{sha256:string})[];
+}
