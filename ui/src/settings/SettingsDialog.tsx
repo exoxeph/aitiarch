@@ -6,8 +6,10 @@ import {unreportedText,usd} from '../chat/investigate-usage.ts';
 import {SkillsPane} from '../skills/SkillsPane.tsx';
 import {cliNotice,tokenMeter,type Meter} from './settings-model.ts';
 import {PipelinePane} from './PipelinePane.tsx';
+import {SetupPreferences} from '../setup/SetupPreferences.tsx';
+import type {SetupView} from '../../shared/setup.ts';
 
-type Tab='usage'|'skills'|'pipeline';
+type Tab='usage'|'skills'|'pipeline'|'preferences';
 const TABS:{id:Tab;label:string}[]=[{id:'usage',label:'Usage'},{id:'skills',label:'Skills'},{id:'pipeline',label:'Pipeline'}];
 
 function MeterBar({meter,label}:{meter:Meter;label:string}){
@@ -31,8 +33,12 @@ function UsagePane(){
  </div>;
 }
 
-export function SettingsDialog({onClose,onOpenStudio,onOpenSetup,setupError}:{onClose:()=>void;onOpenStudio?:()=>void;onOpenSetup?:()=>void;setupError?:string|null}){
+export function SettingsDialog({onClose,onOpenStudio,onOpenSetup,setupError,preferences,onPreferences}:{
+ onClose:()=>void;onOpenStudio?:()=>void;onOpenSetup?:()=>void;setupError?:string|null;
+ preferences?:SetupView|null;onPreferences?:(view:SetupView)=>void;
+}){
  const [tab,setTab]=useState<Tab>('usage');
+ const tabs=preferences&&onPreferences?[...TABS,{id:'preferences' as const,label:'Models and text size'}]:TABS;
  const dialog=useRef<HTMLElement>(null);
  // Focus lands on the tabs; Tab stays inside the dialog; Escape closes it and nothing underneath also hears it.
  useEffect(()=>{
@@ -48,20 +54,21 @@ export function SettingsDialog({onClose,onOpenStudio,onOpenSetup,setupError}:{on
  },[onClose]);
  const arrows=(e:ReactKeyboardEvent)=>{
   const keys=['ArrowDown','ArrowRight','ArrowUp','ArrowLeft','Home','End'];if(!keys.includes(e.key))return;e.preventDefault();
-  const at=TABS.findIndex(t=>t.id===tab),next=e.key==='Home'?0:e.key==='End'?TABS.length-1:(at+(e.key==='ArrowDown'||e.key==='ArrowRight'?1:-1)+TABS.length)%TABS.length;
-  setTab(TABS[next].id);requestAnimationFrame(()=>dialog.current?.querySelector<HTMLElement>(`#settings-tab-${TABS[next].id}`)?.focus());
+  const at=tabs.findIndex(t=>t.id===tab),next=e.key==='Home'?0:e.key==='End'?tabs.length-1:(at+(e.key==='ArrowDown'||e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length;
+  setTab(tabs[next].id);requestAnimationFrame(()=>dialog.current?.querySelector<HTMLElement>(`#settings-tab-${tabs[next].id}`)?.focus());
  };
  return <div className="settings-scrim" onPointerDown={e=>{if(e.target===e.currentTarget)onClose();}}>
   <section ref={dialog} className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="ai-settings-title">
    <header className="settings-head"><h2 id="ai-settings-title">AI settings</h2><button type="button" className="ghost settings-close" aria-label="Close AI settings" onClick={onClose}>×</button></header>
    <div className="settings-body">
     <div className="settings-tabs" role="tablist" aria-label="AI settings sections" aria-orientation="vertical" onKeyDown={arrows}>
-     {TABS.map(t=><button key={t.id} id={`settings-tab-${t.id}`} type="button" role="tab" aria-selected={tab===t.id} aria-controls={`settings-pane-${t.id}`} tabIndex={tab===t.id?0:-1} onClick={()=>setTab(t.id)}>{t.label}</button>)}
+     {tabs.map(t=><button key={t.id} id={`settings-tab-${t.id}`} type="button" role="tab" aria-selected={tab===t.id} aria-controls={`settings-pane-${t.id}`} tabIndex={tab===t.id?0:-1} onClick={()=>setTab(t.id)}>{t.label}</button>)}
     </div>
     <div className="settings-pane" role="tabpanel" id={`settings-pane-${tab}`} aria-labelledby={`settings-tab-${tab}`}>
      {onOpenSetup && <button type="button" onClick={onOpenSetup}>Open setup</button>}
      {setupError && <p className="settings-warn" role="status">{setupError}</p>}
-     {tab==='skills'?<SkillsPane/>:tab==='pipeline'?<PipelinePane onOpenStudio={onOpenStudio}/>:<UsagePane/>}
+     {tab==='preferences'&&preferences&&onPreferences?<SetupPreferences view={preferences} onChange={onPreferences}/>:
+      tab==='skills'?<SkillsPane/>:tab==='pipeline'?<PipelinePane onOpenStudio={onOpenStudio}/>:<UsagePane/>}
     </div>
    </div>
   </section>

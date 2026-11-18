@@ -1,7 +1,7 @@
 import {notebookWords} from './editor/smart-dictionary.ts';
 import type {BringPreview,RepairStatus} from '../server/insertion-store.ts';
 import type {DiagramLayout} from '../shared/diagram-svg.ts';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 // The Constellation and d3-force load only when the view is first opened: none of it is in the first page load.
 const Constellation = lazy(() => import("./constellation/Constellation.tsx"));
 // The Pipeline Studio loads only when first opened too.
@@ -60,11 +60,16 @@ export default function App() {
   const menu=useEdgeMenu(),burgerRef=useRef<HTMLButtonElement>(null),noteMenuRef=useRef<HTMLButtonElement>(null),chatPillRef=useRef<HTMLButtonElement>(null);
   const [noteMenuOpen,setNoteMenuOpen]=useState(false),[chatOpen,setChatOpen]=useState(false),[settingsOpen,setSettingsOpen]=useState(false);
   const [setup,setSetup]=useState<SetupView|null>(null);
+  const [setupPreferences,setSetupPreferences]=useState<SetupView|null>(null);
   const [setupError,setSetupError]=useState<string|null>(null);
   useEffect(()=>{
     if(boot.state!=='ready')return;
     let active=true;
-    void fetchSetup().then(view=>{if(active&&view.ready&&!view.seen)setSetup(view);}).catch(()=>{});
+    void fetchSetup().then(view=>{
+      if(!active||!view.ready)return;
+      setSetupPreferences(view);
+      if(!view.seen)setSetup(view);
+    }).catch(()=>{});
     return ()=>{active=false;};
   },[boot]);
   async function reopenSetup(){
@@ -611,7 +616,8 @@ export default function App() {
         <button ref={chatPillRef} type="button" className="chat-pill" aria-expanded={chatOpen} aria-controls="chat-panel" onClick={() => setChatOpen(v => !v)}><span className="chat-pill-dot" aria-hidden="true" />Chat</button>
       </header>
       <NotesMenu menu={menu} burger={burgerRef} rootName={boot.rootName} rootPath={boot.rootPath} tree={tree} active={active} onOpen={(p) => void openNote(p)} onSearch={() => setOverlay("palette")} onDecisions={() => {setDecisionsFocus(true);setMapOpen(true);}} onSettings={() => setSettingsOpen(true)} usage={<UsagePanel />} settings={settingsPanel} onTreeChanged={() => refreshTree()} onMoved={m => void afterMove(m)} blocked={moveBlocked} />
-      <main className="editor-col" data-note-path={active ?? undefined}>
+      <main className="editor-col" data-note-path={active ?? undefined}
+        style={setupPreferences?.fontSize!=null?{'--text-body':`${setupPreferences.fontSize}px`} as CSSProperties:undefined}>
         {cacheNotice && <div className="notice" role="alert">
           To keep thoughts attached between visits, Aitiarch can save local text copies. Keep them out of Git by adding <code>{cacheNotice.line}</code> to this folder’s <code>.gitignore</code>.
           <button disabled={cacheBusy} onClick={async () => {
@@ -652,8 +658,8 @@ export default function App() {
           onUseAsContext={ps => { setMapNotes(ps); setChatOpen(true); }} />
       </Suspense>}
       {chatOpen && <ChatPanel extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} editor={chatEditor} onShowOnPipeline={(nodeId) => setStudio({ highlight: nodeId })} onAdd={addChatMessage} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onCiteClaim={(heading) => { const h = active ? panes.current.get(active) : undefined; return !!h && !!active && citeAtCursor(h.view, active, { path: active, title: titleOf(h.view.state.doc.toString(), active), ...(heading ? { heading } : {}) }); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
-      {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); burgerRef.current?.focus(); }} onOpenStudio={() => { setSettingsOpen(false); setStudio({}); }} onOpenSetup={()=>void reopenSetup()} setupError={setupError} />}
-      {setup && <Setup data={setup} onClose={message=>{setSetup(null);if(message)setNotice(message);burgerRef.current?.focus();}}/>}
+      {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); burgerRef.current?.focus(); }} onOpenStudio={() => { setSettingsOpen(false); setStudio({}); }} onOpenSetup={()=>void reopenSetup()} setupError={setupError} preferences={setupPreferences} onPreferences={setSetupPreferences} />}
+      {setup && <Setup data={setup} onPreferences={setSetupPreferences} onClose={message=>{setSetup(null);if(message)setNotice(message);burgerRef.current?.focus();}}/>}
       {studio && <Suspense fallback={<section className="studio" role="status" aria-label="Pipeline Studio"><p className="cn-empty">Drawing the pipeline…</p></section>}>
         <PipelineStudio highlight={studio.highlight} onClose={() => { setStudio(null); studioButtonRef.current?.focus(); }} />
       </Suspense>}

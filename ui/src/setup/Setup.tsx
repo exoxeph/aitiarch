@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {applyPrivateSetup, fetchSetup, saveSetup} from '../api.ts';
 import type {SetupProvider, SetupView} from '../../shared/setup.ts';
+import {SetupPreferences} from './SetupPreferences.tsx';
 
 const roleLabels = {
  'normal-chat':'Normal chat', invoked:'Think and Ask', 'thread-reply':'Thread replies',
@@ -8,7 +9,7 @@ const roleLabels = {
 };
 const names = {claude:'Claude',codex:'Codex',kiro:'Kiro'};
 
-export function Setup({data, onClose}:{data:SetupView; onClose:(notice?:string)=>void}) {
+export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(notice?:string)=>void;onPreferences?:(view:SetupView)=>void}) {
  const [view,setView] = useState(data);
  const [message,setMessage] = useState('');
  const [busy,setBusy] = useState(false);
@@ -36,7 +37,7 @@ export function Setup({data, onClose}:{data:SetupView; onClose:(notice?:string)=
    onKeyDown={event=>{
     if(event.key==='Escape' && !busy){event.stopPropagation();onClose();}
     if(event.key!=='Tab') return;
-    const controls=[...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled)')];
+    const controls=[...event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled), input:not(:disabled)')];
     const first=controls[0],last=controls.at(-1);
     if(event.shiftKey && (document.activeElement===first||document.activeElement===dialog.current) && last){
      event.preventDefault();last.focus();
@@ -64,7 +65,11 @@ export function Setup({data, onClose}:{data:SetupView; onClose:(notice?:string)=
       <label>{roleLabels[role.role]}{' '}
        <select value={role.provider??''} disabled={busy||!role.capableProviders.length||!!role.routingNote} onChange={event=>{
         const provider=event.currentTarget.value as SetupProvider;
-        void perform(async()=>{setView(await saveSetup({role:role.role,provider}));});
+        void perform(async()=>{
+         const next=await saveSetup({role:role.role,provider});
+         setView(next);
+         onPreferences?.(next);
+        });
        }}>
         {role.provider===null && <option value="" disabled>Unset</option>}
         {role.provider && !role.capableProviders.includes(role.provider) &&
@@ -76,6 +81,7 @@ export function Setup({data, onClose}:{data:SetupView; onClose:(notice?:string)=
       {role.routingNote && <p className="settings-lead">{role.routingNote}</p>}
      </div>)}
     </div>
+    <SetupPreferences view={view} disabled={busy} onChange={next=>{setView(next);onPreferences?.(next);}}/>
     <div className="settings-section">
      <h3>Notebook privacy</h3>
      <p>Private (default)</p>

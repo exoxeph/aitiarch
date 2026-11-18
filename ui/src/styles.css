@@ -1142,6 +1142,8 @@ button.claim-chip:focus-visible, .claim-action:focus-visible { outline: 2px soli
 .settings-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--rule); }
 .settings-head h2 { margin: 0; font: 400 20px/1.3 var(--font-body); }
 .setup-path { overflow-wrap: anywhere; }
+.setup-model { min-inline-size: 0; margin: var(--space-3) 0; padding: var(--space-3); border: 1px solid var(--rule); }
+.setup-model label { display: block; margin-bottom: var(--space-2); }
 .settings-dialog button.setup-primary:not(.ghost) { border-color: var(--accent); background: var(--accent-soft); }
 .settings-close { font-size: 22px; line-height: 1; }
 .settings-body { display: grid; flex: 1; grid-template-columns: 200px minmax(0, 1fr); min-height: 0; }

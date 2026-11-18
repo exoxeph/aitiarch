@@ -12,11 +12,25 @@ export interface MachineSetup {
  fontSize:number;tour:{completed:boolean};
  setupSeen?:boolean;
  defaultRoles?:SetupRole[];
+ fontSizeConfigured?:boolean;
 }
+export const MODEL_ROLES=['normal-chat','council','invoked','thread-reply'] as const;
+export type ModelRole=typeof MODEL_ROLES[number];
+export interface RoleModelPreference {
+ role:ModelRole;
+ provider:SetupProvider;
+ effortSupported:boolean;
+ selection:ModelEffort|null;
+ effective:ModelEffort;
+}
+export type SetupUpdate = {seen:true}|{role:SetupRole;provider:SetupProvider}|
+ {role:ModelRole;provider:SetupProvider;selection:ModelEffort|null}|{fontSize:number};
 export type SetupSource = 'explicit flag' | 'saved choice' | 'default';
 export interface SetupView {
  ready:boolean;
  seen:boolean;
+ fontSize:number|null;
+ models:RoleModelPreference[];
  providers:{id:SetupProvider;label:string;path:string|null;version:string|null;notices:string[];reason:string;compatible:boolean;source:SetupSource}[];
  roles:{role:SetupRole;provider:SetupProvider|null;capableProviders:SetupProvider[];reason:string|null;source:SetupSource;routingNote?:string}[];
  privacy:{mode:'private';sharedReady:false;notice:string};
@@ -39,7 +53,8 @@ function modelEffort(v:unknown):v is ModelEffort {
 }
 /** Exact v1 keys at every level. Catalog/role compatibility is slice 5/6, not a safety grant. */
 export function validMachineSetup(v:unknown):v is MachineSetup {
- if(!object(v)||!keys(v,['version','providers','roles','fontSize','tour',...['setupSeen','defaultRoles'].filter(k=>Object.hasOwn(v,k))])||v.version!==1||
+ if(!object(v)||!keys(v,['version','providers','roles','fontSize','tour',...['setupSeen','defaultRoles','fontSizeConfigured'].filter(k=>Object.hasOwn(v,k))])||v.version!==1||
+  (Object.hasOwn(v,'fontSizeConfigured')&&typeof v.fontSizeConfigured!=='boolean')||
   (Object.hasOwn(v,'setupSeen')&&typeof v.setupSeen!=='boolean')||
   (Object.hasOwn(v,'defaultRoles')&&(!Array.isArray(v.defaultRoles)||!v.defaultRoles.every(role=>SETUP_ROLES.includes(role))))||
   !Number.isInteger(v.fontSize)||Number(v.fontSize)<14||Number(v.fontSize)>24||

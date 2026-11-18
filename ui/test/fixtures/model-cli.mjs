@@ -8,7 +8,11 @@ if(provider==='claude'){
  await import('./provider-cli.mjs');
 }else{
  if(args.includes('--version')){console.log('codex-cli 0.167.0');process.exit(0);}
- if(args.includes('--help')){console.log('--json --ephemeral --ignore-user-config --ignore-rules --disable\n-m, --model <MODEL> Model the agent should use');process.exit(0);}
+ if(args.includes('--help')){
+  console.log(['--json','--ephemeral','--ignore-user-config','--ignore-rules','--disable','--sandbox',
+   '--skip-git-repo-check','--color','--config','-m, --model <MODEL> Model the agent should use'].join('\n'));
+  process.exit(0);
+ }
  if(fs.readdirSync(process.cwd()).length)process.exit(91);
  fs.writeFileSync(record,JSON.stringify(args));
  process.stdin.resume();process.stdin.on('end',()=>{

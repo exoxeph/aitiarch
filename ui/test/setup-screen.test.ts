@@ -5,7 +5,7 @@ import {Setup} from '../src/setup/Setup.tsx';
 import type {SetupView} from '../shared/setup.ts';
 
 const empty: SetupView = {
- ready:true, seen:false, providers:[], roles:[],
+ ready:true, seen:false, providers:[], roles:[], fontSize:null, models:[],
  privacy:{mode:'private', sharedReady:false, notice:'filesystem-private'},
 };
 const render = (data: SetupView) => renderToStaticMarkup(createElement(Setup, {data, onClose:() => {}}));

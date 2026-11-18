@@ -23,6 +23,43 @@ beforeEach(async () => {
 const service = (providers = [codex]) => createSetupHttp({dir, project, providers, ready:async () => true});
 
 describe('first-run setup endpoints', () => {
+ it('round-trips an explicit Default override separately from inheritance and persists font size', async () => {
+  const defaults=defaultMachineSetup();
+  defaults.providers.codex.model='custom-1';
+  await saveMachineSetup(dir,defaults);
+  const api=service();
+  await api.put({role:'council',provider:'codex',selection:{model:null,effort:null}});
+  expect((await loadMachineSetup(dir)).providers.codex.roles.council).toEqual({model:null,effort:null});
+  await api.put({role:'council',provider:'codex',selection:null});
+  expect((await loadMachineSetup(dir)).providers.codex.roles.council).toBeUndefined();
+  await api.put({fontSize:24});
+  expect((await service().get()).fontSize).toBe(24);
+ });
+ it('rejects invalid launch settings and font size without a write', async () => {
+  await saveMachineSetup(dir,defaultMachineSetup());
+  const before=await readFile(path.join(dir,SETUP_FILE));
+  for(const data of [{fontSize:13},{fontSize:24.5},{fontSize:'16'},
+   {role:'council',provider:'codex',selection:{model:'-bad',effort:null}},
+   {role:'council',provider:'codex',selection:{model:null,effort:'low'}},
+   {role:'council',provider:'claude',selection:{model:null,effort:'low'}}]){
+   await expect(service().put(data)).rejects.toThrow(/font|model|effort|provider/i);
+  }
+  const claude={...codex,id:'claude' as const,effort:false};
+  await expect(service([claude]).put({role:'council',provider:'claude',selection:{model:'fable',effort:'max'}})).rejects.toThrow(/help/i);
+  expect(await readFile(path.join(dir,SETUP_FILE))).toEqual(before);
+ });
+ it('accepts the Claude aliases and strict custom IDs only with pinned effort support', async () => {
+  const api=service([{...codex,id:'claude',effort:true,effortCode:'help_flag_present'}]);
+  for(const model of ['opus','sonnet','haiku','fable','custom_2026.1']){
+   await api.put({role:'invoked',provider:'claude',selection:{model,effort:'xhigh'}});
+   expect((await api.get()).models.find(item=>item.role==='invoked')).toMatchObject({
+    selection:{model,effort:'xhigh'},effortSupported:true,
+   });
+  }
+  await expect(api.put({role:'invoked',provider:'claude',selection:{model:'fable',effort:'turbo'}})).rejects.toThrow(/effort/i);
+  const kiro=service([{...codex,id:'kiro'}]);
+  await expect(kiro.put({role:'council',provider:'kiro',selection:{model:'custom',effort:null}})).rejects.toThrow(/Kiro/);
+ });
  it('shows detected capability, saved selection and unavailable reasons without writing files', async () => {
   const settings = defaultMachineSetup();
   settings.providers.codex.enabled = true;

@@ -3,6 +3,7 @@ import {mkdtemp,readFile,mkdir,writeFile} from 'node:fs/promises';
 import os from 'node:os';import path from 'node:path';
 import {defaultMachineSetup} from '../shared/setup.ts';
 import {saveMachineSetup} from '../server/setup-store.ts';
+import {createSetupHttp} from '../server/setup-http.ts';
 import {ProviderRegistry,descriptorFromAdapter} from '../server/providers/registry.ts';
 import {createCliAdapter} from '../server/providers/tool-less.ts';
 import {runTurn,type TurnAdapter,type TurnInput} from '../server/providers/turn.ts';
@@ -19,6 +20,10 @@ let dir:string;
 beforeEach(async()=>{dir=await mkdtemp(path.join(os.tmpdir(),'aitiarch-model-routing-'));vi.stubEnv('AITIARCH_CONFIG_DIR',dir);});
 afterEach(()=>vi.unstubAllEnvs());
 const input:TurnInput={question:'Synthetic question',notes:[],deadlineMs:3000,maxOutputBytes:2000,cap:{unit:'tokens',amount:1000}};
+const preferences=()=>createSetupHttp({dir,project:dir,ready:async()=>true,providers:[{
+ id:'claude',path:'/synthetic/claude',version:'2.1.205',isolation:'metadata-compatible',
+ code:'metadata_compatible',reason:'Synthetic metadata',roles:[],effort:true,effortCode:'help_flag_present',
+}]});
 it('a model switch freezes and previews carried history before the fresh CLI turn',async()=>{
  const root=path.join(dir,'notes');await mkdir(root);await writeFile(path.join(root,'plan.md'),'Synthetic note.');
  const store=await Store.open(root),ink=await InkStore.open(root),index=await SessionIndex.open(path.join(dir,'index')),questions=new QuestionStore(index.dir);
@@ -26,7 +31,7 @@ it('a model switch freezes and previews carried history before the fresh CLI tur
  const registry=new ProviderRegistry([descriptorFromAdapter(adapter,{detect:async()=>({available:true,reason:null})})]),routing=()=>registry.snapshot(dir);
  const session=await index.create({mode:'chat',label:'Synthetic',note:'plan.md'});
  await index.selectNormalAnswerer(session.id,'claude',(await routing()).contextKey('normal-chat'));await index.touch(session.id);
- const settings=defaultMachineSetup();settings.providers.claude.model='sonnet';await saveMachineSetup(dir,settings);
+ await preferences().put({role:'normal-chat',provider:'claude',selection:{model:'sonnet',effort:null}});
  const council=new CouncilService({store,ink,index,ledger:new LedgerStore(root),adapters:[adapter],routing}),normal=new NormalChat({index,questions,council,adapters:[adapter],routing});
  const record=path.join(dir,'turns.jsonl'),runner=new ClaudeSessionRunner({command:process.execPath,prefixArgs:[path.resolve('test/fixtures/harness-cli.mjs'),'ok',record],dir:path.join(dir,'runner')});
  let pairs=[{question:'Original synthetic question.',answer:'Original synthetic final answer.'}];
@@ -80,7 +85,7 @@ it('invoked consent exposes the captured settings and rejects a model change as 
  const legacy={name:'claude' as const,checkAvailability:async()=>({available:true as const}),invoke:async()=>{throw Error('not called');}};
  const reviews=new ProviderReviews('invoked',()=>registry.snapshot(dir),legacy),selected=(await reviews.selection())!;
  const issued=reviews.issue(selected,'synthetic',{});expect(issued.modelSettings).toEqual({model:'sonnet',effort:null});
- setup.providers.claude.model='haiku';await saveMachineSetup(dir,setup);
+ await preferences().put({role:'invoked',provider:'claude',selection:{model:'haiku',effort:null}});
  await expect(reviews.consume(issued.id,'synthetic',{})).rejects.toMatchObject({code:'stale_review'});
 });
 it('model or effort changes reset a persisted Claude context, and Default reuses the current one',async()=>{
