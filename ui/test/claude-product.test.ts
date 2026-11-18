@@ -64,8 +64,8 @@ it('accepts the exact quote key and rejects the field-names-only regression shap
     expect(Object.hasOwn(claim,'quote')).toBe(false);
   }
 });
-it('disables a changed CLI version even when its help claims the same flags', async () => {
-  expect(await createProvider(config('verified-version-change')).checkAvailability()).toMatchObject({ available: false, code: 'unsupported_cli' });
+it('accepts a newer CLI only with the same verified capability declarations and an untested notice', async () => {
+  expect(await createProvider(config('verified-version-change')).checkAvailability()).toMatchObject({available:true,warnings:expect.arrayContaining(['untested version: tested 2.1.205, found 2.1.206'])});
 });
 it('recognizes the actual 2.1.205 hook lifecycle wording with wrapped lines', async () => {
   expect(await createProvider(config('verified-real-hook-wording')).checkAvailability()).toMatchObject({ available: true });

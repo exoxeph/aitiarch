@@ -22,6 +22,13 @@ it.each([['codex','tokens'],['kiro','credits']] as const)('preserves %s after-tu
 it('Claude USD remains a hard cap even on final usage',async()=>{expect((await runTurn({...fake([{type:'complete',answer:'no'},{type:'usage',usage:{unit:'usd',amount:3,afterTurn:true}}]),id:'claude'},{...input,cap:{unit:'usd',amount:2}})).code).toBe('budget');});
 it('Codex pinned recipe includes the spike hardening',()=>{expect(CODEX_FLAGS).toContain('--ignore-rules');expect(CODEX_FLAGS).toContain('code_mode_host');expect(CODEX_FLAGS).toContain('--ephemeral');});
 it('Codex fake CLI completes and removes an empty scratch',async()=>{const r=await runTurn(cli('codex','codex'),input);expect(r.status).toBe('ok');expect(r.answer).toBe('June.');await expect(access(scratches.at(-1)!)).rejects.toThrow();});
+it.each(['codex','kiro'] as const)('newer %s passes unchanged isolation with an info notice',async id=>{
+ const adapter=cli(id,id+'-newer');expect((await runTurn(adapter,input)).status).toBe('ok');
+ expect(adapter.status?.()).toMatchObject({version:id==='codex'?'0.168.0':'3.4.0',message:expect.stringContaining('untested version: tested')});
+});
+it('Kiro still rejects an incompatible ACP protocol',async()=>{
+ expect((await runTurn(cli('kiro','kiro-wrong-protocol'),input)).status).toBe('unavailable');
+});
 it.each(['command_execution','mcp_tool_call','file_change','apply_patch'])('Codex kills forbidden %s item',async kind=>{const r=await runTurn(cli('codex',kind),input);expect(r.code).toBe('tool_attempt');expect(r.status).toBe('error');});
 it('Kiro verified empty inventory allows answer and counts the final credit snapshot once',async()=>{const r=await runTurn(cli('kiro','kiro'),{...input,cap:{unit:'credits',amount:1}});expect(r.status).toBe('ok');expect(r.usage).toEqual([{unit:'credits',amount:0.02,afterTurn:true}]);});
 it('Kiro rejects EVERY permission request and fails the turn',async()=>{const r=await runTurn(cli('kiro','permission'),input);expect(r.code).toBe('tool_attempt');expect(r.status).toBe('error');});

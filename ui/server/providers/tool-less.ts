@@ -5,7 +5,7 @@ import {chatSessionInstruction,turnMessage} from '../chat/request.ts';
 import {TurnFailure,type TurnAdapter,type TurnEvent,type TurnInput} from './turn.ts';
 import {protocolRefusal} from './claude-turn.ts';
 import {redact} from './index.ts';
-import {CODEX_VERSION,codexVersionNotice} from './codex-command.ts';
+import {assessToollessMetadata,cliVersion,versionCheck} from './cli-compatibility.ts';
 import {modelArguments} from '../../shared/model-settings.ts';
 import type {ModelEffort} from '../../shared/setup.ts';
 export {CODEX_FLAGS} from './tool-less-arguments.ts';
@@ -76,12 +76,12 @@ async function verifyCapabilities(config:CliTurnConfig,cwd:string,env:NodeJS.Pro
  const s=await stat(config.command),key=JSON.stringify([config.id,config.command,s.size,s.mtimeMs,config.prefixArgs,CODEX_FLAGS,config.selection?.model!=null]);
  if(verified.has(key)){record(verified.get(key)!);return;}
  const version=await capabilityOutput(config,cwd,env,signal,'version');
- const found=/^codex-cli ([0-9A-Za-z.+-]{1,50})\s*$/.exec(version.trim())?.[1]??'unknown';if(config.id==='codex'){record(found);if(found!==CODEX_VERSION)throw new TurnFailure('unsupported_cli','unavailable',codexVersionNotice(found));}
- if(!(config.id==='kiro'?/^kiro-cli 3\.3\.0\s*$/:/^codex-cli \d+\.\d+\.\d+\s*$/).test(version.trim()))throw new TurnFailure('unsupported_cli','unavailable',`${config.id} --version did not match the supported format; observed ${/^[a-zA-Z0-9 ._-]{1,80}$/.test(version.trim())?version.trim():'unknown'}.`);
+ const found=cliVersion(config.id,version),check=versionCheck(config.id,found);if(found)record(found);
+ if(!check.available)throw new TurnFailure('unsupported_cli','unavailable',check.reason!);
  const help=await capabilityOutput(config,cwd,env,signal,'help');
- const missing=(config.id==='kiro'?['--agent-engine','--agent']:['--json','--ephemeral','--ignore-user-config','--ignore-rules','--disable']).filter(f=>!help.includes(f));if(missing.length)throw new TurnFailure('unsupported_cli','unavailable',`${config.id} help is missing required flags: ${missing.join(', ')}.`);
+ const assessed=assessToollessMetadata(config.id,version,help);if(!assessed.available)throw new TurnFailure('unsupported_cli','unavailable',assessed.reason!);
  if(config.id==='codex'&&config.selection?.model!=null&&!help.split(/\r?\n/).some(line=>/^\s*(?:-m,\s*)?--model(?=[\s=,]|$)/.test(line)))throw new TurnFailure('unsupported_cli','unavailable','Codex help does not declare --model. Use Default.');
- verified.set(key,config.id==='codex'?found:version.trim()); // Success only, in memory; binary changes invalidate. Never cache runtime isolation.
+ verified.set(key,found!); // Success only, in memory; binary changes invalidate. Never cache runtime isolation.
 }
 export function createCliAdapter(config:CliTurnConfig):TurnAdapter{
  config={...config,prefixArgs:config.prefixArgs?[...config.prefixArgs]:undefined,...(config.selection?{selection:Object.freeze({...config.selection})}:{})};
@@ -94,7 +94,7 @@ export function createCliAdapter(config:CliTurnConfig):TurnAdapter{
   let home:string|undefined;
   try{
    const env=environment();if(config.id==='kiro'){env.KIRO_HOME=await kiroHome(config.kiroHomeParent,p=>{home=p;});await config.onHome?.(env.KIRO_HOME);if((await readdir(env.KIRO_HOME)).some(n=>n!=='agents'))throw new TurnFailure('kiro_profile_not_clean','unavailable');if(JSON.stringify(JSON.parse(await readFile(path.join(env.KIRO_HOME,'agents',AGENT+'.json'),'utf8')))!==JSON.stringify(agentConfig))throw new TurnFailure('isolation','unavailable');}
-   await verifyCapabilities(config,cwd,env,signal,v=>{state.version=v;state.message=config.id==='codex'&&v!==CODEX_VERSION?codexVersionNotice(v):undefined;});
+   await verifyCapabilities(config,cwd,env,signal,v=>{state.version=v;state.message=versionCheck(config.id,v).notices[0]?.message;});
    if(signal.aborted)throw new TurnFailure('cancelled');
    const child=spawnToolless(config,'isolated',{cwd,env});
    let queue:TurnEvent[]=[],wake=()=>{},done=false,failure:TurnFailure|undefined,killing=Promise.resolve(),buf='',total=0,stderrBytes=0,acpPhase='initialize',seq=0,session='',collect=false,answer='',completed=false,blocked=0,credits:number|undefined;
@@ -131,7 +131,7 @@ export function createCliAdapter(config:CliTurnConfig):TurnAdapter{
      child.stdin.write(JSON.stringify({jsonrpc:'2.0',id:e.id,result:{outcome:permissionDenial(e.params?.options)}})+'\n',()=>stop(new TurnFailure('tool_attempt')));return;
     }
     if(e.id!==undefined&&!e.method){if(e.error)throw new TurnFailure('acp_error','unavailable');
-     if(acpPhase==='initialize'){if(e.result?.protocolVersion!==1||e.result?.agentInfo?.version!=='3.3.0')throw new TurnFailure('unsupported_cli','unavailable');acpPhase='session';send('session/new',{cwd,mcpServers:[]});}
+     if(acpPhase==='initialize'){if(e.result?.protocolVersion!==1)throw new TurnFailure('unsupported_cli','unavailable','Kiro requires ACP protocolVersion 1.');const version=e.result?.agentInfo?.version;const checked=versionCheck('kiro',typeof version==='string'?version:null);if(!checked.available)throw new TurnFailure('unsupported_cli','unavailable',checked.reason!);acpPhase='session';send('session/new',{cwd,mcpServers:[]});}
      else if(acpPhase==='session'){sessionData=e.result;acpPhase='inventory';promptWhenVerified();}
      else if(acpPhase==='prompt'){if(e.result?.stopReason==='refusal')emit({type:'refusal',code:'refusal'});else if(e.result?.stopReason!=='end_turn')throw new TurnFailure('incomplete');if(credits!==undefined)emit({type:'usage',usage:{unit:'credits',amount:credits,afterTurn:true}});emit({type:'complete',answer});completed=true;collect=false;stop();}return;
     }

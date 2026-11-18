@@ -1,7 +1,7 @@
 import path from 'node:path';
 import {statSync,accessSync,constants,openSync,readSync,closeSync} from 'node:fs';
 export type CliId='claude'|'codex'|'kiro';
-export interface DetectedCli {id:CliId;path:string|null;version:string|null;isolation:'unchecked';code:'found'|'not_found'|'invalid_override';reason:string}
+export interface DetectedCli {id:CliId;path:string|null;version:string|null;isolation:'unchecked';code:'found'|'not_found'|'invalid_override';reason:string;candidates?:string[]}
 export interface DiscoveryOptions {override?:string;arch?:string;inspect?:(file:string)=>{file:boolean;executable:boolean}|undefined}
 export function resolveCli(id:CliId,env:NodeJS.ProcessEnv,platform:NodeJS.Platform,options:DiscoveryOptions={}):DetectedCli {
  const win=platform==='win32',p=win?path.win32:path.posix;
@@ -43,7 +43,9 @@ export function resolveCli(id:CliId,env:NodeJS.ProcessEnv,platform:NodeJS.Platfo
    for(const vendor of [p.join(root,'node_modules','@openai','codex-win32-'+arch,'vendor'),p.join(root,'vendor')])candidates.push(p.join(vendor,triple,'bin',exe));
   }
  }
- for(const file of new Set(candidates))if(usable(file))return result(file,'found','Executable found; metadata and runtime isolation not checked.');
+ if(id!=='codex')for(const file of new Set(candidates))if(usable(file))return result(file,'found','Executable found; metadata and runtime isolation not checked.');
+ const found=id==='codex'?[...new Set(candidates)].filter(usable):[];
+ if(found.length)return {...result(found[0],'found','Executable found; metadata and runtime isolation not checked.'),candidates:found};
  return result(null,'not_found',`Install ${name} or configure its absolute native executable path; AI-off editing remains available.`);
 }
 export async function discoverCli(id:CliId,env:NodeJS.ProcessEnv,platform:NodeJS.Platform,options:DiscoveryOptions={}):Promise<DetectedCli>{return resolveCli(id,env,platform,options);}

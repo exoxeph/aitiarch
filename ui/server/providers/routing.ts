@@ -15,7 +15,7 @@ export function roleRouting(o:{dir:string;adapters:TurnAdapter[];checks:Availabi
  }}):undefined;
  const descriptors=o.adapters.map(a=>descriptorFromAdapter(a,{detect:async()=>{
   const state=(await availability.get()).find(p=>p.id===a.id);
-  return state?{available:state.available,reason:state.reason}:{available:false,reason:'Provider local metadata could not be verified. No other provider was tried.'};
+  return state?{available:state.available,reason:state.reason,version:state.version,notices:state.notices}:{available:false,reason:'Provider local metadata could not be verified. No other provider was tried.'};
  },invokedBridge:bridge(a),threadReplyBridge:o.codexThreadReplies?bridge(a):undefined,bridges:a.id==='claude'&&o.claudeBridge?{invoked:true,'thread-reply':true,'investigate-read':true,'skill-diagram':true}:undefined}));
  const registry=new ProviderRegistry(descriptors);
  let initial:Promise<MachineSetup>|undefined;

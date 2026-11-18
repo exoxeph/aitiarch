@@ -6,8 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Configuration, ErrorCode, CLIProviderName } from './index.ts';
 import {helpDeclaresEffort} from '../../shared/model-settings.ts';
+import {cliVersion,versionCheck,TESTED_VERSION,type CliNotice} from './cli-compatibility.ts';
 
-export type Availability = { available: true; hardening?: string[]; warnings?: string[]; textStreaming?:boolean;effortSupported?:boolean } | {
+export type Availability = { available: true;version?:string;notices?:CliNotice[]; hardening?: string[]; warnings?: string[]; textStreaming?:boolean;effortSupported?:boolean } | {
   available: false; code: ErrorCode; message: string; version?: string; warnings?: string[];
 };
 type Requirement = readonly [flag: string, meaning: RegExp];
@@ -47,13 +48,12 @@ function descriptions(help: string): Map<string, string> {
   return result;
 }
 export function assessCapabilities(config: Pick<Configuration, 'provider' | 'contract'>, versionText: string, help: string): Availability {
-  const versionPattern = config.provider === 'claude' ? /^(\d+\.\d+\.\d+) \(Claude Code\)\s*$/ : /^codex-cli (\d+\.\d+\.\d+)\s*$/;
-  const version = versionPattern.exec(versionText.trim())?.[1];
-  if (!version) return { available: false, code: 'unsupported_cli', message: 'Provider disabled: unrecognized CLI version output.' };
+  const version=cliVersion(config.provider,versionText)??undefined,check=versionCheck(config.provider,version??null);
+  if(!check.available)return {available:false,code:'unsupported_cli',message:check.reason!};
   const blocks = descriptions(help);
   const gaps = requirements[config.provider].filter(([flag, meaning]) => !meaning.test(blocks.get(flag) ?? '')).map(([flag]) => flag);
   if (config.contract === 'claude-canary-2.1.205') {
-    if (config.provider !== 'claude' || version !== '2.1.205') gaps.push('canary-verified Claude version 2.1.205');
+    if (config.provider !== 'claude') gaps.push('Claude isolation profile');
     for (const [flag, meaning] of [['--verbose', /verbose/i], ['--include-hook-events', /Include all hook lifecycle events in the output stream/i]] as const)
       if (!meaning.test(blocks.get(flag) ?? '')) gaps.push(flag);
     if (!/stream-json/.test(blocks.get('--output-format') ?? '')) gaps.push('structured event stream');
@@ -63,13 +63,13 @@ export function assessCapabilities(config: Pick<Configuration, 'provider' | 'con
   if (config.provider === 'codex' && !(config.contract === 'fake' && help.includes('AITIARCH FAKE: empty tool registry; single response')))
     gaps.push('global no-tools guarantee', 'single-turn guarantee');
   if (gaps.length) return { available: false, code: 'unsupported_cli', version,
-    message: `Provider disabled (${config.provider} ${version}): cannot verify ${gaps.join(', ')} from installed help.` };
+    message: `Provider disabled (${config.provider} ${version}; minimum ${TESTED_VERSION[config.provider]}): cannot verify ${gaps.join(', ')} from installed help.` };
   if (config.contract !== 'fake' && config.contract !== 'claude-canary-2.1.205') return { available: false, code: 'unsupported_cli', version,
     message: `Provider disabled (${config.provider} ${version}): live isolation has not been verified; canary approval required.` };
   const maxTurns = blocks.get('--max-turns') ?? '';
   return config.provider === 'claude'
-    ? { available: true, effortSupported:helpDeclaresEffort(help),textStreaming:/partial/i.test(blocks.get('--include-partial-messages')??''), hardening: /(?:max(?:imum)?|limit)[\s\S]*\bturns?\b/i.test(maxTurns) ? ['--max-turns', '1'] : [] }
-    : { available: true };
+    ? { available: true,version:version!,notices:check.notices,warnings:check.notices.map(n=>n.message), effortSupported:helpDeclaresEffort(help),textStreaming:/partial/i.test(blocks.get('--include-partial-messages')??''), hardening: /(?:max(?:imum)?|limit)[\s\S]*\bturns?\b/i.test(maxTurns) ? ['--max-turns', '1'] : [] }
+    : { available: true,version:version!,notices:check.notices,warnings:check.notices.map(n=>n.message) };
 }
 
 export async function probeCapabilities(config: Configuration, env: NodeJS.ProcessEnv): Promise<Availability> {
@@ -80,7 +80,7 @@ export async function probeCapabilities(config: Configuration, env: NodeJS.Proce
     const help = await metadata(config.provider === 'claude' ? ['--help'] : ['exec', '--help']);
     const result = assessCapabilities(config, version, help);
     const warnings = config.provider === 'claude' ? await managedSettingsWarnings() : [];
-    return warnings.length ? { ...result, warnings } : result;
+    return warnings.length ? { ...result, warnings:[...(result.warnings??[]),...warnings] } : result;
   } catch {
     return { available: false, code: 'unsupported_cli',
       message: 'Provider disabled: metadata check failed, timed out, or exceeded its output limit. No request was sent.' };
