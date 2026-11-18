@@ -38,7 +38,8 @@ const app=createApp({store,watcher,distDir:path.join(repo,'ui','dist'),
  chatImageDelivery:{supports:(id,model)=>id==='claude'&&model==='synthetic-vision',async send({request,approved}){
   imageCalls++;
   assert.equal(approved.images.length,3);
-  assert(approved.images.every(image=>image.bytes.toString('base64')===png));
+  assert(approved.images.every(image=>image.bytes.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'))));
+  assert.deepEqual(approved.images.map(({width,height})=>[width,height]),[[1,1],[3,2],[4,3]]);
   return result(request,'Synthetic image reply.\n<claims>{"none":"no_context_used"}</claims>');
  }},
 });
@@ -71,15 +72,23 @@ try{
   input.dispatchEvent(new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true}));
  },png);
  await panel.getByRole('img',{name:'Attached image 1'}).waitFor();
- await composer.evaluate((input,png)=>{
-  const bytes=Uint8Array.from(atob(png),char=>char.charCodeAt(0)),data=new DataTransfer();
-  data.items.add(new File([bytes],'drop.png',{type:'image/png'}));
+ await composer.evaluate(async input=>{
+  const canvas=document.createElement('canvas');canvas.width=3;canvas.height=2;
+  canvas.getContext('2d').fillRect(0,0,3,2);
+  const jpeg=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg'));
+  const data=new DataTransfer();data.items.add(new File([jpeg],'drop.jpg',{type:'image/jpeg'}));
   input.dispatchEvent(new DragEvent('drop',{dataTransfer:data,bubbles:true,cancelable:true}));
- },png);
+ });
  await panel.getByRole('img',{name:'Attached image 2'}).waitFor();
- await panel.locator('input[type=file][accept="image/png"]').setInputFiles({name:'picker.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')});
+ const webp=await page.evaluate(async()=>{
+  const canvas=document.createElement('canvas');canvas.width=4;canvas.height=3;
+  canvas.getContext('2d').fillRect(0,0,4,3);
+  const encoded=await new Promise(resolve=>canvas.toBlob(resolve,'image/webp'));
+  return Array.from(new Uint8Array(await encoded.arrayBuffer()));
+ });
+ await panel.locator('input[type=file][accept*="image/webp"]').setInputFiles({name:'picker.webp',mimeType:'image/webp',buffer:Buffer.from(webp)});
  await panel.getByRole('img',{name:'Attached image 3'}).waitFor();
- await page.waitForFunction(()=>Array.from(document.querySelectorAll('.chat-image-list img')).every(img=>img.complete&&img.naturalWidth===1));
+ await page.waitForFunction(()=>Array.from(document.querySelectorAll('.chat-image-list img')).every(img=>img.complete&&img.naturalWidth>0));
 
  for(let turn=1;turn<=2;turn++){
   await ask('Review retained images '+turn);

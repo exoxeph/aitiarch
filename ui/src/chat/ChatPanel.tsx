@@ -560,7 +560,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
     <ChatModeMenu value={mode} onChange={setMode} disabled={composing||busy}/>
     <div className="compose-right">
      {mode==='chat'&&<>
-      <input ref={imageInput} type="file" hidden accept="image/png" multiple onChange={e=>{
+      <input ref={imageInput} type="file" hidden accept="image/png,image/jpeg,image/webp" multiple onChange={e=>{
        const files=Array.from(e.target.files??[]);e.target.value='';if(!composing)void imageDraft.add(files);
       }}/>
       <button type="button" className="chat-ctl" aria-label="Attach images" title={imageDraft.support.reason??'Attach images'}

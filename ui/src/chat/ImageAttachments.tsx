@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
-import {IMAGE_MAX_BYTES,IMAGE_SEND_MAX_BYTES,IMAGE_SEND_MAX_COUNT,IMAGE_WARNING,type StagedImage} from '../../shared/image-attachments.ts';
+import {IMAGE_SEND_MAX_BYTES,IMAGE_SEND_MAX_COUNT,IMAGE_WARNING,type StagedImage} from '../../shared/image-attachments.ts';
 import {chatImageAvailability,removeChatImage,stageChatImage} from '../api.ts';
+import {imageAsPng} from './image-source.ts';
 
 export type ImagePreview=StagedImage&{src:string};
 
@@ -8,7 +9,7 @@ export function clipboardImages(data:DataTransfer){
  return Array.from(data.files).filter(file=>file.type.startsWith('image/'));
 }
 
-function pngData(file:File):Promise<string>{
+function pngData(file:Blob):Promise<string>{
  return new Promise((resolve,reject)=>{
   const reader=new FileReader();
   reader.onload=()=>resolve(String(reader.result).split(',',2)[1]??'');
@@ -48,8 +49,7 @@ export function useChatImages(settings:unknown,showNotice:(text:string)=>void){
   try{
    for(const file of files){
     if(current.current.length>=IMAGE_SEND_MAX_COUNT)throw Error('Attach at most four images.');
-    if(file.size>IMAGE_MAX_BYTES||file.type!=='image/png')throw Error('Attach a PNG image of at most 5 MiB.');
-    const encoded=await pngData(file);
+    const encoded=await pngData(await imageAsPng(file));
     const staged=await stageChatImage(encoded);
     if(!alive.current){discard(staged.id);return;}
     if(current.current.reduce((sum,image)=>sum+image.byteLength,0)+staged.byteLength>IMAGE_SEND_MAX_BYTES){

@@ -7,6 +7,7 @@ import path from 'node:path';
 import {finishReply,type ReplySources} from '../server/chat/reply.ts';
 import {hash} from '../server/chat/context.ts';
 import {ImageConfirmation,ImageInterpretationNotice,clipboardImages} from '../src/chat/ImageAttachments.tsx';
+import {inspectImageSource} from '../src/chat/image-source.ts';
 import {ChatRuntime} from '../server/chat/runtime.ts';
 import {ChatStore} from '../server/chat/store.ts';
 import {Store} from '../server/store.ts';
@@ -111,6 +112,18 @@ it.each(['claude','codex'] as const)('%s refuses transport after a reviewed mode
 
 it('does not enable the image transport for an unverified executable',async()=>{
  await expect(runImageFixture('codex','executable')).rejects.toThrow(/not been verified/);
+});
+
+it('checks JPEG dimensions and refuses animated WebP, GIF, SVG and oversized source images before decoding',()=>{
+ const jpeg=Buffer.from('ffd8ffc00011080002000303011100021100031100ffd9','hex');
+ expect(inspectImageSource(jpeg)).toEqual({mime:'image/jpeg',width:3,height:2});
+ const webp=Buffer.from('524946461600000057454250565038580a00000002000000000000000000','hex');
+ expect(()=>inspectImageSource(webp)).toThrow('Animated WebP');
+ expect(()=>inspectImageSource(Buffer.from('GIF89a'))).toThrow('GIF');
+ expect(()=>inspectImageSource(Buffer.from('<svg/>'))).toThrow('PNG, JPEG or WebP');
+ const large=Buffer.from(jpeg);large.writeUInt16BE(4001,7);large.writeUInt16BE(4000,9);
+ expect(()=>inspectImageSource(large)).toThrow('16 megapixels');
+ expect(()=>inspectImageSource(Buffer.alloc(5*1024*1024+1))).toThrow('5 MiB');
 });
 
 it('leaves ordinary text paste alone and only captures file-backed images',()=>{
