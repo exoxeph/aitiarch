@@ -265,7 +265,7 @@ export function createApp(opts: AppOptions) {
       }
     }
 
-    if (opts.setup && (url.pathname === '/api/setup' || url.pathname === '/api/setup/private')) {
+    if (opts.setup && (url.pathname === '/api/setup' || url.pathname === '/api/setup/private' || url.pathname === '/api/setup/models')) {
       try {
         if (url.pathname === '/api/setup' && req.method === 'GET') return json(res, 200, await opts.setup.get());
         if (url.pathname === '/api/setup' && req.method === 'PUT') {
@@ -274,6 +274,8 @@ export function createApp(opts: AppOptions) {
         }
         if (url.pathname === '/api/setup/private' && req.method === 'POST')
           return json(res, 200, await opts.setup.init(await readBody(req, 2048)));
+        if (url.pathname === '/api/setup/models' && req.method === 'POST')
+          return json(res, 200, await opts.setup.refreshModels(await readBody(req, 128)));
         return json(res, 405, {error:'method_not_allowed'});
       } catch (error) {
         const invalid = error instanceof SyntaxError || error instanceof SetupRequestError ||

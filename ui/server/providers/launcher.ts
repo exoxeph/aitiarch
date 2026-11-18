@@ -9,6 +9,20 @@ import {CODEX_FLAGS,TOOLLESS_AGENT} from './tool-less-arguments.ts';
 import type {ModelEffort} from '../../shared/setup.ts';
 import {modelArguments} from '../../shared/model-settings.ts';
 
+/** Metadata only. Caller owns the fixed RPC sequence and never writes a prompt. */
+export function spawnModelCatalog(config:{id:'claude'|'codex';command:string;prefixArgs?:readonly string[]},cwd:string){
+ if((config.id!=='claude'&&config.id!=='codex')||!path.isAbsolute(config.command)||/\.(cmd|bat|ps1)$/i.test(config.command)||
+    (config.prefixArgs?.length&&config.command!==process.execPath))throw Error('Invalid model catalog executable.');
+ assertLaunch('codex','isolated',[],cwd);
+ const args=config.id==='codex'?['app-server','--listen','stdio://']:
+  ['--print','--input-format','stream-json','--output-format','stream-json','--verbose','--no-session-persistence',
+   '--tools','','--setting-sources','','--strict-mcp-config','--mcp-config','{"mcpServers":{}}'];
+ const safeEnv=Object.fromEntries(Object.entries(process.env).filter(([k])=>/^(PATH|PATHEXT|SYSTEMROOT|WINDIR|TEMP|TMP)$/i.test(k)));
+ const env={...safeEnv,HOME:cwd,USERPROFILE:cwd,APPDATA:cwd,LOCALAPPDATA:cwd,CODEX_HOME:cwd,CLAUDE_CONFIG_DIR:cwd,
+  XDG_CONFIG_HOME:cwd,XDG_DATA_HOME:cwd,XDG_CACHE_HOME:cwd,XDG_STATE_HOME:cwd};
+ return spawn(config.command,[...(config.prefixArgs??[]),...args],{cwd,env,shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:['pipe','pipe','ignore']});
+}
+
 /** Separate notes-only profiles. Never shares or alters the Claude/Investigate/diagram profiles below.
  * The host builds every argument; prompts go to stdin only. No shell or native prefix arguments. */
 export function spawnToolless(config:{id:'codex'|'kiro';command:string;prefixArgs?:string[];selection?:Readonly<ModelEffort>},mode:'version'|'metadata'|'isolated',options:SpawnOptionsWithoutStdio&{cwd:string}){

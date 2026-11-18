@@ -1,4 +1,5 @@
 import type {MachineSetup,ModelEffort,SetupProvider,SetupRole} from './setup.ts';
+import {validCatalogModelId} from './models.ts';
 export const CLAUDE_MODELS=Object.freeze(['opus','sonnet','haiku','fable'] as const);
 export const CLAUDE_EFFORTS=Object.freeze(['low','medium','high','xhigh','max'] as const);
 export const DEFAULT_SELECTION:Readonly<ModelEffort>=Object.freeze({model:null,effort:null});
@@ -16,7 +17,7 @@ export function modelSelection(setup:MachineSetup,role:SetupRole,id:SetupProvide
 export function modelArguments(id:SetupProvider,selection:Readonly<ModelEffort>=DEFAULT_SELECTION,effortSupported=false):string[]{
  if(!selection||Object.keys(selection).sort().join()!=='effort,model')throw Error('Invalid model selection.');
  const {model,effort}=selection;
- if(model!==null&&!validModelId(model))throw Error('Invalid model ID: use 1-100 letters, digits, dots, underscores or hyphens, starting with a letter or digit.');
+ if(model!==null&&!validModelId(model)&&!(id==='claude'&&validCatalogModelId(model)))throw Error('Invalid model ID: use 1-100 letters, digits, dots, underscores or hyphens, starting with a letter or digit.');
  if(id==='kiro'&&(model!==null||effort!==null))throw Error('Kiro model and effort must stay at Default.');
  if(effort!==null){
   if(id!=='claude')throw Error('Codex effort is not verified; use Default.');

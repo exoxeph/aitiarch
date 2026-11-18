@@ -1,6 +1,7 @@
 // Runtime policy only. Reuses the exact existing adapters, never rebuilds a fence.
 import type {SetupProvider} from '../../shared/setup.ts';
 import type {MachineSetup} from '../../shared/setup.ts';
+import type {ModelCatalog} from '../../shared/models.ts';
 import type {TurnAdapter} from './turn.ts';
 import {ProviderRegistry,descriptorFromAdapter,compatibleDefaults,type RequestSettingsSnapshot,type InvokedBridgeFactory} from './registry.ts';
 import {CouncilAvailability,type AvailabilityCheck} from './council-availability.ts';
@@ -8,7 +9,7 @@ import type {createInvokedCodexBridge} from './invoked-bridge.ts';
 import {initializeDefaultRoles} from '../setup-store.ts';
 
 export type RoleRouting=()=>Promise<RequestSettingsSnapshot>;
-export function roleRouting(o:{dir:string;adapters:TurnAdapter[];checks:AvailabilityCheck[];legacyAnswerer:()=>SetupProvider;claudeBridge?:boolean;codexInvokedBridge?:typeof createInvokedCodexBridge;codexThreadReplies?:boolean}):RoleRouting&{initializeDefaults:(preferred?:readonly SetupProvider[])=>Promise<MachineSetup>} {
+export function roleRouting(o:{dir:string;adapters:TurnAdapter[];checks:AvailabilityCheck[];legacyAnswerer:()=>SetupProvider;claudeBridge?:boolean;codexInvokedBridge?:typeof createInvokedCodexBridge;codexThreadReplies?:boolean;catalogFor?:(id:SetupProvider)=>ModelCatalog|undefined}):RoleRouting&{initializeDefaults:(preferred?:readonly SetupProvider[])=>Promise<MachineSetup>} {
  const availability=new CouncilAvailability(o.checks);
  const bridge=(a:TurnAdapter):InvokedBridgeFactory|undefined=>a.id==='codex'&&o.codexInvokedBridge?options=>o.codexInvokedBridge!({...options,adapter:a,checkAvailability:async()=>{
   const state=(await availability.get()).find(p=>p.id==='codex');
@@ -28,7 +29,7 @@ export function roleRouting(o:{dir:string;adapters:TurnAdapter[];checks:Availabi
   // The legacy default Claude permits first-run compatible-only setup suggestions.
   if(legacy!=='claude'){setup.roles['normal-chat']=legacy;setup.providers[legacy].enabled=true;}
   return setup;
- });
+ },o.catalogFor);
  return Object.assign(routing,{initializeDefaults:(preferred:readonly SetupProvider[]=[])=>{
   const legacy=o.legacyAnswerer();return initializeDefaultRoles(o.dir,descriptors,preferred,legacy==='claude'?{}:{'normal-chat':legacy});
  }});

@@ -10,6 +10,7 @@ import {createApp} from '../server/http.ts';
 import {createSetupHttp} from '../server/setup-http.ts';
 import {compatibleDefaults,descriptorFromAdapter} from '../server/providers/registry.ts';
 import {saveMachineSetup} from '../server/setup-store.ts';
+import {createModelCatalogs,readCatalog} from '../server/providers/model-catalog.ts';
 
 const output = path.resolve(process.env.BATCH2A_OUTPUT ?? '');
 const relative = path.relative(path.resolve('..'), output);
@@ -27,7 +28,9 @@ await writeFile(note,original);
 const dir = process.env.AITIARCH_CONFIG_DIR;
 let ready = false;
 const providers=[];
-const setup = createSetupHttp({dir,project,providers,ready:async()=>ready});
+let modelCatalogs;
+const setup = createSetupHttp({dir,project,providers,ready:async()=>ready,
+ catalogs:{view:source=>modelCatalogs?.view(source),refresh:force=>modelCatalogs?.refresh(force)??Promise.resolve([])}});
 const store = await Store.open(notes);
 const watcher = new NoteWatcher(store);
 const app = createApp({store,watcher,distDir:path.resolve('dist'),pipelineConfigDir:dir,setup});
@@ -217,6 +220,43 @@ try {
  const saved = await setup.get();
  assert.equal(saved.roles.find(r=>r.role==='normal-chat').provider,'claude');
  assert.deepEqual(saved.models.find(m=>m.role==='normal-chat').selection,{model:'sonnet',effort:'low'});
+
+ const fake=path.join(output,'setup-model-cli.mjs');
+ await writeFile(fake,`import {createInterface} from 'node:readline';
+ if(process.argv.includes('--version')){console.log(process.argv[2]);process.exit(0);}
+ const send=message=>console.log(JSON.stringify(message));
+ for await(const line of createInterface({input:process.stdin})){
+  const m=JSON.parse(line);
+  if(m.type==='control_request'&&m.request?.subtype==='initialize'){
+   const model={resolvedModel:'demo-claude',description:'Synthetic model',supportsEffort:true,supportedEffortLevels:['low','high']};
+   send({type:'control_response',response:{subtype:'success',request_id:m.request_id,response:{models:[{...model,value:'default',displayName:'Default'},{...model,value:'alias',displayName:'Claude Demo Model'}]}}});
+  }else if(m.method==='initialize')send({id:m.id,result:{userAgent:'fake',platformFamily:'windows',platformOs:'windows'}});
+  else if(m.method==='model/list')send({id:m.id,result:{nextCursor:null,data:[{id:'demo-codex',model:'demo-codex',displayName:'Codex Demo Model',hidden:false,isDefault:false,supportedReasoningEfforts:[{reasoningEffort:'medium',description:'Synthetic effort'}]}]}});
+  else if(m.method!=='initialized')process.exit(91);
+ }`);
+ modelCatalogs=createModelCatalogs(dir,providers,{read:(source,options)=>readCatalog({...source,path:process.execPath},{...options,prefixArgs:[fake,source.id==='claude'?source.version+' (Claude Code)':'codex-cli '+source.version]})});
+ const refreshed=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/setup/models'&&r.ok());
+ await page.reload();
+ const chatButton=page.getByRole('button',{name:'Chat',exact:true});
+ await chatButton.waitFor();
+ if(!await chip.isVisible())await chatButton.click();
+ await chip.click();
+ await refreshed;
+ await claude().getByRole('menuitemradio',{name:'Claude Demo Model',exact:true}).click();
+ await chip.click();
+ await menu.getByRole('group',{name:'Effort'}).getByRole('menuitemradio',{name:'high',exact:true}).waitFor();
+ assert.equal(await menu.getByRole('menuitemradio',{name:'medium',exact:true}).count(),0);
+ await shot('catalog-claude-1280.png');
+ await menu.getByRole('menuitemradio',{name:'Codex Demo Model',exact:true}).click();
+ await chip.click();
+ const codexEffort=menu.getByRole('group',{name:'Effort'}).getByRole('menuitemradio',{name:'medium',exact:true});
+ await codexEffort.waitFor();
+ assert.equal(await codexEffort.isEnabled(),false);
+ assert.equal(await menu.getByRole('menuitemradio',{name:'Default (Codex Demo Model)',exact:true}).count(),0);
+ await shot('catalog-codex-1280.png');
+ const forced=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/setup/models'&&r.request().postDataJSON()?.force===true&&r.ok());
+ await menu.getByRole('button',{name:'Refresh model lists'}).click();
+ await forced;
  assert.deepEqual(await readFile(note),original);
  assert.deepEqual(await readdir(project,{recursive:true}),baseline);
  assert.deepEqual(external,[]);

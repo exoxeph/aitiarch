@@ -1,4 +1,5 @@
 // Machine preferences only. No routing, grants, prompts, credentials or active globals.
+import {validCatalogModelId,type ModelCatalog} from './models.ts';
 export const SETUP_PROVIDERS=['claude','codex','kiro'] as const;
 export type SetupProvider=typeof SETUP_PROVIDERS[number];
 export const ROLE_REGISTRY=[
@@ -19,6 +20,7 @@ export const LAUNCH_ROLE_LOCK='Set by launch flag; remove the flag to edit here.
 export interface ModelEffort {model:string|null;effort:string|null}
 export interface ProviderSetup extends ModelEffort {
  enabled:boolean;executable:string|null;roles:Partial<Record<SetupRole,ModelEffort>>;
+ catalogChoices?:Partial<Record<SetupRole,string>>;
 }
 export interface MachineSetup {
  version:1;providers:Record<SetupProvider,ProviderSetup>;roles:Record<SetupRole,SetupProvider|null>;
@@ -34,9 +36,11 @@ export interface RoleModelPreference {
  effortSupported:boolean;
  selection:ModelEffort|null;
  effective:ModelEffort;
+ listed?:true;
+ modelNotice?:string;
 }
 export type SetupUpdate = {seen:true}|{role:SetupRole;provider:SetupProvider}|
- {role:ModelRole;provider:SetupProvider;selection:ModelEffort|null}|{fontSize:number}|
+ {role:ModelRole;provider:SetupProvider;selection:ModelEffort|null;catalogModel?:true}|{fontSize:number}|
  {role:SetupRole;reset:true}|{role:'council';participants:SetupProvider[]};
 export type SetupSource = 'explicit flag' | 'discovered' | 'saved choice' | 'default';
 export interface SetupView {
@@ -44,7 +48,7 @@ export interface SetupView {
  seen:boolean;
  fontSize:number|null;
  models:RoleModelPreference[];
- providers:{id:SetupProvider;label:string;path:string|null;version:string|null;notices:string[];reason:string;compatible:boolean;source:SetupSource}[];
+ providers:{id:SetupProvider;label:string;path:string|null;version:string|null;notices:string[];reason:string;compatible:boolean;source:SetupSource;catalog?:ModelCatalog}[];
  roles:{role:SetupRole;provider:SetupProvider|null;capableProviders:SetupProvider[];reason:string|null;source:SetupSource;routingNote?:string;locked?:string;participants?:SetupProvider[];eligibleParticipants?:SetupProvider[]}[];
  privacy:{mode:'private';sharedReady:false;notice:string};
 }
@@ -65,7 +69,7 @@ export function validCouncilParticipants(value:unknown):value is SetupProvider[]
 // checks existence/native executable format on save, never starts the binary.
 const executable=(v:unknown)=>v===null||typeof v==='string'&&v.length<=4096&&/^(?:[a-zA-Z]:[\\/]|\/)/.test(v)&&!/^[/\\]{2}/.test(v)&&!/[\x00-\x1f\x7f]/.test(v);
 function modelEffort(v:unknown):v is ModelEffort {
- return object(v)&&keys(v,['model','effort'])&&optionalId(v.model,100)&&optionalId(v.effort,40);
+ return object(v)&&keys(v,['model','effort'])&&(optionalId(v.model,100)||validCatalogModelId(v.model))&&optionalId(v.effort,40);
 }
 /** Exact v1 keys at every level. Catalog/role compatibility is slice 5/6, not a safety grant. */
 export function validMachineSetup(v:unknown):v is MachineSetup {
@@ -81,8 +85,13 @@ export function validMachineSetup(v:unknown):v is MachineSetup {
  const providers=v.providers;
  return SETUP_PROVIDERS.every(id=>{
   const p=providers[id];
-  if(!object(p)||!keys(p,['enabled','executable','model','effort','roles'])||typeof p.enabled!=='boolean'||
+  if(!object(p)||!keys(p,['enabled','executable','model','effort','roles',...(Object.hasOwn(p,'catalogChoices')?['catalogChoices']:[])])||typeof p.enabled!=='boolean'||
    !executable(p.executable)||!optionalId(p.model,100)||!optionalId(p.effort,40)||!object(p.roles))return false;
+  if(Object.hasOwn(p,'catalogChoices')){
+   const roles=p.roles;
+   if(!object(p.catalogChoices)||!Object.entries(p.catalogChoices).every(([role,value])=>SETUP_ROLES.includes(role as SetupRole)&&
+    validCatalogModelId(value)&&object(roles[role])&&roles[role].model===value))return false;
+  }
   if(!Object.entries(p.roles).every(([role,value])=>SETUP_ROLES.includes(role as SetupRole)&&modelEffort(value)))return false;
   // Kiro has no verified selection interface yet: only Default is accepted.
   return id!=='kiro'||p.model===null&&p.effort===null&&Object.values(p.roles).every(r=>(r as ModelEffort).model===null&&(r as ModelEffort).effort===null);

@@ -92,6 +92,7 @@ async function ok<T>(method: "GET" | "PUT" | "POST", url: string, body?: unknown
 }
 
 export const fetchSetup = () => ok<import('../shared/setup.ts').SetupView>('GET','/api/setup');
+export const refreshSetupModels = (force:boolean) => ok<import('../shared/setup.ts').SetupView>('POST','/api/setup/models',{force});
 export const saveSetup = (body:import('../shared/setup.ts').SetupUpdate) =>
   ok<import('../shared/setup.ts').SetupView>('PUT','/api/setup',body);
 export const applyPrivateSetup = () =>

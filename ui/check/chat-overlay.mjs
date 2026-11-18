@@ -25,7 +25,7 @@ try {
     const anchor = captureAnchor(original, from, to); s.document.items.push({ id, kind: 'margin', body, anchor, originalAnchor: anchor, attachment: { status: 'attached', from, to } });
   }
   await ink.write('notebook.md', s.document, s.version);
-  proc = spawn(process.execPath, [path.join(uiDir, 'server', 'main.ts'), '--root', root, '--port', '0', '--no-open'], { cwd: uiDir, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, AITIARCH_CONFIG_DIR: path.join(project, 'config') } });
+  proc = spawn(process.execPath, [path.join(uiDir, 'server', 'main.ts'), '--root', root, '--port', '0', '--no-open'], { cwd: uiDir, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, AITIARCH_TEST:"1", AITIARCH_CONFIG_DIR: path.join(project, 'config') } });
   const url = await new Promise((resolve, reject) => { let o = ''; proc.stdout.on('data', (d) => { o += d; const m = /AITIARCH_READY (.*)/.exec(o); if (m) resolve(JSON.parse(m[1]).launch); }); proc.on('exit', (c) => reject(new Error('server exited ' + c))); setTimeout(() => reject(new Error('server startup timeout')), 15000); });
   browser = await chromium.launch({ channel: 'msedge', headless: true });
   const SELECTORS = ['.editor-col', '.cm-editor', '.cm-content', '.cm-line', '.margin-card', '.cm-ink-block', '.thought-blob', '.topbar', '.statusbar'];

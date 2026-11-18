@@ -32,7 +32,7 @@ const results = [], check = (name, ok, detail = "") => { results.push({ name, ok
 const until = async (fn, ms = 7000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await sleep(100); } return false; };
 
 const { proc, ready } = await new Promise((resolve, reject) => {
-  const p = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", proj, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_CONFIG_DIR: path.join(base, "config") } });
+  const p = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", proj, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_TEST:"1", AITIARCH_CONFIG_DIR: path.join(base, "config") } });
   let buf = ""; p.stdout.on("data", (d) => { buf += d; const m = /AITIARCH_READY (.*)/.exec(buf); if (m) resolve({ proc: p, ready: JSON.parse(m[1]) }); });
   p.stderr.on("data", (d) => { const s = String(d); if (!/ExperimentalWarning|--trace-warnings/.test(s)) process.stderr.write(s); });
   p.on("exit", (c) => reject(new Error(`server exited early (${c})`))); setTimeout(() => reject(new Error("server did not start")), 10000);

@@ -32,7 +32,7 @@ try {
   s.document.items.push(item("answer", "answer", "A fixture AI answer shown as a thought.", original.indexOf(alpha), alpha.length));
   s.document.items.push(item("margin-1", "margin", "A fixture AI margin note.", original.indexOf(beta), beta.length));
   await ink.write("notebook.md", s.document, s.version);
-  proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_CONFIG_DIR: path.join(project, "config") } }); // a temp registry, never the user's
+  proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_TEST:"1", AITIARCH_CONFIG_DIR: path.join(project, "config") } }); // a temp registry, never the user's
   const url = await new Promise((resolve, reject) => {
     let out = "";
     proc.stdout.on("data", (d) => { out += d; const m = /AITIARCH_READY (.*)/.exec(out); if (m) resolve(JSON.parse(m[1]).launch); });

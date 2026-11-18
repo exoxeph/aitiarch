@@ -40,7 +40,7 @@ try {
   await ink.write("notebook.md", s.document, s.version);
   const unchanged = readFileSync(note);
 
-  proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_CONFIG_DIR: path.join(project, "config") } }); // a temp registry, never the user's
+  proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_TEST:"1", AITIARCH_CONFIG_DIR: path.join(project, "config") } }); // a temp registry, never the user's
   const url = await new Promise((resolve, reject) => {
     let output = "";
     proc.stdout.on("data", d => { output += d; const m = /AITIARCH_READY (.*)/.exec(output); if (m) resolve(JSON.parse(m[1]).launch); });

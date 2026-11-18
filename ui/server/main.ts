@@ -9,12 +9,13 @@ import {selectedCouncilAdapters} from './providers/council-adapters.ts';
 export {selectRuntimeProviders} from './platform/runtime-providers.ts';
 import {roleRouting} from './providers/routing.ts';
 import {createSetupHttp} from './setup-http.ts';
+import {createModelCatalogs} from './providers/model-catalog.ts';
 import {checkPrerequisites} from './platform/doctor.ts';
 import {createInvokedCodexBridge} from './providers/invoked-bridge.ts';
 import {validateCodexCommand} from './providers/codex-command.ts';
 import { createHost } from "./host.ts";
 import { PipelineConfigStore } from "./pipeline-config-store.ts";
-import { Registry, RegistryError, resolveConfigFolder, type ProjectEntry } from "./registry.ts";
+import { Registry, RegistryError, resolveConfigFolder, underTest, type ProjectEntry } from "./registry.ts";
 import { DEFAULT_PORT, clearInstance, listenOrReuse, readInstance, writeInstance } from "./launch.ts";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,6 +75,7 @@ const {version}=JSON.parse(await readFile(path.join(appFolder,'ui','package.json
 const identity={version,appFolder,notebookRoot:path.join(projectFolder,'.aitiarch')};
 const { UsageLogs } = await import("./providers/usage.ts");
 const runtime=await selectRuntimeProviders({configDir:configFolder,overrides:{...(args.claude!==undefined?{claude:args.claude}:{}),...(args.codex!==undefined?{codex:args.codex}:{})}});
+const catalogs=createModelCatalogs(configFolder,underTest()?[]:runtime.providers);
 const serverIdentity={...identity,providers:runtime.providers};
 const claudeCommand=runtime.commands.claude;
 // Plugin run/start and the normal command both reach here. Save compatible defaults once, before any project opens.
@@ -104,8 +106,9 @@ const openProject = async (entry: ProjectEntry) => {
   const usage = new UsageLogs({ notebookRoot: store.rootReal });
   const provider = plan ?? (claudeCommand ? createProvider({ provider: defaults.roles.chat, command: claudeCommand, contract: "claude-canary-2.1.205", usageLog: usage }) : undefined);
   const adapters=selectedCouncilAdapters(runtime.providers),availabilityChecks=runtime.availabilityChecks;
-  const routing=roleRouting({dir:configFolder,adapters,checks:availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!claudeCommand,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true});
-  const setup = createSetupHttp({dir:configFolder, project:entry.root, providers:runtime.providers,
+  const routing=roleRouting({dir:configFolder,adapters,checks:availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!claudeCommand,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true,
+   catalogFor:id=>{const provider=runtime.providers.find(p=>p.id===id);return provider&&catalogs.view(provider);}});
+  const setup = createSetupHttp({dir:configFolder, project:entry.root, providers:runtime.providers,catalogs,
     overrides:{claude:args.claude,codex:args.codex},
     ready:async()=>(await checkPrerequisites({configDir:configFolder,distDir})).every(check=>check.ok)});
   const app = createApp({ pipelineConfigDir: configFolder, store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, setup, council:{adapters,availabilityChecks,routing}, harness: claudeCommand ? { command: claudeCommand } : undefined });
@@ -167,8 +170,10 @@ await writeInstance(configFolder, { v: 1, port: boundPort, pid: process.pid, tok
 const url = `http://127.0.0.1:${boundPort}/`;
 const launch = `${url}?launch=${security.token}${defaultId ? `&project=${defaultId}` : ""}`;
 console.log(`AITIARCH_READY ${JSON.stringify({ url, launch, root: defaultId ? registry!.get(defaultId)?.notes : null, port: boundPort, project: defaultId ?? null })}`);
+void catalogs.refresh();
 if (args.open) openBrowser(launch);
 const shutdown = async () => {
+  await catalogs.close();
   await clearInstance(configFolder, process.pid);
   await host.close();
   for (const plan of plans) await plan.close();

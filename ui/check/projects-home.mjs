@@ -31,7 +31,7 @@ const results = [], check = (name, ok, detail = "") => { results.push({ name, ok
 
 function start() {
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", A, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_CONFIG_DIR: config } });
+    const proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", A, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_TEST:"1", AITIARCH_CONFIG_DIR: config } });
     let buf = ""; proc.stdout.on("data", (d) => { buf += d; const m = /AITIARCH_READY (.*)/.exec(buf); if (m) resolve({ proc, ready: JSON.parse(m[1]) }); });
     proc.stderr.on("data", (d) => { const s = String(d); if (!/ExperimentalWarning|--trace-warnings/.test(s)) process.stderr.write(s); });
     proc.on("exit", (c) => reject(new Error(`server exited early (${c})`))); setTimeout(() => reject(new Error("server did not start")), 10000);

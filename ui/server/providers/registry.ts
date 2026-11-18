@@ -10,6 +10,7 @@ import type {TurnAdapter,SafetyLabel} from './turn.ts';
 import type {createInvokedCodexBridge} from './invoked-bridge.ts';
 import type {Provider} from './index.ts';
 import {modelSelection} from '../../shared/model-settings.ts';
+import {applyCatalogAvailability,type ModelCatalog} from '../../shared/models.ts';
 import type {ModelEffort} from '../../shared/setup.ts';
 import {versionParts,type CliNotice} from './cli-compatibility.ts';
 export type InvokedBridgeFactory=(options:Pick<Parameters<typeof createInvokedCodexBridge>[0],'cap'|'onTurn'|'beforeTurn'|'selection'>)=>Provider;
@@ -99,11 +100,12 @@ export class ProviderRegistry {
   if(!provider.capabilities[roleDefinition(role).capability])return unavailable(role,id,'role-unavailable',`${provider.label} is not available for ${role} through a verified bridge. No other provider was tried.`);
   return provider;
  }
- async snapshot(dir:string,initial?:()=>Promise<MachineSetup>):Promise<RequestSettingsSnapshot>{
+ async snapshot(dir:string,initial?:()=>Promise<MachineSetup>,catalogFor?:(provider:SetupProvider)=>ModelCatalog|undefined):Promise<RequestSettingsSnapshot>{
   const readSettings=async()=>{
    let missing=false;
    if(initial)try{await lstat(path.join(dir,SETUP_FILE));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')missing=true;else throw e;}
-   return missing?await initial!():await loadMachineSetup(dir);
+   const setup=missing?await initial!():await loadMachineSetup(dir);
+   return catalogFor?applyCatalogAvailability(setup,catalogFor):setup;
   };
   let settings:MachineSetup,fault=false;
   try{

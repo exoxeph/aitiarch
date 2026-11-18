@@ -43,7 +43,7 @@ function makeFixture(eol, bom) {
 
 function startServer(root) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_CONFIG_DIR: path.join(path.dirname(root), "config") } }); // a temp registry, never the user's
+    const proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_TEST:"1", AITIARCH_CONFIG_DIR: path.join(path.dirname(root), "config") } }); // a temp registry, never the user's
     let buf = "";
     proc.stdout.on("data", (d) => {
       buf += d;
