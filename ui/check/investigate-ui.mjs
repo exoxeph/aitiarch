@@ -13,6 +13,8 @@ import { chromium } from 'playwright-core';
 import { Store } from '../server/store.ts';
 import { NoteWatcher } from '../server/watch.ts';
 import { createApp } from '../server/http.ts';
+import { compatibleDefaults, descriptorFromAdapter, ProviderRegistry } from '../server/providers/registry.ts';
+import { saveMachineSetup } from '../server/setup-store.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const output = process.env.BATCH2A_OUTPUT || process.env.GROVE_OUTPUT;
@@ -28,7 +30,13 @@ await writeFile(path.join(repo, 'src', 'server.js'), 'const port = 4100;\n'); aw
 await scenario('inv-trail');
 const provider = { name: 'claude', async checkAvailability() { return { available: true }; }, async invoke() { throw new Error('the one-off chat is not used here'); } };
 const store = await Store.open(notebook), watcher = new NoteWatcher(store);
-const app = createApp({ store, watcher, distDir: path.join(here, '../dist'), provider, harness: { command: process.execPath, prefixArgs: [path.join(here, '..', 'test', 'fixtures', 'harness-cli.mjs'), '@' + scenarioFile, record], dir: harness } });
+const adapter={id:'claude',label:'Claude',safetyLabel:'fenced',async *startTurn(){throw Error('Unexpected tool-less turn');}};
+const descriptor=descriptorFromAdapter(adapter,{bridges:{'investigate-read':true},detect:async()=>({available:true,reason:null})});
+const registry=new ProviderRegistry([descriptor]), config=process.env.AITIARCH_CONFIG_DIR;
+const preferences=compatibleDefaults([descriptor]);
+preferences.providers.claude.roles['investigate-read']={model:'sonnet',effort:'low'};
+await saveMachineSetup(config,preferences);
+const app = createApp({ store, watcher, distDir: path.join(here, '../dist'), provider, council:{adapters:[adapter],routing:()=>registry.snapshot(config)}, harness: { command: process.execPath, prefixArgs: [path.join(here, '..', 'test', 'fixtures', 'harness-cli.mjs'), '@' + scenarioFile, record], dir: harness,effortSupported:true } });
 const browser = await (async () => { for (const channel of ['msedge', 'chrome']) { try { return await chromium.launch({ channel, headless: true }); } catch { /* next */ } } throw new Error('Edge or Chrome is required.'); })();
 const external = [], report = {};
 try {
@@ -55,6 +63,7 @@ try {
   await composer.fill('How does login work?'); await page.keyboard.press('Enter');
   const card = panel.getByRole('group', { name: 'Plan for this conversation' }); await card.waitFor();
   const cardText = await card.innerText();
+  assert.match(await card.locator('[data-plan="settings"]').innerText(), /Claude.*sonnet.*low/);
   assert.match(await card.locator('[data-plan="excluded"]').innerText(), /\.env/, 'the plan lists excluded file names');
   assert.doesNotMatch(cardText, /CANARY-INVUI/, 'excluded file contents never reach the plan');
   for (const s of ['What Claude may do', 'Repo folder', repo, 'Cost cap per message', 'Read, Grep and Glob']) assert(cardText.includes(s), 'plan card shows ' + s);
@@ -68,7 +77,9 @@ try {
   const session = await page.evaluate(() => document.querySelector('#chat-panel .chat-pick-trigger').dataset.session);
   const refused = await page.evaluate(async (s) => (await fetch('/api/conversation/turn', { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Aitiarch': '1' }, body: JSON.stringify({ conversationId: s, path: 'plan.md', text: 'q', attachments: { repo: true } }) })).json(), session);
   assert.equal(refused.error, 'plan_required', 'the server refuses a turn before the card is approved');
+  await page.setViewportSize({width:1280,height:900});
   await panel.screenshot({ path: path.join(output, 'investigate-plan-card.png') });
+  await page.setViewportSize({width:1440,height:900});
   await card.getByRole('button', { name: 'Approve and send' }).focus(); assert.equal(await focused(), 'Approve and send'); await page.keyboard.press('Enter');
 
   // The trail: thinking (collapsed), Glob, Grep, a denied Read, a Read; the answer with file claim chips; an unknown event is tolerated.

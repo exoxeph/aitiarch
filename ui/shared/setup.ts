@@ -7,7 +7,7 @@ export const ROLE_REGISTRY=[
  {id:'invoked',label:'Think and Ask',capability:'invoked',multiple:false,modelSettings:true,help:'Answers questions about selected text.'},
  {id:'thread-reply',label:'Thread replies',capability:'thread-reply',multiple:false,modelSettings:true,help:'Answers follow-ups in note threads.'},
  {id:'council',label:'Council participants',capability:'council',multiple:true,modelSettings:true,help:'Answers the same question independently.'},
- {id:'investigate-read',label:'Investigate',capability:'investigate-read',multiple:false,modelSettings:false,help:'Reads approved project files.',routingNote:'This feature uses the startup Claude configuration. Role assignment is unavailable here.'},
+ {id:'investigate-read',label:'Investigate',capability:'investigate-read',multiple:false,modelSettings:true,help:'Reads approved project files.'},
  {id:'skill-diagram',label:'Skill diagrams',capability:'skill-diagram',multiple:false,modelSettings:true,help:'Creates diagrams using the Skill workflow.'},
 ] as const;
 export type RoleDefinition=typeof ROLE_REGISTRY[number];

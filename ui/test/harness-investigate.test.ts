@@ -28,7 +28,7 @@ async function setup(){
  await writeFile(path.join(repo,'.env'),'KEY=CANARY-ENV-INV\n');await writeFile(path.join(repo,'a.private.md'),'CANARY-PRIV-INV\n');
  await writeFile(path.join(notebook,'plan.md'),'# Plan\n\nKeep this.\n');
  const index=await SessionIndex.open(harness);
- const service=(scenario='inv-ok',limits={})=>new InvestigateService({index,dir:harness,notebook,command:process.execPath,prefixArgs:[cli,scenario,record],limits});
+ const service=(scenario='inv-ok',limits={},investigateSettings?:import('../server/harness/conversation.ts').GateConfig['investigateSettings'])=>new InvestigateService({index,dir:harness,notebook,command:process.execPath,prefixArgs:[cli,scenario,record],limits,investigateSettings,effortSupported:true});
  const run=async(svc:InvestigateService,id:string,q='How does login work?')=>{const events:InvestigateEvent[]=[];await svc.send(id,q,e=>events.push(e));return {events,complete:events.find(e=>e.type==='complete') as Extract<InvestigateEvent,{type:'complete'}>|undefined,error:events.find(e=>e.type==='error') as Extract<InvestigateEvent,{type:'error'}>|undefined};};
  const calls=async()=>(await readFile(record,'utf8')).trim().split('\n').map(l=>JSON.parse(l));
  return {repo,notebook,harness,index,service,run,calls};
@@ -114,6 +114,22 @@ it('Investigate reply survives a taken-over ledger lock with visible retry and l
 });
 
 describe('investigation sessions',()=>{
+ it('rejects a stale legacy card and send and launches only the reviewed model and effort',async()=>{
+  const {repo,service,run,calls}=await setup();
+  let current={key:'a'.repeat(64),provider:'claude' as const,model:'sonnet',effort:'low'};
+  const svc=service('inv-ok',{},async()=>current);
+  const {s,p}=await confirmed(svc,repo);
+  expect(p.investigateSettings).toEqual(current);
+  current={...current,key:'b'.repeat(64),model:'opus'};
+  await expect(svc.confirm(s.id,p.planHash)).rejects.toMatchObject({code:'plan_changed'});
+  await expect(run(svc,s.id)).rejects.toMatchObject({code:'plan_changed'});
+  const updated=await svc.plan(s.id);
+  await svc.confirm(s.id,updated.planHash);
+  expect((await run(svc,s.id)).complete).toBeDefined();
+  const [{args}]=await calls();
+  expect(args.slice(args.indexOf('--model'),args.indexOf('--model')+2)).toEqual(['--model','opus']);
+  expect(args.slice(args.indexOf('--effort'),args.indexOf('--effort')+2)).toEqual(['--effort','low']);
+ });
  it('refuses a folder that is not a git repo or is reached through a link',async()=>{
   const t=await setup(),svc=t.service(),plain=await temp('aitiarch-inv-plain-'),link=path.join(await temp('aitiarch-inv-link-'),'r');await symlink(t.repo,link,'junction');
   await expect(svc.create('x',plain)).rejects.toThrow('repo');await expect(svc.create('x',link)).rejects.toThrow('repo');await expect(svc.create('x','relative/path')).rejects.toThrow('repo');

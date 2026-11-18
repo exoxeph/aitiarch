@@ -16,6 +16,10 @@ import {QuestionStore} from '../server/harness/questions.ts';
 import {SessionIndex} from '../server/harness/session-index.ts';
 import {ConversationGate,GateRefusal,carriedPairs,projectRepo} from '../server/harness/conversation.ts';
 import type {ChatEvent} from '../shared/chat.ts';
+import {createElement} from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
+import {PlanCard} from '../src/chat/PlanCard.tsx';
+import type {GateConfig} from '../server/harness/conversation.ts';
 
 // One conversation entry point against the synthetic CLI (no model): each profile gets exactly its flags, anything beyond the grant is refused before the CLI runs, a profile change starts a fresh CLI
 // session with the app's own questions and final answers carried over, and the ledger records the profile and counts, never content. Synthetic temp folders only.
@@ -24,18 +28,18 @@ const here=path.dirname(fileURLToPath(import.meta.url)),cli=path.join(here,'fixt
 const dirs:string[]=[];afterEach(async()=>{for(const d of dirs.splice(0))await rm(d,{recursive:true,force:true,maxRetries:5,retryDelay:100});});
 const temp=async(n:string)=>{const d=await mkdtemp(path.join(os.tmpdir(),n));dirs.push(d);return d;};
 
-async function setup(){
+async function setup(investigateSettings?:GateConfig['investigateSettings']){
  const notebook=await temp('aitiarch-conv-nb-'),repo=await temp('aitiarch-conv-repo-'),harness=await temp('aitiarch-conv-h-'),record=path.join(await temp('aitiarch-conv-rec-'),'calls.jsonl');
  execFileSync('git',['init','-q'],{cwd:notebook,stdio:'pipe'});await writeFile(path.join(notebook,'.gitignore'),'/chat/\n');await writeFile(path.join(notebook,'plan.md'),'# Plan\n\nA unique sentence for the session.\n');
  execFileSync('git',['init','-q'],{cwd:repo,stdio:'pipe'});await mkdir(path.join(repo,'src'));
  await writeFile(path.join(repo,'src','login.js'),"const sessions = new Map();\nfunction login(name) { return sessions.get(name); }\n");await writeFile(path.join(repo,'README.md'),'# Fixture\n');await writeFile(path.join(repo,'.env'),'KEY=CANARY-ENV\n');
  await writeFile(path.join(harness,'repo.json'),JSON.stringify({v:1,repo})); // the project's chosen repo, placed before the index opens
  const store=await Store.open(notebook),ink=await InkStore.open(notebook),index=await SessionIndex.open(harness),questions=new QuestionStore(harness);
- const gate=new ConversationGate({index,notebook:store.rootReal,repo:()=>projectRepo(harness)});
+ const gate=new ConversationGate({index,notebook:store.rootReal,repo:()=>projectRepo(harness),investigateSettings});
  const runner=new ClaudeSessionRunner({command:process.execPath,prefixArgs:[cli,'ok',record],dir:harness});
  let runtime!:ChatRuntime,invest!:InvestigateService;
  const carried=(s:Parameters<typeof carriedPairs>[0])=>carriedPairs(s,questions,runtime,invest);
- invest=new InvestigateService({index,dir:harness,notebook:store.rootReal,command:process.execPath,prefixArgs:[cli,'inv-ok',record],gate,carried});
+ invest=new InvestigateService({index,dir:harness,notebook:store.rootReal,command:process.execPath,prefixArgs:[cli,'inv-ok',record],gate,carried,investigateSettings,effortSupported:true});
  runtime=new ChatRuntime(store,ink,new ChatStore(notebook),new FakeChatProvider(),[],undefined,{index,runner,questions,gate,carried});
  const calls=async()=>(await readFile(record,'utf8').catch(()=>'')).trim().split('\n').filter(Boolean).map(l=>JSON.parse(l));
  let n=0;
@@ -54,6 +58,31 @@ const flag=(c:any,f:string)=>c.args[c.args.indexOf(f)+1];
 const refused=async(p:Promise<unknown>)=>{try{await p;}catch(e){if(e instanceof GateRefusal)return e;throw e;}throw new Error('expected a refusal');};
 
 describe('each profile gets exactly its flags and nothing more',()=>{
+ it('shows pinned settings beside the cap, then launches and resumes the exact reviewed model',async()=>{
+  let current={provider:'claude' as const,key:'a'.repeat(64),model:'sonnet',effort:'low'};
+  const t=await setup(async()=>current),s=await t.chat(),att={repo:true};
+  const plan=await t.gate.plan({conversation:s.id,attachments:att,hasDiagrams:false});
+  const noop=()=>{};
+  const html=renderToStaticMarkup(createElement(PlanCard,{plan,busy:false,onApprove:noop,onCancel:noop,onReplan:noop}));
+  expect(html).toMatch(/Claude.*sonnet.*low.*Cost cap per message/);
+  await t.approve(s,att);
+  await t.turn(s,'First reviewed question',att);
+  await t.turn(s,'Second question',att);
+  current={...current,key:'b'.repeat(64),model:'opus'};
+  expect((await refused(t.turn(s,'Stale question',att))).code).toBe('plan_changed');
+  await t.approve(s,att);
+  await t.turn(s,'New context question',att);
+  const [first,resume,fresh]=await t.calls();
+  expect([flag(first,'--model'),flag(resume,'--model'),flag(fresh,'--model')]).toEqual(['sonnet','sonnet','opus']);
+  expect(flag(fresh,'--effort')).toBe('low');
+  expect(flag(fresh,'--max-budget-usd')).toBe('0.50');
+  expect(flag(resume,'--resume')).toBe(flag(first,'--session-id'));
+  expect(fresh.args).not.toContain('--resume');
+  expect(fresh.addendum).toContain('First reviewed question');
+  expect(fresh.addendum).not.toContain('Stale question');
+  const ledger=await new LedgerStore(t.notebook).read();
+  expect(ledger.events.filter(event=>event.event==='investigate_turn').map(event=>event.turn?.reportedModel)).toEqual(['fixture-reported-model','fixture-reported-model','fixture-reported-model']);
+ });
  it('notes only: no tools, nothing else',async()=>{
   const t=await setup(),s=await t.chat();await t.turn(s,'Where does the data live?');
   const [c]=await t.calls();

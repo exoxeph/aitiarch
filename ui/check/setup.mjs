@@ -261,8 +261,8 @@ try {
  const readCount = setupRequests.length;
  await setupPane.getByText('C:/synthetic/claude.exe',{exact:true}).waitFor();
  await setupPane.getByText(/untested version: tested 2.1.205/).waitFor();
- await setupPane.getByText(/This feature uses the startup Claude configuration/).first().waitFor();
  const investigate=setupPane.getByRole('combobox',{name:'Investigate',exact:true});
+ assert.equal(await investigate.isEnabled(),true);
  const unavailableCodex=investigate.locator('option[value="codex"]');
  assert.equal(await unavailableCodex.isDisabled(),true);
  assert.match(await unavailableCodex.textContent(),/Needs the approved read-only project workflow/);
@@ -299,6 +299,19 @@ try {
  await normalRole.getByRole('button',{name:'Model: Claude · Haiku'}).waitFor();
  await normalRole.getByRole('button',{name:'Reset to default'}).click();
  await normalRole.getByRole('button',{name:'Model: Claude · Default'}).waitFor();
+ const investigateRole=setupPane.locator('[data-role="investigate-read"]');
+ await investigateRole.getByRole('button',{name:'Model: Claude · Default'}).click();
+ await investigateRole.getByRole('menuitemradio',{name:'haiku',exact:true}).click();
+ await investigateRole.getByRole('button',{name:'Model: Claude · Haiku'}).waitFor();
+ await page.reload();
+ await page.getByRole('button',{name:'Notes menu',exact:true}).click();
+ await page.getByRole('button',{name:'AI settings',exact:true}).click();
+ await setupTab.click();
+ await investigateRole.getByRole('button',{name:'Model: Claude · Haiku'}).waitFor();
+ await investigateRole.scrollIntoViewIfNeeded();
+ await shot('investigate-setup-1280.png');
+ await investigateRole.getByRole('button',{name:'Reset to default'}).click();
+ await investigateRole.getByRole('button',{name:'Model: Claude · Default'}).waitFor();
 
  await settings.getByRole('tab',{name:'Text size'}).click();
  await settings.getByText('Choose the model in the chat box.').waitFor();

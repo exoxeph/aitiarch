@@ -76,8 +76,8 @@ export class SessionIndex {
  rename(id:string,label:string){const clean=cleanLabel(label);if(!clean)return Promise.reject(new SessionIndexError('Invalid label.'));
   return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');s.label=clean;return {...s};});}
  /** The user confirmed this investigation's scope and cost plan (by its hash). */
- confirm(id:string,planHash:string,budgetUsd?:number){if(!/^[0-9a-f]{64}$/.test(planHash)||budgetUsd!==undefined&&!(budgetUsd>0&&budgetUsd<=5))return Promise.reject(new SessionIndexError('Invalid plan.'));
-  return this.change(all=>{const s=all.find(x=>x.id===id);if(!s||s.mode!=='investigate')throw new SessionIndexError('No such investigation.');s.confirmed=planHash;if(budgetUsd!==undefined)s.budgetUsd=budgetUsd;return {...s};});}
+ confirm(id:string,planHash:string,budgetUsd?:number,settingsKey?:string){if(!/^[0-9a-f]{64}$/.test(planHash)||budgetUsd!==undefined&&!(budgetUsd>0&&budgetUsd<=5)||settingsKey!==undefined&&!/^[0-9a-f]{64}$/.test(settingsKey))return Promise.reject(new SessionIndexError('Invalid plan.'));
+  return this.change(all=>{const s=all.find(x=>x.id===id);if(!s||s.mode!=='investigate')throw new SessionIndexError('No such investigation.');s.confirmed=planHash;s.investigateSettingsKey=settingsKey;if(budgetUsd!==undefined)s.budgetUsd=budgetUsd;return {...s};});}
  /** A run stopped on its cost cap or its safety backstop: the next turn needs a fresh confirmed plan. Persisted, so it also holds after a restart. */
  unconfirm(id:string){return this.change(all=>{const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');delete s.confirmed;return {...s};});}
  /** Forgets a session. Its CLI transcript is removed separately (transcripts.ts). */
@@ -102,17 +102,18 @@ export class SessionIndex {
   * already ran at exactly this profile is resumed; any change (up or down) starts a fresh one under a new id, and the old id is kept so Delete can remove it.
   * `fresh` is true when something ran before (the app's own history is then carried over); a first turn simply starts.
   */
- ensureCli(id:string,profile:Profile,cwd:string):Promise<{id:string;resume:boolean;fresh:boolean}>{
+ ensureCli(id:string,profile:Profile,cwd:string,settingsKey?:string):Promise<{id:string;resume:boolean;fresh:boolean}>{
   return this.change(all=>{
    const s=all.find(x=>x.id===id);if(!s)throw new SessionIndexError('No such session.');
    const plan=resumePlan(s.cli,s.turns,profile,s.mode==='investigate'?'investigate':'notes');
    // The CLI files a session under its working folder: a different folder (another set of attached files) cannot resume it either.
    if(!plan.fresh&&s.cli?.cwd&&s.cli.cwd!==cwd)plan.fresh=true;
-   if(!plan.fresh){s.cli??={id:s.id,profile,turns:s.turns};s.cli.cwd??=cwd;return {id:s.cli.id,resume:plan.resume,fresh:false};}
+   if(profile==='investigate'&&settingsKey!==s.cli?.settingsKey&&(s.cli||s.turns>0))plan.fresh=true;
+   if(!plan.fresh){s.cli??={id:s.id,profile,turns:s.turns,settingsKey};s.cli.cwd??=cwd;return {id:s.cli.id,resume:plan.resume,fresh:false};}
    const ran=!!s.cli||s.turns>0;
    if(s.cli)(s.past??=[]).push({id:s.cli.id,...(s.cli.cwd?{cwd:s.cli.cwd}:{})});else if(s.turns>0)(s.past??=[]).push({id:s.id});
    if(s.past&&s.past.length>50)s.past.splice(0,s.past.length-50);
-   const cliId=ran?randomUUID():s.id;s.cli={id:cliId,profile,turns:0,cwd};
+   const cliId=ran?randomUUID():s.id;s.cli={id:cliId,profile,turns:0,cwd,settingsKey};
    return {id:cliId,resume:false,fresh:ran};
   });
  }

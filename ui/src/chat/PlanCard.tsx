@@ -3,6 +3,7 @@ import type {ConversationPlan} from '../../server/harness/conversation.ts';
 import type {CopyExclusions} from '../../shared/harness.ts';
 import {reviewDiagramsText,withheldText} from './diagram-words.ts';
 import {CARRIED_TEXT,FILE_REFUSAL_TEXT,PROFILE_TEXT} from './conversation-model.ts';
+import {selectionLabel} from '../../shared/model-settings.ts';
 
 /**
  * The scope and cost card of a conversation, in the Investigate card's look: what Claude may do, the repo and the files (each refused one with its reason), the diagrams that are withheld
@@ -25,6 +26,7 @@ export function PlanCard({plan,resume,busy,onApprove,onReplan,onCancel}:{plan:Co
    {plan.files.length>0&&<><dt>Files</dt><dd><ul className="chat-plan-files">{plan.files.map(f=><li key={f.path} data-file={f.path} data-status={f.ok?'ok':'refused'}><code>{f.path}</code>{f.ok?'':` refused: ${FILE_REFUSAL_TEXT[f.reason??'missing']}`}</li>)}</ul></dd></>}
    {plan.openDiagrams&&plan.openDiagrams.length>0&&<><dt>Diagrams</dt><dd className="chat-plan-diagrams" data-plan="diagrams">{reviewDiagramsText({diagrams:plan.openDiagrams,diagramCapUsd:plan.budgetUsd})}. It opens one only when your question needs it.</dd></>}
    {plan.withheldDiagrams&&plan.withheldDiagrams.items.length>0&&<><dt>Withheld</dt><dd><ul className="chat-plan-withheld">{plan.withheldDiagrams.items.map(d=><li key={d.n} data-diagram={d.n} data-status="withheld">{withheldText({n:d.n,title:d.title,why:d.why??plan.withheldDiagrams!.reason??'withheld'})}</li>)}</ul></dd></>}
+   {plan.investigateSettings&&<><dt>Provider and settings</dt><dd data-plan="settings">Claude · {selectionLabel(plan.investigateSettings)}{plan.investigateSettings.notice&&<p role="status">{plan.investigateSettings.notice}</p>}</dd></>}
    <dt><label htmlFor="chat-plan-cap">Cost cap per message</label></dt>
    <dd className="inv-cap"><span aria-hidden="true">$</span><input id="chat-plan-cap" type="number" inputMode="decimal" min="0.05" max="5" step="0.05" value={cap} onChange={e=>setCap(e.target.value)}
      onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();if(capChanged&&capOk)onReplan(value);}}}/>

@@ -71,7 +71,7 @@ export interface AppOptions {
   /** Where the Skill library looks. Tests pass temp folders; the real app uses the usual places under your home folder and this project. */
   skillRoots?: SkillRoot[];
   /** Harness chat sessions through the Claude Code CLI. `dir` (tests) overrides the per-project folder under local app data. */
-  harness?: {command:string;prefixArgs?:string[];model?:string;dir?:string;/** The folder whose .claude holds the CLI's transcripts (default: the user's home). Tests pass a fake one. */home?:string};
+  harness?: {command:string;prefixArgs?:string[];model?:string;effortSupported?:boolean;dir?:string;/** The folder whose .claude holds the CLI's transcripts (default: the user's home). Tests pass a fake one. */home?:string};
 }
 
 export const CSP = [
@@ -200,9 +200,19 @@ export function createApp(opts: AppOptions) {
   const chatRef=(()=>{let resolve!:(r:ChatRuntime)=>void;const promise=new Promise<ChatRuntime>(r=>{resolve=r;});return {promise,resolve};})();
   const harnessReady=opts.harness?SessionIndex.open(opts.harness.dir??harnessDirectory(store.rootReal)).then(async index=>{const h=opts.harness!;await sweepStaleTurnFolders(index.dir).catch(()=>{}); /* a turn that was cut off leaves its notes in a turn-* folder: clear the old ones when the project opens */const runner=new ClaudeSessionRunner({command:h.command,prefixArgs:h.prefixArgs,model:h.model,dir:index.dir});
     // The one decision point for what a conversation may do, and the app's own earlier questions and final answers (for a fresh CLI session after its profile changed).
-    const questions=new QuestionStore(index.dir),gate=new ConversationGate({index,notebook:store.rootReal,repo:()=>projectRepo(index.dir),notes:async()=>{const out:string[]=[],walk=(n:{path:string;type:string;children?:any[]})=>{if(n.type==='file'&&/\.md$/i.test(n.path))out.push(n.path);for(const c of n.children??[])walk(c);};walk(await store.tree());return out;}});
+    const routing=opts.council?.routing;
+    const investigateSettings=routing?async():Promise<import('./harness/conversation.ts').InvestigateSettings>=>{
+     const snapshot=await routing(),selected=snapshot.resolveRole('investigate-read');
+     if('available' in selected)throw new GateRefusal('investigate_unavailable',{message:selected.reason});
+     if(selected.id!=='claude')throw new GateRefusal('investigate_unavailable',{message:'The configured Investigate provider has no read-only launcher.'});
+     const key=snapshot.contextKey('investigate-read');
+     if(!snapshot.currentContextKey||await snapshot.currentContextKey('investigate-read')!==key)throw new GateRefusal('plan_changed',{message:'Investigate settings changed. Review the plan again.'});
+     const selection=selected.selection??{model:null,effort:null};
+     return {key,provider:selected.id,...selection,...(snapshot.investigateModelNotice?{notice:snapshot.investigateModelNotice}:{})};
+    }:undefined;
+    const questions=new QuestionStore(index.dir),gate=new ConversationGate({index,notebook:store.rootReal,investigateSettings,repo:()=>projectRepo(index.dir),notes:async()=>{const out:string[]=[],walk=(n:{path:string;type:string;children?:any[]})=>{if(n.type==='file'&&/\.md$/i.test(n.path))out.push(n.path);for(const c of n.children??[])walk(c);};walk(await store.tree());return out;}});
     const carried=async(s:import('../shared/harness.ts').HarnessSession):Promise<{question:string;answer:string}[]>=>carriedPairs(s,questions,await chatRef.promise,await investigateRef.promise);
-    const investigate=new InvestigateService({index,dir:index.dir,notebook:store.rootReal,command:h.command,prefixArgs:h.prefixArgs,model:h.model,gate,carried});investigateRef.resolve(investigate);
+    const investigate=new InvestigateService({index,dir:index.dir,notebook:store.rootReal,command:h.command,prefixArgs:h.prefixArgs,model:h.model,effortSupported:h.effortSupported,investigateSettings,gate,carried});investigateRef.resolve(investigate);
     return {index,runner,questions,version:()=>runner.version(), // the CLI's version, for the ledger at a conversation's first turn and for Settings
     investigate,gate,carried};}):Promise.resolve(null);
   // Council's app-owned conversation index needs no CLI or transcript access.
@@ -403,7 +413,7 @@ export function createApp(opts: AppOptions) {
         if(url.pathname==='/api/harness/investigate/turns')return json(res,200,{turns:await h.investigate.turns(session)});
         if(url.pathname==='/api/harness/investigate/status')return json(res,200,{needsPlan:await h.investigate.needsPlan(session)});
         if(url.pathname==='/api/harness/investigate/excerpt')return json(res,200,await h.investigate.excerpt(session,q.get('path'),Number(q.get('line'))));
-      }catch(e){if(e instanceof InvestigateError)return json(res,409,{error:e.code,message:'Investigation: '+e.code.replace(/_/g,' ')+'.'});throw e;}
+      }catch(e){if(e instanceof GateRefusal)return json(res,409,{error:e.code,message:e.message});if(e instanceof InvestigateError)return json(res,409,{error:e.code,message:'Investigation: '+e.code.replace(/_/g,' ')+'.'});throw e;}
     }
     // The questions asked in this note's named conversations, by message id, so a reloaded panel can show them.
     // A named conversation's whole history by its id: its saved replies (from the chat record of the note it was started on, in order), its questions, its counters and the label. It does
@@ -470,6 +480,7 @@ export function createApp(opts: AppOptions) {
         }
       }catch(e){
         if(e instanceof SessionIndexError)return json(res,400,{error:'invalid_session',message:e.message});
+        if(e instanceof GateRefusal)return json(res,409,{error:e.code,message:e.message});
         if(e instanceof InvestigateError){if(res.headersSent)return res.end();return json(res,409,{error:e.code,message:'Investigation: '+e.code.replace(/_/g,' ')+'. Nothing was run.'});}
         throw e;
       }
@@ -527,7 +538,7 @@ export function createApp(opts: AppOptions) {
         }
       }catch(e){
         if(res.headersSent)return res.end();
-        if(e instanceof GateRefusal)return json(res,409,{error:e.code,message:'This conversation can not do that yet ('+e.code.replace(/_/g,' ')+'). Nothing was sent.',...(e.plan?{plan:e.plan}:{}),...(e.files?{files:e.files}:{})});
+        if(e instanceof GateRefusal)return json(res,409,{error:e.code,message:e.code==='investigate_unavailable'?e.message:'This conversation can not do that yet ('+e.code.replace(/_/g,' ')+'). Nothing was sent.',...(e.plan?{plan:e.plan}:{}),...(e.files?{files:e.files}:{})});
         if(e instanceof SessionIndexError)return json(res,400,{error:'invalid_session',message:e.message});
         if(e instanceof InvestigateError)return json(res,409,{error:e.code,message:'Investigation: '+e.code.replace(/_/g,' ')+'. Nothing was run.'});
         if(e instanceof ChatError)return json(res,409,{error:e.code,message:CHAT_MESSAGES[e.code]});

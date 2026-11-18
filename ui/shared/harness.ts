@@ -17,6 +17,7 @@ export interface HarnessSession {
  repo?:string;
  /** An investigation: the hash of the scope and cost plan the user confirmed. No turn runs without it. */
  confirmed?:string;
+ investigateSettingsKey?:string;
  /** An investigation: the cost cap (dollars per question) the user confirmed. */
  budgetUsd?:number;
  /** What this conversation was approved for on its plan card (profile, files, repo, diagrams, cost cap), bound to this conversation and this project. None: notes only. */
@@ -40,19 +41,20 @@ export function validSession(v:unknown):v is HarnessSession{
   &&[s.created,s.lastUsed].every(t=>typeof t==='string'&&Number.isFinite(Date.parse(t)))&&Number.isSafeInteger(s.turns)&&s.turns>=0
   &&(s.repo===undefined||typeof s.repo==='string'&&s.repo.length<=1000)&&(s.confirmed===undefined||typeof s.confirmed==='string'&&/^[0-9a-f]{64}$/.test(s.confirmed))
   &&(s.budgetUsd===undefined||typeof s.budgetUsd==='number'&&Number.isFinite(s.budgetUsd)&&s.budgetUsd>0&&s.budgetUsd<=5)
-  &&(s.normalAnswerer===undefined||['claude','codex','kiro'].includes(s.normalAnswerer))&&(s.normalSettingsKey===undefined||typeof s.normalSettingsKey==='string'&&/^[a-f0-9]{64}$/.test(s.normalSettingsKey))&&(s.normalOneOff===undefined||s.normalOneOff===true)
+  &&validOptionalSettingsKey(s.investigateSettingsKey)&&(s.normalAnswerer===undefined||['claude','codex','kiro'].includes(s.normalAnswerer))&&(s.normalSettingsKey===undefined||typeof s.normalSettingsKey==='string'&&/^[a-f0-9]{64}$/.test(s.normalSettingsKey))&&(s.normalOneOff===undefined||s.normalOneOff===true)
   &&(s.grant===undefined||validGrantShape(s.grant))&&(s.councilGrant===undefined||validCouncilGrant(s.councilGrant))&&(s.cli===undefined||validCliShape(s.cli))
   &&(s.past===undefined||Array.isArray(s.past)&&s.past.length<=50&&s.past.every(p=>p&&validSessionId(p.id)&&(p.cwd===undefined||typeof p.cwd==='string'&&p.cwd.length<=1000)));
 }
 /** Only the shape: whether a grant belongs to this conversation and project is decided when it is used (grantFor), so a mis-bound record is refused, not lost. */
+const validOptionalSettingsKey=(v:unknown)=>v===undefined||typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 export function validGrantShape(v:unknown):v is Grant{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;const g=v as Grant,strings=(l:unknown,max:number)=>Array.isArray(l)&&l.length<=max&&l.every(x=>typeof x==='string'&&x.length<=400);
  return g.v===1&&typeof g.project==='string'&&g.project.length<=100&&validSessionId(g.session)&&isProfile(g.profile)&&strings(g.files,20)&&typeof g.repo==='boolean'&&typeof g.diagrams==='boolean'&&(g.diagramNote===undefined||typeof g.diagramNote==='string'&&g.diagramNote.length<=400)
-  &&typeof g.budgetUsd==='number'&&Number.isFinite(g.budgetUsd)&&g.budgetUsd>0&&g.budgetUsd<=5&&typeof g.confirmed==='string'&&/^[0-9a-f]{64}$/.test(g.confirmed);
+  &&validOptionalSettingsKey(g.investigateSettingsKey)&&typeof g.budgetUsd==='number'&&Number.isFinite(g.budgetUsd)&&g.budgetUsd>0&&g.budgetUsd<=5&&typeof g.confirmed==='string'&&/^[0-9a-f]{64}$/.test(g.confirmed);
 }
 export function validCliShape(v:unknown):v is CliSession&{cwd?:string}{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;const c=v as CliSession&{cwd?:string};
- return validSessionId(c.id)&&isProfile(c.profile)&&Number.isSafeInteger(c.turns)&&c.turns>=0&&(c.cwd===undefined||typeof c.cwd==='string'&&c.cwd.length<=1000);
+ return validSessionId(c.id)&&isProfile(c.profile)&&Number.isSafeInteger(c.turns)&&c.turns>=0&&validOptionalSettingsKey(c.settingsKey)&&(c.cwd===undefined||typeof c.cwd==='string'&&c.cwd.length<=1000);
 }
 
 /**

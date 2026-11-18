@@ -14,6 +14,22 @@ afterEach(()=>{vi.unstubAllEnvs();vi.restoreAllMocks();});
 const adapter=(id:'claude'|'codex'|'kiro',onRun=()=>{}):TurnAdapter=>({id,label:id,safetyLabel:id==='claude'?'fenced':id==='codex'?'contained':'host-gated',async *startTurn(){onRun();yield {type:'complete',answer:'Synthetic answer'};}});
 const descriptor=(id:'claude'|'codex'|'kiro')=>descriptorFromAdapter(adapter(id),{detect:async()=>({available:true,reason:null}),bridges:id==='claude'?{invoked:true,'thread-reply':true}:undefined});
 
+it('uses Default and explains why when an Investigate catalog choice retires',async()=>{
+ const saved=defaultMachineSetup();
+ saved.providers.claude.roles['investigate-read']={model:'retired',effort:'low'};
+ saved.providers.claude.catalogChoices={'investigate-read':'retired'};
+ await saveMachineSetup(dir,saved);
+ const d=descriptorFromAdapter(adapter('claude'),{detect:async()=>({available:true,reason:null}),bridges:{'investigate-read':true}});
+ const registry=new ProviderRegistry([d]);
+ const before=await registry.snapshot(dir,undefined,()=>({source:'cli',checkedAt:1,models:[]}));
+ expect(before.investigateModelNotice).toMatch(/no longer listed.*CLI default/);
+ expect(before.resolveRole('investigate-read')).toBe(d);
+ saved.providers.claude.roles['investigate-read']={model:null,effort:null};
+ delete saved.providers.claude.catalogChoices;
+ await saveMachineSetup(dir,saved);
+ expect(await before.currentContextKey?.('investigate-read')).not.toBe(before.contextKey('investigate-read'));
+});
+
 it('a saved role edit invalidates the old review context without starting any provider',async()=>{
  let runs=0;
  const registry=new ProviderRegistry(['claude','codex'].map(id=>descriptorFromAdapter(adapter(id as 'claude'|'codex',()=>runs++),{detect:async()=>({available:true,reason:null})})));

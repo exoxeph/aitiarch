@@ -70,18 +70,17 @@ export function createSetupHttp(options: {
    })),
    roles:ROLE_REGISTRY.map(def => {
     const role=def.id;
-    const routingNote='routingNote' in def ? def.routingNote : undefined;
     const capableProviders = capable(role);
     const providerReasons:NonNullable<SetupView['roles'][number]['providerReasons']>={};
     for(const tool of options.providers){
      const unavailable=whyUnavailable(tool,def.capability,setup);
      if(unavailable)providerReasons[tool.id]=unavailable;
     }
-    const provider = routingNote ? capableProviders.includes('claude') ? 'claude' : null : setup.roles[role];
+    const provider = setup.roles[role];
     const savedChoice = provider!==null && !setup.defaultRoles?.includes(role);
     const source = def.multiple
      ? setup.councilParticipants===undefined ? 'default' : 'saved choice'
-     : !routingNote && savedChoice ? 'saved choice' : 'default';
+     : savedChoice ? 'saved choice' : 'default';
     const eligibleParticipants = def.multiple ? enabledCouncil(setup) : undefined;
     const participants = eligibleParticipants && (setup.councilParticipants??eligibleParticipants);
     let reason = null;
@@ -89,9 +88,8 @@ export function createSetupHttp(options: {
     else if (!capableProviders.length) reason = 'No detected compatible provider can perform this role.';
     else if (provider === null) reason = 'No provider is assigned to this role.';
     else if (!capableProviders.includes(provider)) reason = 'The saved provider is unavailable for this role.';
-    else if (!routingNote && !setup.providers[provider].enabled) reason = 'The saved provider is disabled.';
-    return {role, provider, capableProviders, providerReasons, reason, source, ...(participants ? {participants,eligibleParticipants} : {}),
-     ...(routingNote ? {routingNote} : {})};
+    else if (!setup.providers[provider].enabled) reason = 'The saved provider is disabled.';
+    return {role, provider, capableProviders, providerReasons, reason, source, ...(participants ? {participants,eligibleParticipants} : {})};
    }),
    privacy:{mode:'private', sharedReady:protection.sharedReady, notice:protection.messages.join(' ')},
   };
@@ -117,8 +115,6 @@ export function createSetupHttp(options: {
    throw new SetupRequestError('Choose a whole-number font size from 14 to 24 px.');
   if ((model||assignment) && !capable(role).includes(provider))
    throw new SetupRequestError('Choose a detected compatible provider that supports this role.');
-  const routingNote = def && 'routingNote' in def ? def.routingNote : undefined;
-  if (routingNote) throw new SetupRequestError(routingNote);
   const selection=data.selection as ModelEffort|null;
   if (model && selection!==null) {
    if (!selection || typeof selection!=='object' || Array.isArray(selection))

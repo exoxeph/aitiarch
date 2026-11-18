@@ -41,6 +41,7 @@ export function providerCapabilities(id:SetupProvider,bridges:Partial<Record<'in
 }
 export interface RequestSettingsSnapshot {
  readonly skillModelNotice?:string;
+ readonly investigateModelNotice?:string;
  readonly settings:MachineSetup;
  readonly providerVersions?:Readonly<Partial<Record<SetupProvider,string>>>;
  resolveRole(role:SetupRole):RoleResolution;
@@ -109,14 +110,18 @@ export class ProviderRegistry {
   };
   const applyCatalog=(setup:MachineSetup)=>catalogFor?applyCatalogAvailability(setup,catalogFor):setup;
   const readSettings=async()=>applyCatalog(await readSavedSettings());
-  let settings:MachineSetup,fault=false,skillModelNotice:string|undefined;
+  let settings:MachineSetup,fault=false,skillModelNotice:string|undefined,investigateModelNotice:string|undefined,investigateRequestedKey:string|undefined;
   try{
    const saved=await readSavedSettings();
-   const id=saved.roles['skill-diagram'];
-   if(id&&catalogFor){
-    const requested=modelSelection(saved,'skill-diagram',id);
-    skillModelNotice=effectiveCatalogSelection(id,requested,saved.providers[id].catalogChoices?.['skill-diagram']===requested.model,catalogFor(id)).modelNotice;
-   }
+   investigateRequestedKey=settingsKey(saved,'investigate-read');
+   const modelNotice=(role:'skill-diagram'|'investigate-read')=>{
+    const id=saved.roles[role];
+    if(!id||!catalogFor)return;
+    const requested=modelSelection(saved,role,id);
+    return effectiveCatalogSelection(id,requested,saved.providers[id].catalogChoices?.[role]===requested.model,catalogFor(id)).modelNotice;
+   };
+   skillModelNotice=modelNotice('skill-diagram');
+   investigateModelNotice=modelNotice('investigate-read');
    settings=applyCatalog(saved);
   }catch{settings=defaultMachineSetup();fault=true;}
   // Capture before asynchronous metadata checks; later disk edits are a new request.
@@ -128,6 +133,11 @@ export class ProviderRegistry {
   }));
   const providerVersions=freeze(Object.fromEntries([...states].filter(([,d])=>typeof d.version==='string'&&versionParts(d.version)).map(([id,d])=>[id,d.version])) as Partial<Record<SetupProvider,string>>);
   const versionKey=(key:string,id:SetupProvider|null)=>id&&providerVersions[id]?createHash('sha256').update(JSON.stringify({key,version:providerVersions[id]})).digest('hex'):key;
+  const contextKey=(setup:MachineSetup,role:SetupRole,requested?:string,invalid=false)=>{
+   const effective=settingsKey(setup,role,invalid);
+   const key=role==='investigate-read'&&requested!==undefined?createHash('sha256').update(effective+requested).digest('hex'):effective;
+   return versionKey(key,setup.roles[role]);
+  };
   const resolve=(role:SetupRole,setup=frozen):RoleResolution=>{
    if(fault)return unavailable(role,null,'settings-unavailable','Machine setup could not be read. Fix the saved settings; no provider was selected.');
    const selected=this.resolveRole(role,setup);if('available' in selected)return selected;
@@ -149,10 +159,14 @@ export class ProviderRegistry {
   };
   const providerKey=(settings:MachineSetup,id:SetupProvider)=>versionKey(createHash('sha256').update(JSON.stringify(
    settings.councilParticipants===undefined?settings.providers[id]:{provider:settings.providers[id],participants:settings.councilParticipants})).digest('hex'),id);
-  return Object.freeze({settings:frozen,providerVersions,skillModelNotice,resolveRole:resolve,resolveParticipant:(id:SetupProvider)=>frozen.councilParticipants&&!frozen.councilParticipants.includes(id)
+  return Object.freeze({settings:frozen,providerVersions,skillModelNotice,investigateModelNotice,resolveRole:resolve,resolveParticipant:(id:SetupProvider)=>frozen.councilParticipants&&!frozen.councilParticipants.includes(id)
    ? unavailable('council',id,'role-unavailable','This provider is not selected in AI settings → Setup → Council participants.')
    : resolve('council',{...frozen,roles:{...frozen.roles,council:id}}),council,
-   contextKey:(role:SetupRole)=>versionKey(settingsKey(frozen,role,fault),frozen.roles[role]),currentContextKey:async(role:SetupRole)=>{const current=await readSettings();return versionKey(settingsKey(current,role),current.roles[role]);},
+   contextKey:(role:SetupRole)=>contextKey(frozen,role,investigateRequestedKey,fault),
+   currentContextKey:async(role:SetupRole)=>{
+    const saved=await readSavedSettings();
+    return contextKey(applyCatalog(saved),role,role==='investigate-read'?settingsKey(saved,role):undefined);
+   },
    providerKey:(id:SetupProvider)=>providerKey(frozen,id),
    currentProviderKey:async(id:SetupProvider)=>providerKey(await readSettings(),id)});
  }

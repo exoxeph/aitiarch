@@ -4,6 +4,7 @@ import path from 'node:path';
 import {isAbortCause,type AbortCause} from '../shared/chat.ts';
 import type {TurnUsage,TurnStatus} from './providers/turn.ts';
 import {validInvokedUsage,type InvokedUsage} from '../shared/invoked-usage.ts';
+import {validCatalogModelId} from '../shared/models.ts';
 export interface InvokedAudit extends InvokedUsage {status:TurnStatus;durationMs:number}
 export function validInvokedAudit(v:unknown):v is InvokedAudit {
  if(!validInvokedUsage(v))return false;const x=v as InvokedAudit;
@@ -18,10 +19,10 @@ export function validCouncilAudit(v:unknown):v is CouncilAudit{
 export interface InvestigationAudit {kind:'mother'|'agent'|'lookup';agent:'claude'|'codex'|null;filesRead:string[];durationMs:number;tokens:number|null;cost:number|null;cancelled:boolean;outcome:'completed'|'failed'|'cancelled'}
 export function validInvestigation(v:unknown):v is InvestigationAudit {if(!v||typeof v!=='object'||Array.isArray(v))return false;const x=v as InvestigationAudit;return Object.keys(x).sort().join()==='agent,cancelled,cost,durationMs,filesRead,kind,outcome,tokens'&&['mother','agent','lookup'].includes(x.kind)&&['claude','codex',null].includes(x.agent)&&Array.isArray(x.filesRead)&&x.filesRead.length<=100&&x.filesRead.every(p=>typeof p==='string'&&p.length<=400)&&[x.durationMs,x.tokens??0,x.cost??0].every(n=>typeof n==='number'&&Number.isFinite(n)&&n>=0)&&typeof x.cancelled==='boolean'&&['completed','failed','cancelled'].includes(x.outcome);}
 /** One Investigate turn that reached the CLI: what it cost, never what was asked or answered. Counts are null when the CLI reported none (a stopped turn). */
-export interface InvestigateTurnAudit {session:string;mode:'investigate';inputTokens:number|null;cachedTokens:number|null;outputTokens:number|null;costUsd:number|null;outcome:string}
+export interface InvestigateTurnAudit {session:string;mode:'investigate';inputTokens:number|null;cachedTokens:number|null;outputTokens:number|null;costUsd:number|null;outcome:string;reportedModel?:string}
 const counter=(v:unknown)=>v===null||typeof v==='number'&&Number.isFinite(v)&&v>=0;
 export function validInvestigateTurn(v:unknown):v is InvestigateTurnAudit {if(!v||typeof v!=='object'||Array.isArray(v))return false;const x=v as InvestigateTurnAudit;
- return Object.keys(x).sort().join()==='cachedTokens,costUsd,inputTokens,mode,outcome,outputTokens,session'&&x.mode==='investigate'&&typeof x.session==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(x.session)
+ return Object.keys(x).sort().join()===(Object.hasOwn(x,'reportedModel')?'cachedTokens,costUsd,inputTokens,mode,outcome,outputTokens,reportedModel,session':'cachedTokens,costUsd,inputTokens,mode,outcome,outputTokens,session')&&(!Object.hasOwn(x,'reportedModel')||validCatalogModelId(x.reportedModel))&&x.mode==='investigate'&&typeof x.session==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(x.session)
   &&[x.inputTokens,x.cachedTokens,x.outputTokens,x.costUsd].every(counter)&&typeof x.outcome==='string'&&/^[a-z_]{1,24}$/.test(x.outcome);}
 /** One diagram the model opened with Read in a conversation turn: which diagram (D<n>), its name in the assets folder, the SHA-256 and size of the copy it read, and the note it is in. Never the picture. */
 export interface DiagramReadAudit {id:string;asset:string;hash:string;bytes:number;note:string}

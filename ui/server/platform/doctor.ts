@@ -41,7 +41,7 @@ export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
  const roles=await Promise.all(ROLE_REGISTRY.map(async({id:role,capability,multiple})=>{
   const id=setup?.roles[role]??null,p=providers.find(p=>p.id===id);
   const capable=id&&providerCapabilities(id,{invoked:true,'thread-reply':true,'investigate-read':true,'skill-diagram':true})[capability];
-  const effective=role==='skill-diagram'&&setup&&id&&p&&capable?(()=>{
+  const effective=(role==='skill-diagram'||role==='investigate-read')&&setup&&id&&p&&capable?(()=>{
    const requested=modelSelection(setup,role,id);
    return {requested,listed:setup.providers[id].catalogChoices?.[role]===requested.model};
   })():undefined;

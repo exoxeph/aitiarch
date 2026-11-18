@@ -76,7 +76,7 @@ if (args[args.indexOf('--tools') + 1] === 'Read,Grep,Glob') { // an investigatio
   out({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Sessions live in a Map. ' } } });
   out({ type: 'assistant', message: { id: 'm2', content: [{ type: 'text', text }] } });
   out({ type: 'rate_limit_event' });
-  out({ type: 'result', subtype: 'success', is_error: false, result: text, num_turns: 2, total_cost_usd: 0.0123, usage: { input_tokens: 50, cache_creation_input_tokens: 400, cache_read_input_tokens: 3000, output_tokens: 90 }, permission_denials: kind === 'inv-denied' ? [{ tool_name: 'Read', tool_input: {} }] : [] });
+  out({ type: 'result', subtype: 'success', is_error: false, result: text, num_turns: 2, total_cost_usd: 0.0123, ...(args.includes('--model') ? {model:'fixture-reported-model'} : {}), usage: { input_tokens: 50, cache_creation_input_tokens: 400, cache_read_input_tokens: 3000, output_tokens: 90 }, permission_denials: kind === 'inv-denied' ? [{ tool_name: 'Read', tool_input: {} }] : [] });
   process.exit(0);
 }
 if (args[args.indexOf('--tools') + 1] === 'Read') { // a conversation turn that may open diagram pictures: Read only, dontAsk

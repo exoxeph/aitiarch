@@ -24,6 +24,7 @@ import {snapshotDrift,syncSnapshot,SNAPSHOT_LIMITS,type Drift} from './snapshot.
 import {captureFolder,folderChanges,restoreFolder} from './tripwire.ts';
 import {activeTurnDirs} from './sweep.ts';
 import {LedgerStore,appendLedger,type InvestigateTurnAudit} from '../ledger-store.ts';
+import {validCatalogModelId} from '../../shared/models.ts';
 import type {InvestigateUsage} from '../../shared/usage.ts';
 const exec=promisify(execFile);
 const sha=(s:string)=>createHash('sha256').update(s).digest('hex');
@@ -56,7 +57,7 @@ export type InvestigateCode='not_investigation'|'invalid'|'repo'|'plan_required'
 // Display metadata only: never resolve this string or use it to decide permission.
 const displayPath=(raw:string)=>raw.replace(/[\u0000-\u001f\u007f-\u009f]/g,'').slice(0,300);
 export class InvestigateError extends Error {code:InvestigateCode;attemptedPath?:string;constructor(code:InvestigateCode,attemptedPath?:string){super(code);this.code=code;if(attemptedPath!==undefined)this.attemptedPath=displayPath(attemptedPath);}}
-export interface Plan {session:string;repo:string;files:number;bytes:number;skipped:Record<string,number>;excluded:string[];excludedFromCopy?:import('../../shared/harness.ts').CopyExclusions;budgetUsd:number;turnLimit:number;snapshotHash:string;planHash:string}
+export interface Plan {session:string;repo:string;files:number;bytes:number;skipped:Record<string,number>;excluded:string[];excludedFromCopy?:import('../../shared/harness.ts').CopyExclusions;budgetUsd:number;turnLimit:number;snapshotHash:string;planHash:string;investigateSettings?:InvestigateSettings}
 export interface ToolStep {tool:string;target:string;ok:boolean|null;/** Sanitised requested string, display only; never a read target. */attemptedPath?:string;/** Only a real permission denial by the CLI's rules. */denial?:string;/** Any other tool error (a path that does not exist, a directory read as a file...), cleaned of the copy's folder and redacted. */error?:string;/** The repo-relative path the call named, when it named one. */path?:string;/** Lines in the tool's result (the result itself never leaves the server). */lines?:number}
 /** What a turn had done when it was stopped. `text` is only what was written after the last tool call (the answer so far, often empty); the
  *  narration before the calls is in `trail`, in order. */
@@ -91,7 +92,7 @@ export class InvestigateStream {
  private decoder=new StringDecoder('utf8');private pending='';private inited=false;private ids=new Set<string>();private byId=new Map<string,number>();private o:StreamHooks;
  private requestedPaths=new Map<number,string>();
  /** What the CLI reported at the end of the run (tokens and cost), also when the run stopped on the cost cap. Null when it never got that far. */
- reported:{usage:Record<string,unknown>|null;cost:number|null}|null=null;
+ reported:{usage:Record<string,unknown>|null;cost:number|null;model?:string}|null=null;
  readonly steps:ToolStep[]=[];unknown=0;result:{text:string;usage:Record<string,unknown>|null;cost:number|null;turns:number;denials:string[]}|null=null;
  constructor(o:StreamHooks){this.o=o;}
  /** Model turns so far: one per distinct assistant message. */
@@ -148,7 +149,7 @@ export class InvestigateStream {
   }
   if(t==='result'){
    const cost=typeof e.total_cost_usd==='number'&&Number.isFinite(e.total_cost_usd)?e.total_cost_usd:null;
-   this.reported={usage:e.usage&&typeof e.usage==='object'?e.usage:null,cost};
+   this.reported={usage:e.usage&&typeof e.usage==='object'?e.usage:null,cost,...(validCatalogModelId(e.model)?{model:e.model}:{})};
    if(e.subtype!=='success'||e.is_error===true||typeof e.result!=='string')throw new InvestigateError(/budget/i.test(st)?'budget':'provider_failed');
    this.result={text:e.result,usage:e.usage&&typeof e.usage==='object'?e.usage:null,cost,turns:Number.isSafeInteger(e.num_turns)?e.num_turns:this.turns,
     denials:(Array.isArray(e.permission_denials)?e.permission_denials:[]).map((d:any)=>String(d?.tool_name??'?').slice(0,40))};
@@ -167,13 +168,15 @@ function addTurn(sum:InvestigateUsage,t:InvestigateTurnAudit){
 }
 const randomId=()=>'inv-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);
 
-export interface InvestigateConfig {index:SessionIndex;dir:string;notebook:string;command:string;prefixArgs?:string[];model?:string;limits?:Partial<typeof INVESTIGATE_LIMITS>;
+type InvestigateSettings=import('./conversation.ts').InvestigateSettings;
+export interface InvestigateConfig {index:SessionIndex;dir:string;notebook:string;command:string;prefixArgs?:string[];model?:string;effortSupported?:boolean;limits?:Partial<typeof INVESTIGATE_LIMITS>;
+ investigateSettings?:()=>Promise<InvestigateSettings>;
  /** The decision point for what a conversation may do. Absent: an investigation runs on its confirmed plan alone (the older behaviour). */
  gate?:ConversationGate;
  /** Earlier questions and final answers of a conversation, for a fresh CLI session after its profile changed. */
  carried?:(session:HarnessSession)=>Promise<{question:string;answer:string}[]>}
 /** What one run needs, whichever way it was authorised: an older confirmed investigation (the whole repo) or a granted conversation (the repo, or just the attached files). */
-interface RunSpec {id:string;repo:string;/** Only these repo files are in the copy; absent: the whole repo. */files?:string[];budgetUsd:number;
+interface RunSpec {id:string;repo:string;/** Only these repo files are in the copy; absent: the whole repo. */files?:string[];budgetUsd:number;investigateSettings?:InvestigateSettings;
  /** Called when a run stops on its cost cap or the safety backstop: the next turn needs the card again. */onCapStop:()=>Promise<unknown>;
  /** The attached files the run is told to start with (the whole copy when the repo is attached too). */focus?:string[];
  /** The one line that starts the message: what was attached, and the diagrams withheld because the repo is. Never any file text. */prefix?:string}
@@ -190,9 +193,9 @@ export class InvestigateService {
   return sum;
  }
  /** One turn that reached the CLI, in the ledger and in the totals: ids, counts and cost only, never the question or the answer. */
- private async recordTurn(session:string,requestId:string,outcome:string,reported:{usage:Record<string,unknown>|null;cost:number|null}|null){
+ private async recordTurn(session:string,requestId:string,outcome:string,reported:InvestigateStream['reported']){
   const u=sessionUsage(reported?.usage??null);
-  const turn:InvestigateTurnAudit={session,mode:'investigate',inputTokens:u?.inputTokens??null,cachedTokens:u?.cachedTokens??null,outputTokens:u?.outputTokens??null,costUsd:reported?.cost??null,outcome};
+  const turn:InvestigateTurnAudit={session,mode:'investigate',inputTokens:u?.inputTokens??null,cachedTokens:u?.cachedTokens??null,outputTokens:u?.outputTokens??null,costUsd:reported?.cost??null,outcome,...(reported?.model?{reportedModel:reported.model}:{})};
   addTurn(await this.usage(),turn);
   await appendLedger(this.ledger,{id:randomUUID(),inkId:'investigate-'+session,requestId,note:'',event:'investigate_turn',at:new Date().toISOString(),turn}); // a ledger that cannot be written never fails the turn
  }
@@ -247,10 +250,15 @@ export class InvestigateService {
   if(!Number.isFinite(budget)||budget<BUDGET_MIN||budget>BUDGET_MAX)throw new InvestigateError('invalid');
   const r=await syncSnapshot(s.repo,d.files,d.manifest,undefined,this.o.notebook),capped=Math.round(budget*100)/100;
   // The cost cap is part of the plan the user confirms, so changing it changes the hash. The backstop is kept in the plan but never shown.
-  const core={repo:s.repo,files:r.files,excluded:EXCLUDED,budgetUsd:capped,turnLimit:this.limits.turns,snapshotHash:r.hash};
+  const investigateSettings=await this.o.investigateSettings?.();
+  const core={repo:s.repo,files:r.files,excluded:EXCLUDED,budgetUsd:capped,turnLimit:this.limits.turns,snapshotHash:r.hash,...(investigateSettings?{investigateSettings}:{})};
   const plan:Plan={session:id,...core,bytes:r.bytes,skipped:r.skipped,excludedFromCopy:r.excludedFromCopy,planHash:sha(JSON.stringify(core))};this.plans.set(id,plan);return plan;
  }
- async confirm(id:string,planHash:unknown){const p=this.plans.get(id);if(!p||p.planHash!==planHash)throw new InvestigateError('plan_changed');await this.o.index.confirm(id,p.planHash,p.budgetUsd);return p;}
+ async confirm(id:string,planHash:unknown){
+  const p=this.plans.get(id);
+  if(!p||p.planHash!==planHash||p.investigateSettings?.key!==(await this.o.investigateSettings?.())?.key)throw new InvestigateError('plan_changed');
+  await this.o.index.confirm(id,p.planHash,p.budgetUsd,p.investigateSettings?.key);return p;
+ }
  /** Cancel can reach the server before the turn it is for (both are requests in flight): an early cancel is kept for a few seconds and honoured
   *  as soon as that session's turn starts. */
  private early=new Map<string,number>();
@@ -259,9 +267,11 @@ export class InvestigateService {
  async send(id:string,question:unknown,emit:(e:InvestigateEvent)=>void,signal?:AbortSignal):Promise<void>{
   if(typeof question!=='string'||!question.trim()||question.length>4000)throw new InvestigateError('invalid');
   const s=await this.session(id);
+  const investigateSettings=await this.o.investigateSettings?.();
+  if(investigateSettings&&(!s.confirmed||s.investigateSettingsKey!==investigateSettings.key))throw new InvestigateError(s.confirmed?'plan_changed':'plan_required');
   if(this.o.gate){const {grant}=this.o.gate.effective(s);if(!covers(grant,needOf({files:[],repo:true},false)))throw new InvestigateError('plan_required');}
   else if(!s.confirmed)throw new InvestigateError('plan_required');
-  return this.run({id,repo:s.repo,budgetUsd:s.budgetUsd??this.limits.budgetUsd,onCapStop:()=>this.o.index.unconfirm(id)},question,emit,signal);
+  return this.run({id,repo:s.repo,budgetUsd:s.budgetUsd??this.limits.budgetUsd,investigateSettings,onCapStop:()=>this.o.index.unconfirm(id)},question,emit,signal);
  }
  /** A turn of a conversation that carries files or the repo. The gate has already decided it is covered; it runs at exactly the grant's cap, and with files only it reads a copy of just those files. */
  async sendGranted(auth:Authorized,question:unknown,emit:(e:InvestigateEvent)=>void,signal?:AbortSignal,withheld?:{n:number;title:string}[]):Promise<void>{
@@ -271,7 +281,8 @@ export class InvestigateService {
   const line=[auth.attachments.repo?'Attached this turn: the repo'+(auth.files.length?'; start with '+auth.files.join(', '):''):'Attached this turn: '+auth.files.join(', '),
    // every diagram of the note is named, each withheld with the reason, in the same words as the chat's editor line (D3 'title' withheld: <reason>.)
    ...(withheld?.length?[withheld.map(d=>`D${d.n} '${redact(d.title).replace(/[\r\n\]]/g,' ').replace(/'/g,'\u2019').slice(0,60)}' withheld: ${WITHHELD_WITH_REPO}.`).join(' ')]:[])].join('\n');
-  return this.run({id:auth.session.id,repo:auth.repo,...(scoped?{files:scoped}:{}),...(auth.files.length?{focus:auth.files}:{}),budgetUsd:auth.grant.budgetUsd,onCapStop:()=>this.o.index.clearGrant(auth.session.id),prefix:line},question,emit,signal);
+  if(this.o.investigateSettings&&!auth.investigateSettings)throw new InvestigateError('plan_required');
+  return this.run({id:auth.session.id,repo:auth.repo,...(scoped?{files:scoped}:{}),...(auth.files.length?{focus:auth.files}:{}),budgetUsd:auth.grant.budgetUsd,investigateSettings:auth.investigateSettings,onCapStop:()=>this.o.index.clearGrant(auth.session.id),prefix:line},question,emit,signal);
  }
  private async run(p:RunSpec,question:string,emit:(e:InvestigateEvent)=>void,signal?:AbortSignal):Promise<void>{
   const id=p.id;
@@ -286,7 +297,7 @@ export class InvestigateService {
    before=await captureFolder(this.o.notebook,backup);
    const cwd=await realpath(d.files);turnDir=await mkdtemp(path.join(this.o.dir,'turn-'));activeTurnDirs.add(path.resolve(turnDir));const file=path.join(turnDir,'system.md');
    // Only a CLI session that already ran at this profile in this folder is resumed; otherwise a fresh one starts and the app's own questions and final answers are carried over. The rules stay last.
-   const cli=await this.o.index.ensureCli(id,'investigate',cwd),extra:string[]=[];
+   const cli=await this.o.index.ensureCli(id,'investigate',cwd,p.investigateSettings?.key),extra:string[]=[];
    if(p.files)extra.push('This conversation attached these files, and the folder holds only them:\n'+p.files.map(f=>'- '+f).join('\n'));
    else if(p.focus?.length)extra.push('The user attached these files; start with them:\n'+p.focus.map(f=>'- '+f).join('\n'));
    const earlier=cli.fresh&&this.o.carried?buildCarriedHistory(await this.o.carried((await this.o.index.get(id))!).catch(()=>[])):'';
@@ -304,7 +315,10 @@ export class InvestigateService {
    emit({type:'start',id,profile:'investigate'});
    if(controller.signal.aborted)throw new InvestigateError('cancelled'); // cancelled before the CLI started: never start it
    await new Promise<void>((resolve,reject)=>{
-    const child=spawnInvestigateSession({provider:DEFAULT_PIPELINE_CONFIG.roles.investigate,command:this.o.command,prefixArgs:this.o.prefixArgs},{id:cli.id,resume:cli.resume,addendumFile:file,budgetUsd,...(this.o.model?{model:this.o.model}:{})},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
+    const selection=p.investigateSettings
+     ? {selection:{model:p.investigateSettings.model,effort:p.investigateSettings.effort},effortSupported:this.o.effortSupported}
+     : this.o.model?{model:this.o.model}:{};
+    const child=spawnInvestigateSession({provider:DEFAULT_PIPELINE_CONFIG.roles.investigate,command:this.o.command,prefixArgs:this.o.prefixArgs},{id:cli.id,resume:cli.resume,addendumFile:file,budgetUsd,...selection},{cwd,env:env(),detached:process.platform!=='win32'},cwd);
     let failure:InvestigateError|undefined,killing:Promise<void>=Promise.resolve(),bytes=0;
     const stop=(code:InvestigateCode,attemptedPath?:string)=>{if(failure)return;failure=new InvestigateError(code,attemptedPath);if(child.pid)killing=killTree(child.pid);};
     const timer=setTimeout(()=>stop('timeout'),this.limits.timeoutMs),onAbort=()=>stop('cancelled');controller.signal.addEventListener('abort',onAbort,{once:true});
@@ -361,5 +375,5 @@ export class InvestigateService {
  /** Removes the session's tripwire copy (Delete conversation). */
  async forget(id:string){this.plans.delete(id);this.last.delete(id);await rm(path.join(this.o.dir,'tripwire',id),{recursive:true,force:true});await rm(this.turnsFile(id),{force:true});}
  /** The plan this session last confirmed is still the one the card would show (so the UI knows whether to ask again). */
- async needsPlan(id:string){const s=await this.session(id);return !s.confirmed;}
+ async needsPlan(id:string){const s=await this.session(id);return !s.confirmed||s.investigateSettingsKey!==(await this.o.investigateSettings?.())?.key;}
 }

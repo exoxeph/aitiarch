@@ -23,6 +23,28 @@ async function setup(){
 const refused=async(p:Promise<unknown>)=>{try{await p;}catch(e){if(e instanceof GateRefusal)return e;throw e;}throw new Error('expected a refusal');};
 
 describe('a turn is authorised from what it carries and what was granted',()=>{
+ it('binds Investigate approval and authorization to the reviewed launch settings',async()=>{
+  const {index,notebook,repo,chat,turn}=await setup(),s=await chat(),t=turn(s,{repo:true});
+  let current={key:'a'.repeat(64),provider:'claude' as const,model:'sonnet',effort:'low'};
+  const gate=new ConversationGate({index,notebook,repo:async()=>repo,investigateSettings:async()=>current});
+  const first=await gate.plan(t);
+  expect(first.investigateSettings).toEqual(current);
+  await gate.approve({...t,hash:first.hash});
+  expect((await gate.authorize(t)).investigateSettings).toEqual(current);
+  current={...current,key:'b'.repeat(64),model:'opus'};
+  expect((await refused(gate.approve({...t,hash:first.hash}))).code).toBe('plan_changed');
+  expect((await refused(gate.authorize(t))).code).toBe('plan_changed');
+  expect((await gate.plan(t)).needsApproval).toBe(true);
+ });
+ it('resumes only an Investigate context with the same reviewed settings key',async()=>{
+  const {index,repo,chat}=await setup(),s=await chat();
+  const first=await index.ensureCli(s.id,'investigate',repo,'a'.repeat(64));
+  await index.touch(s.id);
+  expect(await index.ensureCli(s.id,'investigate',repo,'a'.repeat(64))).toMatchObject({id:first.id,resume:true});
+  const changed=await index.ensureCli(s.id,'investigate',repo,'b'.repeat(64));
+  expect(changed).toMatchObject({resume:false,fresh:true});
+  expect(changed.id).not.toBe(first.id);
+ });
  it('notes only needs no card',async()=>{
   const {gate,chat,turn}=await setup(),s=await chat();
   const a=await gate.authorize(turn(s,{notes:['other.md']}));expect(a.profile).toBe('notes');

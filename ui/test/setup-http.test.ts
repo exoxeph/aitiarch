@@ -137,14 +137,19 @@ describe('first-run setup endpoints', () => {
   expect(await readFile(path.join(project,'.gitignore'),'utf8')).toBe('/.aitiarch/\n');
   expect(await readFile(path.join(dir,SETUP_FILE))).toEqual(before);
  });
- it('explains roles still bound to the startup Claude harness', async () => {
-  const claude = {...codex, id:'claude' as const};
+ it('saves and resets Investigate model and effort independently of Skill diagrams', async () => {
+  const claude = {...codex, id:'claude' as const,effort:true,effortCode:'help_flag_present' as const};
   const setup = service([claude]);
   const view = await setup.get();
   expect(view.roles.find(r=>r.role==='investigate-read')).toMatchObject({
-   capableProviders:['claude'], routingNote:expect.stringContaining('startup Claude'),
+   capableProviders:['claude'],
   });
-  await expect(setup.put({role:'investigate-read',provider:'claude'})).rejects.toThrow(/startup Claude/);
+  await setup.put({role:'investigate-read',provider:'claude'});
+  await setup.put({role:'investigate-read',provider:'claude',selection:{model:'sonnet',effort:'low'}});
+  expect((await service([claude]).get()).models.find(m=>m.role==='investigate-read')?.effective).toEqual({model:'sonnet',effort:'low'});
+  expect((await setup.get()).models.find(m=>m.role==='skill-diagram')?.selection).toBeNull();
+  await setup.put({role:'investigate-read',reset:true});
+  expect((await setup.get()).models.find(m=>m.role==='investigate-read')?.selection).toBeNull();
  });
  it('persists Skill diagram model and effort independently of Think and Ask',async()=>{
   const claude={...codex,id:'claude' as const,effort:true,effortCode:'help_flag_present' as const};
@@ -171,7 +176,7 @@ describe('first-run setup endpoints', () => {
   expect(view.providers.find(p=>p.id==='claude')?.source).toBe('explicit flag');
   expect(view.roles.find(r=>r.role==='normal-chat')).toMatchObject({provider:'claude',source:'default'});
   expect(view.roles.every(r=>['saved choice','default'].includes(r.source))).toBe(true);
-  expect(view.roles.find(r=>r.role==='investigate-read')).toMatchObject({provider:'claude',source:'default',reason:null});
+  expect(view.roles.find(r=>r.role==='investigate-read')).toMatchObject({provider:'codex',source:'saved choice',reason:expect.any(String)});
   expect((await loadMachineSetup(dir)).roles['investigate-read']).toBe('codex');
  });
  it('changes roles and models with both binaries flagged, reloads the saved choice and resets to the preferred default',async()=>{

@@ -119,7 +119,7 @@ const openProject = async (entry: ProjectEntry) => {
   const setup = createSetupHttp({dir:configFolder, project:entry.root, providers:runtime.providers,catalogs,
     overrides,
     ready:async()=>(await checkPrerequisites({configDir:configFolder,distDir})).every(check=>check.ok)});
-  const app = createApp({ pipelineConfigDir: configFolder, store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, setup, council:{adapters,availabilityChecks,routing}, harness: claudeCommand ? { command: claudeCommand } : undefined });
+  const app = createApp({ pipelineConfigDir: configFolder, store, watcher, distDir, allowOrigins: args.origins, provider, plan, usage, security, setup, council:{adapters,availabilityChecks,routing}, harness: claudeCommand ? { command: claudeCommand, effortSupported: runtime.providers.some(p=>p.id==='claude'&&p.effort===true&&p.effortCode==='help_flag_present') } : undefined });
   return { handle: app.handle, close: async () => { watcher.stop(); await plan?.close(); await app.close(); } };
 };
 const host = createHost({ registry: registry!, security, distDir, openProject, identity:serverIdentity, providers:runtime.providers, defaultProject: () => defaultId });
