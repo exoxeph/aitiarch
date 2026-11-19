@@ -13,6 +13,7 @@ export type InvokedTurnMetadata=Pick<TurnResult,'provider'|'status'|'usage'|'dur
 export function createInvokedCodexBridge(options:{
  adapter:TurnAdapter;checkAvailability:Provider['checkAvailability'];cap:CouncilCap;
  selection?:Readonly<ModelEffort>;
+ profile?:'skill-diagram';
  onTurn:(metadata:InvokedTurnMetadata)=>Promise<void>;
  /** Revalidate the one-use review after metadata awaits, before any transport. */
  beforeTurn?:(packet:ReturnType<typeof prepareRequest>)=>Promise<void>;
@@ -20,7 +21,8 @@ export function createInvokedCodexBridge(options:{
  if(options.adapter.id!=='codex'||options.cap.unit!=='tokens')throw new Error('Codex invoked bridge requires the Codex token-cap transport.');
  const cap=structuredClone(options.cap),maxOutputBytes=activePipelineConfig().council.outputBytes;
  return {name:'codex',checkAvailability:options.checkAvailability,async invoke(request,invokeOptions){
-  if(request.chat||request.render)throw new ProviderError('unsupported_cli','This bridge supports structured requests without CLI session history.');
+  const skill=options.profile==='skill-diagram';
+  if(request.chat||(skill?request.render!=='skill'||request.skillFormat!=='codex-svg'||!!invokeOptions?.imageInput||!!request.skills:!!request.render||!!request.skillFormat))throw new ProviderError('unsupported_cli','This bridge supports structured requests without CLI session history.');
   const images=invokeOptions?.imageInput;
   if(images&&!options.adapter.startImageTurn)throw new ProviderError('unsupported_cli','The selected Codex transport cannot send images.');
   const availability=await options.checkAvailability();
@@ -44,10 +46,19 @@ export function createInvokedCodexBridge(options:{
    deadlineMs:Math.min(cap.deadlineMs,invokeOptions?.timeoutMs??cap.deadlineMs),maxOutputBytes},invokeOptions?.signal);
   await options.onTurn({provider:turn.provider,status:turn.status,usage:turn.usage,durationMs:turn.durationMs,
    ...(turn.code?{code:turn.code}:{}),...(turn.blockedAttempts===undefined?{}:{blockedAttempts:turn.blockedAttempts}),...(turn.overCap?{overCap:true}:{})});
+  if(skill&&turn.code==='output_limit')throw new ProviderError('output_limit','Codex returned more than the diagram output limit. No diagram was saved.');
   if(turn.status!=='ok')throw new ProviderError(invokeOptions?.signal?.aborted?'cancelled':turn.status==='timeout'?'timeout':turn.status==='unavailable'?'unsupported_cli':'provider_error',
    turn.status==='refused'?'Codex refused this request. No other provider was tried.':undefined);
+  if(skill&&turn.overCap)throw new ProviderError('output_limit','The Codex turn exceeded its approved token cap. No diagram was saved.');
   let parsed:unknown;
   try{parsed=parseAnswerJson(completion);}catch{throw new ProviderError('invalid_response');}
+  if(skill){
+   const result=parsed as {answer?:unknown;claims?:unknown;svg?:unknown}|null;
+   if(!result||Object.keys(result).sort().join()!=='answer,claims,svg'||typeof result.svg!=='string')
+    throw new ProviderError('invalid_response','Codex did not return one static SVG diagram.');
+   const value=validateProviderResponse({answer:result.answer,claims:result.claims});
+   return {id:request.id,provider:'codex',model:null,...value,skillSvg:result.svg,usage:null};
+  }
   const value=validateProviderResponse(parsed);
   // Assistance applies validateProductResult unchanged, including exact quotes.
   return {id:request.id,provider:'codex',model:null,...value,usage:null};

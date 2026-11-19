@@ -1,5 +1,5 @@
 import type {SelectedCli} from './platform/cli-selection.ts';
-import {providerCapabilities} from './providers/registry.ts';
+import {providerCapabilities,WIRED_ROLE_BRIDGES} from './providers/registry.ts';
 import {loadMachineSetup, saveMachineSetup, SetupError} from './setup-store.ts';
 import {initProject, privateProtection} from './init.ts';
 import {CAPABILITY_NEEDS, MODEL_ROLES, ROLE_REGISTRY, SETUP_PROVIDERS, SETUP_ROLES, roleDefinition, validCouncilParticipants, type MachineSetup, type ModelEffort, type SetupProvider, type SetupRole, type SetupView} from '../shared/setup.ts';
@@ -8,7 +8,6 @@ import type {createModelCatalogs} from './providers/model-catalog.ts';
 import {catalogEntry,effectiveCatalogSelection} from '../shared/models.ts';
 
 const labels = {claude:'Claude', codex:'Codex', kiro:'Kiro'};
-const wiredBridges = {invoked:true, 'thread-reply':true, 'investigate-read':true, 'skill-diagram':true};
 const writes = new Map<string, Promise<unknown>>();
 
 export class SetupRequestError extends Error {}
@@ -27,7 +26,7 @@ export function createSetupHttp(options: {
 }) {
  const binaryPinned = (provider:SetupProvider) => options.overrides?.[provider]!==undefined;
  const hasCapability = (id:SetupProvider, capability:SetupRole) =>
-  (options.capabilities?.(id)??providerCapabilities(id,wiredBridges))[capability];
+  (options.capabilities?.(id)??providerCapabilities(id,WIRED_ROLE_BRIDGES))[capability];
  const capable = (role:SetupRole) => options.providers.filter(p =>
   p.isolation==='metadata-compatible' && hasCapability(p.id,roleDefinition(role).capability)
  ).map(p => p.id);

@@ -133,8 +133,11 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   const stepNode = draft ? nodeFor(draft.input.action, draft.input.question) : 'ask', persona = useNodeSettings(stepNode);
   // Visualize only: who draws the diagram. Skill needs a skill attached to the Visualize step (Settings); Built-in is always there and the default.
   const renderer = draft?.input.renderer ?? 'builtin';
+  const [codexSkill,setCodexSkill]=useState(false);
   const [visualizeSkills, setVisualizeSkills] = useState(0);
-  useEffect(() => { if (!isVisualize) return; let off = false; void api.nodes().then(r => { if (!off) setVisualizeSkills(r.nodes.visualize.skills.length); }).catch(() => {}); return () => { off = true; }; }, [isVisualize, draft?.input.id]);
+  useEffect(() => { if (!isVisualize) return; let off = false; void api.nodes().then(r => { if (!off) setVisualizeSkills(r.nodes.visualize.skills.length); }).catch(() => {});
+    void api.assistance('skill').then(r=>{if(!off)setCodexSkill(r.available&&r.provider==='codex');}).catch(()=>{});
+    return () => { off = true; }; }, [isVisualize, draft?.input.id]);
   const chooseRenderer = (next: 'builtin' | 'skill') => { if (!draft || busy || next === renderer) return; const { skill: _drop, ...rest } = draft.input, input: Invocation = { ...rest, renderer: next }; setDraft({ input }); void review(input); }; // a pick belongs to the Skill renderer only
   const pickSkill = (id: string) => { if (!draft || busy) return; const input: Invocation = { ...draft.input, renderer: 'skill', skill: id }; setDraft({ input }); void review(input); };
   useEffect(() => { if (hasPacket) sendRef.current?.focus(); }, [hasPacket]);
@@ -176,11 +179,11 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       <legend className="persona-legend">Who draws it</legend>
       <div className="persona-options">
         <label className="persona-option"><input type="radio" name="renderer" value="builtin" checked={renderer === 'builtin'} onChange={() => chooseRenderer('builtin')} aria-describedby="renderer-line" /><span className="persona-seg">Built-in</span></label>
-        <label className="persona-option"><input type="radio" name="renderer" value="skill" checked={renderer === 'skill'} disabled={visualizeSkills === 0} onChange={() => chooseRenderer('skill')} aria-describedby="renderer-line" /><span className="persona-seg">Skill</span></label>
+        <label className="persona-option"><input type="radio" name="renderer" value="skill" checked={renderer === 'skill'} disabled={visualizeSkills === 0 && !codexSkill} onChange={() => chooseRenderer('skill')} aria-describedby="renderer-line" /><span className="persona-seg">Skill</span></label>
       </div>
-      <p className="persona-line" id="renderer-line">{renderer === 'skill' ? 'A skill you attached to Visualize draws it as a still image. Only a cleaned copy of its drawing is kept; nothing it sends can run.' : visualizeSkills === 0 ? 'The app draws it from a short spec. To draw with a skill, attach one to Visualize in Settings.' : 'The app draws it from a short spec.'}</p>
+      <p className="persona-line" id="renderer-line">{codexSkill ? 'Codex draws a still image using built-in drawing instructions.' : renderer === 'skill' ? 'A skill you attached to Visualize draws it as a still image. Only a cleaned copy of its drawing is kept; nothing it sends can run.' : visualizeSkills === 0 ? 'The app draws it from a short spec. To draw with a skill, attach one to Visualize in Settings.' : 'The app draws it from a short spec.'}</p>
     </fieldset>}
-    {isVisualize && renderer === 'skill' && <SkillPick review={(draft.packet as { skills?: SkillsReview } | undefined)?.skills} disabled={busy} onPick={pickSkill} />}
+    {isVisualize && renderer === 'skill' && !codexSkill && <SkillPick review={(draft.packet as { skills?: SkillsReview } | undefined)?.skills} disabled={busy} onPick={pickSkill} />}
     {!(isVisualize && renderer === 'skill') && <PersonaSwitch id={'step-' + stepNode} label={`How ${NODE_LABEL[stepNode]} works with you`} value={persona.persona} kept={persona.kept} disabled={busy}
       onChange={p => void persona.choose(p).then(saved => { if (saved && hasPacket) void review(draft.input); })} />}
     {persona.failed && <p role="alert" className="small">That choice could not be saved. Nothing was changed.</p>}

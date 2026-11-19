@@ -18,15 +18,20 @@ export class ProviderReviews {
  private reviews=new Map<string,ReviewedInvocation>();
  private role:'invoked'|'thread-reply'|'skill-diagram';private routing?:RoleRouting;private legacy:Provider;
  constructor(role:ProviderReviews['role'],routing:RoleRouting|undefined,legacy:Provider){this.role=role;this.routing=routing;this.legacy=legacy;}
+ private factory(provider:ProviderDescriptor){
+  return this.role==='skill-diagram'?provider.createSkillDiagramProvider:
+   this.role==='invoked'?provider.createInvokedProvider:provider.createThreadProvider;
+ }
  async selection(){
   if(!this.routing)return undefined;
   const snapshot=await this.routing(),provider=snapshot.resolveRole(this.role);
   if('available' in provider)throw new PathError(409,provider.code,provider.reason);
-  const factory=this.role==='invoked'?provider.createInvokedProvider:provider.createThreadProvider;
-  if(provider.id==='kiro'||provider.id==='codex'&&(!factory||this.role==='skill-diagram'))throw new PathError(409,'role-unavailable','This provider has no verified bridge for this request. No other provider was tried.');
+  if(provider.id==='kiro'||provider.id==='codex'&&!this.factory(provider))throw new PathError(409,'role-unavailable','This provider has no verified bridge for this request. No other provider was tried.');
   if(provider.id==='claude'&&this.legacy.name&&this.legacy.name!=='claude')throw new PathError(409,'provider-unavailable','Claude is not configured for this request. No other provider was tried.');
   const version=snapshot.providerVersions?.[provider.id],model=provider.selection?.model??null;
-  return {provider,version,imageSupport:imageDeliveryStatus(provider.id,version,model,snapshot.codexRoleImageInput?.(this.role)),
+  return {provider,version,imageSupport:this.role==='skill-diagram'&&provider.id==='codex'
+   ?{available:false,status:'unsupported' as const,reason:'Codex Skill diagrams use reviewed text only.'}
+   :imageDeliveryStatus(provider.id,version,model,snapshot.codexRoleImageInput?.(this.role)),
    contextKey:snapshot.contextKey(this.role),currentContextKey:snapshot.currentContextKey,
    modelNotice:this.role==='skill-diagram'?snapshot.skillModelNotice:undefined};
  }
@@ -80,7 +85,7 @@ export class ProviderReviews {
    return this.legacy.invoke(request,{...options,...(review.provider.selection?{selection:review.provider.selection}:{})});
   }};
   let accounted=false;
-  const factory=this.role==='invoked'?review.provider.createInvokedProvider:review.provider.createThreadProvider;
+  const factory=this.factory(review.provider);
   return factory!({cap:review.cap!,beforeTurn:async(packet)=>{
    await this.assert(review);
    if(JSON.stringify(packet)!==review.packet)throw staleReview();

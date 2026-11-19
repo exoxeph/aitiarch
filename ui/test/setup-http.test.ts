@@ -36,7 +36,7 @@ describe('first-run setup endpoints', () => {
   expect(await reasonFor({...codex,path:null,isolation:'unverified',code:'not_found',reason:'Codex was not found.'})).toBe('Codex is not installed or was not found.');
   expect(await reasonFor({...codex,isolation:'unverified',reason:'Codex version is older than the minimum.'})).toBe('Codex version is older than the minimum.');
   expect(await reasonFor({...codex,isolation:'unverified',reason:'Missing a required flag.'},'normal-chat',{codex:codex.path!})).toBe('The explicit binary is incompatible. Missing a required flag.');
-  expect(await reasonFor(codex,'skill-diagram')).toMatch(/needs.*skill workflow/i);
+  expect(await reasonFor({...codex,id:'kiro'},'skill-diagram')).toMatch(/needs a verified staged diagram renderer/i);
  });
 
  it('makes a newly declared capability selectable without changing the Setup UI',async()=>{
@@ -159,11 +159,11 @@ describe('first-run setup endpoints', () => {
  it('persists Skill diagram model and effort independently of Think and Ask',async()=>{
   const claude={...codex,id:'claude' as const,effort:true,effortCode:'help_flag_present' as const};
   const api=service([claude,codex]);
-  await expect(api.put({role:'skill-diagram',provider:'codex'})).rejects.toThrow(/supports this role/);
+  await expect(api.put({role:'skill-diagram',provider:'codex'})).resolves.toBeUndefined();
   await api.put({role:'skill-diagram',provider:'claude'});
   await api.put({role:'skill-diagram',provider:'claude',selection:{model:'sonnet',effort:'low'}});
   const view=await service([claude,codex]).get();
-  expect(view.roles.find(r=>r.role==='skill-diagram')).toMatchObject({capableProviders:['claude'],source:'saved choice'});
+  expect(view.roles.find(r=>r.role==='skill-diagram')).toMatchObject({capableProviders:['claude','codex'],source:'saved choice'});
   expect(view.models.find(m=>m.role==='skill-diagram')?.selection).toEqual({model:'sonnet',effort:'low'});
   expect(view.models.find(m=>m.role==='invoked')?.selection).toBeNull();
  });

@@ -12,7 +12,7 @@ import type {Provider} from './index.ts';
 import {modelSelection} from '../../shared/model-settings.ts';
 import {applyCatalogAvailability,effectiveCatalogSelection,type ModelCatalog} from '../../shared/models.ts';
 import type {ModelEffort} from '../../shared/setup.ts';
-import {versionParts,type CliNotice} from './cli-compatibility.ts';
+import {versionCheck,versionParts,type CliNotice} from './cli-compatibility.ts';
 export type InvokedBridgeFactory=(options:Pick<Parameters<typeof createInvokedCodexBridge>[0],'cap'|'onTurn'|'beforeTurn'|'selection'>)=>Provider;
 
 export interface Detection {available:boolean;reason:string|null;version?:string;notices?:CliNotice[]}
@@ -26,17 +26,19 @@ export interface ProviderDescriptor {
  readonly createToollessAdapter:()=>TurnAdapter;
  readonly createInvokedProvider?:InvokedBridgeFactory;
  readonly createThreadProvider?:InvokedBridgeFactory;
+ readonly createSkillDiagramProvider?:InvokedBridgeFactory;
 }
 export interface Unavailable {
  available:false;provider:SetupProvider|null;role:SetupRole;
  code:'provider-disabled'|'provider-unavailable'|'role-unavailable'|'settings-unavailable';reason:string;
 }
 export type RoleResolution=ProviderDescriptor|Unavailable;
+export const WIRED_ROLE_BRIDGES=Object.freeze({invoked:true,'thread-reply':true,'investigate-read':true,'skill-diagram':true});
 /** Shared transport policy; metadata compatibility alone does not supply a bridge. */
 export function providerCapabilities(id:SetupProvider,bridges:Partial<Record<'invoked'|'thread-reply'|'investigate-read'|'skill-diagram',boolean>>={}):Record<SetupRole|'vision',boolean> {
  const capabilities:Record<SetupRole|'vision',boolean>={'normal-chat':true,council:true,invoked:false,'thread-reply':false,'investigate-read':false,'skill-diagram':false,vision:false};
  if(id==='claude')for(const role of ['invoked','thread-reply','investigate-read','skill-diagram'] as const)capabilities[role]=bridges[role]===true;
- if(id==='codex'){capabilities.invoked=bridges.invoked===true;capabilities['thread-reply']=bridges['thread-reply']===true;}
+ if(id==='codex'){capabilities.invoked=bridges.invoked===true;capabilities['thread-reply']=bridges['thread-reply']===true;capabilities['skill-diagram']=bridges['skill-diagram']===true;}
  return capabilities;
 }
 export interface RequestSettingsSnapshot {
@@ -69,14 +71,14 @@ function freeze<T>(v:T):T {
 }
 /** Wrap an existing tool-less instance; never constructs a harness or changes flags.
  * Bridges describe already wired legacy Claude paths, not grants to use read tools. */
-export function descriptorFromAdapter(adapter:TurnAdapter,options:{detect:()=>Promise<Detection>;invokedBridge?:InvokedBridgeFactory;threadReplyBridge?:InvokedBridgeFactory;bridges?:Partial<Record<'invoked'|'thread-reply'|'investigate-read'|'skill-diagram',boolean>>}):ProviderDescriptor {
+export function descriptorFromAdapter(adapter:TurnAdapter,options:{detect:()=>Promise<Detection>;invokedBridge?:InvokedBridgeFactory;threadReplyBridge?:InvokedBridgeFactory;skillDiagramBridge?:InvokedBridgeFactory;bridges?:Partial<Record<'invoked'|'thread-reply'|'investigate-read'|'skill-diagram',boolean>>}):ProviderDescriptor {
  if(!SETUP_PROVIDERS.includes(adapter.id as SetupProvider))throw Error('Unknown registry provider');
  const id=adapter.id as SetupProvider;
- const capabilities=providerCapabilities(id,id==='codex'?{invoked:typeof options.invokedBridge==='function','thread-reply':typeof options.threadReplyBridge==='function'}:options.bridges);
+ const capabilities=providerCapabilities(id,id==='codex'?{invoked:typeof options.invokedBridge==='function','thread-reply':typeof options.threadReplyBridge==='function','skill-diagram':typeof options.skillDiagramBridge==='function'}:options.bridges);
  return freeze({id,label:adapter.label,safetyLabel:adapter.safetyLabel,capabilities,
   vision:{available:false,reason:'Image input for this role, model and isolated transport is not verified.'},
   detect:options.detect,models:async()=>({source:'default' as const,models:[{id:null,label:'Default'}],reason:'Model catalog is not verified yet; use the CLI default.'}),
-  createToollessAdapter:()=>adapter,...(id==='codex'&&options.invokedBridge?{createInvokedProvider:options.invokedBridge}:{}),...(id==='codex'&&options.threadReplyBridge?{createThreadProvider:options.threadReplyBridge}:{})});
+  createToollessAdapter:()=>adapter,...(id==='codex'&&options.invokedBridge?{createInvokedProvider:options.invokedBridge}:{}),...(id==='codex'&&options.threadReplyBridge?{createThreadProvider:options.threadReplyBridge}:{}),...(id==='codex'&&options.skillDiagramBridge?{createSkillDiagramProvider:options.skillDiagramBridge}:{})});
 }
 /** Initial setup suggestion only, never applied over a stored choice. No discovery or fallback. */
 export function compatibleDefaults(providers:readonly ProviderDescriptor[]):MachineSetup {
@@ -145,6 +147,10 @@ export class ProviderRegistry {
    const selected=this.resolveRole(role,setup);if('available' in selected)return selected;
    const state=states.get(selected.id);
    if(!state?.available)return unavailable(role,selected.id,'provider-unavailable',state?.reason??'Provider metadata could not be verified.');
+   if(role==='skill-diagram'&&selected.id==='codex'){
+    const gate=versionCheck('codex',state.version??null);
+    if(!gate.available)return unavailable(role,selected.id,'provider-unavailable',gate.reason!);
+   }
    const selection=modelSelection(setup,role,selected.id);
    // Keep the legacy Default descriptor and exact transport input unchanged.
    if(selection.model===null&&selection.effort===null)return selected;
@@ -153,7 +159,7 @@ export class ProviderRegistry {
     const adapter=selected.createToollessAdapter(),{startImageTurn}=adapter;
     return {...adapter,startTurn:(input:Parameters<TurnAdapter['startTurn']>[0],signal:AbortSignal)=>adapter.startTurn({...input,selection},signal),
      ...(startImageTurn?{startImageTurn:(...[input,signal,images]:Parameters<NonNullable<TurnAdapter['startImageTurn']>>)=>startImageTurn.call(adapter,{...input,selection},signal,images)}:{})};
-   },...(selected.createInvokedProvider?{createInvokedProvider:bind(selected.createInvokedProvider)}:{}),...(selected.createThreadProvider?{createThreadProvider:bind(selected.createThreadProvider)}:{})});
+   },...(selected.createInvokedProvider?{createInvokedProvider:bind(selected.createInvokedProvider)}:{}),...(selected.createThreadProvider?{createThreadProvider:bind(selected.createThreadProvider)}:{}),...(selected.createSkillDiagramProvider?{createSkillDiagramProvider:bind(selected.createSkillDiagramProvider)}:{})});
   };
   const council=()=>{
    const providers=fault?[]:this.providers.filter(p=>frozen.providers[p.id].enabled&&p.capabilities.council&&states.get(p.id)?.available&&(!frozen.councilParticipants||frozen.councilParticipants.includes(p.id)));

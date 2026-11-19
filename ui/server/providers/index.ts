@@ -19,7 +19,7 @@ import {ClaudeChatStream} from './chat-stream.ts';
 import {isolationPasses} from './claude-events.ts';
 import {composeInstruction,type SkillBlock} from '../../shared/instruction.ts';
 import {NOTESPACE_GUIDE,replyProfileInstruction} from '../../shared/notespace-guide.ts';
-import {skillDiagramInstruction} from '../../shared/skill-diagram.ts';
+import {codexSkillDiagramInstruction,skillDiagramInstruction} from '../../shared/skill-diagram.ts';
 import {personaInstruction,type PersonaMode} from '../../shared/persona.ts';
 import {claudeUsageRecord,type UsageLog} from './usage.ts';
 import { ProductValidationError, validateResponseSchema, type ValidationRecord } from '../product-validation.ts';
@@ -45,6 +45,8 @@ export interface Request {
   editor?: string;
   /** 'skill': the Visualize skill renderer. The reply is one HTML document, passed through as raw text (server/assistance.ts checks and saves it). */
   render?: 'skill';
+  /** Server-selected structured output for the tool-less Codex Skill renderer. */
+  skillFormat?: 'codex-svg';
 }
 export type ErrorCode = 'unsupported_cli' | 'missing_cli' | 'not_logged_in' | 'timeout'
   | 'cancelled' | 'invalid_response' | 'output_limit' | 'provider_error' | 'context_limit';
@@ -68,7 +70,7 @@ export interface Result {
   /** CLI-reported dollars only; absent when not supplied. No computed price. */
   costUsd?:number;
   id: string; provider: ProviderName; model: string | null; answer: string;
-  claims: unknown[]; diagram?:unknown; usage: { inputTokens: number; outputTokens: number; cachedTokens?:number } | null;
+  claims: unknown[]; diagram?:unknown; skillSvg?:string; usage: { inputTokens: number; outputTokens: number; cachedTokens?:number } | null;
   /** Chat only: `answer` is the model's raw reply (Markdown and its claims block), read by the chat's output gate. */
   rawReply?:true;
 }
@@ -157,7 +159,7 @@ export function prepareRequest(request: Request, images?:ReviewedImageManifest):
     };
     return { id: turn.id, user: clip(turn.user), assistant: clip(turn.assistant) };
   });
-  return { instruction:request.render==='skill'?skillDiagramInstruction(request.skills):invokedInstruction(request,images), omittedTurns: Math.max(0, request.turns.length - activePipelineConfig().invoked.historyPairs), clippedMessages,
+  return { instruction:request.skillFormat==='codex-svg'?codexSkillDiagramInstruction():request.render==='skill'?skillDiagramInstruction(request.skills):invokedInstruction(request,images), omittedTurns: Math.max(0, request.turns.length - activePipelineConfig().invoked.historyPairs), clippedMessages,
     data: { id: request.id, action: request.action, question: redact(request.question),
       selection: redact(request.selection), note: redact(request.note),
       decisions: request.decisions.map(d => ({ id: d.id, text: redact(d.text) })), turns } };

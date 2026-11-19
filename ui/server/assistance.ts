@@ -9,7 +9,7 @@ import { Store } from './store.ts';
 import { normalizeRel, PathError } from './paths.ts';
 import { SkillDiagramStore } from './skill-diagram-store.ts';
 import { SKILL_DIAGRAM_FAILED_BODY, SKILL_DIAGRAM_MAX_BYTES, extractDocument, skillDiagramBody, skillDiagramFallbackBody, type SkillDiagramRef } from '../shared/skill-diagram.ts';
-import { sanitizeSvgDocument } from '../shared/svg-sanitize.ts';
+import { sanitizeStaticSkillSvg, sanitizeSvgDocument } from '../shared/svg-sanitize.ts';
 import { appendLedger, LedgerStore } from './ledger-store.ts';
 import {validCatalogModelId} from '../shared/models.ts';
 import { prepareRequest, ProviderError, redact, type Provider, type Request } from './providers/index.ts';
@@ -55,10 +55,11 @@ export class Assistance {
     this.skillDiagrams = new SkillDiagramStore(store.rootReal);
     this.images = images;
   }
-  /** The Skill renderer needs Claude, and a skill attached to Visualize that actually loaded. Refused before anything is sent. */
-  private checkSkillRenderer(renderer: string | undefined, request: Request,providerName=this.provider.name) {
+  /** An attached skill is required on the existing Claude path. Codex uses the built-in drawing instructions. */
+  private checkSkillRenderer(renderer: string | undefined, request: Request,providerName:string|undefined=this.provider.name) {
     if (renderer !== 'skill') return;
-    if (providerName && providerName !== 'claude') throw new PathError(409, 'skill_renderer', 'The Skill renderer works with Claude only for now. Use the Built-in renderer.');
+    if (request.skillFormat==='codex-svg'&&providerName==='codex')return;
+    if (providerName && providerName !== 'claude') throw new PathError(409, 'skill_renderer', 'Choose a verified Claude or Codex Skill diagram role, or use the Built-in renderer.');
     if (!request.skills) throw new PathError(409, 'skill_renderer', 'Attach a skill to Visualize in Settings first, then choose Skill.');
   }
   /** What the model's reply becomes: a saved document, or a fixed reason. None of the model's own words are kept. */
@@ -77,11 +78,29 @@ export class Assistance {
   }
   async availability(renderer?:string|null) {
     try{const selection=await (renderer==='skill'?this.skillReviews:this.reviews).selection();
-      if(selection?.provider.id==='codex')return {available:true,provider:'codex'};
+      if(selection?.provider.id==='codex'){
+        if(renderer==='skill')await this.requirePrivateDiagramStorage();
+        return {available:true,provider:'codex'};
+      }
       return { ...await this.provider.checkAvailability(), provider:this.provider.name??'claude' };
     }catch(e){return {available:false,provider:'unavailable',code:'unsupported_cli',message:e instanceof PathError?e.message:'Provider settings could not be verified. No provider was selected.'};}
   }
   private extras?: ExtrasFor;
+  private async requirePrivateDiagramStorage(){
+    if(!await this.skillDiagrams.hasPrivateStaging().catch(()=>false))
+      throw new PathError(409,'skill_renderer','Codex Skill diagrams require a notebook with private staging. Choose an initialized notebook.');
+  }
+  private async invocationRequest(frozen:ReturnType<typeof freezeInvocation>,provider?:string){
+    const request:Request={id:frozen.id,action:frozen.action,question:frozen.question,selection:frozen.selection,
+      note:frozen.text,decisions:[],turns:[],...(frozen.renderer==='skill'?{render:'skill' as const}:{})};
+    if(request.render==='skill'&&provider==='codex'){
+      await this.requirePrivateDiagramStorage();
+      if(frozen.skill)throw new PathError(409,'skill_renderer','Codex Skill diagrams use the built-in drawing instructions. Installed skill opt-in is unavailable.');
+      return {request:{...request,skillFormat:'codex-svg' as const},names:[],review:null};
+    }
+    return this.withExtras(request,frozen.skill);
+  }
+
   /** The node's persona goes on every request; its skills only when something loaded. Names are what gets recorded on the answer. */
   private async withExtras(base: Request, pick?: string): Promise<{ request: Request; names: string[]; review: SkillsReview | null }> {
     if (!this.extras) return { request: base, names: [], review: null };
@@ -97,9 +116,8 @@ export class Assistance {
     const reviews=frozen.renderer==='skill'?this.skillReviews:this.reviews;
     const selected=await reviews.selection();
     const images=await reviews.reviewImages(this.images,selected,frozen.imageIds);
-    const { request, review } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question,
-      selection: frozen.selection, note: frozen.text, decisions: [], turns: [], ...(frozen.renderer === 'skill' ? { render: 'skill' as const } : {}) }, frozen.skill);
-    this.checkSkillRenderer(frozen.renderer, request,selected?.provider.id==='codex'?'codex':this.provider.name);
+    const { request, review } = await this.invocationRequest(frozen,selected?.provider.id);
+    this.checkSkillRenderer(frozen.renderer, request,selected?.provider.id??this.provider.name);
     const packet = prepareRequest(request,images);
     // The instruction in the packet is the exact text; "skills" beside it says what was loaded, skipped or not installed.
     const prepared=review?{...packet,skills:review}:packet;
@@ -128,11 +146,11 @@ export class Assistance {
   async start(input: Invocation): Promise<InkSnapshot> {
     const frozen = freezeInvocation(input), path = normalizeRel(frozen.path);
     if (this.jobs.has(frozen.id)||this.starting.has(frozen.id)) throw new Error('Request ID already exists.');
-    const { request, names } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question, selection: frozen.selection,
-      note: frozen.text, decisions: [], turns: [], ...(frozen.renderer === 'skill' ? { render: 'skill' as const } : {}) }, frozen.skill);
     // Transcript context stays none. Optional source selection is a later slice;
     // never discover a user's global sessions or transmit one implicitly.
     const reviews=frozen.renderer==='skill'?this.skillReviews:this.reviews;
+    const selected=frozen.renderer==='skill'&&this.routing?await reviews.selection():undefined;
+    const {request,names}=await this.invocationRequest(frozen,selected?.provider.id);
     const imageInput=frozen.imageIds?.length||reviews.hasImages(frozen.reviewId)?
       await reviews.confirmImages(this.images,await reviews.selection(),frozen):undefined;
     const manifest=imageInput?.approved.manifest;
@@ -176,7 +194,15 @@ export class Assistance {
             event:'skill_diagram_turn',at:new Date().toISOString(),skillTurn:{model:selection?.model??null,effort:selection?.effort??null,
               reportedModel:validCatalogModelId(result.model)?result.model:null}});
           if(!saved)job.notice='The Skill diagram ledger entry is queued for retry.';
-          ({ body, model, skillDiagram, diagramIssue } = await this.acceptSkillDiagram(result, frozen.id, names));
+          if(request.skillFormat==='codex-svg'){
+            ({model,evidence}=validateProductResult(result,frozen.id,packet.data,redact,textHash,'codex'));
+            const source=result.skillSvg;
+            const svg=source&&redact(source)===source?sanitizeStaticSkillSvg(source):null;
+            if(!svg?.ok)throw new ProviderError('invalid_response',svg?.text??'Codex did not return a safe standalone SVG. No diagram was saved.');
+            if(redact(svg.svg)!==svg.svg)throw new ProviderError('invalid_response','The SVG contains content that could not be saved safely. No diagram was saved.');
+            skillDiagram=await this.skillDiagrams.saveSvg(svg.svg,true);
+            body='Codex drew this diagram. It is shown as a static image.';
+          } else ({ body, model, skillDiagram, diagramIssue } = await this.acceptSkillDiagram(result, frozen.id, names));
           if(controller.signal.aborted){
             if(skillDiagram)await this.skillDiagrams.discard(skillDiagram);
             skillDiagram=undefined;

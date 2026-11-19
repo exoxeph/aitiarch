@@ -9,16 +9,16 @@ import type {createInvokedCodexBridge} from './invoked-bridge.ts';
 import {initializeDefaultRoles} from '../setup-store.ts';
 
 export type RoleRouting=()=>Promise<RequestSettingsSnapshot>;
-export function roleRouting(o:{dir:string;adapters:TurnAdapter[];checks:AvailabilityCheck[];legacyAnswerer:()=>SetupProvider;claudeBridge?:boolean;codexInvokedBridge?:typeof createInvokedCodexBridge;codexThreadReplies?:boolean;catalogFor?:(id:SetupProvider)=>ModelCatalog|undefined}):RoleRouting&{initializeDefaults:(preferred?:readonly SetupProvider[])=>Promise<MachineSetup>} {
+export function roleRouting(o:{dir:string;adapters:TurnAdapter[];checks:AvailabilityCheck[];legacyAnswerer:()=>SetupProvider;claudeBridge?:boolean;codexInvokedBridge?:typeof createInvokedCodexBridge;codexThreadReplies?:boolean;codexSkillDiagrams?:boolean;catalogFor?:(id:SetupProvider)=>ModelCatalog|undefined}):RoleRouting&{initializeDefaults:(preferred?:readonly SetupProvider[])=>Promise<MachineSetup>} {
  const availability=new CouncilAvailability(o.checks);
- const bridge=(a:TurnAdapter):InvokedBridgeFactory|undefined=>a.id==='codex'&&o.codexInvokedBridge?options=>o.codexInvokedBridge!({...options,adapter:a,checkAvailability:async()=>{
+ const bridge=(a:TurnAdapter,profile?:'skill-diagram'):InvokedBridgeFactory|undefined=>a.id==='codex'&&o.codexInvokedBridge?options=>o.codexInvokedBridge!({...options,adapter:a,profile,checkAvailability:async()=>{
   const state=(await availability.get()).find(p=>p.id==='codex');
   return state?.available?{available:true}:{available:false,code:'unsupported_cli',message:state?.reason??'Codex local availability could not be verified. No other provider was tried.'};
  }}):undefined;
  const descriptors=o.adapters.map(a=>descriptorFromAdapter(a,{detect:async()=>{
   const state=(await availability.get()).find(p=>p.id===a.id);
   return state?{available:state.available,reason:state.reason,version:state.version,notices:state.notices}:{available:false,reason:'Provider local metadata could not be verified. No other provider was tried.'};
- },invokedBridge:bridge(a),threadReplyBridge:o.codexThreadReplies?bridge(a):undefined,bridges:a.id==='claude'&&o.claudeBridge?{invoked:true,'thread-reply':true,'investigate-read':true,'skill-diagram':true}:undefined}));
+ },invokedBridge:bridge(a),threadReplyBridge:o.codexThreadReplies?bridge(a):undefined,skillDiagramBridge:o.codexSkillDiagrams?bridge(a,'skill-diagram'):undefined,bridges:a.id==='claude'&&o.claudeBridge?{invoked:true,'thread-reply':true,'investigate-read':true,'skill-diagram':true}:undefined}));
  const registry=new ProviderRegistry(descriptors);
  let initial:Promise<MachineSetup>|undefined;
  const routing=()=>registry.snapshot(o.dir,async()=>{

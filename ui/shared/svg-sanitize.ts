@@ -245,6 +245,68 @@ function sizeFromViewBox(viewBox:string|undefined):string{
 }
 
 /** The single top-level <svg> of a skill's reply, rebuilt from allowlisted parts. Refuses, in plain words, anything missing, too large or too complex. */
+/** The structured Codex profile accepts a single, strictly allowlisted SVG before rebuild. */
+export function sanitizeStaticSkillSvg(source:string):SvgResult {
+ const reject=(reason:SvgIssue):SvgResult=>({ok:false,reason,text:SVG_ISSUE_TEXT[reason]});
+ if(Buffer.byteLength(source)>SVG_LIMITS.bytes)return reject('svg_too_large');
+ const invalid=():SvgResult=>({ok:false,reason:'svg_none',text:'Codex returned an unsafe or invalid SVG. No diagram was saved.'});
+ if(clean(source)!==source)return invalid();
+ const document=source.trim(),stack:string[]=[];
+ const tag=/<(\/?)([A-Za-z][\w-]*)/y;
+ const tail=/\s*(\/?)>/y;
+ const attribute=/\s+([A-Za-z][\w:-]*)\s*=\s*(?:"([^"<]*)"|'([^'<]*)')/y;
+ let offset=0,count=0;
+ while(offset<document.length){
+  if(document[offset]!=='<'){
+   const next=document.indexOf('<',offset),end=next===-1?document.length:next;
+   const text=document.slice(offset,end);
+   if(text.trim()&&!TEXTUAL.has(stack.at(-1)??''))return invalid();
+   if(text.length>SVG_LIMITS.textLength)return reject('svg_too_complex');
+   offset=end;
+   continue;
+  }
+  tag.lastIndex=offset;
+  const token=tag.exec(document);
+  if(!token)return invalid();
+  const [,closing,name]=token;
+  offset=tag.lastIndex;
+  if(closing){
+   tail.lastIndex=offset;
+   const end=tail.exec(document);
+   if(!end||end[1]||stack.pop()!==name)return invalid();
+   offset=tail.lastIndex;
+   continue;
+  }
+  const root=count===0;
+  if(root?name!=='svg':!stack.length||name==='svg')return invalid();
+  if(ELEMENTS.get(name.toLowerCase())!==name||name==='use')return invalid();
+  if(++count>SVG_LIMITS.elements||stack.length>SVG_LIMITS.depth)return reject('svg_too_complex');
+  const seen=new Set<string>();
+  for(;;){
+   tail.lastIndex=offset;
+   const end=tail.exec(document);
+   if(end){
+    if(root&&!seen.has('xmlns'))return invalid();
+    offset=tail.lastIndex;
+    if(!end[1])stack.push(name);
+    break;
+   }
+   attribute.lastIndex=offset;
+   const a=attribute.exec(document);
+   if(!a||seen.has(a[1]))return invalid();
+   const key=a[1],value=decode(a[2]??a[3]);
+   if(key==='xmlns'?(!root||value!==NS):ATTRS.get(key.toLowerCase())!==key||
+     !safeValue(value,key==='d'||key==='points'?SVG_LIMITS.pathLength:SVG_LIMITS.valueLength)||
+     /\bvar\s*\(/i.test(value)||FORMAT[key]&&!FORMAT[key].test(value))return invalid();
+   seen.add(key);
+   if(seen.size>SVG_LIMITS.attributes)return reject('svg_too_complex');
+   offset=attribute.lastIndex;
+  }
+ }
+ if(!count||stack.length)return invalid();
+ return sanitizeSvgDocument(document);
+}
+
 export function sanitizeSvgDocument(document:string):SvgResult{
  const no=(reason:SvgIssue):SvgResult=>({ok:false,reason,text:SVG_ISSUE_TEXT[reason]});
  try{

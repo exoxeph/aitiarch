@@ -18,7 +18,7 @@ export const CAPABILITY_NEEDS:Record<RoleDefinition['capability'],string>={
  'thread-reply':'Needs the thread reply workflow.',
  council:'Needs support for independent Council turns.',
  'investigate-read':'Needs the approved read-only project workflow and its file tools.',
- 'skill-diagram':'Needs the Skill workflow, including tools unavailable to tool-less profiles.',
+ 'skill-diagram':'Needs a verified staged diagram renderer.',
 };
 export const SETUP_ROLES=ROLE_REGISTRY.map(role=>role.id);
 export const roleDefinition=(id:SetupRole)=>ROLE_REGISTRY.find(role=>role.id===id)!;

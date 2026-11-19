@@ -5,7 +5,7 @@ import path from 'node:path';
 import {selectClis,type CliSelectionOptions,type SelectedCli} from './cli-selection.ts';
 import {loadMachineSetup,SETUP_FILE} from '../setup-store.ts';
 import {ROLE_REGISTRY,roleDefinition,type SetupRole,type SetupProvider} from '../../shared/setup.ts';
-import {providerCapabilities} from '../providers/registry.ts';
+import {providerCapabilities,WIRED_ROLE_BRIDGES} from '../providers/registry.ts';
 import {createModelCatalogs,readCatalog,type CatalogTiming} from '../providers/model-catalog.ts';
 import {modelSelection,selectionLabel} from '../../shared/model-settings.ts';
 import {effectiveCatalogSelection} from '../../shared/models.ts';
@@ -42,7 +42,7 @@ export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
  const catalogs=createModelCatalogs(options.configDir,providers);
  const roles=await Promise.all(ROLE_REGISTRY.map(async({id:role,capability,multiple})=>{
   const id=setup?.roles[role]??null,p=providers.find(p=>p.id===id);
-  const capable=id&&providerCapabilities(id,{invoked:true,'thread-reply':true,'investigate-read':true,'skill-diagram':true})[capability];
+  const capable=id&&providerCapabilities(id,WIRED_ROLE_BRIDGES)[capability];
   const effective=(role==='skill-diagram'||role==='investigate-read')&&setup&&id&&p&&capable?(()=>{
    const requested=modelSelection(setup,role,id);
    return {requested,listed:setup.providers[id].catalogChoices?.[role]===requested.model};
@@ -60,7 +60,9 @@ export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
   return {id:p.id,result:catalog.notice??'OK',count:catalog.models.length,...(timing?{timing}:{})};
  })):undefined;
  const leftovers=options.project?await privateLeftovers(options.project):undefined;
- return {exitCode:checks.every(c=>c.ok)?0:1,checks,providers,roles,...(modelChecks?{modelChecks}:{}),
+ const reportedProviders=providers.map(p=>({...p,roles:p.isolation==='metadata-compatible'
+  ?ROLE_REGISTRY.filter(role=>providerCapabilities(p.id,WIRED_ROLE_BRIDGES)[role.capability]).map(role=>role.id):[]}));
+ return {exitCode:checks.every(c=>c.ok)?0:1,checks,providers:reportedProviders,roles,...(modelChecks?{modelChecks}:{}),
   ...(leftovers?{privateLeftovers:leftovers}:{}),notice:'AI-off editing remains available when optional providers are missing. Login and entitlement were not checked.'};
 }
 export function formatModelChecks(report:DoctorReport):string[]{

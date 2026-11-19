@@ -119,7 +119,7 @@ describe('metadata-only doctor',()=>{
  it('keeps the Codex tested minimum and requires every pinned help flag',async()=>{
   const o=base();o.env={PATH:'/bin'};o.discovery={inspect:p=>p.endsWith('/codex')?{file:true,executable:true}:undefined};
   o.runner=async(_f,a)=>a[0]==='--version'?'codex-cli 0.167.0':codexHelp;
-  let r=await doctor(o);expect(r.providers[1]).toMatchObject({version:'0.167.0',isolation:'metadata-compatible',roles:['normal-chat','council']});
+  let r=await doctor(o);expect(r.providers[1]).toMatchObject({version:'0.167.0',isolation:'metadata-compatible',roles:['normal-chat','invoked','thread-reply','council','skill-diagram']});
   o.runner=async()=> 'codex-cli 0.168.0-alpha';r=await doctor(o);expect(r.providers[1].roles).toEqual([]);expect(r.providers[1].reason).toContain('0.167.0');
  });
  it('bounds a slow metadata runner even if it ignores abort and never starts a session',async()=>{

@@ -87,7 +87,7 @@ void catalogs.refresh();
 const serverIdentity={...identity,providers:runtime.providers};
 const claudeCommand=runtime.commands.claude;
 // Plugin run/start and the normal command both reach here. Save compatible defaults once, before any project opens.
-const initialRouting=roleRouting({dir:configFolder,adapters:runtime.adapters,checks:runtime.availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!claudeCommand,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true});
+const initialRouting=roleRouting({dir:configFolder,adapters:runtime.adapters,checks:runtime.availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!claudeCommand,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true,codexSkillDiagrams:true});
 try {
  await initialRouting.initializeDefaults(SETUP_PROVIDERS.filter(id=>overrides[id]!==undefined));
 } catch {
@@ -114,7 +114,7 @@ const openProject = async (entry: ProjectEntry) => {
   const usage = new UsageLogs({ notebookRoot: store.rootReal });
   const provider = plan ?? (claudeCommand ? createProvider({ provider: defaults.roles.chat, command: claudeCommand, contract: "claude-canary-2.1.205", usageLog: usage }) : undefined);
   const adapters=selectedCouncilAdapters(runtime.providers,catalogs.view),availabilityChecks=runtime.availabilityChecks;
-  const routing=roleRouting({dir:configFolder,adapters,checks:availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!claudeCommand,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true,
+  const routing=roleRouting({dir:configFolder,adapters,checks:availabilityChecks,legacyAnswerer:()=>activePipelineConfig().normalAnswerer,claudeBridge:!!claudeCommand,codexInvokedBridge:createInvokedCodexBridge,codexThreadReplies:true,codexSkillDiagrams:true,
    catalogFor:id=>{const provider=runtime.providers.find(p=>p.id===id);return provider&&catalogs.view(provider);}});
   const setup = createSetupHttp({dir:configFolder, project:entry.root, providers:runtime.providers,catalogs,
     overrides,

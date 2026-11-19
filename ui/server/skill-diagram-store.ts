@@ -37,8 +37,10 @@ export class SkillDiagramStore {
   if(parent.isSymbolicLink()||!parent.isDirectory())throw new Error('Invalid private diagram directory.');
   return path.join(dir,stage+'-'+asset);
  }
- private async save(asset:string,bytes:Buffer):Promise<SkillDiagramRef>{
-  if(!(await resolvePrivateProjectPath(this.root,'skillDiagrams')).managed){
+ async hasPrivateStaging(){return (await resolvePrivateProjectPath(this.root,'skillDiagrams')).managed;}
+ private async save(asset:string,bytes:Buffer,privateOnly=false):Promise<SkillDiagramRef>{
+  if(!await this.hasPrivateStaging()){
+   if(privateOnly)throw new Error('Private diagram storage is unavailable.');
    await this.write(asset,bytes);return {asset,bytes:bytes.length};
   }
   const stage=randomBytes(16).toString('hex'),file=await this.stageFile(asset,stage,true);
@@ -97,9 +99,9 @@ export class SkillDiagramStore {
   const bytes=Buffer.from(injectCsp(document),'utf8'),asset=`diagram-${sha(bytes)}.html`;return this.save(asset,bytes);
  }
  /** A stand-alone <svg> exactly as the skill wrote it: no change to a single byte. */
- async saveSvg(svg:string):Promise<SkillDiagramRef>{
+ async saveSvg(svg:string,privateOnly=false):Promise<SkillDiagramRef>{
   if(Buffer.byteLength(svg)>SKILL_DIAGRAM_MAX_BYTES)throw new Error('The diagram is too large.');
-  const bytes=Buffer.from(svg,'utf8'),asset=`diagram-${sha(bytes)}.svg`;return this.save(asset,bytes);
+  const bytes=Buffer.from(svg,'utf8'),asset=`diagram-${sha(bytes)}.svg`;return this.save(asset,bytes,privateOnly);
  }
  async read(name:string):Promise<Buffer>{
   return this.verified(await this.confined(name),name);
