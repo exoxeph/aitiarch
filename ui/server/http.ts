@@ -159,11 +159,12 @@ interface UiState {
 export function createApp(opts: AppOptions) {
   const { store, watcher } = opts;
   const inkReady = InkStore.open(store.rootReal);
+  const stagedImages=new ImageStore(store.rootReal);
   const clients = new Set<http.ServerResponse>();
   const assistance = inkReady.then(ink => new Assistance(store, ink, opts.provider ?? {
     checkAvailability: async () => ({ available: false, code: "unsupported_cli", message: "Claude is not configured. Start with --claude and an absolute executable path. Codex is disabled." }),
     invoke: async () => { throw new ProviderError("unsupported_cli"); },
-  }, path => { for (const c of clients) c.write(`event: ink\ndata: ${JSON.stringify({ type: "ink", path })}\n\n`); }, undefined, (node, one) => nodeSettings.extras(node, one),opts.provider?.name==='chatgpt-plan'?undefined:opts.council?.routing));
+  }, path => { for (const c of clients) c.write(`event: ink\ndata: ${JSON.stringify({ type: "ink", path })}\n\n`); }, undefined, (node, one) => nodeSettings.extras(node, one),opts.provider?.name==='chatgpt-plan'?undefined:opts.council?.routing,stagedImages));
   let port = 0;
   // Shared with the multi-project host when it embeds this app; otherwise this app is its own front door.
   const security = opts.security ?? createSecurity({ port: () => port, extraOrigins: opts.allowOrigins, requireLaunch: opts.requireLaunch });
@@ -233,7 +234,6 @@ export function createApp(opts: AppOptions) {
   const councilIndexReady=opts.council?harnessReady.then(async h=>opts.council!.index??h?.index??await SessionIndex.open(harnessDirectory(store.rootReal))):Promise.resolve(null);
   const councilReady=opts.council?Promise.all([inkReady,councilIndexReady]).then(async([ink,index])=>new CouncilService({store,ink,index:index!,history:new CouncilHistory(index!,1024*1024,store.rootReal),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters,routing:opts.council!.routing})):Promise.resolve(null);
   const normalReady=Promise.all([councilIndexReady,councilReady]).then(([index,council])=>index&&council?new NormalChat({index,questions:new QuestionStore(index.dir),council,adapters:opts.council!.adapters,routing:opts.council!.routing}):undefined);
-  const stagedImages=new ImageStore(store.rootReal);
   const imageRecovery=stagedImages.recoverAbandoned().catch(()=>{console.warn('Private image recovery was unavailable for this notebook.');});
   const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady,normalReady]).then(([ink,harness,normal])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages,normal,{store:stagedImages,delivery:opts.chatImageDelivery});chatRef.resolve(runtime);return runtime;});
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
@@ -242,7 +242,8 @@ export function createApp(opts: AppOptions) {
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
     name:'claude',checkAvailability:async()=>({available:false,code:'unsupported_cli',message:'Provider disabled. Enable it explicitly at server startup.'}),invoke:async()=>{throw new ProviderError('unsupported_cli');}
-  },path=>{for(const c of clients)c.write(`event: ink\ndata: ${JSON.stringify({type:'ink',path})}\n\n`);},node=>nodeSettings.extras(node),opts.provider?.name==='chatgpt-plan'?undefined:opts.council?.routing));
+  },path=>{for(const c of clients)c.write(`event: ink\ndata: ${JSON.stringify({type:'ink',path})}\n\n`);},node=>nodeSettings.extras(node),opts.provider?.name==='chatgpt-plan'?undefined:opts.council?.routing,stagedImages));
+  const imageSurface=(surface:string|null)=>surface==='invoked'?assistance:surface==='thread'?runtimeReady:chatReady;
   async function readUiState(): Promise<UiState> {
     try { const {v,tabs,active,treeCollapsed,theme,confirmAdd,typingHelp,doubleSpacePeriod,smartCorrections,neverCorrect}=await uiStateStore.read();return {v,tabs,active,...(treeCollapsed!==undefined?{treeCollapsed}:{}),...(theme!==undefined?{theme}:{}),...(confirmAdd!==undefined?{confirmAdd}:{}),...(typingHelp!==undefined?{typingHelp}:{}),...(doubleSpacePeriod!==undefined?{doubleSpacePeriod}:{}),...(smartCorrections!==undefined?{smartCorrections}:{}),...(neverCorrect!==undefined?{neverCorrect}:{})}; }
     catch { return {v:1,tabs:[],active:null}; }
@@ -569,10 +570,16 @@ export function createApp(opts: AppOptions) {
       return json(res,200,{...saved,messages:[...saved.messages,...runtime.memoryMessages(note)],persistence:await chatStore.status(),questionPlaceholder:'Question unavailable after reload.',usage:runtime.usage().find(c=>c.note===note&&c.session===(session||undefined))??null});
     }
     if(url.pathname==='/api/chat/modules'&&req.method==='GET')return json(res,200,await (await chatReady).modules(url.searchParams.get('path')??'',url.searchParams.get('sessions')==='1',url.searchParams.get('otherProjects')==='1'));
-    if(url.pathname==='/api/chat/image-availability'&&req.method==='GET')return json(res,200,await (await chatReady).imageAvailability());
+    if(url.pathname==='/api/chat/image-availability'&&req.method==='GET'){
+      const surface=url.searchParams.get('surface');
+      if(surface!==null&&surface!=='invoked'&&surface!=='thread')return json(res,400,{error:'invalid_image_surface'});
+      return json(res,200,await (await imageSurface(surface)).imageAvailability());
+    }
     if(url.pathname==='/api/chat/image-stage'){
       if(req.method!=='PUT')return json(res,404,{error:'not_found'});
-      const support=await (await chatReady).imageAvailability();
+      const surface=url.searchParams.get('surface');
+      if(surface!==null&&surface!=='invoked'&&surface!=='thread')return json(res,400,{error:'invalid_image_surface'});
+      const support=await (await imageSurface(surface)).imageAvailability();
       if(!support.available)return json(res,409,{error:'disabled',message:support.reason});
       const maxEncoded=4*Math.ceil(IMAGE_MAX_BYTES/3);
       const body=await readBody(req,maxEncoded+128) as {data?:unknown}|null;
@@ -721,7 +728,7 @@ export function createApp(opts: AppOptions) {
     if (url.pathname.startsWith("/api/assistance/") && req.method === "PUT") {
       const b = await readBody(req) as Record<string, unknown>, service = await assistance;
       if (url.pathname === "/api/assistance/preview" || url.pathname === "/api/assistance/invoke") {
-        const input = { id: b.id, path: b.path, action: b.action, question: b.question, text: b.text, from: b.from, to: b.to, ...(b.reviewId===undefined?{}:{reviewId:b.reviewId}), ...(b.renderer === undefined ? {} : { renderer: b.renderer }), ...(b.skill === undefined ? {} : { skill: b.skill }) } as Invocation;
+        const input = { id: b.id, path: b.path, action: b.action, question: b.question, text: b.text, from: b.from, to: b.to, ...(b.reviewId===undefined?{}:{reviewId:b.reviewId}), ...(b.renderer === undefined ? {} : { renderer: b.renderer }), ...(b.skill === undefined ? {} : { skill: b.skill }),...(b.imageIds===undefined?{}:{imageIds:b.imageIds}),...(b.confirmImages===true?{confirmImages:true}:{}) } as Invocation;
         if (url.pathname.endsWith("preview")) return json(res, 200, await service.preview(input));
         return json(res, 202, await service.start(input));
       }

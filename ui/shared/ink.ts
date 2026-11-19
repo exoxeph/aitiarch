@@ -12,6 +12,8 @@ export interface Generation {
   status: "pending" | "complete" | "error" | "cancelled";
   evidence: { sourceId: string; sourceHash: string; quote: string }[];
   dismissed: boolean;
+  /** Interpretation label only. Attachment identifiers and hashes remain private. */
+  imageInterpretation?:true;
   /** Names of the skills that shaped this answer. Absent in older files. Names only: never paths or skill text. */
   skills?: string[];
 }

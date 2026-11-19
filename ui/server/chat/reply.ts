@@ -19,7 +19,7 @@ export type ClaimsBlock=
 const OPEN='<claims>',CLOSE='</claims>';
 const sourceOf=(c:unknown)=>{const s=(c as any).source??(c as any).sourceId;return typeof s==='string'?s:'';};
 /** A claim of the block: a quote with its source, or a picture-only claim ({"source":"D1","visual":true}) which has no quote. Anything else is left out. */
-function isImageReference(c:unknown):c is Record<string,unknown>{
+export function isImageReference(c:unknown):c is Record<string,unknown>{
  return !!c&&typeof c==='object'&&'kind' in c&&c.kind==='image';
 }
 const claimOf=(c:unknown):(QuoteClaim|ImageReferenceClaim)[]=>{
@@ -85,6 +85,11 @@ export interface FinishedReply {body:string;claims:ChatClaim[];noCitation?:NoCit
 export class InvalidImageReference extends Error {
  constructor(){super('The image reference does not match the confirmed send.');}
 }
+export function verifiedImageReference(ref:unknown,confirmed?:ConfirmedImageSend){
+ return !!confirmed&&isImageReference(ref)&&Object.keys(ref).sort().join()==='id,kind,model,provider,sendId,sha256'&&
+  ref.sendId===confirmed.sendId&&ref.provider===confirmed.provider&&ref.model===confirmed.model&&
+  confirmed.images.some(image=>image.id===ref.id&&image.sha256===ref.sha256);
+}
 
 function checkImageReferences(parsed:ClaimsBlock,turn:ReplySources['imageTurn']){
  const confirmed=turn?.confirmed;
@@ -94,9 +99,7 @@ function checkImageReferences(parsed:ClaimsBlock,turn:ReplySources['imageTurn'])
  for(const claim of parsed.claims){
   if(!('kind' in claim))continue;
   const ref=claim.reference;
-  if(!confirmed||Object.keys(ref).sort().join()!=='id,kind,model,provider,sendId,sha256'||
-     ref.sendId!==confirmed.sendId||ref.provider!==confirmed.provider||ref.model!==confirmed.model||
-     !confirmed.images.some(image=>image.id===ref.id&&image.sha256===ref.sha256))throw new InvalidImageReference();
+  if(!verifiedImageReference(ref,confirmed))throw new InvalidImageReference();
  }
 }
 /** `legacy` is a structured result from an adapted provider (its answer and claims are already separate); otherwise `text` is the raw reply. */

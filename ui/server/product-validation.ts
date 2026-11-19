@@ -2,6 +2,8 @@ import {prepareDiagram,type Diagram,type DiagramIssue} from '../shared/diagram.t
 import {captureDiagram} from './diagram-debug.ts';
 import type { Generation } from '../shared/ink.ts';
 import type { Result } from './providers/index.ts';
+import {isImageReference,verifiedImageReference,InvalidImageReference} from './chat/reply.ts';
+import type {ConfirmedImageSend} from '../shared/image-attachments.ts';
 
 // Fixed protocol names; neither model output nor exception text supplies a rule.
 export const productRules = ['response_schema','result_id','result_provider','answer_type','answer_empty','answer_length',
@@ -42,7 +44,7 @@ interface Sources { note:string; decisions:{id:string;text:string}[] }
 export type ProductResult=Omit<Result,'provider'>&{provider:Result['provider']|'kiro'};
 // The production and offline paths share these checks and their original order.
 export function validateProductResult(result:ProductResult,expectedId:string,sources:Sources,
-  redact:(value:string)=>string,hash:(value:string)=>string,expectedProvider:ProductResult['provider']='claude') {
+  redact:(value:string)=>string,hash:(value:string)=>string,expectedProvider:ProductResult['provider']='claude',images?:ConfirmedImageSend) {
   const passedRules:ProductRule[]=[];
   let claimIndex=-1,sourceLength=-1;
   const requireRule=(rule:ProductRule,pass:boolean)=>{
@@ -58,8 +60,12 @@ export function validateProductResult(result:ProductResult,expectedId:string,sou
   requireRule('claims_count',result.claims.length<=32);
   requireRule('model',result.model===null||(typeof result.model==='string'&&/^[\w.:-]{1,100}$/.test(result.model)));
   const body=redact(result.answer),model=result.model;
-  const evidence:Generation['evidence']=result.claims.map((value,index)=>{
+  const evidence:Generation['evidence']=result.claims.flatMap((value,index)=>{
     claimIndex=index;
+    if(images&&isImageReference(value)){
+      if(!verifiedImageReference(value,images))throw new InvalidImageReference();
+      return [];
+    }
     const c=value as {sourceId:string;quote:string};
     const text=c?.sourceId==='N1'?sources.note:sources.decisions.find(d=>d.id===c?.sourceId)?.text;
     sourceLength=typeof text==='string'?text.length:-1;
@@ -68,8 +74,13 @@ export function validateProductResult(result:ProductResult,expectedId:string,sou
     requireRule('claim_quote_empty',!!c.quote.trim());
     requireRule('claim_quote_length',c.quote.length<=240);
     requireRule('claim_quote_exact',text!.includes(c.quote));
-    return {sourceId:c.sourceId,sourceHash:hash(text!),quote:c.quote};
+    return [{sourceId:c.sourceId,sourceHash:hash(text!),quote:c.quote}];
   });
+  if(images){
+    const content=JSON.stringify({answer:result.answer,diagram:result.diagram}).toLowerCase();
+    if([images.sendId,...images.images.flatMap(({id,sha256})=>[id,sha256])].some(id=>content.includes(id.toLowerCase())))
+      throw new InvalidImageReference();
+  }
   // A diagram is optional and never blocks the text answer. It is repaired when it only misses a limit by a little,
   // and when it still cannot be used the item records a specific reason instead of a generic one.
   let diagram:Diagram|undefined,diagramIssue:DiagramIssue|undefined;

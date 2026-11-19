@@ -101,8 +101,9 @@ export const applyNotebookSetup = (sharing:'private'|'shared') =>
 /** What GET /api/chat returns: accepted assistant messages only (questions are not stored), plus where the chat is kept. */
 export interface ChatSnapshot { v: 1; note: string; messages: ChatMessage[]; persistence: { enabled: boolean }; questionPlaceholder: string; usage: ChatUsage | null }
 /** PUT /api/chat/send as a server-sent-event stream. Rejects with ApiError when the server refuses before streaming starts. */
-export const chatImageAvailability=()=>ok<import('../shared/image-attachments.ts').ImageAvailability>('GET','/api/chat/image-availability');
-export const stageChatImage=(data:string)=>ok<import('../shared/image-attachments.ts').StagedImage>('PUT','/api/chat/image-stage',{data});
+export type ImageSurface='invoked'|'thread';
+export const chatImageAvailability=(surface?:ImageSurface)=>ok<import('../shared/image-attachments.ts').ImageAvailability>('GET','/api/chat/image-availability'+(surface?'?surface='+surface:''));
+export const stageChatImage=(data:string,surface?:ImageSurface)=>ok<import('../shared/image-attachments.ts').StagedImage>('PUT','/api/chat/image-stage'+(surface?'?surface='+surface:''),{data});
 export const removeChatImage=(id:string)=>ok<object>('PUT','/api/chat/image-remove',{id});
 
 export async function streamChat(body: { reviewId: string; confirmed?: boolean; dontAskAgain?: boolean; confirmImages?:boolean; imageIds?:string[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal): Promise<void> {

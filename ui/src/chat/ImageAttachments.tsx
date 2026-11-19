@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from 'react';
 import {IMAGE_SEND_MAX_BYTES,IMAGE_SEND_MAX_COUNT,IMAGE_WARNING,type ImageAvailability,type StagedImage} from '../../shared/image-attachments.ts';
-import {chatImageAvailability,removeChatImage,stageChatImage} from '../api.ts';
+import {chatImageAvailability,removeChatImage,stageChatImage,type ImageSurface} from '../api.ts';
 import {imageAsPng} from './image-source.ts';
 
 export type ImagePreview=StagedImage&{src:string};
@@ -22,19 +22,27 @@ function pngData(file:Blob):Promise<string>{
 
 function discard(id:string){void removeChatImage(id).catch(()=>{});}
 
-export function useChatImages(settings:unknown,showNotice:(text:string)=>void){
+export function useChatImages(settings:unknown,showNotice:(text:string)=>void,surface?:ImageSurface,enabled=true){
  const [support,setSupport]=useState<ImageSupport>({available:false,reason:'Checking image delivery…'});
  const [images,setImages]=useState<ImagePreview[]>([]),[loading,setLoading]=useState(false);
  const current=useRef<ImagePreview[]>([]),alive=useRef(true),staging=useRef(false);
+ const epoch=useRef(0);
+ function clear(){
+  epoch.current++;
+  for(const image of current.current)discard(image.id);
+  current.current=[];
+  setImages([]);
+ }
  useEffect(()=>{
+  if(!enabled)return;
   let active=true;
-  const check=()=>{void chatImageAvailability().then(value=>{if(active)setSupport(value);}).catch(()=>{
+  const check=()=>{void chatImageAvailability(surface).then(value=>{if(active)setSupport(value);}).catch(()=>{
    if(active)setSupport({available:false,reason:'Could not check image delivery.'});
   });};
   check();
   window.addEventListener('aitiarch:pipeline-changed',check);
   return()=>{active=false;window.removeEventListener('aitiarch:pipeline-changed',check);};
- },[settings]);
+ },[settings,surface,enabled]);
  useEffect(()=>{
   alive.current=true;
   return()=>{
@@ -44,17 +52,19 @@ export function useChatImages(settings:unknown,showNotice:(text:string)=>void){
   };
  },[]);
  async function add(files:readonly File[]){
-  if(!files.length||staging.current)return;
+  if(!enabled||!files.length||staging.current)return;
   if(!support.available){showNotice(imageSupportText(support));return;}
   if(support.status==='untested model'||support.status==='untested version')showNotice(imageSupportText(support));
   staging.current=true;
+  const generation=epoch.current;
   setLoading(true);
   try{
    for(const file of files){
     if(current.current.length>=IMAGE_SEND_MAX_COUNT)throw Error('Attach at most four images.');
     const encoded=await pngData(await imageAsPng(file));
-    const staged=await stageChatImage(encoded);
-    if(!alive.current){discard(staged.id);return;}
+    if(!alive.current||generation!==epoch.current)return;
+    const staged=await stageChatImage(encoded,surface);
+    if(!alive.current||generation!==epoch.current){discard(staged.id);return;}
     if(current.current.reduce((sum,image)=>sum+image.byteLength,0)+staged.byteLength>IMAGE_SEND_MAX_BYTES){
      discard(staged.id);
      throw Error('Attach at most 15 MiB of images per send.');
@@ -63,7 +73,7 @@ export function useChatImages(settings:unknown,showNotice:(text:string)=>void){
     current.current=[...current.current,image];
     setImages(current.current);
    }
-  }catch(error){if(alive.current)showNotice(error instanceof Error?error.message:'The image could not be attached.');}
+  }catch(error){if(alive.current&&generation===epoch.current)showNotice(error instanceof Error?error.message:'The image could not be attached.');}
   finally{staging.current=false;if(alive.current)setLoading(false);}
  }
  function remove(id:string){
@@ -73,7 +83,20 @@ export function useChatImages(settings:unknown,showNotice:(text:string)=>void){
   current.current=current.current.filter(item=>item.id!==id);
   setImages(current.current);
  }
- return {images,support,loading,add,remove};
+ return {images,support,loading,add,remove,clear};
+}
+
+export function ImagePicker({draft,disabled}:{draft:ReturnType<typeof useChatImages>;disabled:boolean}){
+ const picker=useRef<HTMLInputElement>(null);
+ return <div className="chat-image-picker">
+  <input type="file" ref={picker} hidden multiple accept="image/png,image/jpeg,image/webp" disabled={disabled||draft.loading||!draft.support.available} onChange={e=>{
+   const files=Array.from(e.target.files??[]);
+   e.target.value='';
+   void draft.add(files);
+  }}/>
+  <button type="button" disabled={disabled||draft.loading||!draft.support.available} title={imageSupportText(draft.support)} onClick={()=>picker.current?.click()}>Attach images</button>
+  {!draft.support.available&&<span className="small muted"> {imageSupportText(draft.support)}</span>}
+ </div>;
 }
 
 export function ImageThumbnails({images,onRemove}:{images:readonly ImagePreview[];onRemove?:(id:string)=>void}){

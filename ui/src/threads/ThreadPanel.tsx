@@ -2,6 +2,8 @@ import {profileForRole} from '../../shared/reply-render-profile.ts';
 import {DiagramSlot} from '../diagrams/DiagramSlot.tsx';
 import {selectionLabel,reportedModelLabel} from '../../shared/model-settings.ts';
 import {ReplyMarkdown} from '../ink/ReplyMarkdown.tsx';
+import {clipboardImages,ImageConfirmation,ImageInterpretationNotice,ImagePicker,ImageThumbnails,useChatImages} from '../chat/ImageAttachments.tsx';
+import type {ReviewedImageManifest} from '../../shared/image-attachments.ts';
 import {DiagramReveal,Streamed,Thinking} from '../ink/streaming.tsx';
 import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
@@ -35,7 +37,7 @@ export function ReplyView({reply,onAdd}:{reply:ThreadReply;onAdd?:(r:ThreadReply
  const fresh=waited.current&&reply.generation.status==='complete';
  return <article className="thread-reply" data-reply-id={reply.id} data-generated-complete={reply.generation.status==='complete'?'true':undefined}>
   <div className="small muted">AI · {providerLabel(reply.generation.provider)} · {reportedModelLabel(reply.generation.model)} · {reply.generation.status}</div>
-  {reply.generation.status==='complete'?<div className="ai-answer"><Streamed text={reply.body} fresh={fresh}><ReplyMarkdown text={reply.body} profile={profileForRole("thread-reply")}/></Streamed><DiagramReveal fresh={fresh}><DiagramSlot diagram={reply.diagram} invalid={reply.diagramIssue}/></DiagramReveal></div>:reply.generation.status==='pending'&&!reply.failure?<p><Thinking/></p>:<p role="status">{reply.failure?failureLabels[reply.failure.code]:'Answer unavailable. No partial answer was accepted.'}</p>}
+  {reply.generation.status==='complete'?<div className="ai-answer"><ImageInterpretationNotice shown={reply.generation.imageInterpretation}/><Streamed text={reply.body} fresh={fresh}><ReplyMarkdown text={reply.body} profile={profileForRole("thread-reply")}/></Streamed><DiagramReveal fresh={fresh}><DiagramSlot diagram={reply.diagram} invalid={reply.diagramIssue}/></DiagramReveal></div>:reply.generation.status==='pending'&&!reply.failure?<p><Thinking/></p>:<p role="status">{reply.failure?failureLabels[reply.failure.code]:'Answer unavailable. No partial answer was accepted.'}</p>}
   {onAdd&&reply.generation.status==='complete'&&<button type="button" className="add-to-note" aria-label={'Add to note: '+reply.body.replace(/\s+/g,' ').slice(0,48)} onClick={()=>onAdd(reply)}>Add to note</button>}
  </article>;
 }
@@ -62,7 +64,11 @@ export function ThreadPanel(props:Props){
 function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgnoreNotice=true}:Props&{item:InkItem;memory:Map<string,MemoryDraft>}){
  const key=path+':'+item.id;let entry=memory.get(key);if(!entry){entry={text:'',revision:null,loaded:false,dirty:false,enabled:false,sequence:0,queue:Promise.resolve()};memory.set(key,entry);}const draft=entry;
  const [text,setText]=useState(draft.text),[draftNotice,setDraftNotice]=useState(false),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[confirmDelete,setConfirmDelete]=useState(false);
- const [question,setQuestion]=useState(''),[review,setReview]=useState<null|{purpose:'followup'|'summary';replyId:string;parentId:string;provider:string;required:boolean;from:string|null;description:string;packet:unknown;noteVersion:string;question:string;skills?:SkillsReview;modelSettings?:import('../../shared/setup.ts').ModelEffort;reviewId?:string;cap?:{amount:number;unit:string}|null}>(null),[confirmed,setConfirmed]=useState(false);
+ const [question,setQuestion]=useState(''),[review,setReview]=useState<null|{purpose:'followup'|'summary';replyId:string;parentId:string;provider:string;required:boolean;from:string|null;description:string;packet:unknown;noteVersion:string;question:string;skills?:SkillsReview;modelSettings?:import('../../shared/setup.ts').ModelEffort;reviewId?:string;cap?:{amount:number;unit:string}|null;images?:ReviewedImageManifest}>(null),[confirmed,setConfirmed]=useState(false);
+ const [imagesConfirmed,setImagesConfirmed]=useState(false);
+ const imageDraft=useChatImages(null,setNotice,'thread',visible);
+ const reviewedIds=review?.images?.images.map(image=>image.id);
+ const sameImages=!reviewedIds||reviewedIds.length===imageDraft.images.length&&reviewedIds.every((id,index)=>id===imageDraft.images[index].id);
  const [accounting,setAccounting]=useState<Record<string,{usage:InvokedUsage;notice?:string}>>({});
  const [saveFailures,setSaveFailures]=useState<string[]>([]);
  const mounted=useRef(true),card=useRef<HTMLElement|null>(null),seen=useRef(new Set<string>()),live=useRef({item,version,saved});live.current={item,version,saved};
@@ -109,14 +115,17 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgno
   setBusy(true);setNotice('');try{
    const a=await api.assistance(),notice=await api.threadCall<{required:boolean;from:string|null;to:string;description:string}>('notice',{path,id:item.id});
    const replies=[initial,...t.followups,...(t.summary.reply?[t.summary.reply]:[])].filter(r=>r.generation.status==='complete');
-   const replyId=crypto.randomUUID(),parentId=replies.at(-1)?.id??item.id,response=await api.threadCall<{packet:unknown;noteVersion:string;skills?:SkillsReview;review?:{id:string;provider:string;modelSettings?:import('../../shared/setup.ts').ModelEffort;cap:{amount:number;unit:string}|null};notice?:typeof notice}>('preview',{path,id:item.id,purpose,question,replyId,parentId});
+   const imageIds=purpose==='followup'?imageDraft.images.map(image=>image.id):[];
+   const replyId=crypto.randomUUID(),parentId=replies.at(-1)?.id??item.id,response=await api.threadCall<{packet:unknown;noteVersion:string;skills?:SkillsReview;review?:{id:string;provider:string;modelSettings?:import('../../shared/setup.ts').ModelEffort;cap:{amount:number;unit:string}|null;images?:ReviewedImageManifest};notice?:typeof notice}>('preview',{path,id:item.id,purpose,question,replyId,parentId,...(imageIds.length?{imageIds}:{})});
    const pinnedNotice=response.notice??notice;
-   setConfirmed(!pinnedNotice.required);setReview({purpose,replyId,parentId,provider:response.review?.provider??a.provider??'claude',question,...pinnedNotice,...response,modelSettings:response.review?.modelSettings,reviewId:response.review?.id,cap:response.review?.cap});
+   if(imageIds.length&&!response.review?.images)throw Error('The attachments were not reviewed. Review the reply again.');
+   setImagesConfirmed(false);setConfirmed(!pinnedNotice.required);setReview({purpose,replyId,parentId,provider:response.review?.provider??a.provider??'claude',question,...pinnedNotice,...response,modelSettings:response.review?.modelSettings,reviewId:response.review?.id,cap:response.review?.cap,images:response.review?.images});
   }catch(e){fail(e);}finally{setBusy(false);}
  };
- const send=async()=>{if(!review||busy||!confirmed)return;setBusy(true);try{
-  const body={path,id:item.id,inkVersion:live.current.version,replyId:review.replyId,parentId:review.parentId,purpose:review.purpose,question:review.question,noteVersion:review.noteVersion,confirmed,...(review.reviewId?{reviewId:review.reviewId}:{})};
+ const send=async()=>{if(!review||busy||!confirmed||reviewedIds&&(!sameImages||!imagesConfirmed))return;setBusy(true);try{
+  const body={path,id:item.id,inkVersion:live.current.version,replyId:review.replyId,parentId:review.parentId,purpose:review.purpose,question:review.question,noteVersion:review.noteVersion,confirmed,...(review.reviewId?{reviewId:review.reviewId}:{}),...(reviewedIds?{imageIds:reviewedIds,confirmImages:true}:{})};
   const s=await api.threadCall<InkSnapshot>('invoke',body);rememberQuestion(path,review.replyId,review.purpose==='summary'?'Closing summary':review.question);update(s);setQuestion('');setReview(null);
+  if(reviewedIds)imageDraft.clear();
  }catch(e){fail(e);}finally{setBusy(false);}};
  if(t.dismissed)return <article className="thread-card"><p>Thread dismissed; replies and your work are preserved.</p><button disabled={busy} onClick={()=>void act({type:'restore'})}>Restore thread</button><button onClick={()=>setConfirmDelete(true)}>Delete thread…</button>{confirmDelete&&<DeleteConfirm busy={busy} cancel={()=>setConfirmDelete(false)} remove={()=>void act({type:'delete',confirmed:true})}/ >}</article>;
  return <article className="thread-card" data-thread-id={item.id} ref={card}>
@@ -132,15 +141,20 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgno
   {t.takeaway.state==='submitted'&&<section><strong>Your submitted takeaway</strong><p className="human-text">{t.takeaway.text}</p><button disabled={busy||item.attachment.status!=='attached'} onClick={()=>void insert(item).catch(fail)}>Preview insertion</button></section>}
   {t.takeaway.state==='submitted'&&<button disabled={busy} onClick={()=>void act({type:'reopen'})}>Reopen takeaway</button>}
   <section aria-label="Closing summary" className={revealed?undefined:'summary-locked'}>{revealed&&<h4>AI closing summary</h4>}{!revealed?<p>AI summary stays locked until you write your takeaway or skip it.</p>:t.summary.reply?<ReplyView reply={t.summary.reply} onAdd={r=>card.current?.dispatchEvent(new CustomEvent('bring-thought',{bubbles:true,detail:{id:item.id,replyId:r.id}}))}/>:<button disabled={busy||item.attachment.status!=='attached'} onClick={()=>void prepare('summary')}>Request closing summary</button>}</section>
-  <div className="writeback"><input aria-label="Write back" placeholder="Write back…" value={question} disabled={!!review||busy} maxLength={8000} onChange={e=>setQuestion(e.target.value)}/>
-  <button className="send-arrow" aria-label="Review reply" title="Review reply" disabled={busy||!question.trim()||item.attachment.status!=='attached'} onClick={()=>void prepare('followup')}><span aria-hidden="true"/></button></div>
+  <div className="writeback" onDragOver={e=>{if(e.dataTransfer.types.includes('Files'))e.preventDefault();}}
+   onDrop={e=>{const files=clipboardImages(e.dataTransfer);if(!files.length)return;e.preventDefault();e.stopPropagation();if(!review&&!busy)void imageDraft.add(files);}}>
+   <input aria-label="Write back" placeholder="Write back…" value={question} disabled={!!review||busy} maxLength={8000} onChange={e=>setQuestion(e.target.value)}
+    onPaste={e=>{const files=clipboardImages(e.clipboardData);if(files.length){e.preventDefault();e.stopPropagation();void imageDraft.add(files);}}}/>
+   <button className="send-arrow" aria-label="Review reply" title="Review reply" disabled={busy||!!review||imageDraft.loading||!question.trim()||item.attachment.status!=='attached'} onClick={()=>void prepare('followup')}><span aria-hidden="true"/></button></div>
+  {!review&&<><ImagePicker draft={imageDraft} disabled={busy||item.attachment.status!=='attached'}/>{imageDraft.images.length>0&&<ImageThumbnails images={imageDraft.images} onRemove={imageDraft.remove}/>}</>}
   {review&&<section className="thread-request" aria-label="Review thread request"><p>Send to {providerLabel(review.provider)}. Note and selection frozen by version; changes require a new review.</p>
    <p className="small muted">{selectionLabel(review.modelSettings)}. Each reply uses a fresh CLI context with only the reviewed app-kept history.</p>
    {review.cap&&<p className="small muted">Allowance for this request: {review.cap.amount.toLocaleString()} {review.cap.unit}. Reported after the turn; if unreported, the full allowance is charged conservatively. Another reply needs a new review.</p>}
    <SkillsReviewList review={review.skills}/>
    <details><summary>Exact redacted request</summary><pre>{JSON.stringify(review.packet,null,2)}</pre></details>
    {review.required&&<label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>Switch from {providerLabel(review.from??'claude')} to {providerLabel(review.provider)}: {review.description} Confirm this first change.</label>}
-   <button disabled={busy||!confirmed} onClick={()=>void send()}>Send reply</button><button onClick={()=>setReview(null)}>Cancel write-back</button></section>}
+   {reviewedIds&&sameImages&&<ImageConfirmation images={imageDraft.images} checked={imagesConfirmed} onChange={setImagesConfirmed}/>}
+   <button disabled={busy||!confirmed||!!reviewedIds&&(!imagesConfirmed||!sameImages)} onClick={()=>void send()}>Send reply</button><button onClick={()=>setReview(null)}>Cancel write-back</button></section>}
   <div className="thread-actions"><button disabled={busy} onClick={()=>void act({type:t.resolvedAt?'unresolve':'resolve'})}>{t.resolvedAt?'Reopen thought':'Resolve thought'}</button><button disabled={busy} onClick={()=>void act({type:'dismiss'})}>Dismiss thread</button><button onClick={()=>setConfirmDelete(true)}>Delete thread…</button></div>
   {confirmDelete&&<DeleteConfirm busy={busy} cancel={()=>setConfirmDelete(false)} remove={()=>void act({type:'delete',confirmed:true})}/>}
  </article>;

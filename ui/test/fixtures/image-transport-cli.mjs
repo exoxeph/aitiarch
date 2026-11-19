@@ -17,10 +17,11 @@ if(provider==='catalog'){
  }
  process.exit(0);
 }
-const record=args[0]==='record'?args[1]:null;
+const invoked=args[0]==='record-invoked';
+const record=invoked||args[0]==='record'?args[1]:null;
 const argv=record?args.slice(2):args;
 if(record&&argv.includes('--version')){
- console.log(provider==='claude'?'2.1.205 (Claude Code)':'codex-cli 0.167.0');
+ console.log(provider==='claude'?'2.1.205 (Claude Code)':invoked?'codex-cli 0.170.0':'codex-cli 0.167.0');
  process.exit(0);
 }
 if(record&&argv.includes('--help')){
@@ -40,10 +41,16 @@ const input=readFileSync(0,'utf8');
 const image=argv.includes('--image')?argv[argv.indexOf('--image')+1]:undefined;
 const data={argv,cwd:process.cwd(),body:provider==='claude'?JSON.parse(input):input,...(image?{image,contents:readFileSync(image).toString('base64')}:{})};
 if(!record){console.log(JSON.stringify(data));process.exit(0);}
-writeFileSync(record,JSON.stringify(data));
-const result='Synthetic image answer.\n<claims>{"none":"no_context_used"}</claims>';
+writeFileSync(record,JSON.stringify(invoked?{argv,bytes:provider==='claude'?data.body.message?.content[1]?.source.data:data.contents}:data));
+let result='Synthetic image answer.\n<claims>{"none":"no_context_used"}</claims>';
+if(invoked){
+ const instruction=provider==='claude'?JSON.parse(data.body.message?.content[0]?.text??input).instruction:input;
+ const references=instruction.match(/^\[\{"kind":"image".*\]$/m);
+ result=JSON.stringify({answer:'Synthetic image interpretation.',claims:references?JSON.parse(references[0]):[]});
+}
 if(provider==='claude'){
  console.log(JSON.stringify({type:'system',subtype:'init',tools:[],mcp_servers:[],plugins:[]}));
+ if(invoked)console.log(JSON.stringify({type:'assistant',message:{content:[{type:'text',text:result}]}}));
  console.log(JSON.stringify({type:'result',subtype:'success',result,usage:{input_tokens:30,output_tokens:5},total_cost_usd:0.001}));
 }else{
  console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:result}}));

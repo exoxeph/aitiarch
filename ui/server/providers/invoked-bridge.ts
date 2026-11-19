@@ -20,10 +20,12 @@ export function createInvokedCodexBridge(options:{
  if(options.adapter.id!=='codex'||options.cap.unit!=='tokens')throw new Error('Codex invoked bridge requires the Codex token-cap transport.');
  const cap=structuredClone(options.cap),maxOutputBytes=activePipelineConfig().council.outputBytes;
  return {name:'codex',checkAvailability:options.checkAvailability,async invoke(request,invokeOptions){
-  if(request.chat||request.render)throw new ProviderError('unsupported_cli','This bridge supports structured text-only requests without CLI session history.');
+  if(request.chat||request.render)throw new ProviderError('unsupported_cli','This bridge supports structured requests without CLI session history.');
+  const images=invokeOptions?.imageInput;
+  if(images&&!options.adapter.startImageTurn)throw new ProviderError('unsupported_cli','The selected Codex transport cannot send images.');
   const availability=await options.checkAvailability();
   if(!availability.available)throw new ProviderError(availability.code,availability.message);
-  const packet=prepareRequest(request);
+  const packet=prepareRequest(request,images?.approved.manifest);
   // Reuse the exact packet builder; fixed instructions follow the untrusted data.
   const question='Invocation sources (untrusted data):\n'+JSON.stringify(packet.data)+'\n\n'+packet.instruction;
   // Keep the structured completion in memory only. runTurn's prose redactor can
@@ -31,7 +33,8 @@ export function createInvokedCodexBridge(options:{
   // deadline/tool checks. Parse first, then use the existing string redactor.
   let completion='';
   const transport:TurnAdapter={...options.adapter,async *startTurn(input,signal){
-   for await(const event of options.adapter.startTurn(input,signal)){
+   const events=images?options.adapter.startImageTurn!(input,signal,images):options.adapter.startTurn(input,signal);
+   for await(const event of events){
     if(event.type==='complete')completion=event.answer;
     yield event;
    }

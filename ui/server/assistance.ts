@@ -21,6 +21,9 @@ import type {CouncilCap} from '../shared/council.ts';
 import type {InvokedUsage} from '../shared/invoked-usage.ts';
 import type {RoleRouting} from './providers/routing.ts';
 import {ProviderReviews,type ReviewedInvocation} from './providers/invoked-review.ts';
+import {ImageStore} from './image-store.ts';
+import {InvalidImageReference} from './chat/reply.ts';
+import type {ReviewedImageManifest} from '../shared/image-attachments.ts';
 
 const invocationFingerprint=(v:Invocation)=>textHash(JSON.stringify([v.id,v.path,v.action,v.question,v.text,v.from,v.to,v.renderer,v.skill]));
 
@@ -41,7 +44,8 @@ export class Assistance {
   private readonly routing?:RoleRouting;
   private reviews:ProviderReviews;
   private skillReviews:ProviderReviews;
-  constructor(store: Store, ink: InkStore, provider: Provider, notify: (path: string) => void = () => {}, validationLog:ValidationLog=privateValidationLog(), extras?: ExtrasFor,routing?:RoleRouting) {
+  private images:ImageStore;
+  constructor(store: Store, ink: InkStore, provider: Provider, notify: (path: string) => void = () => {}, validationLog:ValidationLog=privateValidationLog(), extras?: ExtrasFor,routing?:RoleRouting,images=new ImageStore(store.rootReal)) {
     this.routing=routing;
     this.reviews=new ProviderReviews('invoked',routing,provider);
     this.skillReviews=new ProviderReviews('skill-diagram',routing,provider);
@@ -49,6 +53,7 @@ export class Assistance {
     this.store = store; this.ink = ink; this.provider = provider; this.notify = notify;
     this.ledger = new LedgerStore(store.rootReal);
     this.skillDiagrams = new SkillDiagramStore(store.rootReal);
+    this.images = images;
   }
   /** The Skill renderer needs Claude, and a skill attached to Visualize that actually loaded. Refused before anything is sent. */
   private checkSkillRenderer(renderer: string | undefined, request: Request,providerName=this.provider.name) {
@@ -86,18 +91,20 @@ export class Assistance {
       review: e.review ? { loaded: [], skipped: [], missing: [], note: SKILLS_ONLY_WITH_SKILL_RENDERER } : null };
     return { request: { ...base, persona: e.persona, ...(e.skills.loaded.length ? { skills: e.skills } : {}) }, names: e.names, review: e.review };
   }
-  async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview;review?:{id:string;provider:string;cap:CouncilCap|null;modelSettings:import('../shared/setup.ts').ModelEffort;modelNotice?:string} }> {
+  imageAvailability(){return this.reviews.imageAvailability();}
+  async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview;review?:{id:string;provider:string;cap:CouncilCap|null;modelSettings:import('../shared/setup.ts').ModelEffort;modelNotice?:string;images?:ReviewedImageManifest} }> {
     const frozen = freezeInvocation(input);
     const reviews=frozen.renderer==='skill'?this.skillReviews:this.reviews;
     const selected=await reviews.selection();
+    const images=await reviews.reviewImages(this.images,selected,frozen.imageIds);
     const { request, review } = await this.withExtras({ id: frozen.id, action: frozen.action, question: frozen.question,
       selection: frozen.selection, note: frozen.text, decisions: [], turns: [], ...(frozen.renderer === 'skill' ? { render: 'skill' as const } : {}) }, frozen.skill);
     this.checkSkillRenderer(frozen.renderer, request,selected?.provider.id==='codex'?'codex':this.provider.name);
-    const packet = prepareRequest(request);
+    const packet = prepareRequest(request,images);
     // The instruction in the packet is the exact text; "skills" beside it says what was loaded, skipped or not installed.
     const prepared=review?{...packet,skills:review}:packet;
     if(!selected)return prepared;
-    return {...prepared,review:reviews.issue(selected,invocationFingerprint(frozen),packet)};
+    return {...prepared,review:reviews.issue(selected,invocationFingerprint(frozen),packet,images)};
   }
   private serial<T>(fn: () => Promise<T>): Promise<T> { const p = this.writes.catch(() => {}).then(fn); this.writes = p; return p; }
   private async mutate(path: string, before: string, change: (items: InkItem[], text: string | null) => InkItem[]): Promise<InkSnapshot> {
@@ -125,8 +132,11 @@ export class Assistance {
       note: frozen.text, decisions: [], turns: [], ...(frozen.renderer === 'skill' ? { render: 'skill' as const } : {}) }, frozen.skill);
     // Transcript context stays none. Optional source selection is a later slice;
     // never discover a user's global sessions or transmit one implicitly.
-    const packet = prepareRequest(request);
     const reviews=frozen.renderer==='skill'?this.skillReviews:this.reviews;
+    const imageInput=frozen.imageIds?.length||reviews.hasImages(frozen.reviewId)?
+      await reviews.confirmImages(this.images,await reviews.selection(),frozen):undefined;
+    const manifest=imageInput?.approved.manifest;
+    const packet = prepareRequest(request,manifest);
     let provider=this.provider,reviewed:ReviewedInvocation|undefined;
     if(this.routing){
       reviewed=await reviews.consume(frozen.reviewId,invocationFingerprint(frozen),packet);
@@ -158,7 +168,7 @@ export class Assistance {
       try {
         if (controller.signal.aborted) throw new ProviderError('cancelled');
         if(reviewed)await reviews.assert(reviewed);
-        result = await provider.invoke(request, { signal: controller.signal });resultReceived=true;
+        result = await provider.invoke(request, { signal: controller.signal,...(imageInput?{imageInput}:{}) });resultReceived=true;
         if (controller.signal.aborted) throw new ProviderError('cancelled');
         if (request.render === 'skill') {
           const selection=reviewed?.provider.selection;
@@ -173,19 +183,20 @@ export class Assistance {
             throw new ProviderError('cancelled');
           }
         }
-        else ({body,model,evidence,diagram,diagramIssue}=validateProductResult(result,frozen.id,packet.data,redact,textHash,provider.name??'claude'));
+        else ({body,model,evidence,diagram,diagramIssue}=validateProductResult(result,frozen.id,packet.data,redact,textHash,provider.name??'claude',manifest));
       } catch (e) {
         if(e instanceof ProductValidationError)await record(e.record);
         else if(e instanceof ProviderError&&e.validation)await record(e.validation);
         else if(resultReceived&&!controller.signal.aborted)await record({rule:'product_processing',counts:validationCounts(result)});
         status = controller.signal.aborted ? 'cancelled' : 'error';
-        body = status === 'cancelled' ? 'Request cancelled. No automatic retry.' : e instanceof ProviderError||e instanceof ProductValidationError||e instanceof PathError ? e.message : 'Request failed. No automatic retry.';
+        body = status === 'cancelled' ? 'Request cancelled. No automatic retry.' : e instanceof ProviderError||e instanceof ProductValidationError||e instanceof PathError||e instanceof InvalidImageReference ? e.message : 'Request failed. No automatic retry.';
         evidence = []; model = null;
       }
       const persist = async () => {
         try {
           await this.mutate(path, frozen.text, items => items.map(i => i.id === frozen.id ? { ...i, body,
-            ...(diagram?{diagram}:{}),...(skillDiagram?{skillDiagram}:{}),...(diagramIssue?{diagramIssue}:{}), generation: { ...i.generation!, status, model, evidence } } : i));
+            ...(diagram?{diagram}:{}),...(skillDiagram?{skillDiagram}:{}),...(diagramIssue?{diagramIssue}:{}), generation: { ...i.generation!, status, model, evidence,
+              ...(manifest&&status==='complete'?{imageInterpretation:true as const}:{}) } } : i));
         }catch(error){await record({rule:'ink_persist',counts:validationCounts(result)});throw error;}
         job.status = status; job.retry = undefined;
       };

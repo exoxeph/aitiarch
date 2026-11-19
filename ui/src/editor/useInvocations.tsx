@@ -20,6 +20,8 @@ import {useNodeSettings} from '../skills/useNodeSettings.ts';
 import {NODE_LABEL} from '../skills/skills-model.ts';
 import {nodeFor} from '../../shared/node-settings.ts';
 import type {SkillsReview} from '../../shared/node-settings.ts';
+import {clipboardImages,ImageConfirmation,ImagePicker,ImageThumbnails,useChatImages} from '../chat/ImageAttachments.tsx';
+import type {ReviewedImageManifest} from '../../shared/image-attachments.ts';
 /** The packet the server sends back has a "skills" entry beside the request; the request itself is everything else. */
 const exactRequest=(packet:unknown)=>{const {skills:_skills,review:_review,...rest}=packet as Record<string,unknown>;return rest;};
 
@@ -29,6 +31,13 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   saved: (snapshot: InkSnapshot) => void) {
   const [draft, setDraft] = useState<Draft | null>(null), [jobs, setJobs] = useState<Running[]>([]), [busy, setBusy] = useState(false);
   const [availableProviderLabel,setProviderLabel]=useState('Claude');
+  const [imageNotice,setImageNotice]=useState(''),[imagesConfirmed,setImagesConfirmed]=useState(false);
+  const isVisualize = !!draft && draft.input.question === VISUALIZE_QUESTION;
+  const imageDraft=useChatImages(path,setImageNotice,'invoked',!!draft&&!isVisualize);
+  const imageIds=imageDraft.images.map(image=>image.id);
+  const reviewedImages=(draft?.packet as {review?:{images?:ReviewedImageManifest}}|undefined)?.review?.images?.images??[];
+  const imagesReviewed=imageIds.length===reviewedImages.length&&imageIds.every((id,i)=>id===reviewedImages[i].id);
+  const canSendImages=imagesReviewed&&!imageDraft.loading&&(!imageIds.length||imagesConfirmed&&imageDraft.support.available);
   const providerLabel=draft?.providerLabel??availableProviderLabel;
   useEffect(()=>{void api.assistance().then(a=>setProviderLabel(savedProviderLabel(a.provider??'claude'))).catch(()=>{});},[]);
   const mounted = useRef(true), liveSaved = useRef(saved); liveSaved.current = saved;
@@ -70,6 +79,11 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
     const timer = setInterval(() => void poll(), 300); return () => { cancelled = true; clearInterval(timer); };
   }, [jobs, path]);
   const review = async (input: Invocation) => {
+    if(imageDraft.loading)return;
+    setImagesConfirmed(false);
+    // A revision always starts a new review of the original editor selection.
+    const {imageIds:_previousImages,reviewId:_previousReview,...frozen}=input;
+    input={...frozen,...(!isVisualize&&imageIds.length?{imageIds}:{})};
     setBusy(true);
     try {
       const availability = await api.assistance(input.renderer);
@@ -94,11 +108,11 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
     window.dispatchEvent(new CustomEvent('invocation-begin'));
     if (action === 'think' || visualize) void review(input);
   };
-  const cancelPreview = () => { if (draft && view.current) view.current.dispatch({ effects: removeInk.of(draft.input.id) }); setDraft(null); };
+  const cancelPreview = () => { if (draft && view.current) view.current.dispatch({ effects: removeInk.of(draft.input.id) }); imageDraft.clear();setImageNotice('');setImagesConfirmed(false);setDraft(null); };
   useEffect(()=>{if(!draft)return;return transient(()=>document.querySelector<HTMLElement>('.ink-surface[data-note-path='+JSON.stringify(path)+'] .invocation-review'),cancelPreview,180,()=>busy||(draft.input.action==='ask'&&draft.input.question!==VISUALIZE_QUESTION&&!!draft.input.question.trim()));},[draft,busy,path]);
   const send = async () => {
-    if (!draft?.packet || busy) return;
-    const input = draft.input;
+    if (!draft?.packet || busy || !canSendImages) return;
+    const input = {...draft.input,...(imageIds.length?{confirmImages:true}:{})};
     setBusy(true);
     try {
       // Save only the human's current draft through the existing byte-preserving
@@ -107,25 +121,40 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       if (session.current?.status !== 'saved') throw new Error('Save or resolve this note before sending.');
       const snapshot = await api.invoke(input);
       rememberQuestion(path,input.id,input.question||'Think on this');
-      merge(snapshot); setJobs(all => [...all, { id: input.id, status: 'pending' }]); setDraft(null);
+      merge(snapshot); setJobs(all => [...all, { id: input.id, status: 'pending' }]); imageDraft.clear();setImageNotice('');setImagesConfirmed(false);setDraft(null);
     } catch (e) { setDraft({ input:draft.input, error: e instanceof Error ? e.message : 'Invocation failed. No automatic retry.' }); }
     finally { setBusy(false); }
   };
   // The ask/review form lives in the margin blob of the frozen selection (Enter to ask or send, Esc to cancel). The top panel
   // only shows it as a fallback when that blob is not on screen (narrow layout), plus the job status lines.
-  const sendRef = useRef<HTMLButtonElement>(null), hasPacket = draft?.packet !== undefined;
+  const sendRef = useRef<HTMLButtonElement>(null), hasPacket = draft?.packet !== undefined&&imagesReviewed;
   const reviewedCap=(draft?.packet as {review?:{cap?:{unit:string;amount:number}|null}}|undefined)?.review?.cap;
   const modelNotice=(draft?.packet as {review?:{modelNotice?:string}}|undefined)?.review?.modelNotice;
   const stepNode = draft ? nodeFor(draft.input.action, draft.input.question) : 'ask', persona = useNodeSettings(stepNode);
   // Visualize only: who draws the diagram. Skill needs a skill attached to the Visualize step (Settings); Built-in is always there and the default.
-  const isVisualize = !!draft && draft.input.question === VISUALIZE_QUESTION, renderer = draft?.input.renderer ?? 'builtin';
+  const renderer = draft?.input.renderer ?? 'builtin';
   const [visualizeSkills, setVisualizeSkills] = useState(0);
   useEffect(() => { if (!isVisualize) return; let off = false; void api.nodes().then(r => { if (!off) setVisualizeSkills(r.nodes.visualize.skills.length); }).catch(() => {}); return () => { off = true; }; }, [isVisualize, draft?.input.id]);
   const chooseRenderer = (next: 'builtin' | 'skill') => { if (!draft || busy || next === renderer) return; const { skill: _drop, ...rest } = draft.input, input: Invocation = { ...rest, renderer: next }; setDraft({ input }); void review(input); }; // a pick belongs to the Skill renderer only
   const pickSkill = (id: string) => { if (!draft || busy) return; const input: Invocation = { ...draft.input, renderer: 'skill', skill: id }; setDraft({ input }); void review(input); };
   useEffect(() => { if (hasPacket) sendRef.current?.focus(); }, [hasPacket]);
-  const asking = !!draft && draft.input.action === 'ask' && !hasPacket && draft.input.question !== VISUALIZE_QUESTION;
+  const asking = !!draft && draft.input.action === 'ask' && draft.packet===undefined && !isVisualize;
   const draftSection = draft ? <section aria-label={`Review ${providerLabel} request`} className="invocation-review" data-frozen-selection={draft.input.text.slice(draft.input.from, draft.input.to)}
+    onPaste={e=>{
+      const files=clipboardImages(e.clipboardData);
+      if(isVisualize||!files.length)return;
+      e.preventDefault();
+      e.stopPropagation();
+      if(!busy){setImagesConfirmed(false);void imageDraft.add(files);}
+    }}
+    onDragOver={e=>{if(!isVisualize&&e.dataTransfer.types.includes('Files'))e.preventDefault();}}
+    onDrop={e=>{
+      const files=clipboardImages(e.dataTransfer);
+      if(isVisualize||!files.length)return;
+      e.preventDefault();
+      e.stopPropagation();
+      if(!busy){setImagesConfirmed(false);void imageDraft.add(files);}
+    }}
     onKeyDown={e => {
       if (e.key === 'Escape') { e.stopPropagation(); if(!busy&&!(draft.input.action==='ask'&&draft.input.question!==VISUALIZE_QUESTION&&draft.input.question.trim()))cancelPreview(); return; }
       if (e.key !== 'Enter' || e.shiftKey || busy) return;
@@ -138,6 +167,11 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
     <p role="status" className="sr-only">{hasPacket ? 'Review ready. Press Enter to send, Escape to cancel.' : asking ? 'Type your question, then press Enter to review it. Escape cancels.' : ''}</p>
     {asking && <label>Question for {providerLabel}<input aria-label={`Question for ${providerLabel}`} placeholder="Ask about this selection…" maxLength={8000} autoFocus
       value={draft.input.question} onChange={e => setDraft({ input: { ...draft.input, question: e.target.value } })} /></label>}
+    {!isVisualize&&<ImagePicker draft={imageDraft} disabled={busy}/>}
+    {imageNotice&&<p role="status" className="small muted">{imageNotice}</p>}
+    {imageIds.length>0&&(hasPacket?<><ImageConfirmation checked={imagesConfirmed} onChange={setImagesConfirmed} images={imageDraft.images}/>
+      <button type="button" disabled={busy} onClick={()=>{imageDraft.clear();setImagesConfirmed(false);}}>Remove attached images</button></>:
+      <ImageThumbnails images={imageDraft.images} onRemove={busy?undefined:id=>{setImagesConfirmed(false);imageDraft.remove(id);}}/>)}
     {isVisualize && <fieldset className="persona-switch renderer-switch" disabled={busy}>
       <legend className="persona-legend">Who draws it</legend>
       <div className="persona-options">
@@ -157,13 +191,13 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       <details><summary>Exact redacted request</summary><pre>{JSON.stringify(exactRequest(draft.packet), null, 2)}</pre></details></details>}
     {hasPacket && <p className="small muted">{providerLabel} · {selectionLabel((draft.packet as {review?:{modelSettings?:import('../../shared/setup.ts').ModelEffort}}).review?.modelSettings)}. This request uses a fresh CLI context.</p>}
     {hasPacket && modelNotice && <p className="small muted">{modelNotice}</p>}
-    {hasPacket && <p className="small muted ask-hint">Enter to send · Esc to cancel</p>}
+    {hasPacket && <p className="small muted ask-hint">{canSendImages?'Enter to send · Esc to cancel':'Confirm the reviewed images before sending.'}</p>}
     {hasPacket&&reviewedCap&&<p className="small muted">{providerLabel} allowance for this request: {reviewedCap.amount.toLocaleString()} {reviewedCap.unit}. Usage is reported after the turn; if it is not reported, the full allowance is charged conservatively. Another request needs a new review.</p>}
     {draft.error && <p role="alert">{draft.error}</p>}
     {draft.warnings?.map(warning => <p role="note" key={warning}>{warning}</p>)}
     <div className="attach-actions">{hasPacket
-      ? <button ref={sendRef} disabled={busy} onClick={() => void send()}>Send to {providerLabel}</button>
-      : <button disabled={busy || (draft.input.action === 'ask' && !draft.input.question.trim())} onClick={() => void review(draft.input)}>Review request</button>}
+      ? <button ref={sendRef} disabled={busy||!canSendImages} onClick={() => void send()}>Send to {providerLabel}</button>
+      : <button disabled={busy || imageDraft.loading || (draft.input.action === 'ask' && !draft.input.question.trim())} onClick={() => void review(draft.input)}>Review request</button>}
       <button disabled={busy} onClick={cancelPreview}>Cancel preview</button></div>
   </section> : null;
   const panel = <div className="invocation-panel">

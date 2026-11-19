@@ -4,6 +4,10 @@ export const IMAGE_SEND_MAX_COUNT=4;
 export const IMAGE_SEND_MAX_BYTES=15*1024*1024;
 export const IMAGE_WARNING='images are sent as-is; secret exclusion cannot inspect them';
 
+export function validImageIds(value:unknown):value is string[]{
+ return Array.isArray(value)&&value.length<=IMAGE_SEND_MAX_COUNT&&value.every(id=>typeof id==='string'&&/^[a-f0-9]{32}$/.test(id));
+}
+
 export interface StagedImage {
  id:string;
  mime:'image/png';

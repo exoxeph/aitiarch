@@ -10,8 +10,17 @@ import type {RoleRouting} from './providers/routing.ts';
 import type {InkItem} from '../shared/ink.ts';
 import type {InvokedUsage} from '../shared/invoked-usage.ts';
 import {PathError} from './paths.ts';
-export interface ThreadRequest {path:string;id:string;inkVersion:string|null;replyId:string;parentId:string;purpose:'followup'|'summary';question:string;confirmed:boolean;noteVersion?:string;reviewId?:string}
-type PreviewInput=Pick<ThreadRequest,'path'|'id'|'replyId'|'purpose'|'question'> & {parentId?:string};
+import {ImageStore} from './image-store.ts';
+import {InvalidImageReference} from './chat/reply.ts';
+import {validImageIds} from '../shared/image-attachments.ts';
+export interface ThreadRequest {path:string;id:string;inkVersion:string|null;replyId:string;parentId:string;purpose:'followup'|'summary';question:string;confirmed:boolean;noteVersion?:string;reviewId?:string;imageIds?:string[];confirmImages?:boolean}
+type PreviewInput=Pick<ThreadRequest,'path'|'id'|'replyId'|'purpose'|'question'|'imageIds'> & {parentId?:string};
+function imageIds(input:PreviewInput){
+ if(input.imageIds===undefined)return;
+ if(!validImageIds(input.imageIds)||input.purpose!=='followup'&&input.imageIds.length)
+  throw new PathError(400,'invalid_image','Invalid image attachments for this request.');
+ return [...input.imageIds];
+}
 const fingerprint=(i:PreviewInput)=>JSON.stringify([i.path,i.id,i.replyId,i.parentId??i.id,i.purpose,i.question]);
 export function threadFailure(error:unknown):ThreadFailure {
  if(error instanceof PathError)return error.code==='stale_review'?'review_changed':'unavailable';
@@ -31,7 +40,9 @@ export class ThreadRuntime {
  private extras?:ExtrasFor;
  private reviews:ProviderReviews;private routing?:RoleRouting;
  private questions=new Map<string,string>();private usage=new Map<string,{usage:InvokedUsage;notice?:string}>();
- constructor(store:Store,threads:ThreadStore,provider:Provider,notify:(path:string)=>void=()=>{},extras?:ExtrasFor,routing?:RoleRouting){this.store=store;this.threads=threads;this.provider=provider;this.notify=notify;this.extras=extras;this.routing=routing;this.reviews=new ProviderReviews('thread-reply',routing,provider);}
+ private images:ImageStore;
+ constructor(store:Store,threads:ThreadStore,provider:Provider,notify:(path:string)=>void=()=>{},extras?:ExtrasFor,routing?:RoleRouting,images=new ImageStore(store.rootReal)){this.store=store;this.threads=threads;this.provider=provider;this.notify=notify;this.extras=extras;this.routing=routing;this.reviews=new ProviderReviews('thread-reply',routing,provider);this.images=images;}
+ imageAvailability(){return this.reviews.imageAvailability();}
  async notice(path:string,id:string){const selected=await this.reviews.selection();return this.continuity(path,id,selected?.provider.id==='codex'?'codex':this.provider.name??'claude');}
  /** Only accepted app-side AI messages, never CLI sessions, drafts or hidden summaries.
   * Questions are memory-only; after reload the explicit placeholder is sent. */
@@ -54,15 +65,17 @@ export class ThreadRuntime {
  }
  activeIds(){return new Set([...this.starting,...[...this.jobs].filter(([,j])=>j.active||j.retry).map(([id])=>id)]);}
  async preview(input:PreviewInput){
+  const draft=imageIds(input);
   const selected=await this.reviews.selection();
   const note=await this.store.read(input.path),s=await this.threads.read(input.path),i=s.document.items.find(i=>i.id===input.id);
   if(!i||i.attachment.status!=='attached'||note.text.slice(i.attachment.from,i.attachment.to)!==i.anchor.quote)throw new Error('Re-attach the thread before asking a new question.');
   const {request,review}=await this.request(input,i,note.text,selected?.provider.id==='codex');
-  const packet=prepareRequest(request);
-  return {noteVersion:note.version,packet,...(review?{skills:review}:{}),...(selected?{review:this.reviews.issue(selected,fingerprint(input),packet),notice:await this.continuity(input.path,input.id,selected.provider.id==='codex'?'codex':this.provider.name??'claude')}:{})};
+  const images=await this.reviews.reviewImages(this.images,selected,draft);
+  const packet=prepareRequest(request,images);
+  return {noteVersion:note.version,packet,...(review?{skills:review}:{}),...(selected?{review:this.reviews.issue(selected,fingerprint(input),packet,images),notice:await this.continuity(input.path,input.id,selected.provider.id==='codex'?'codex':this.provider.name??'claude')}:{})};
  }
  async start(input:ThreadRequest){
-  input={...input};
+  input={...input,imageIds:imageIds(input)};
   if(this.jobs.has(input.replyId)||this.starting.has(input.replyId))throw new Error('Request id already used.');
   if(typeof input.question!=='string'||input.question.length>8000||!['followup','summary'].includes(input.purpose))throw new Error('Invalid thread request.');
   const note=await this.store.read(input.path),s=await this.threads.read(input.path),i=s.document.items.find(i=>i.id===input.id);
@@ -71,12 +84,13 @@ export class ThreadRuntime {
   if(this.activeIds().size>=2)throw new Error('Two requests are already running. Wait before sending another.');
   const selected=await this.reviews.selection();
   const {request,names}=await this.request(input,i,note.text,selected?.provider.id==='codex');
-  const packet=prepareRequest(request);
   let reviewed:ReviewedInvocation|undefined,provider=this.provider;
   // Confirm the provider switch before consuming its one-use approval.
   const providerName=selected?.provider.id==='codex'?'codex':provider.name??'claude';
   const notice=await this.threads.providerNotice(input.path,input.id,providerName);
   if(notice.required&&!input.confirmed)throw new Error('Confirm sending to a different provider.');
+  const imageInput=await this.reviews.confirmImages(this.images,selected,input),manifest=imageInput?.approved.manifest;
+  const packet=prepareRequest(request,manifest);
   if(this.routing){reviewed=await this.reviews.consume(input.reviewId,fingerprint(input),packet);
    if(reviewed.provider.id!==selected?.provider.id)throw staleReview();
    provider=this.reviews.provider(reviewed,this.threads.ledger,{id:input.id,requestId:input.replyId,note:input.path},(usage,notice)=>this.usage.set(input.replyId,{usage,...(notice?{notice}:{})}));}
@@ -90,12 +104,12 @@ export class ThreadRuntime {
    let apply:()=>Promise<unknown>;
    try{const a=await provider.checkAvailability();if(controller.signal.aborted)throw new ProviderError('cancelled');if(!a.available)throw new ProviderError(a.code,a.message);
     if(reviewed)await this.reviews.assert(reviewed);
-    const result=await provider.invoke(request,{signal:controller.signal});
+    const result=await provider.invoke(request,{signal:controller.signal,...(imageInput?{imageInput}:{})});
     if(controller.signal.aborted)throw new ProviderError('cancelled');
-    apply=async()=>{const saved=await this.threads.completeReply(input.path,input.id,input.replyId,result,packet.data);this.questions.set(input.replyId,input.question);if(this.questions.size>200)this.questions.delete(this.questions.keys().next().value!);return saved;};
+    apply=async()=>{const saved=await this.threads.completeReply(input.path,input.id,input.replyId,result,packet.data,manifest);this.questions.set(input.replyId,input.question);if(this.questions.size>200)this.questions.delete(this.questions.keys().next().value!);return saved;};
    }catch(e){const code=threadFailure(e);apply=()=>this.threads.failReply(input.path,input.id,input.replyId,code);}
    const save=async()=>{try{await persist(apply);}catch(e){
-    if(e instanceof ProductValidationError||/response schema/.test(String(e)))await persist(()=>this.threads.failReply(input.path,input.id,input.replyId,'validation'));else throw e;
+    if(e instanceof ProductValidationError||e instanceof InvalidImageReference||/response schema/.test(String(e)))await persist(()=>this.threads.failReply(input.path,input.id,input.replyId,'validation'));else throw e;
    }};
    try{await save();}catch{job.retry=async()=>{await save();job.retry=undefined;};}finally{job.active=false;finish();}
   })();this.notify(input.path);return saved;

@@ -4,6 +4,8 @@ import {InkStore,type InkSnapshot} from './ink-store.ts';import {UiStateStore} f
 import type {InkItem} from '../shared/ink.ts';
 import {newThread,exactKeys,validId,validSkillRefs,validProvider,failureCodes,type ThreadFailure,type ThreadProvider,type ThreadReply} from '../shared/threads.ts';
 import {validateProductResult} from './product-validation.ts';import {redact,type Result} from './providers/index.ts';import {textHash} from './anchor-cache.ts';
+import {isImageReference} from './chat/reply.ts';
+import type {ConfirmedImageSend} from '../shared/image-attachments.ts';
 export type HumanThreadAction={type:'open'|'skip'|'reopen'|'dismiss'|'restore'}|{type:'submit';text:string}|{type:'resolve'|'unresolve'}|{type:'delete';confirmed:boolean};
 interface ReplyInput {id:string;parentId:string;provider:ThreadProvider;action:'think'|'ask';purpose:'followup'|'summary';/** Names of the skills attached to the step. Names only. */skills?:string[]}
 export class ThreadStore {
@@ -66,12 +68,13 @@ export class ThreadStore {
   });
  }
  private reply(i:InkItem,id:string){const r=[...(i.thread?.followups??[]),...(i.thread?.summary.reply?[i.thread.summary.reply]:[])].find(r=>r.id===id);if(!r||r.generation.status!=='pending')throw new Error('Pending reply not found.');return r;}
- async completeReply(note:string,id:string,replyId:string,result:Result,sources:{note:string;decisions:{id:string;text:string}[]}){
-  if(!exactKeys(result,['id','provider','model','answer','claims','usage',...(result.diagram===undefined?[]:['diagram'])])||!Array.isArray(result.claims)||result.claims.some(c=>!exactKeys(c,['sourceId','quote'])))throw new Error('Invalid provider response schema.');
+ async completeReply(note:string,id:string,replyId:string,result:Result,sources:{note:string;decisions:{id:string;text:string}[]},images?:ConfirmedImageSend){
+  const hasTransportCost=images&&result.provider==='claude'&&typeof result.costUsd==='number'&&Number.isFinite(result.costUsd)&&result.costUsd>=0;
+  if(!exactKeys(result,['id','provider','model','answer','claims','usage',...(result.diagram===undefined?[]:['diagram']),...(hasTransportCost?['costUsd']:[])])||!Array.isArray(result.claims)||result.claims.some(c=>!(images&&isImageReference(c))&&!exactKeys(c,['sourceId','quote'])))throw new Error('Invalid provider response schema.');
   const s=await this.ink.read(note);return this.change(note,id,s.version,i=>{const r=this.reply(i,replyId);
-   const value=validateProductResult(result,replyId,sources,redact,textHash,r.generation.provider);
+   const value=validateProductResult(result,replyId,sources,redact,textHash,r.generation.provider,images);
    if(value.diagram)r.diagram=value.diagram;if(value.diagramIssue)r.diagramIssue=value.diagramIssue;
-   r.body=value.body;r.generation={...r.generation,status:'complete',model:value.model,evidence:value.evidence};
+   r.body=value.body;r.generation={...r.generation,status:'complete',model:value.model,evidence:value.evidence,...(images?{imageInterpretation:true}:{})};
   });
  }
  async failReply(note:string,id:string,replyId:string,code:ThreadFailure){if(!failureCodes.includes(code))throw new Error('Invalid failure code.');const s=await this.ink.read(note);return this.change(note,id,s.version,i=>{const r=this.reply(i,replyId);r.body='';r.generation.status=code==='cancelled'?'cancelled':'error';r.generation.evidence=[];r.failure={code};});}

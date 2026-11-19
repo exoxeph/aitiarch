@@ -96,7 +96,7 @@ export function createCliAdapter(config:CliTurnConfig):TurnAdapter{
  const baseConfig=config,state:{version?:string;message?:string}={};
  async function* startTurn(input:Parameters<TurnAdapter['startTurn']>[0],signal:AbortSignal,images?:ImageDeliveryInput){
   const config={...baseConfig,...(input.selection?{selection:Object.freeze({...input.selection})}:{})};
-  if(images&&(config.id!=='codex'||input.outputFormat!=='assembled-chat'))throw new TurnFailure('invalid_image_profile','unavailable');
+  if(images&&(config.id!=='codex'||!['assembled-chat','invoked-json'].includes(input.outputFormat??'')))throw new TurnFailure('invalid_image_profile','unavailable');
   const buffers=images?reviewedImageBuffers('codex',config.selection?.model,images.approved):[];
   const copies:Awaited<ReturnType<ImageDeliveryInput['storage']['copyForTransport']>>[]=[];
   const binding=config.id==='codex'&&config.selection?.effort!=null?config.codexCatalog?.():undefined;

@@ -1,5 +1,6 @@
 import { captureAnchor } from './anchors.ts';
 import { VISUALIZE_QUESTION } from './diagram.ts';
+import {validImageIds} from './image-attachments.ts';
 export type Renderer = 'builtin' | 'skill';
 export interface Invocation {
   id: string; path: string; action: 'think' | 'ask'; question: string;
@@ -10,6 +11,8 @@ export interface Invocation {
   skill?: string;
   /** One-use server review. Required when machine-role routing is enabled. */
   reviewId?:string;
+  imageIds?:string[];
+  confirmImages?:boolean;
 }
 export function freezeInvocation(input: Invocation) {
   if(input?.reviewId!==undefined&&(typeof input.reviewId!=='string'||!/^[a-f0-9-]{36}$/.test(input.reviewId)))throw new Error('Review again before sending.');
@@ -19,6 +22,8 @@ export function freezeInvocation(input: Invocation) {
       input.to - input.from > 8000 || (input.action === 'ask' && !input.question.trim())) throw new Error('Invalid invocation or context too large.');
   if (input.renderer !== undefined && (!['builtin', 'skill'].includes(input.renderer) || (input.renderer === 'skill' && (input.action !== 'ask' || input.question !== VISUALIZE_QUESTION)))) throw new Error('Invalid invocation or context too large.');
   if (input.skill !== undefined && (input.renderer !== 'skill' || typeof input.skill !== 'string' || !/^[a-f0-9]{12}$/.test(input.skill))) throw new Error('Invalid invocation or context too large.');
+  if(input.imageIds!==undefined&&(!validImageIds(input.imageIds)||
+     input.imageIds.length>0&&input.question===VISUALIZE_QUESTION))throw new Error('Invalid image attachments for this request.');
   const anchor = captureAnchor(input.text, input.from, input.to);
-  return Object.freeze({ ...input, anchor: structuredClone(anchor), selection: anchor.quote });
+  return Object.freeze({ ...input, ...(input.imageIds?{imageIds:[...input.imageIds]}:{}), anchor: structuredClone(anchor), selection: anchor.quote });
 }
