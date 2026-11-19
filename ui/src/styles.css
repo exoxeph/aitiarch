@@ -916,6 +916,8 @@ input.chat-ctl { background: var(--paper); cursor: text; }
 .chat-review-source { margin-top: 4px; }
 .chat-review-source summary { cursor: pointer; font-size: var(--text-control); }
 .chat-review-est { color: var(--muted); }
+/* The file input is opened by the "Attach images" button. A generic input rule was un-hiding it inside Think and Ask drafts (39px of empty box), making the draft too tall for its place in the margin. */
+.chat-image-picker > input[type="file"][hidden] { display: none !important; }
 .chat-image-list { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; list-style: none; }
 .chat-image-list li { display: grid; grid-template-columns: auto auto; align-items: center; gap: 4px; font-size: var(--text-meta); color: var(--muted); }
 .chat-image-list img { grid-column: 1 / -1; object-fit: contain; background: var(--paper); border-radius: 4px; }
