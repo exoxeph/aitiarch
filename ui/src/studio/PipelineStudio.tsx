@@ -180,8 +180,8 @@ export default function PipelineStudio({highlight,onClose,setup,onSetupChange}:{
  // A press on empty canvas that does not move is a click on nothing: it clears the selection (and so the lit path).
  const onPortUp=(e:ReactPointer<HTMLDivElement>)=>{const p=pan.current;pan.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);if(p&&!p.moved){setSelected(null);setPeek(flagged??null);}};
  const zoom=(f:number)=>{const r=port.current?.getBoundingClientRect();setCam(c=>zoomAt(c,f,(r?.width??600)/2,(r?.height??400)/2));};
- /** Shows every node at once, as large as fits. */
- const fit=()=>{const r=port.current?.getBoundingClientRect();if(r){const at=(n:PipelineNode)=>placeOf(n,layoutRef.current);setCam(fitCamera(PIPELINE_NODES.map(at),{w:r.width,h:r.height},12,regionsOf(PIPELINE_NODES,at)));}};
+ /** The default fit frames the pipeline itself at a readable size; the roles lane (Setup roles and Codex skills) sits below it, one pan or "Show all" away. */
+ const fit=(all=false)=>{const r=port.current?.getBoundingClientRect();if(r){const at=(n:PipelineNode)=>placeOf(n,layoutRef.current),shown=all?PIPELINE_NODES:PIPELINE_NODES.filter(n=>n.group!=='roles');setCam(fitCamera(shown.map(at),{w:r.width,h:r.height},12,regionsOf(shown,at)));}};
  useEffect(()=>{if(narrow||flagged)return;const t=window.setTimeout(fit,0);return()=>window.clearTimeout(t);},[narrow]);
  const resetLayout=()=>{clearLayout();layoutRef.current={};setLayout({});fit();};
  const doExport=async()=>{
@@ -216,7 +216,7 @@ export default function PipelineStudio({highlight,onClose,setup,onSetupChange}:{
     <button type="button" className="chat-ctl" data-act="import" title="Replace your settings with an exported file" onClick={()=>fileInput.current?.click()}>Import…</button>
     <input ref={fileInput} type="file" accept="application/json,.json" hidden aria-label="Choose a settings file to import" onChange={e=>{const f=e.target.files?.[0];e.target.value='';void chooseFile(f);}}/>
     <button type="button" className="chat-ctl" data-act="reset-all" disabled={!view||!Object.keys(view.overrides).length} title="Put every setting back to its default" onClick={()=>setConfirm({kind:'reset'})}>Reset all</button>
-    {!narrow&&<><button type="button" className="chat-ctl" aria-label="Zoom out" onClick={()=>zoom(1/1.2)}>−</button><button type="button" className="chat-ctl" aria-label="Zoom in" onClick={()=>zoom(1.2)}>+</button><button type="button" className="chat-ctl" onClick={resetLayout}>Reset layout</button></>}
+    {!narrow&&<><button type="button" className="chat-ctl" aria-label="Zoom out" onClick={()=>zoom(1/1.2)}>−</button><button type="button" className="chat-ctl" aria-label="Zoom in" onClick={()=>zoom(1.2)}>+</button><button type="button" className="chat-ctl" onClick={()=>fit(true)}>Show all</button><button type="button" className="chat-ctl" onClick={resetLayout}>Reset layout</button></>}
     <button type="button" className="chat-ctl" aria-label="Close Pipeline Studio" onClick={onClose}>Close</button>
    </div>
   </header>

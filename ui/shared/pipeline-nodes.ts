@@ -177,18 +177,21 @@ const STAGES:readonly PipelineNode[]=Object.freeze([
   fields:[],edges:[],source:['server/ledger-store.ts','server/chat/runtime.ts','server/council.ts']}),
 ]);
 
+/** Role and skill nodes share one compact 4-column grid so the world stays short and the default fit stays readable. */
+const roleSlot=(i:number)=>({x:32+(i%4)*272,y:1120+Math.floor(i/4)*120});
+
 /** Roles without a stage appear together without inventing edges to the chat flow. */
 export function nodesWithRoles<Role extends string>(registry:readonly {id:Role;label:string;help:string}[]):readonly PipelineNode<Role|SetupRole>[] {
  const attached=new Set<string>(STAGES.flatMap(stage=>stage.role?[stage.role]:[]));
  const extra=registry.filter(role=>!attached.has(role.id)).map((role,index)=>n<Role>({
   id:`role-${role.id}`,role:role.id,label:role.label,kind:'editable',group:'roles',
-  x:32+(index%3)*272,y:928+Math.floor(index/3)*128,
+  ...roleSlot(index),
   does:role.help,receives:'The input approved for this role.',sendsOn:'The reply for this role.',
   fields:[],edges:[],source:['shared/setup.ts'],
  }));
  const skills=registry.filter(role=>isCodexSkillRole(role.id)).map((role,index)=>n<Role>({
   id:`skills-${role.id}`,skillRole:role.id as CodexSkillRole,label:`Skills: ${role.label}`,kind:'editable',group:'roles',
-  x:32+(index%3)*272,y:928+(Math.ceil(extra.length/3)+Math.floor(index/3))*128,
+  ...roleSlot(extra.length+index),
   does:'Manage approved, instruction-only Codex skills for this role.',receives:'Local skill metadata and your approval.',
   sendsOn:'Reviewed skill instructions to Codex on an explicitly confirmed send.',
   fields:[],edges:[],source:['server/providers/codex-skills.ts'],
