@@ -6,7 +6,7 @@
 
 **A local-first decision notebook for the choices you make while coding with AI.**
 
-`Plain Markdown on disk` &nbsp;·&nbsp; `AI always labelled` &nbsp;·&nbsp; `Nothing sent unseen` &nbsp;·&nbsp; `Windows first`
+`Plain Markdown on disk` &nbsp;·&nbsp; `AI always labelled` &nbsp;·&nbsp; `Review and consent` &nbsp;·&nbsp; `Windows first`
 
 </div>
 
@@ -79,7 +79,7 @@ Your note stays **byte-for-byte your Markdown**. The ink lives next to the file,
 <img src="docs/media/motion-review.gif" alt="Typing a question in the chat, the review card appearing with the note, threads, instructions and budget, and Send pressed only after reading it" width="100%">
 </div>
 
-Every message gets a review card first: your question, the note, the threads, the instructions, the token budget. *Nothing has gone to Claude yet. It will see exactly this, and nothing else.*
+The review card shows the selected provider, your question, the context included in the request, the instructions and the budget. Some text-only turns can reuse a session approval. Image attachments and Codex skill instructions require confirmation on every send.
 
 <br>
 
@@ -184,10 +184,10 @@ Notes become stars and links become lines. Open threads glow. Notes nothing cite
 |---|---|
 | **The why is yours** | AI never writes your takeaway, your reasons, or a failed reason. |
 | **Asked, not assumed** | No proactive comments. Edits come only from something you did: typing, a toolbar, a shortcut, a click. |
-| **Look, then send** | A review card for every message. A plan card for anything bigger: files, repo, diagrams, a cost cap. Raising it asks again. |
+| **Look, then send** | Review the context before approving an AI request. Investigate has a plan card with its file scope and dollar cap. |
 | **Read-only investigations** | *Investigate* reads a throwaway copy of your repo, never the repo itself, with secrets filtered out. |
 | **Your files, byte-exact** | Rendering is display only. Decorations never change the document. |
-| **Local** | No accounts, no hosted backend, no network fonts. The app never handles your Claude credentials. |
+| **Local** | The notebook and editor run locally without an Aitiarch account. AI requests use your own provider CLI and its sign-in. |
 
 <br>
 
@@ -201,16 +201,56 @@ Notes become stars and links become lines. Open threads glow. Notes nothing cite
 
 ## &nbsp;Run it
 
-Needs Node 24+.
+The source build requires Node 24 or later. The release checks were run on Windows.
 
 ```powershell
-cd ui
-npm install
-npm run build
-node server/main.ts --root <your-project>\.aitiarch
+npm --prefix ui ci
+npm --prefix ui run build
+node ui/scripts/aitiarch.mjs doctor
+node ui/scripts/aitiarch.mjs init "C:\path\to\project" --private
+node ui/scripts/aitiarch.mjs start --project "C:\path\to\project"
 ```
 
-The notebook opens in your browser. Details and the practice notebook: [ui/README.md](ui/README.md).
+Run these commands from the Aitiarch checkout. Use your project folder in place of the example path. Private init asks before editing a Git project's `.gitignore`. The editor also works with AI off. See the [user guide](docs/guide.md).
+
+### Tested CLI versions
+
+| Provider | Baseline used by Doctor |
+| --- | --- |
+| Claude Code | `2.1.205` |
+| Codex | `0.167.0` |
+| Kiro | `3.3.0` |
+
+Doctor checks local CLI metadata. Newer CLIs that pass the capability checks are shown as untested. Login and entitlement are checked on first use.
+
+### Experimental plugins
+
+Use a local checkout that contains the plugin manifests. Both plugins require a source build. The setup skill prepares an app-owned install, initializes or reuses the chosen project, runs Doctor, and starts the local app. If the host blocks a command, the skill uses the host's approval flow.
+
+1. **Claude Code.** Run `/plugin marketplace add <absolute-path-to-checkout>` and `/plugin install aitiarch@aitiarch`. Open your project in Claude Code and run `/aitiarch:aitiarch`. [Claude Code plugin installation](https://code.claude.com/docs/en/discover-plugins#add-a-marketplace)
+2. **Codex.** Run `codex plugin marketplace add "<absolute-path-to-checkout>"`. In the Codex Plugins Directory, choose **Aitiarch (experimental)** and install **Aitiarch**. Open your project and ask to start Aitiarch. [Codex plugin installation](https://developers.openai.com/plugins/build/plugins#add-a-marketplace-from-the-cli)
+
+## &nbsp;Privacy
+
+Editing and browsing the notebook are local. When you approve an AI request, the selected provider CLI receives the question and the context included for that turn, such as note text, a selection, thread history, chosen session excerpts or skill instructions. Review the context before approving it. Inspect text after redaction, and review the approved file scope before an investigation reads the throwaway copy.
+
+The image warning is **“images are sent as-is; secret exclusion cannot inspect them”**. The provider gets the reviewed PNG and can read anything visible in its pixels. JPEG and WebP are converted to PNG locally. Every image send needs fresh confirmation, including resends. Council and Investigate do not receive image attachments.
+
+## &nbsp;Known limits
+
+- **Codex Investigate is off.** The installed CLI help establishes neither snapshot-only reads nor a pre-turn budget ceiling equivalent to Claude's.
+- **Codex skills are instruction-only.** Installed skills are off by default, with per-skill opt-in and per-send consent. Native plugin execution is unavailable.
+- **Mermaid in AI replies** renders flowcharts and sequence diagrams. Other diagram types show their source.
+- **Kiro** uses the CLI's Default model and supports neither images nor diagrams.
+- **Shared notebooks** require Git verification that `.aitiarch/local/` is ignored and that no private files there are tracked. Without Git, protection is filesystem-private.
+- **UI-state and chat locks** lack an owner record. The app leaves unowned leftovers in place.
+- **Claude image delivery** is enabled only for the probed model `claude-opus-4-8[1m]` on Claude Code `2.1.205`.
+
+## &nbsp;How this differs from Obsidian AI plugins
+
+Both apps work with local Markdown notes. Obsidian offers community plugins, so its AI workflow depends on the plugin you install. Aitiarch has a built-in workflow for reviewing context sent through local provider CLIs, keeping AI replies in margin threads, and recording your own takeaways and decisions. [Obsidian community plugins](https://help.obsidian.md/Extending+Obsidian/Community+plugins)
+
+Aitiarch is [MIT-licensed](LICENSE). See the [third-party notices](THIRD_PARTY_NOTICES.md) for dependency licences.
 
 <br>
 

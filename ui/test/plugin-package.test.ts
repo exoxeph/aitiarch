@@ -33,7 +33,7 @@ describe('experimental dual plugin package',()=>{
   const claude=await json('.claude-plugin/plugin.json'),codex=await json('plugin.json');
   identity(claude);identity(codex,true);
   for(const manifest of [claude,codex]){
-   expect(manifest.name).toBe('aitiarch');expect(manifest.version).toBe('0.0.4');
+   expect(manifest.name).toBe('aitiarch');expect(manifest.version).toBe('0.0.5');
    expect(manifest.description).toMatch(/experimental/i);expect(manifest.description).toMatch(/source setup/i);
   }
   expect(claude).not.toHaveProperty('$schema');
@@ -55,6 +55,14 @@ describe('experimental dual plugin package',()=>{
    expect(releases[manifest.version]).not.toBe(digest(text+'\nChanged skill instructions.'));
   }
   expect(manifests[0].version).toBe(manifests[1].version);
+ });
+ it('keeps the published plugin versions in agreement',async()=>{
+  const manifests=await Promise.all(['.claude-plugin/plugin.json','plugin.json'].map(json));
+  const catalogs=await Promise.all(['.claude-plugin/marketplace.json','.agents/plugins/marketplace.json'].map(json));
+  const entries=catalogs.flatMap(catalog=>catalog.plugins.filter((plugin:{name:string})=>plugin.name==='aitiarch'));
+  expect(entries).toHaveLength(2);
+  const versions=[...manifests,...entries].map(entry=>entry.version).filter(version=>version!==undefined);
+  expect(new Set(versions)).toEqual(new Set(['0.0.5']));
  });
  it('requires sequential explicit absolute working directories and cwd-independent npm for both hosts',async()=>{
   const text=await skill();
