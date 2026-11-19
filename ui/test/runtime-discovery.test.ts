@@ -1,6 +1,6 @@
 import {describe,it,expect} from 'vitest';
 import path from 'node:path';
-import {doctor,type DoctorOptions} from '../server/platform/doctor.ts';
+import {doctor,type DoctorOptions,type DoctorReport} from '../server/platform/doctor.ts';
 import * as main from '../server/main.ts';
 import {codexHelp,claudeHelp,kiroHelp} from './fixtures/cli-help.ts';
 import {createHost} from '../server/host.ts';
@@ -18,7 +18,10 @@ const runtime=(o:DoctorOptions)=>(main as any).selectRuntimeProviders(o);
 describe('server startup CLI selection',()=>{
  it('uses the same selected binary and version as doctor for every provider',async()=>{
   const o=options(),r=await runtime(o),d=await doctor(o);
-  expect(r.providers).toEqual(d.providers);
+  // Doctor adds wired roles after binary selection. Compare the underlying selection.
+  const selection=({roles:_,...provider}:DoctorReport['providers'][number])=>provider;
+  expect(r.providers.map(selection)).toEqual(d.providers.map(selection));
+  expect(d.providers.find(p=>p.id==='codex')?.roles).toContain('invoked');
   expect(r.providers.find((p:any)=>p.id==='codex')).toMatchObject({path:'/newer/codex',version:'0.168.0'});
   expect(r.commands).toEqual({claude:'/older/claude',codex:'/newer/codex',kiro:'/older/kiro-cli'});
  });

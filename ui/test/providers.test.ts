@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { createProvider, prepareRequest } from '../server/providers/index.ts';
 const roots: string[] = [];
 const script = fileURLToPath(new URL('./fixtures/provider-cli.mjs', import.meta.url));
@@ -88,16 +88,18 @@ for (const [scenario, code] of [['invalid', 'invalid_response'], ['overflow', 'o
     await expect(cli.invoke(request())).rejects.toMatchObject({ code });
   });
 }
-it('redacts before sending and does not inherit API-key fallback', async () => {
-  const { cli, record } = fixture(); const old = process.env.OPENAI_API_KEY;
-  process.env.OPENAI_API_KEY = 'synthetic-environment-secret';
+it('redacts before sending and Claude does not inherit API keys or Codex config', async () => {
+  const { cli, record } = fixture();
+  vi.stubEnv('OPENAI_API_KEY','synthetic-environment-secret');
+  vi.stubEnv('CODEX_HOME',path.join(path.dirname(record),'synthetic-codex-home'));
   try {
     await cli.invoke({ ...request(), question: 'Authorization: Bearer synthetic-token-123456789',
       note: 'password=synthetic-password\nC:\\Users\\SyntheticPerson\\private.txt' });
     const recorded = JSON.parse(readFileSync(record, 'utf8'));
     expect(recorded.input).not.toContain('synthetic-token'); expect(recorded.input).not.toContain('synthetic-password');
     expect(recorded.input).not.toContain('SyntheticPerson'); expect(recorded.inheritedKey).toBe(null);
-  } finally { if (old === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = old; }
+    expect(recorded.inheritedCodexHome).toBe(false);
+  } finally { vi.unstubAllEnvs(); }
 });
 it('caps transcript messages, total size and turn count without mutating the request', () => {
   const input = { ...request(), turns: Array.from({ length: 9 }, (_, i) => ({ id: `T${i}`, user: 'u'.repeat(3000), assistant: 'a'.repeat(3000) })) };

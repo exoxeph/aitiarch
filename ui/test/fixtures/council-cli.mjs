@@ -1,7 +1,7 @@
 // Synthetic protocol data only. Never invokes a provider.
 import readline from 'node:readline';import fs from 'node:fs';import path from 'node:path';
 const mode=process.argv[2];const args=process.argv.slice(3);const out=e=>console.log(JSON.stringify(e));
-if(mode==='alpha'&&args.includes('--version')){console.log('codex-cli 0.169.0-alpha.11.1');process.exit();}
+if(mode==='alpha'&&args.includes('--version')){console.log('codex-cli 0.167.0-alpha.11.1');process.exit();}
 const record=args[0]&&path.isAbsolute(args[0])?args.shift():null;
 if(record&&(args.includes('--version')||args.includes('--help')))fs.appendFileSync(record,JSON.stringify(args)+'\n');
 if(fs.readdirSync(process.cwd()).length)process.exit(91);

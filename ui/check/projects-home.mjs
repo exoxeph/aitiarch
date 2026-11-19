@@ -11,10 +11,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import {defaultMachineSetup} from '../shared/setup.ts';
+import {saveMachineSetup} from '../server/setup-store.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url)), uiDir = path.resolve(here, "..");
 const shots = process.env.PHASE2_SHOTS ?? "C:\\Users\\UseR\\Documents\\aitiarch-trial\\design-d3\\screenshots\\phase2";
-mkdirSync(shots, { recursive: true }); mkdirSync(path.join(here, "out"), { recursive: true });
+mkdirSync(shots, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const realConfig = path.join(process.env.APPDATA ?? os.homedir(), "aitiarch", "projects.json");
 const realBefore = existsSync(realConfig) ? statSync(realConfig).mtimeMs : null;
@@ -37,6 +39,7 @@ function start() {
     proc.on("exit", (c) => reject(new Error(`server exited early (${c})`))); setTimeout(() => reject(new Error("server did not start")), 10000);
   });
 }
+await saveMachineSetup(config,{...defaultMachineSetup(),setupSeen:true});
 const { proc, ready } = await start();
 let browser;
 for (const channel of ["msedge", "chrome"]) { try { browser = await chromium.launch({ channel, headless: true }); break; } catch { /* next */ } }
@@ -151,11 +154,12 @@ try {
   check("Initialize creates the planned notebook", readdirSync(path.join(C, ".aitiarch")).sort().join() === ".local-storage-v1,Welcome.md,decisions,ink,local");
 
   // ---- remove forgets, never deletes
+  const welcome = path.join(C, ".aitiarch", "Welcome.md"), welcomeBytes = readFileSync(welcome);
   const gamma = page.locator('.project-card:has-text("gamma")');
   await gamma.locator('button:has-text("Remove")').click();
   await gamma.locator('button:has-text("Remove from list")').click();
   check("Remove takes it off the list", await until(async () => (await page.locator(".project-card").count()) === 2));
-  check("Remove keeps its files", existsSync(path.join(C, ".aitiarch", "index.md")));
+  check("Remove keeps its files", existsSync(welcome) && readFileSync(welcome).equals(welcomeBytes));
 
   // ---- motion
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -175,7 +179,7 @@ try {
   check("the real project list was not touched", realBefore === realAfter, `${realBefore} -> ${realAfter}`);
 } catch (e) {
   check("check ran to the end", false, `${String(e).split("\n")[0]} | page says: ${await alerts()} | url ${page.url()}`);
-  await page.screenshot({ path: path.join(here, "out", "projects-home-failure.png") }).catch(() => {});
+  await page.screenshot({ path: path.join(shots, "projects-home-failure.png") }).catch(() => {});
 } finally {
   await browser.close(); proc.kill(); rmSync(base, { recursive: true, force: true });
 }

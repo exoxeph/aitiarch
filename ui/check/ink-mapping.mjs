@@ -90,7 +90,7 @@ try {
   saved = await ink.read("fixture.md");
   assert.equal(saved.document.items[0].anchor.quote, quote.replace("verified", "checked"));
   assert.equal(readFileSync(path.join(root, "fixture.md"), "utf8"), closedEdit);
-  const out = path.resolve("check/out"); mkdirSync(out, { recursive: true });
+  const out = path.resolve(process.env.BATCH2A_OUTPUT ?? "check/out"); mkdirSync(out, { recursive: true });
   await page.screenshot({ path: path.join(out, "mapping-wide.png"), fullPage: true });
   await page.setViewportSize({ width: 650, height: 850 });
   await page.locator('.pane').evaluate(el => { el.scrollTop = el.scrollHeight; });

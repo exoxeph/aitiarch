@@ -12,10 +12,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import {defaultMachineSetup} from '../shared/setup.ts';
+import {saveMachineSetup} from '../server/setup-store.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url)), uiDir = path.resolve(here, "..");
 const shots = process.env.PHASE4_SHOTS ?? "C:\\Users\\UseR\\Documents\\aitiarch-trial\\design-d3\\screenshots\\phase4";
-mkdirSync(shots, { recursive: true }); mkdirSync(path.join(here, "out"), { recursive: true });
+mkdirSync(shots, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const realConfig = path.join(process.env.APPDATA ?? os.homedir(), "aitiarch", "projects.json");
 const realBefore = existsSync(realConfig) ? statSync(realConfig).mtimeMs : null;
@@ -49,9 +51,11 @@ const big = (n) => Object.fromEntries(Array.from({ length: n }, (_, i) => {
 const B = project("big", { "index.md": "# Big\n[n0](f0/n0.md)\n", ...big(999) });
 const C = project("bigger", { "index.md": "# Bigger\n", ...big(1300) });
 
-function start(root) {
+async function start(root) {
+  const config = path.join(base, "config-" + path.basename(root));
+  await saveMachineSetup(config,{...defaultMachineSetup(),setupSeen:true});
   return new Promise((resolve, reject) => {
-    const p = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_TEST:"1", AITIARCH_CONFIG_DIR: path.join(base, "config-" + path.basename(root)) } });
+    const p = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_TEST:"1", AITIARCH_CONFIG_DIR: config } });
     let buf = ""; p.stdout.on("data", (d) => { buf += d; const m = /AITIARCH_READY (.*)/.exec(buf); if (m) resolve({ proc: p, ready: JSON.parse(m[1]) }); });
     p.stderr.on("data", (d) => { const s = String(d); if (!/ExperimentalWarning|--trace-warnings/.test(s)) process.stderr.write(s); });
     p.on("exit", (c) => reject(new Error(`server exited early (${c})`))); setTimeout(() => reject(new Error("server did not start")), 15000);
@@ -75,7 +79,7 @@ async function openApp(root, reducedMotion = "no-preference") {
   return { ctx, page, errors, requests };
 }
 const snap = (page) => page.evaluate(() => window.__constellation?.snapshot() ?? null);
-const openMap = async (page) => { await page.click(".map-pill"); await page.locator(".constellation canvas").waitFor(); await until(async () => (await snap(page))?.stars.length > 0, 15000); };
+const openMap = async (page) => { const button=page.getByRole("button",{name:"Constellation",exact:true}); if(await button.getAttribute("aria-expanded")!=="true")await button.click(); await page.locator(".constellation canvas").waitFor(); await until(async () => (await snap(page))?.stars.length > 0, 15000); };
 const star = async (page, p) => (await snap(page)).stars.find((s) => s.path === p);
 /** Clicks a star on the canvas itself; fails loudly if a card or bar covers that spot instead of clicking the overlay. */
 async function clickStar(page, p, shift = false) {
@@ -137,7 +141,7 @@ try {
   check("the review request carries exactly the chosen notes (index.md is the open note, so only base.md)", JSON.stringify(other?.ids) === JSON.stringify(["base.md"]), JSON.stringify(review.context));
   check("no model was called", !requests.some((r) => String(r).startsWith("MODEL CALL")));
   if (await page.getByRole("button", { name: "Cancel", exact: true }).count()) await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Close chat", exact: true }).click();
 
   // ---- keyboard: the star list, then Escape gives focus back
   await openMap(page);

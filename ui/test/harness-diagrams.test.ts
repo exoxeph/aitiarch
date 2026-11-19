@@ -1,3 +1,5 @@
+import {DEFAULT_PIPELINE_CONFIG} from '../shared/pipeline-config.ts';
+import {replyProfileInstruction} from '../shared/notespace-guide.ts';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {mkdir,mkdtemp,readdir,readFile,rm,writeFile} from 'node:fs/promises';
@@ -9,6 +11,7 @@ import {Store} from '../server/store.ts';import {InkStore} from '../server/ink-s
 import {ChatRuntime} from '../server/chat/runtime.ts';import {ChatStore} from '../server/chat/store.ts';
 import {FakeChatProvider} from '../server/chat/fake.ts';
 import {CHAT_HARD_RULES,CHAT_HARD_RULES_DIAGRAMS,DIAGRAM_RULES,DIAGRAM_RULES_UNAVAILABLE,SESSION_INVARIANTS,SESSION_INVARIANTS_DIAGRAMS} from '../server/chat/request.ts';
+const richPrefix=(prefix:string)=>prefix.replace(DEFAULT_PIPELINE_CONFIG.prompts.chatLength,()=>replyProfileInstruction('rich'));
 import {DiagramImageStore} from '../server/diagram-image-store.ts';
 import {SessionIndex} from '../server/harness/session-index.ts';
 import {ClaudeSessionRunner} from '../server/harness/claude-session.ts';
@@ -120,7 +123,7 @@ describe('a conversation turn that may open diagrams',()=>{
  it('keeps the rules last: the instruction names the one tool, the hard rules end it, and the instruction lists no source text of a diagram',async()=>{
   const p=await project(),{index,runtime}=await p.open(),s=await index.create({mode:'chat',label:'Rules',note:'plan.md'});
   const r=await turn(runtime,ask(s.id,'m-h1','Hello'));const [c]=await p.calls();
-  expect(c.addendum.startsWith(SESSION_INVARIANTS_DIAGRAMS+'\n\n'+DIAGRAM_RULES)).toBe(true);expect(c.addendum.endsWith(CHAT_HARD_RULES_DIAGRAMS)).toBe(true);expect(r.review.instruction.endsWith(CHAT_HARD_RULES_DIAGRAMS)).toBe(true);
+  expect(c.addendum.startsWith(richPrefix(SESSION_INVARIANTS_DIAGRAMS)+'\n\n'+DIAGRAM_RULES)).toBe(true);expect(c.addendum.endsWith(CHAT_HARD_RULES_DIAGRAMS)).toBe(true);expect(r.review.instruction.endsWith(CHAT_HARD_RULES_DIAGRAMS)).toBe(true);
   expect(DIAGRAM_RULES).toMatch(/only when the question needs it/);expect(DIAGRAM_RULES).toMatch(/only what you see/);expect(DIAGRAM_RULES).toMatch(/never guess/i);
   expect(c.addendum).not.toContain('hunter2');expect(c.stdin).not.toContain('hunter2');
  });
@@ -132,7 +135,7 @@ describe('a note without a diagram Claude can open',()=>{
   await turn(runtime,ask(s.id,'m-p1','What is the plan?','plain.md'));await turn(runtime,ask(t.id,'m-p2','Look at the diagram','hidden.md'));
   const [a,b]=await p.calls();
   for(const c of [a,b]){expect(at(c.args,'--tools')).toBe('');for(const flag of ['--allowedTools','--permission-mode','--max-budget-usd','--input-format'])expect(c.args).not.toContain(flag);expect(c.cwdFiles).toEqual([]);}
-  expect(a.addendum.startsWith(SESSION_INVARIANTS)).toBe(true);expect(a.addendum).not.toContain(DIAGRAM_RULES);expect(a.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);
+  expect(a.addendum.startsWith(richPrefix(SESSION_INVARIANTS))).toBe(true);expect(a.addendum).not.toContain(DIAGRAM_RULES);expect(a.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);
   // every diagram of that note is withheld: the model is told so and told it has no tools, and the manifest says which
   const hiddenChars=(await readFile(path.join(p.root,'hidden.md'),'utf8')).length;
   expect(b.addendum).toContain(DIAGRAM_RULES_UNAVAILABLE);expect(b.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);expect(b.stdin.split('\n\n')[0]).toBe(`Open note: Hidden (${hiddenChars} chars). D1 'secret-only' withheld: ${WITHHELD_WORDS.secret}.`);

@@ -80,7 +80,11 @@ const prose="import('./not-code.ts')";
   const result=await copy();
   const expected=tracked.filter(file=>!trackedExclusionAllowList.some(prefix=>file.startsWith(prefix)));
   expect(expected.filter(file=>!result.copied.includes(file)),'Missing tracked files').toEqual([]);
-  for(const file of expected)expect((await lstat(path.join(target,file))).isFile(),file).toBe(true);
+  for(const file of expected){
+   expect((await lstat(path.join(target,file))).isFile(),file).toBe(true);
+   const [source,installed]=await Promise.all([readFile(path.join(root,file)),readFile(path.join(target,file))]);
+   expect(installed.equals(source),file+' must be copied byte for byte').toBe(true);
+  }
   const actual=(await walk(target)).map(file=>path.relative(target,file).replaceAll('\\','/'));
   expect(actual.filter(file=>file!=='build-version.json'&&excludedSource(file)),'Excluded paths in copy').toEqual([]);
   for(const prefix of ['.git','.aitiarch','node_modules','ui/node_modules','ui/dist','ui/check/out','docs/plan',

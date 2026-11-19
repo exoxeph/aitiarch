@@ -10,10 +10,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import {defaultMachineSetup} from '../shared/setup.ts';
+import {saveMachineSetup} from '../server/setup-store.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url)), uiDir = path.resolve(here, "..");
 const shots = process.env.PHASE3_SHOTS ?? "C:\\Users\\UseR\\Documents\\aitiarch-trial\\design-d3\\screenshots\\phase3";
-mkdirSync(shots, { recursive: true }); mkdirSync(path.join(here, "out"), { recursive: true });
+mkdirSync(shots, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const realConfig = path.join(process.env.APPDATA ?? os.homedir(), "aitiarch", "projects.json");
 const realBefore = existsSync(realConfig) ? statSync(realConfig).mtimeMs : null;
@@ -31,6 +33,7 @@ const read = (rel) => readFileSync(path.join(notes, ...rel.split("/")));
 const results = [], check = (name, ok, detail = "") => { results.push({ name, ok, detail }); console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : "  -> " + detail}`); };
 const until = async (fn, ms = 7000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await sleep(100); } return false; };
 
+await saveMachineSetup(path.join(base,'config'),{...defaultMachineSetup(),setupSeen:true});
 const { proc, ready } = await new Promise((resolve, reject) => {
   const p = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", proj, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_TEST:"1", AITIARCH_CONFIG_DIR: path.join(base, "config") } });
   let buf = ""; p.stdout.on("data", (d) => { buf += d; const m = /AITIARCH_READY (.*)/.exec(buf); if (m) resolve({ proc: p, ready: JSON.parse(m[1]) }); });
@@ -167,7 +170,7 @@ try {
   check("the real project list was not touched", realBefore === realAfter, `${realBefore} -> ${realAfter}`);
 } catch (e) {
   check("check ran to the end", false, String(e).split("\n")[0]);
-  await page.screenshot({ path: path.join(here, "out", "citations-failure.png") }).catch(() => {});
+  await page.screenshot({ path: path.join(shots, "citations-failure.png") }).catch(() => {});
 } finally {
   await browser.close(); proc.kill(); rmSync(base, { recursive: true, force: true });
 }

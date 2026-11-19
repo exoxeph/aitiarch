@@ -55,7 +55,7 @@ try {
   const withDraft = await rects(), draftId = Object.keys(withDraft).find(id => !id.startsWith('seed'));
   assert(draftId, 'the draft blob is there');
   for (const id of Object.keys(before)) { near(withDraft[id].top, before[id].top, `${id} did not move when the request appeared`); near(withDraft[id].left, before[id].left, `${id} did not move sideways`); }
-  for (const id of Object.keys(before)) assert(!hit(withDraft[draftId], withDraft[id]), `the new request does not sit on ${id}`);
+  for (const id of Object.keys(before)) assert(!hit(withDraft[draftId], withDraft[id]), `the new request does not sit on ${id}: ${JSON.stringify({draft:withDraft[draftId],existing:withDraft[id]})}`);
   await page.screenshot({ path: path.join(out, 'blobs-1-fresh.png') });
   await page.getByRole('button', { name: 'Cancel preview', exact: true }).click(); await page.waitForTimeout(400);
 

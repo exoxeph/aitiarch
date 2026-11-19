@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {chromium} from 'playwright-core';
 import {Store} from '../server/store.ts';
+import {UiStateStore} from '../server/ui-state-store.ts';
 import {NoteWatcher} from '../server/watch.ts';
 import {createApp} from '../server/http.ts';
 import {createHost} from '../server/host.ts';
@@ -41,6 +42,7 @@ assert.equal(localInit.privateLocation,path.join(notes,'local'));
 const note = path.join(notes,'Synthetic plan.md');
 const original = Buffer.from('\uFEFF# Synthetic plan\r\n\r\nRelease in June.\r\n');
 await writeFile(note,original);
+await new UiStateStore(notes).saveTour('skipped');
 const dir = process.env.AITIARCH_CONFIG_DIR;
 let ready = false;
 const providers=[];
@@ -157,10 +159,10 @@ async function checkLaunches() {
    }
    const roleRows=panel.locator('.setup-roles');
    assert(!await roleRows.getByText(/explicit flag|set by launch flag/i).count());
-   for(const role of ['Normal chat','Think and Ask','Thread replies','Skill diagrams']){
+   for(const role of ['Normal chat','Think and Ask','Thread replies','Skill diagrams','Investigate']){
     const row=roleRows.getByRole('group',{name:role,exact:true});
     assert(await row.getByRole('combobox').isEnabled());
-    assert.equal(await row.locator('option[value="codex"]').isEnabled(),role!=='Skill diagrams');
+    assert.equal(await row.locator('option[value="codex"]').isEnabled(),role!=='Investigate');
     assert(await row.getByRole('button',{name:'Reset to default'}).isEnabled());
    }
    const council=roleRows.getByRole('group',{name:'Council participants'});
@@ -201,6 +203,12 @@ async function checkLaunches() {
    if(server&&server.exitCode===null&&server.signalCode===null){const closed=once(server,'close');server.kill();await closed;}
   }
  }
+}
+
+async function dismissNotebookTour(page){
+ const tour=page.getByRole('dialog',{name:'Notebook tour'});
+ await tour.getByRole('button',{name:'Skip tour',exact:true}).click();
+ await tour.waitFor({state:'hidden'});
 }
 
 async function checkSkillStages(base,store,notePath,kind){
@@ -250,6 +258,7 @@ async function checkSkillStages(base,store,notePath,kind){
    const setup=page.getByRole('dialog',{name:'Set up Aitiarch'});
    await setup.getByRole('button',{name:'Skip',exact:true}).click();
    await setup.waitFor({state:'hidden'});
+   await dismissNotebookTour(page);
   }
   const card=id=>page.locator('.margin-card[data-ink-id="'+id+'"]');
   const firstCard=card(first.id);
@@ -383,6 +392,7 @@ async function checkHomePrivacy(kind){
   await page.screenshot({path:path.join(output,'home-privacy-'+kind+'.png')});
   await card.getByRole('button',{name:'Continue',exact:true}).click();
   await card.waitFor({state:'detached'});
+  await dismissNotebookTour(page);
   await page.getByRole('button',{name:'Notes menu',exact:true}).click();
   await page.getByRole('button',{name:'AI settings',exact:true}).click();
   const settings=page.getByRole('dialog',{name:'AI settings'});

@@ -173,11 +173,12 @@ function argumentsFor(provider: ProviderName, hardening?: string[], stream = fal
     '-c', 'features.shell_tool=false', '-c', 'features.incremental_tools=false', '-c', 'features.sleep_tool=false',
     '-c', 'web_search="disabled"', '-'];
 }
-function environment(): NodeJS.ProcessEnv {
-  const allowed = /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|TEMP|TMP|HOME|USERPROFILE|APPDATA|LOCALAPPDATA|CODEX_HOME)$/i;
+function environment(provider: CLIProviderName): NodeJS.ProcessEnv {
+  const allowed = /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|TEMP|TMP|HOME|USERPROFILE|APPDATA|LOCALAPPDATA)$/i;
   const result: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(process.env)) if (allowed.test(key)) result[key] = value;
-  result.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
+  for (const [key, value] of Object.entries(process.env))
+    if (allowed.test(key) || (provider === 'codex' && /^CODEX_HOME$/i.test(key))) result[key] = value;
+  if (provider === 'claude') result.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
   return result;
 }
 /** Redacts every string value of a parsed reply, keeping its structure. Redacting the serialized JSON instead broke parsing: a rule such as
@@ -250,7 +251,7 @@ export function createProvider(configuration: Configuration): Provider {
       return { available: false, code: 'unsupported_cli', message: 'Provider disabled: use an absolute native executable or an explicitly configured Node entrypoint.' };
     try { await access(config.command, constants.X_OK); }
     catch { return { available: false, code: 'missing_cli', message: messages.missing_cli }; }
-    return probeCapabilities(config, environment());
+    return probeCapabilities(config, environment(config.provider));
   }
   // Eager, metadata-only adapter startup. Cache the result for this instance;
   // construct a new adapter after updating/replacing the CLI. No prompt is sent.
@@ -281,7 +282,7 @@ export function createProvider(configuration: Configuration): Provider {
         const decoder=new StringDecoder('utf8');let pending='';
         const observe=(chunk?:Buffer)=>{if(!options.onStreamEvent||!stream)return;pending+=chunk?decoder.write(chunk):decoder.end();let n;while((n=pending.indexOf('\n'))>=0){const line=pending.slice(0,n);pending=pending.slice(n+1);if(line.trim())options.onStreamEvent(JSON.parse(line));}if(!chunk&&pending.trim()){options.onStreamEvent(JSON.parse(pending));pending='';}};
         const child = spawnIsolated(launchConfig, argumentsFor(config.provider, availability.hardening, stream,!!partial,launchConfig.selection,availability.effortSupported),
-          { cwd:cwd!, env: environment(), shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: 'pipe' },!!images);
+          { cwd:cwd!, env: environment(config.provider), shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: 'pipe' },!!images);
         let bytes = 0, failure: ProviderError | undefined;
         let killing: Promise<void> = Promise.resolve();
         const stop = (code: ErrorCode, reason?: FailureReason) => {

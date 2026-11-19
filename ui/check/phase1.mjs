@@ -12,10 +12,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import {defaultMachineSetup} from '../shared/setup.ts';
+import {saveMachineSetup} from '../server/setup-store.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const uiDir = path.resolve(here, "..");
-const outDir = path.join(here, "out");
+const outDir = process.env.BATCH2A_OUTPUT ?? path.join(here, "out");
 mkdirSync(outDir, { recursive: true });
 
 const LF_RUNS = Number(process.env.CHECK_RUNS ?? 20);
@@ -41,9 +43,11 @@ function makeFixture(eol, bom) {
   return { proj, root, file };
 }
 
-function startServer(root) {
+async function startServer(root) {
+  const config = path.join(path.dirname(root), "config");
+  await saveMachineSetup(config,{...defaultMachineSetup(),setupSeen:true});
   return new Promise((resolve, reject) => {
-    const proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_TEST:"1", AITIARCH_CONFIG_DIR: path.join(path.dirname(root), "config") } }); // a temp registry, never the user's
+    const proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_TEST:"1", AITIARCH_CONFIG_DIR: config } }); // a temp registry, never the user's
     let buf = "";
     proc.stdout.on("data", (d) => {
       buf += d;

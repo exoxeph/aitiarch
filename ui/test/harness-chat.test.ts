@@ -1,3 +1,5 @@
+import {DEFAULT_PIPELINE_CONFIG} from '../shared/pipeline-config.ts';
+import {replyProfileInstruction} from '../shared/notespace-guide.ts';
 import {execFileSync} from 'node:child_process';
 import {mkdtemp,readdir,readFile,rm,writeFile} from 'node:fs/promises';
 import os from 'node:os';
@@ -8,6 +10,7 @@ import {Store} from '../server/store.ts';import {InkStore} from '../server/ink-s
 import {ChatRuntime} from '../server/chat/runtime.ts';import {ChatStore} from '../server/chat/store.ts';
 import {FakeChatProvider} from '../server/chat/fake.ts';
 import {CHAT_HARD_RULES,SESSION_INVARIANTS} from '../server/chat/request.ts';
+const richPrefix=(prefix:string)=>prefix.replace(DEFAULT_PIPELINE_CONFIG.prompts.chatLength,()=>replyProfileInstruction('rich'));
 import {SessionIndex} from '../server/harness/session-index.ts';
 import {ClaudeSessionRunner} from '../server/harness/claude-session.ts';
 import {QuestionStore} from '../server/harness/questions.ts';
@@ -62,7 +65,7 @@ describe('harness chat sessions',()=>{
    expect(c.args).toContain('--include-partial-messages');expect(at('--output-format')).toBe('stream-json'); // without these the reply would arrive all at once
    expect(c.args).not.toContain('--no-session-persistence');expect(c.args).not.toContain('--dangerously-skip-permissions');
    expect(c.addendumOutsideCwd).toBe(true);expect(path.relative(p.root,c.cwd).startsWith('..')).toBe(true);
-   expect(c.addendum.startsWith(SESSION_INVARIANTS)).toBe(true);expect(c.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);expect(c.addendum).toContain('A unique sentence for the session.');
+   expect(c.addendum.startsWith(richPrefix(SESSION_INVARIANTS))).toBe(true);expect(c.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);expect(c.addendum).toContain('A unique sentence for the session.');
   }
   const line=`Open note: Plan (${NOTE.length} chars).`;
   expect(a.stdin).toBe(line+'\n\nWhere does the data live?');expect(b.stdin).toBe(line+'\n\nAnd who decided?');expect(one.review.manifest).toBe(line);expect(a.cwd).toBe(b.cwd); // same folder, so the CLI can find the session
@@ -83,7 +86,7 @@ describe('harness chat sessions',()=>{
   expect(c.addendum).toBe(b.addendum); // nothing changed between the last two turns, so the same text goes again
   for(const x of [a,b,c]){
    expect(count(x.addendum,'[[source N1:')).toBe(1);expect(count(x.addendum,'[[end of source N1]]')).toBe(1);
-   expect(x.addendum.startsWith(SESSION_INVARIANTS)).toBe(true);expect(x.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);
+   expect(x.addendum.startsWith(richPrefix(SESSION_INVARIANTS))).toBe(true);expect(x.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);
    expect(x.addendum.indexOf('[[end of source N1]]')).toBeLessThan(x.addendum.lastIndexOf(CHAT_HARD_RULES)); // the note comes before the rules
   }
   expect(b.stdin).toBe(`Open note: Plan (${('# Plan\n\n'+NEW+'\n').length} chars).\n\nAnd now?`);expect(b.stdin).not.toContain(NEW); // only the manifest line, never the note's text, so the CLI's record does not hold it twice

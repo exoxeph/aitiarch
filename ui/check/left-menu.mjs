@@ -1,12 +1,15 @@
 // Real-browser check for M1: the left edge menu, the removed right-hand tabs, the note menu and the chat shell.
 // Real mouse and keyboard events against the built app with synthetic OS-temp notes. No provider is ever called.
-import {spawn} from 'node:child_process';
+import './config-isolation.mjs';
 import {mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright-core';
+import {createApp} from '../server/http.ts';
+import {Store} from '../server/store.ts';
+import {NoteWatcher} from '../server/watch.ts';
 
 const here=path.dirname(fileURLToPath(import.meta.url)),uiDir=path.resolve(here,'..');
 const output=process.env.BATCH2A_OUTPUT||process.env.GROVE_OUTPUT;
@@ -17,18 +20,19 @@ mkdirSync(path.join(root,'folder'),{recursive:true});
 const text=['# Menu fixture','',...Array.from({length:12},(_,i)=>`Paragraph ${i+1}: some plain text to select by dragging.`)].join('\n')+'\n';
 const note=path.join(root,'notebook.md');writeFileSync(note,text);writeFileSync(path.join(root,'folder','sub.md'),'# Sub\n\nSub note.\n');
 const unchanged=readFileSync(note);
-let browser,proc;
+let browser,app,watcher,invocations=0;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 try{
- proc=spawn(process.execPath,[path.join(uiDir,'server','main.ts'),'--root',root,'--port','0','--no-open'],{cwd:uiDir,env:{...process.env,AITIARCH_TEST:"1",AITIARCH_CONFIG_DIR:path.join(project,'config')},stdio:['ignore','pipe','pipe']}); // a temp registry, never the user's
- const url=await new Promise((resolve,reject)=>{let o='';proc.stdout.on('data',d=>{o+=d;const m=/AITIARCH_READY (.*)/.exec(o);if(m)resolve(JSON.parse(m[1]).launch);});proc.on('exit',c=>reject(new Error('Server exited early '+c)));setTimeout(()=>reject(new Error('Server startup timeout')),10000);});
+ const store=await Store.open(root);watcher=new NoteWatcher(store);
+ app=createApp({store,watcher,distDir:path.join(uiDir,'dist'),provider:{name:'claude',checkAvailability:async()=>({available:true}),invoke:async()=>{invocations++;throw Error('Unexpected provider turn');}}});
+ const url=`http://127.0.0.1:${await app.listen(0)}/?debug=1`;
  for(const channel of ['msedge','chrome']){try{browser=await chromium.launch({channel,headless:true});break;}catch{/* next */}}
  if(!browser)throw new Error('Edge or Chrome is required.');
  const providerCalls=[];
  const open=async(options={})=>{
   const context=await browser.newContext({viewport:{width:1440,height:900},...options}),page=await context.newPage();
   page.on('request',r=>{if(/\/api\/assistance\/invoke|\/api\/chat\/send|\/api\/chatgpt-plan\/(sign-in|models)/.test(r.url()))providerCalls.push(r.url());});
-  await page.goto(url+'&debug=1'); // the launch link hands this browser its session
+  await page.goto(url);
   await page.locator('#note-tree').waitFor({state:'attached'});
   return {context,page};
  };
@@ -127,6 +131,7 @@ try{
  await page.screenshot({path:path.join(output,'chat-open.png')});
  await page.keyboard.press('Escape');await panel.waitFor({state:'hidden'});assert.equal(await chat.getAttribute('aria-expanded'),'false');
  assert.equal(providerCalls.length,0,'the chat shell must not call a provider: '+providerCalls.join(','));
+ assert.equal(invocations,0);
  await context.close();
 
  // ---------- reduced motion: a fade, never a slide ----------
@@ -153,6 +158,7 @@ try{
  console.log(JSON.stringify({pass:true,providerCalls:providerCalls.length}));
 }finally{
  await browser?.close().catch(()=>{});
- if(proc&&!proc.killed)proc.kill();
+ watcher?.stop();
+ await app?.close();
  const target=path.resolve(project);if(target.startsWith(path.resolve(os.tmpdir()))&&path.basename(target).startsWith('aitiarch-left-menu-')){console.log('CLEANUP TARGET:',target);await sleep(300);rmSync(target,{recursive:true,force:true,maxRetries:5});}
 }

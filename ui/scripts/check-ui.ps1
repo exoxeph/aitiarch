@@ -22,7 +22,7 @@ foreach($check in $checks){
  $name=$check.BaseName
  $shots=Join-Path $output $name
  New-Item -ItemType Directory -Path $shots -Force | Out-Null
- $env:BATCH2A_OUTPUT=$shots;$env:GROVE_OUTPUT=$shots;$env:PHASE3_SHOTS=$shots;$env:PHASE4_SHOTS=$shots
+ $env:BATCH2A_OUTPUT=$shots;$env:GROVE_OUTPUT=$shots;$env:PHASE2_SHOTS=$shots;$env:PHASE3_SHOTS=$shots;$env:PHASE4_SHOTS=$shots
  # Also isolate checks which spawn their own server instead of importing config-isolation.mjs.
  $env:AITIARCH_CONFIG_DIR=Join-Path $shots ('config-'+[guid]::NewGuid().ToString('N'))
  New-Item -ItemType Directory -Path $env:AITIARCH_CONFIG_DIR -Force | Out-Null

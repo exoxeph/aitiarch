@@ -65,7 +65,12 @@ describe('what a conversation was approved for, as the page may show it',()=>{
    expect((await s.turn(c.id,{files:['src/login.js','src/server.js','README.md']})).status).toBe(409); // a file the card never listed
    expect((await s.turn(c.id,{repo:true})).status).toBe(409);
    expect(await s.stored(c.id)).toEqual(before);
-   expect((await s.turn(c.id,{files:['src/login.js','src/server.js']})).status).toBe(200); // putting the chips back needs no card
+   const attachments={files:['src/login.js','src/server.js']};
+   const restored=await s.turn(c.id,attachments);
+   expect(restored.status).toBe(409);
+   expect(await restored.json()).toMatchObject({error:'plan_changed'}); // The intervening turns changed the reviewed carryover.
+   await s.approve(c.id,attachments);
+   expect((await s.turn(c.id,attachments)).status).toBe(200);
   }finally{await s.close();}
  });
 });

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {chromium} from 'playwright-core';
 import {createApp} from '../server/http.ts';
+import {UiStateStore} from '../server/ui-state-store.ts';
 import {resolveProjectStorage} from '../server/project-storage.ts';
 import {createSetupHttp} from '../server/setup-http.ts';
 import {saveMachineSetup} from '../server/setup-store.ts';
@@ -21,6 +22,7 @@ const base=await mkdtemp(path.join(os.tmpdir(),'aitiarch-codex-controls-'));
 const root=path.join(base,'.aitiarch'),skills=path.join(base,'skills'),config=process.env.AITIARCH_CONFIG_DIR;
 assert((await resolveProjectStorage(root,{create:true})).ok);
 await writeFile(path.join(root,'fixture.md'),'# Synthetic skill controls');
+await new UiStateStore(root).saveTour('skipped');
 async function writeSkill(name,classification,text){
  const directory=path.join(skills,name);
  await mkdir(directory,{recursive:true});

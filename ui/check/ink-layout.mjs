@@ -5,12 +5,14 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import {defaultMachineSetup} from '../shared/setup.ts';
+import {saveMachineSetup} from '../server/setup-store.ts';
 import { InkStore } from "../server/ink-store.ts";
 import { captureAnchor } from "../shared/anchors.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const uiDir = path.resolve(here, "..");
-const out = path.join(here, "out");
+const out = process.env.BATCH2A_OUTPUT ?? path.join(here, "out");
 mkdirSync(out, { recursive: true });
 const project = mkdtempSync(path.join(os.tmpdir(), "aitiarch-ink-layout-"));
 const root = path.join(project, ".aitiarch");
@@ -40,6 +42,7 @@ try {
   await ink.write("notebook.md", s.document, s.version);
   const unchanged = readFileSync(note);
 
+  await saveMachineSetup(path.join(project,'config'),{...defaultMachineSetup(),setupSeen:true});
   proc = spawn(process.execPath, [path.join(uiDir, "server", "main.ts"), "--root", root, "--port", "0", "--no-open"], { cwd: uiDir, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, AITIARCH_TEST:"1", AITIARCH_CONFIG_DIR: path.join(project, "config") } }); // a temp registry, never the user's
   const url = await new Promise((resolve, reject) => {
     let output = "";

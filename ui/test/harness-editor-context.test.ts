@@ -1,3 +1,5 @@
+import {DEFAULT_PIPELINE_CONFIG} from '../shared/pipeline-config.ts';
+import {replyProfileInstruction} from '../shared/notespace-guide.ts';
 import {execFileSync} from 'node:child_process';
 import {mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
 import os from 'node:os';
@@ -5,6 +7,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {CHAT_HARD_RULES,EDITOR_WORDS,SESSION_INVARIANTS} from '../server/chat/request.ts';
+const richPrefix=(prefix:string)=>prefix.replace(DEFAULT_PIPELINE_CONFIG.prompts.chatLength,()=>replyProfileInstruction('rich'));
 import {ChatInsertion} from '../server/chat/insertion.ts';import {InsertionStore} from '../server/insertion-store.ts';import {LedgerStore} from '../server/ledger-store.ts';
 import {Store} from '../server/store.ts';import {InkStore} from '../server/ink-store.ts';
 import {ChatRuntime} from '../server/chat/runtime.ts';import {ChatStore} from '../server/chat/store.ts';
@@ -87,7 +90,7 @@ describe('the editor line on a conversation turn',()=>{
   const p=await project(),{index,runtime}=await p.open('quote-selection'),s=await index.create({mode:'chat',label:'x',note:'plan.md'});
   const r=await turn(runtime,ask(s.id,'m-ec-q','What does this paragraph mean?',{selection:SEL,editor:{path:'plan.md',title:'Plan',section:['Plan'],lines:{from:3,to:3}}}));
   const [c]=await p.calls();
-  expect(c.addendum.startsWith(SESSION_INVARIANTS)).toBe(true);expect(c.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);
+  expect(c.addendum.startsWith(richPrefix(SESSION_INVARIANTS))).toBe(true);expect(c.addendum.endsWith(CHAT_HARD_RULES)).toBe(true);
   expect(r.review.instruction).not.toContain(SEL);
   expect(r.complete!.message.claims).toEqual([expect.objectContaining({sourceId:'S1',source:'selection',status:'found'})]);
   // the same words, quoted from the note instead, are checked against the note
