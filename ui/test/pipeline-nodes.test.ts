@@ -1,3 +1,5 @@
+import {roleDefinition} from '../shared/setup.ts';
+import {CODEX_SKILL_ROLES} from '../shared/codex-skills.ts';
 import {existsSync,mkdtempSync,rmSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -39,8 +41,8 @@ it('has a node for every node id the failure explainer can report, except an int
 });
 it('gives every locked node a reason and no editable fields, and every editable node something to edit',()=>{
  for(const node of PIPELINE_NODES){
-  if(node.kind==='locked'){expect(node.fields,node.id).toEqual([]);expect(node.role,node.id).toBeUndefined();expect(lockReason(node).length,node.id).toBeGreaterThan(20);}
-  else{expect(node.fields.length>0||!!node.role,node.id).toBe(true);expect(lockReason(node)).toBe('');}
+  if(node.kind==='locked'){expect(node.fields,node.id).toEqual([]);expect(node.role,node.id).toBeUndefined();expect(node.skillRole,node.id).toBeUndefined();expect(lockReason(node).length,node.id).toBeGreaterThan(20);}
+  else{expect(node.fields.length>0||!!node.role||!!node.skillRole,node.id).toBe(true);expect(lockReason(node)).toBe('');}
   for(const k of node.fields)expect(FIELDS[k],`${node.id} field ${k}`).toBeDefined();
   expect(node.does.length&&node.receives.length&&node.sendsOn.length,node.id).toBeTruthy();
  }
@@ -109,4 +111,11 @@ it('the corrected wording stays true to the code it was checked against',()=>{
  has('provider_contracts','does not confine','selection','editor line','earlier exchanges');
  has('hard_prompt_rules','asked of the model, not enforced','allowed fields','claim marks');
  has('chat-store','Keep on disk privately','/chat/','.gitignore');
+});
+
+it('has a distinct editable Skills node for each applicable Codex role',()=>{
+ for(const role of CODEX_SKILL_ROLES){
+  const nodes=PIPELINE_NODES.filter(node=>node.skillRole===role);
+  expect(nodes).toEqual([expect.objectContaining({kind:'editable',label:'Skills: '+roleDefinition(role).label})]);
+ }
 });

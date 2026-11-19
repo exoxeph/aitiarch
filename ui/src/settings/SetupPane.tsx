@@ -1,3 +1,4 @@
+import {CodexSkillControls} from '../skills/CodexSkillControls.tsx';
 import type {SetupView} from '../../shared/setup.ts';
 import {RoleControls,useRoleWrites} from '../setup/RoleControls.tsx';
 import {NotebookPrivacy} from '../setup/NotebookPrivacy.tsx';
@@ -20,6 +21,7 @@ export function SetupPane({view,onChange,onReplay,error}:{
    <RoleControls view={view} busy={busy||!onChange} save={save} onChange={onChange}/>
    <NotebookPrivacy privacy={view.privacy} disabled={busy||!onChange} onChange={onChange}/>
   </> : <p className="settings-lead">Setup information is unavailable.</p>}
+  <section aria-label="Codex skills"><h3>Codex skills</h3><CodexSkillControls/></section>
   <p className="settings-lead">Choose the model in the chat box.</p>
   {onReplay && <button type="button" onClick={onReplay} disabled={busy}>Run first-time setup again</button>}
  </div>;

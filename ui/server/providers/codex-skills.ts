@@ -8,6 +8,7 @@ import {privateWriteTemp} from '../private-write-temp.ts';
 import type {ReviewedCodexSkill} from '../../shared/invocation.ts';
 import type {SkillBlock} from '../../shared/instruction.ts';
 import {SETUP_ROLES, type SetupRole} from '../../shared/setup.ts';
+import {isCodexSkillRole,type CodexSkillClassification,type CodexSkillMetadata,type CodexSkillStatus} from '../../shared/codex-skills.ts';
 import {assertStoragePath, resolveProjectStorage, storageEntry} from '../project-storage.ts';
 
 const MAX_SKILL_BYTES=32*1024;
@@ -15,8 +16,6 @@ const MAX_CONSENT_BYTES=128*1024;
 const MAX_CANDIDATES=256;
 const MAX_SKILL_CHARACTERS=2048;
 const MAX_ENABLED=8;
-export const CODEX_SKILL_ROLES=['normal-chat','invoked','thread-reply','skill-diagram','council'] as const satisfies readonly SetupRole[];
-export const isCodexSkillRole=(role:unknown):role is typeof CODEX_SKILL_ROLES[number]=>CODEX_SKILL_ROLES.some(allowed=>allowed===role);
 export const CONFIRM_CODEX_SKILLS='Confirm the reviewed Codex skills before sending.';
 export const codexSkillRoots=(home:string,project:string,codexHome=path.join(home,'.codex'))=>
  [path.join(codexHome,'skills'),path.join(home,'.agents','skills'),path.join(project,'.agents','skills')];
@@ -26,16 +25,7 @@ const safeName=(name:string)=>/^[a-z0-9][a-z0-9_-]{0,79}$/i.test(name)&&
  !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(name)&&!repoDenied(name);
 
 export const NATIVE_SKILL_UNAVAILABLE='Native skill and plugin execution is unavailable. Only separately reviewed instruction text can be approved.';
-type Classification='read-only'|'writes'|'network'|'shell'|'needs review';
-export interface CodexSkillMetadata {
- readonly name:string;
- readonly description:string;
- readonly pathHash:string;
- readonly contentHash:string|null;
- readonly classification:Classification;
- readonly reason:string;
-}
-const reasons:Record<Classification,string>={
+const reasons:Record<CodexSkillClassification,string>={
  'read-only':'Instruction text only. The skill cannot run tools or read files.',
  writes:'This skill declares writes. Write access is unavailable.',
  network:'This skill declares network access. Network access is unavailable.',
@@ -79,7 +69,7 @@ function metadata(text:string){
  }
  const name=fields.get('name'),description=fields.get('description'),declared=fields.get('classification');
  if(!name||!safeName(name)||!description||description.length>400)return null;
- const classification:Classification=declared==='read-only'||declared==='writes'||declared==='network'||declared==='shell'
+ const classification:CodexSkillClassification=declared==='read-only'||declared==='writes'||declared==='network'||declared==='shell'
   ?declared:'needs review';
  return {name,description:redact(description),classification};
 }
@@ -138,14 +128,20 @@ async function scan(roots:readonly string[],take?:TakeInstructions):Promise<Code
  return [...found.values()].sort((a,b)=>a.name.localeCompare(b.name)||a.pathHash.localeCompare(b.pathHash));
 }
 
-type Consent={role:SetupRole;pathHash:string;contentHash:string;classification:'read-only';generation?:string};
+type SkillRoleKey={role:SetupRole;pathHash:string};
+type Approval=SkillRoleKey&{contentHash:string;classification:'read-only';generation?:string};
+type Consent=Approval|(SkillRoleKey&{needsReapproval:true});
+const isApproval=(item:Consent):item is Approval=>'contentHash' in item;
 const isRole=(value:unknown):value is SetupRole=>SETUP_ROLES.some(role=>role===value);
 const isConsent=(value:unknown):value is Consent=>{
- if(!value||typeof value!=='object'||Object.keys(value).some(key=>!['role','pathHash','contentHash','classification','generation'].includes(key)))return false;
- const item=value as Partial<Consent>;
- return isRole(item.role)&&isHash(item.pathHash)&&isHash(item.contentHash)&&item.classification==='read-only'&&(item.generation===undefined||isHash(item.generation));
+ if(!value||typeof value!=='object')return false;
+ const item=value as Record<string,unknown>,keys=Object.keys(item);
+ if(!isRole(item.role)||!isHash(item.pathHash))return false;
+ if(item.needsReapproval===true)return keys.every(key=>['role','pathHash','needsReapproval'].includes(key));
+ return keys.every(key=>['role','pathHash','contentHash','classification','generation'].includes(key))&&
+  isHash(item.contentHash)&&item.classification==='read-only'&&(item.generation===undefined||isHash(item.generation));
 };
-const writes=new Map<string,Promise<void>>();
+const writes=new Map<string,Promise<Consent[]>>();
 
 export class CodexSkillConsent {
  private readonly notebook:string;
@@ -157,12 +153,35 @@ export class CodexSkillConsent {
 
  inventory(){return discoverCodexSkills(this.roots);}
 
+ async status({clearChanged=true}={}):Promise<CodexSkillStatus>{
+  const [inventory,layout]=await Promise.all([this.inventory(),resolveProjectStorage(this.notebook)]);
+  let records=layout.ok?await this.read(layout.privatePaths.codexSkillConsent):[];
+  const byPath=new Map(inventory.map(skill=>[skill.pathHash,skill]));
+  const outdated=(item:Consent)=>{
+   const skill=byPath.get(item.pathHash);
+   return isApproval(item)&&(!skill||skill.classification!=='read-only'||skill.contentHash!==item.contentHash);
+  };
+  if(layout.ok&&clearChanged&&records.some(outdated)){
+   // Only revoke the records in this scan. A concurrent explicit approval of
+   // fresh bytes is a different record and must survive this reconciliation.
+   const stale=new Set(records.filter(outdated).map(item=>JSON.stringify(item)));
+   records=await this.update(async items=>items.map(item=>stale.has(JSON.stringify(item))
+    ?{role:item.role,pathHash:item.pathHash,needsReapproval:true}:item));
+  }
+  const skills=inventory.map(skill=>{
+   const related=records.filter(item=>item.pathHash===skill.pathHash);
+   return {...skill,approvedRoles:related.filter(item=>isApproval(item)&&!outdated(item)).map(item=>item.role),
+    changedRoles:related.filter(item=>!isApproval(item)||outdated(item)).map(item=>item.role)};
+  });
+  return {skills,nativeUnavailable:NATIVE_SKILL_UNAVAILABLE,...(layout.ok?{}:{storageReason:'Skill approvals need a notebook with private local storage.'})};
+ }
+
  async reviewed(role:SetupRole){
   const block:SkillBlock={text:'',loaded:[],skipped:[],truncated:false};
   const skills:ReviewedCodexSkill[]=[];
   const layout=await resolveProjectStorage(this.notebook);
   if(!layout.ok)return {block,skills,key:''};
-  const approvals=(await this.read(layout.privatePaths.codexSkillConsent)).filter(item=>item.role===role);
+  const approvals=(await this.read(layout.privatePaths.codexSkillConsent)).filter(isApproval).filter(item=>item.role===role);
   if(!approvals.length)return {block,skills,key:''};
   if(approvals.length>MAX_ENABLED)throw Error('Too many approved Codex skills.');
   const sections=new Map<string,{text:string;item:ReviewedCodexSkill;generation:string}>();
@@ -199,17 +218,17 @@ export class CodexSkillConsent {
   if(!layout.ok)return [];
   const [inventory,approvals]=await Promise.all([discoverCodexSkills(this.roots),this.read(layout.privatePaths.codexSkillConsent)]);
   return inventory.filter(skill=>skill.classification==='read-only'&&approvals.some(item=>
-   item.role===role&&item.pathHash===skill.pathHash&&item.contentHash===skill.contentHash));
+   isApproval(item)&&item.role===role&&item.pathHash===skill.pathHash&&item.contentHash===skill.contentHash));
  }
 
  async approve(role:SetupRole,pathHash:string,contentHash:string){
-  if(!isRole(role)||!isHash(pathHash)||!isHash(contentHash))throw Error('Invalid skill consent.');
+  if(!isCodexSkillRole(role)||!isHash(pathHash)||!isHash(contentHash))throw Error('Invalid skill consent.');
   await this.update(async approvals=>{
    const skill=(await discoverCodexSkills(this.roots)).find(item=>item.pathHash===pathHash);
    if(!skill||skill.contentHash!==contentHash)throw Error('The installed skill changed. Review it again.');
    if(skill.classification!=='read-only')throw Error(skill.reason);
    const next=approvals.filter(item=>item.role!==role||item.pathHash!==pathHash);
-   if(next.filter(item=>item.role===role).length>=MAX_ENABLED)throw Error('Approve at most eight skills for one role.');
+   if(next.filter(item=>item.role===role&&isApproval(item)).length>=MAX_ENABLED)throw Error('Approve at most eight skills for one role.');
    return [...next,{role,pathHash,contentHash,classification:'read-only',generation:hash(randomUUID())}];
   });
  }
@@ -237,7 +256,8 @@ export class CodexSkillConsent {
   const pending=(writes.get(key)??Promise.resolve()).catch(()=>{}).then(async()=>{
    const checked=await resolveProjectStorage(this.notebook);
    if(!checked.ok)throw Error(checked.reason);
-   const next=JSON.stringify(await change(await this.read(file)))+'\n';
+   const updated=await change(await this.read(file));
+   const next=JSON.stringify(updated)+'\n';
    if(Buffer.byteLength(next)>MAX_CONSENT_BYTES)throw Error('Private skill consent exceeds its size limit.');
    const staging=await privateWriteTemp(file,true);
    let created=false;
@@ -249,11 +269,12 @@ export class CodexSkillConsent {
     const verified=await resolveProjectStorage(this.notebook);
     if(!verified.ok)throw Error(verified.reason);
     await fs.rename(staging,file);
+    return updated;
    }finally{
     if(created)await fs.unlink(staging).catch(()=>{});
    }
   });
   writes.set(key,pending);
-  try{await pending;}finally{if(writes.get(key)===pending)writes.delete(key);}
+  try{return await pending;}finally{if(writes.get(key)===pending)writes.delete(key);}
  }
 }

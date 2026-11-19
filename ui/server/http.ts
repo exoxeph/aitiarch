@@ -47,7 +47,8 @@ import {PipelineConfigStore,PipelineConfigError,pipelineView,PIPELINE_CONFIG_MAX
 import {pipelinePreview,PreviewUnavailable} from './pipeline-preview.ts';
 import {excludedSnapshotPaths} from './harness/snapshot.ts';
 import {resolveConfigFolder,underTest} from './registry.ts';
-import {isCodexSkillRole,CONFIRM_CODEX_SKILLS,CodexSkillConsent,codexSkillRoots,NATIVE_SKILL_UNAVAILABLE} from './providers/codex-skills.ts';
+import {CONFIRM_CODEX_SKILLS,CodexSkillConsent,codexSkillRoots} from './providers/codex-skills.ts';
+import {isCodexSkillRole} from '../shared/codex-skills.ts';
 import {CouncilHistory} from './council-history.ts';
 import type {AvailabilityCheck} from './providers/council-availability.ts';
 import type {TurnAdapter} from './providers/turn.ts';
@@ -404,7 +405,10 @@ export function createApp(opts: AppOptions) {
       return json(res,200,skillLibrary(await discoveredSkills(url.searchParams.get('refresh')==='1'),{q:url.searchParams.get('q')??'',ids,limit:Number(url.searchParams.get('limit'))||undefined}));
     }
     if(url.pathname==='/api/codex-skills'){
-      if(req.method==='GET')return json(res,200,{skills:await codexSkills.inventory(),nativeUnavailable:NATIVE_SKILL_UNAVAILABLE});
+      if(req.method==='GET'){
+       try{return json(res,200,await codexSkills.status());}
+       catch{return json(res,409,{error:'skill_consent_unavailable',message:'Could not read private skill approvals.'});}
+      }
       if(req.method!=='PUT')return json(res,405,{error:'method_not_allowed'});
       const raw=await readBody(req,1024);
       if(!raw||typeof raw!=='object'||Array.isArray(raw))return json(res,400,{error:'invalid_skill_consent'});
@@ -416,7 +420,8 @@ export function createApp(opts: AppOptions) {
         if(typeof contentHash!=='string')return json(res,400,{error:'invalid_skill_consent'});
         await codexSkills.approve(role,pathHash,contentHash);
        }else await codexSkills.revoke(role,pathHash);
-       return json(res,200,{enabled:await codexSkills.enabled(role)});
+       const status=await codexSkills.status();
+       return json(res,200,{...status,enabled:status.skills.filter(skill=>skill.approvedRoles.includes(role))});
       }catch{return json(res,409,{error:'skill_consent_unavailable',message:'Could not save skill consent. Check private storage and review the current skill again.'});}
     }
     if(url.pathname==='/api/usage'&&req.method==='GET'){

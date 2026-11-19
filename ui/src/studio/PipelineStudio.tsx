@@ -2,6 +2,7 @@ import {useEffect,useMemo,useRef,useState,type KeyboardEvent as ReactKey,type Po
 import {api,type PipelineView} from '../api.ts';
 import type {SetupView} from '../../shared/setup.ts';
 import {RoleControls,useRoleWrites} from '../setup/RoleControls.tsx';
+import {CodexSkillControls} from '../skills/CodexSkillControls.tsx';
 import {studioNodeLabel,studioRoleChips} from './studio-roles.ts';
 import {DEFAULT_PIPELINE_CONFIG} from '../../shared/pipeline-config.ts';
 import {GROUP_LABEL,GROUP_ORDER,PIPELINE_NODES,edgesOf,fieldsOf,lockReason,nodeById,numberAt,safetyLabelOf,type NodeGroup,type PipelineNode} from '../../shared/pipeline-nodes.ts';
@@ -28,7 +29,8 @@ function NodeCard({node,view,setup,id}:{node:PipelineNode;view:PipelineView|null
    <dt>What it receives</dt><dd>{node.receives}</dd>
    <dt>What it sends on</dt><dd>{node.sendsOn}</dd>
    <dt>Safety label</dt><dd data-card="safety">{label?<><Badge label={label}/> {safetyHelp(label)}</>:chosen?<>{setup?.providers.find(tool=>tool.id===chosen)?.label} <Badge label={config.safetyLabels[chosen]}/></>:'None for this step.'}</dd>
-   <dt>Editable fields</dt><dd data-card="fields">{fields.length||wording||node.role?<ul>
+   <dt>Editable fields</dt><dd data-card="fields">{fields.length||wording||node.role||node.skillRole?<ul>
+    {node.skillRole&&<li>Codex skill approvals</li>}
     {node.role&&<li>Provider, model and effort <RoleChips node={node} setup={setup}/></li>}
     {fields.map(f=><li key={f.key}>{f.label}: {fmt(numberAt(config,f.key)??0,f.unit)}</li>)}
     {wording?.groups.map((g,i)=><li key={i}>{g.title?`${g.title} wording`:g.fields[0].label}</li>)}
@@ -64,6 +66,7 @@ function NodeEditor({node,view,setup,onSetupChange,onChanged,onClose}:{node:Pipe
    :<>
     {node.role&&(setup?<RoleControls view={setup} only={node.role} busy={roleWrite.busy||!onSetupChange} save={roleWrite.save} onChange={onSetupChange}/>
      :<p className="settings-lead">Setup information is unavailable.</p>)}
+    {node.skillRole&&<CodexSkillControls role={node.skillRole}/>}
     {roleWrite.notice&&<p className="settings-warn" role="alert">{roleWrite.notice}</p>}
     {(fields.length>0||wording)&&<>
     {fields.map(f=>{const def=numberAt(view?.defaults??DEFAULT_PIPELINE_CONFIG,f.key);return <div className="studio-field" key={f.key}>
@@ -107,10 +110,10 @@ export default function PipelineStudio({highlight,onClose,setup,onSetupChange}:{
  function closeEditor(){
   const id=selectedRef.current;
   setSelected(null);
-  if(id&&nodeById(id)?.role)requestAnimationFrame(()=>root.current?.querySelector<HTMLElement>(`.studio-node[data-node="${id}"], [data-node="${id}"] > .studio-row`)?.focus());
+  if(id&&(nodeById(id)?.role||nodeById(id)?.skillRole))requestAnimationFrame(()=>root.current?.querySelector<HTMLElement>(`.studio-node[data-node="${id}"], [data-node="${id}"] > .studio-row`)?.focus());
  }
  useEffect(()=>{
-  if(selected&&nodeById(selected)?.role)root.current?.querySelector<HTMLElement>('[data-editor] .studio-x')?.focus();
+  if(selected&&(nodeById(selected)?.role||nodeById(selected)?.skillRole))root.current?.querySelector<HTMLElement>('[data-editor] .studio-x')?.focus();
  },[selected]);
  // Escape closes the editor first, then the Studio; nothing underneath also hears it. Tab stays inside.
  useEffect(()=>{
@@ -225,7 +228,7 @@ export default function PipelineStudio({highlight,onClose,setup,onSetupChange}:{
   {view?.warning&&<p className="settings-warn" role="status">{view.warning}</p>}
   {flaggedNode&&<p className="studio-banner" role="status" data-banner="show-on-pipeline">Showing <strong>{studioNodeLabel(flaggedNode,setup)}</strong> on the pipeline: this is the step that stopped your reply.</p>}
   {narrow
-   ?<div className="studio-list" data-list="true">{GROUP_ORDER.map(g=>{const nodes=PIPELINE_NODES.filter(n=>n.group===g);return <section key={g} aria-label={GROUP_LABEL[g]}><h3>{GROUP_LABEL[g]}</h3><ul>{nodes.map(n=><li key={n.id} data-node={n.id} data-role-node={n.role} data-kind={n.kind} data-highlight={n.id===flagged||undefined} tabIndex={-1}>
+   ?<div className="studio-list" data-list="true">{GROUP_ORDER.map(g=>{const nodes=PIPELINE_NODES.filter(n=>n.group===g);return <section key={g} aria-label={GROUP_LABEL[g]}><h3>{GROUP_LABEL[g]}</h3><ul>{nodes.map(n=><li key={n.id} data-node={n.id} data-role-node={n.role} data-skill-role={n.skillRole} data-kind={n.kind} data-highlight={n.id===flagged||undefined} tabIndex={-1}>
      <button type="button" className="studio-row" aria-expanded={selected===n.id} onClick={()=>setSelected(s=>s===n.id?null:n.id)}><span>{n.kind==='locked'&&<Lock/>}{studioNodeLabel(n,setup)}</span><span className="studio-row-kind">{isCustomized(view?.overrides,n)&&<em className="studio-custom-tag" data-custom="true">Customized</em>}{n.kind==='locked'?'Locked':'Editable'}</span><RoleChips node={n} setup={setup}/></button>
      {selected===n.id&&<div className="studio-row-body"><NodeCard node={n} view={view} setup={setup}/>{editor}</div>}</li>)}</ul></section>;})}</div>
    :<div className="studio-body">
@@ -244,7 +247,7 @@ export default function PipelineStudio({highlight,onClose,setup,onSetupChange}:{
          ?<g key={key} data-stitch="true" data-limb={route.to} data-active={on||undefined} data-dim={(!!active&&!on)||undefined}><path d={d} data-edge={key} className="stitch-seam" {...common} markerEnd="url(#studio-arrow)"/><path d={d} className="stitch-ticks" {...common}/></g>
          :<path key={key} d={d} data-edge={key} {...common} markerEnd="url(#studio-arrow)"/>;
        })}</svg>
-      {PIPELINE_NODES.map(n=>{const p=place(n),badge=safetyLabelOf(n,view?.effective??DEFAULT_PIPELINE_CONFIG),chips=studioRoleChips(n,setup),onPath=!active||!around||n.id===active||(fullPath?around.up.has(n.id)||around.down.has(n.id):neighbours.has(n.id));return <button key={n.id} type="button" className="studio-node" data-node={n.id} data-role-node={n.role} data-kind={n.kind} data-group={n.group} data-provider={n.provider} data-main={MAIN_NODES.has(n.id)||undefined} data-dim={!onPath||undefined} data-selected={selected===n.id||undefined} data-highlight={n.id===flagged||undefined} aria-pressed={selected===n.id} aria-describedby={peek===n.id?'studio-peek':undefined}
+      {PIPELINE_NODES.map(n=>{const p=place(n),badge=safetyLabelOf(n,view?.effective??DEFAULT_PIPELINE_CONFIG),chips=studioRoleChips(n,setup),onPath=!active||!around||n.id===active||(fullPath?around.up.has(n.id)||around.down.has(n.id):neighbours.has(n.id));return <button key={n.id} type="button" className="studio-node" data-node={n.id} data-role-node={n.role} data-skill-role={n.skillRole} data-kind={n.kind} data-group={n.group} data-provider={n.provider} data-main={MAIN_NODES.has(n.id)||undefined} data-dim={!onPath||undefined} data-selected={selected===n.id||undefined} data-highlight={n.id===flagged||undefined} aria-pressed={selected===n.id} aria-describedby={peek===n.id?'studio-peek':undefined}
         data-customized={isCustomized(view?.overrides,n)||undefined} aria-label={`${studioNodeLabel(n,setup)}, ${n.kind==='locked'?'locked':'editable'}${badge?', '+badge:''}${isCustomized(view?.overrides,n)?', customized':''}${chips?', '+[...chips.labels,chips.source].join(', '):''}`} style={{left:p.x,top:p.y,width:NODE_W,minHeight:nodeH(n.id),height:nodeH(n.id)}}
         onPointerDown={e=>onNodeDown(e,n)} onPointerMove={onNodeMove} onPointerUp={onNodeUp} onPointerCancel={onNodeUp} onClick={()=>choose(n.id)} onKeyDown={e=>onNodeKey(e,n)}
         onPointerEnter={()=>setPeek(n.id)} onPointerLeave={()=>setPeek(c=>c===n.id?(flagged??null):c)} onFocus={e=>{setPeek(n.id);reveal(e,n);}} onBlur={()=>setPeek(c=>c===n.id?(flagged??null):c)}>

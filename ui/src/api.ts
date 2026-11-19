@@ -169,6 +169,8 @@ export async function streamConversation(body: ConversationBody & { id: string; 
 }
 
 export const api = {
+  codexSkillStatus:()=>ok<import('../shared/codex-skills.ts').CodexSkillStatus>('GET','/api/codex-skills'),
+  changeCodexSkill:(body:import('../shared/codex-skills.ts').CodexSkillChange)=>ok<import('../shared/codex-skills.ts').CodexSkillStatus>('PUT','/api/codex-skills',body),
   councilAvailability:(refresh=false)=>ok<{providers:import('../server/providers/council-availability.ts').Availability[]}>('GET','/api/council/availability'+(refresh?'?refresh=1':'')),
   councilHistory:(id:string)=>ok<import('../server/council-history.ts').CouncilRecord>('GET','/api/council/history?conversation='+encodeURIComponent(id)),
   councilPlan:(body:unknown)=>ok<Awaited<ReturnType<import('../server/council.ts').CouncilService['review']>>>('PUT','/api/council/plan',body),

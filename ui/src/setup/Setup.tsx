@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {saveSetup} from '../api.ts';
 import type {SetupUpdate, SetupView} from '../../shared/setup.ts';
+import {CodexSkillControls} from '../skills/CodexSkillControls.tsx';
 import {DefaultAiSelect} from './DefaultAiSelect.tsx';
 import {RoleControls} from './RoleControls.tsx';
 import {NotebookPrivacy} from './NotebookPrivacy.tsx';
@@ -10,6 +11,7 @@ export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(n
  const [view,setView] = useState(data);
  const [message,setMessage] = useState('');
  const [busy,setBusy] = useState(false);
+ const [showSkills,setShowSkills] = useState(false);
  const dialog = useRef<HTMLElement>(null);
  useEffect(() => {
   const previous = document.activeElement;
@@ -63,6 +65,10 @@ export function Setup({data, onClose, onPreferences}:{data:SetupView; onClose:(n
       <RoleControls view={view} busy={busy} customize save={save}/>
      </details>
     </div>
+    <details className="settings-section" onToggle={event=>setShowSkills(event.currentTarget.open)}>
+     <summary>Codex skills</summary>
+     {showSkills&&<CodexSkillControls/>}
+    </details>
     <NotebookPrivacy privacy={view.privacy} disabled={busy} onChange={next=>{setView(next);onPreferences?.(next);}}/>
     {message && <p className="settings-warn" role="status">{message}</p>}
    </div>

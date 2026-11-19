@@ -80,6 +80,29 @@ it('refuses a stale approval, invalidates consent on edits, and forbids non-read
  await expect(store().approve('normal-chat',networked.pathHash,networked.contentHash!)).rejects.toThrow(/network/i);
 });
 
+it('reports project-wide role states and clears changed approvals until they are explicitly re-approved',async()=>{
+ const layout=await resolveProjectStorage(notebook,{create:true});
+ expect(layout.ok).toBe(true);
+ if(!layout.ok)throw Error(layout.reason);
+ await skill('sample');
+ await skill('unclassified','unknown');
+ const [entry]=await inventory();
+ expect((await store().status()).skills[0]).toMatchObject({approvedRoles:[],changedRoles:[]});
+ for(const role of ['normal-chat','council'] as const)await store().approve(role,entry.pathHash,entry.contentHash!);
+ expect((await store().status()).skills[0].approvedRoles).toEqual(['normal-chat','council']);
+ await skill('sample','read-only','Changed synthetic instructions.');
+ let state=(await store().status()).skills[0];
+ expect(state).toMatchObject({approvedRoles:[],changedRoles:['normal-chat','council']});
+ expect(JSON.parse(await readFile(layout.privatePaths.codexSkillConsent,'utf8'))).toEqual([
+  {role:'normal-chat',pathHash:entry.pathHash,needsReapproval:true},
+  {role:'council',pathHash:entry.pathHash,needsReapproval:true},
+ ]);
+ expect((await store().reviewed('normal-chat')).skills).toEqual([]);
+ await store().approve('council',state.pathHash,state.contentHash!);
+ state=(await store().status()).skills[0];
+ expect(state).toMatchObject({approvedRoles:['council'],changedRoles:['normal-chat']});
+});
+
 it('refuses to write consent for a legacy notebook',async()=>{
  await mkdir(notebook);
  await skill('demo');

@@ -3,6 +3,7 @@
 // Ids match the pipeline config's locked-rule ids (permission_gate, fence_flags, exclusion_lists, hard_prompt_rules, redaction, protocol_limits, provider_contracts) and the failure
 // explainer's node ids (reply-integrity, token-budget, run-control, provider-run, request-intake, request-queue, chat-store, session-intake) wherever those exist.
 // Data only. Nothing here enforces anything or reads a file: the server stays the authority on what is accepted.
+import {isCodexSkillRole,type CodexSkillRole} from './codex-skills.ts';
 import {ROLE_REGISTRY,type SetupRole} from './setup.ts';
 import {DEFAULT_PIPELINE_CONFIG,locked,type PipelineConfig,type PipelineSafetyLabel} from './pipeline-config.ts';
 
@@ -49,6 +50,7 @@ export interface PipelineNode<Role extends string=SetupRole> {
  fields:readonly string[];
  /** Machine role settings exposed by this stage. */
  role?:Role;
+ skillRole?:CodexSkillRole;
  /** Name this run after the provider assigned to the linked role. */
  runOf?:Role;
  /** The provider whose safety label (from the config) this node carries. */
@@ -184,7 +186,14 @@ export function nodesWithRoles<Role extends string>(registry:readonly {id:Role;l
   does:role.help,receives:'The input approved for this role.',sendsOn:'The reply for this role.',
   fields:[],edges:[],source:['shared/setup.ts'],
  }));
- return [...STAGES,...extra];
+ const skills=registry.filter(role=>isCodexSkillRole(role.id)).map((role,index)=>n<Role>({
+  id:`skills-${role.id}`,skillRole:role.id as CodexSkillRole,label:`Skills: ${role.label}`,kind:'editable',group:'roles',
+  x:32+(index%3)*272,y:928+(Math.ceil(extra.length/3)+Math.floor(index/3))*128,
+  does:'Manage approved, instruction-only Codex skills for this role.',receives:'Local skill metadata and your approval.',
+  sendsOn:'Reviewed skill instructions to Codex on an explicitly confirmed send.',
+  fields:[],edges:[],source:['server/providers/codex-skills.ts'],
+ }));
+ return [...STAGES,...extra,...skills];
 }
 export const PIPELINE_NODES=Object.freeze(nodesWithRoles(ROLE_REGISTRY));
 

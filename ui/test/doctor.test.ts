@@ -8,9 +8,30 @@ import {claudeHelp,codexHelp,kiroHelp} from './fixtures/cli-help.ts';
 import {ProviderRegistry,descriptorFromAdapter} from '../server/providers/registry.ts';
 import {defaultMachineSetup} from '../shared/setup.ts';
 import {initProject} from '../server/init.ts';
+import {CodexSkillConsent} from '../server/providers/codex-skills.ts';
 const base=():DoctorOptions=>({nodeVersion:'24.1.0',nodeRange:'>=24',distDir:'/build',configDir:process.env.AITIARCH_CONFIG_DIR!,cwd:process.env.AITIARCH_CONFIG_DIR!,
  env:{},platform:'linux',discovery:{inspect:()=>undefined},filesystem:{buildPresent:async()=>true,configWritable:async()=>true}});
 describe('metadata-only doctor',()=>{
+ it('counts approved and changed local skills without writing or requesting a turn',async()=>{
+  const project=await mkdtemp(path.join(await realpath(os.tmpdir()),'aitiarch-doctor-skills-'));
+  const {privateLocation}=await initProject({project,sharing:'private',confirmIgnore:false});
+  const skills=path.join(project,'.agents','skills');
+  const writeSkill=async(name:string,content:string)=>{
+   await mkdir(path.join(skills,name),{recursive:true});
+   await writeFile(path.join(skills,name,'SKILL.md'),'---\nname: '+name+'\ndescription: Fixture\nclassification: read-only\n---\n'+content);
+  };
+  await writeSkill('keep','Explain the note.');
+  await writeSkill('changed','Explain the examples.');
+  const consent=new CodexSkillConsent(path.join(project,'.aitiarch'),[skills]);
+  for(const item of (await consent.status()).skills)await consent.approve('normal-chat',item.pathHash,item.contentHash!);
+  await writeSkill('changed','Explain the revised examples.');
+  const approvalPath=path.join(privateLocation!,'codex-skill-consent.json');
+  const before=await readFile(approvalPath);
+  const report=await doctor({...base(),project,runner:async()=>{throw Error('Unexpected CLI call');}});
+  expect(report.codexSkills).toEqual({approved:1,needsReview:1});
+  expect(formatDoctor(report)).toContain('Codex skills: 1 approved, 1 need review');
+  expect(await readFile(approvalPath)).toEqual(before);
+ });
  it('lists recognized unowned private leftovers by storage directory and preserves their bytes',async()=>{
   const scratch=await mkdtemp(path.join(await realpath(os.tmpdir()),'aitiarch-doctor-leftovers-'));
   const {privateLocation}=await initProject({project:scratch,sharing:'private',confirmIgnore:false});
