@@ -18,7 +18,10 @@ export interface TreeNode {
   children?: TreeNode[];
 }
 
+import type {TourOutcome,TourStatus} from '../shared/tour-state.ts';
+
 export interface UiState {
+  tour?:TourStatus;
   v: 1;
   tabs: string[];
   active: string | null;
@@ -288,6 +291,7 @@ export const api = {
     }
   },
   uiState: () => ok<UiState>("GET", "/api/ui-state"),
+  saveTour: (tour:TourOutcome) => ok<{tour:TourOutcome}>('PUT','/api/ui-state/tour',{tour}),
   putUiState: (s: UiState) => ok<UiState>("PUT", "/api/ui-state", s),
   async save(path: string, base: string, text: string, keepalive = false): Promise<SaveResult> {
     try {

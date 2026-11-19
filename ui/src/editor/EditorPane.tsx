@@ -354,7 +354,7 @@ export function EditorPane(props: Props) {
   return <div className={props.visible ? "ink-surface" : "ink-surface surface-hidden"} ref={surface} data-note-path={props.file.path}>
     {invoked.panel}
     {invoked.draftSection&&!margin.some(m=>m.item.id===invoked.draftId)&&<div className="invocation-panel">{invoked.draftSection}</div>}
-    <div className="pane" ref={host} data-path={props.file.path} />
+    <div className="pane" data-tour="editor" ref={host} data-path={props.file.path} />
     <MarginRail placed={margin} renderDraft={id=>id===invoked.draftId?invoked.draftSection:null}
       blobs={{ order: blobPrefs.order, getScroll: () => host.current?.scrollTop ?? 0, onMove: (id, pos) => { const scroll = host.current?.scrollTop ?? 0, target = (margin.find(m => m.item.id === id)?.target ?? 0) + scroll; updateBlobs(p => moveBlob(p, id, { left: pos.left, top: pos.top - target })); }, onFront: id => updateBlobs(p => frontBlob(p, id)), onReset: id => updateBlobs(p => resetBlob(p, id)) }} />
   </div>;

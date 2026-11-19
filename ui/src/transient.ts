@@ -2,7 +2,8 @@ interface Candidate {id:string;priority:number;inside:boolean;protected:boolean}
 export function dismissTarget(rows:Candidate[],escape:boolean){const top=[...rows].sort((a,b)=>b.priority-a.priority).at(0);return !top||top.protected||(!escape&&top.inside)?null:top.id;}
 interface Entry {element:()=>HTMLElement|null;close:()=>void;priority:number;protect:()=>boolean}
 const entries=new Map<string,Entry>();let serial=0;
-function handle(event:Event){const escape=event instanceof KeyboardEvent&&event.key==='Escape';if(event.type==='keydown'&&!escape)return;
+function handle(event:Event){if(event.target instanceof Element&&event.target.closest("[data-notebook-tour]"))return;
+ const escape=event instanceof KeyboardEvent&&event.key==='Escape';if(event.type==='keydown'&&!escape)return;
  const rows=[...entries].flatMap(([id,e])=>{const el=e.element();return !el||el.hidden||!el.getClientRects().length?[]:[{id,priority:e.priority+Number(id)/100000,inside:event.target instanceof Node&&el.contains(event.target),protected:e.protect()}];});
  const id=dismissTarget(rows,escape);if(!id){if(escape&&rows.length){event.preventDefault();event.stopImmediatePropagation();}return;}
  if(escape){event.preventDefault();event.stopImmediatePropagation();}entries.get(id)?.close();

@@ -27,6 +27,7 @@ function create(view: EditorView): TooltipView {
   const dom = document.createElement("div");
   dom.className = "cm-tooltip cm-sel-toolbar cm-sel-toolbar-compact";
   dom.setAttribute("role", "toolbar");
+  dom.dataset.tour = "selection";
   dom.setAttribute("aria-label", "Format selection");
   dom.setAttribute("aria-keyshortcuts", "Alt+F10");
   let reasonMode = false;

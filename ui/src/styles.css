@@ -1850,3 +1850,36 @@ p.chat-wait { margin: 4px 0 0; }
 .rich-reply-diagram svg :is(.flowchart-link, .messageLine0, .messageLine1, .actor-line) { fill: none; stroke: currentColor; }
 .rich-reply-diagram svg .edgeLabel rect { fill: var(--paper); }
 .rich-reply-diagram svg marker path { fill: currentColor; stroke: currentColor; }
+
+
+/* The native modal keeps the notebook inert while its controls are highlighted. */
+.notebook-tour {
+  position: fixed; inset: 0; box-sizing: border-box; width: 100%; height: 100%;
+  max-width: none; max-height: none; margin: 0; padding: 0; border: 0;
+  overflow: hidden; background: transparent; color: var(--ink-text);
+}
+.notebook-tour::backdrop { background: rgb(0 0 0 / .48); }
+.notebook-tour:has(.notebook-tour-highlight)::backdrop { background: transparent; }
+.notebook-tour-highlight {
+  position: absolute; pointer-events: none; border-radius: 8px;
+  outline: 3px solid var(--accent); box-shadow: 0 0 0 200vmax rgb(0 0 0 / .48);
+}
+.notebook-tour-card {
+  position: absolute; box-sizing: border-box; inset-inline: 16px; bottom: 24px;
+  max-width: 420px; max-height: calc(100% - 32px); margin-inline: auto; padding: 20px;
+  overflow: auto; background: var(--paper); border: 1px solid var(--accent);
+  border-radius: 12px; box-shadow: var(--shadow-up); font: 14px/1.5 var(--font-ui);
+}
+.notebook-tour-card[data-placement="top"] { top: 24px; bottom: auto; }
+.notebook-tour-card h2 { margin: 2px 0 8px; font-size: 20px; }
+.notebook-tour-card p { margin: 0 0 8px; }
+.notebook-tour-progress, .notebook-tour-missing, .notebook-tour-example { color: var(--muted); }
+.notebook-tour-example { display: block; overflow-wrap: anywhere; padding: 6px 8px; background: var(--paper-2); margin-bottom: 8px; }
+.notebook-tour-actions { display: flex; gap: 8px; margin-top: 12px; }
+.notebook-tour-actions > button:first-child { margin-inline-end: auto; }
+.notebook-tour-actions button { min-height: 34px; padding-inline: 10px; }
+.notebook-tour-primary { background: var(--accent); color: var(--on-accent); }
+@media (max-width: 640px) {
+  .notebook-tour-card { inset-inline: 12px; bottom: 12px; padding: 16px; }
+  .notebook-tour-card[data-placement="top"] { top: 12px; bottom: auto; }
+}

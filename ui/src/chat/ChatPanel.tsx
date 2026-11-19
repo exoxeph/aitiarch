@@ -542,7 +542,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
     {atItems.length===0?<p className="chat-at-none">Nothing matches “{at.query}”.</p>:atItems.map((it,i)=><button key={atItemKey(it)} type="button" role="option" aria-selected={i===at.index} tabIndex={-1} className="chat-at-opt" data-at={atItemKey(it)}
      onMouseDown={e=>e.preventDefault()} onClick={()=>pickAt(it)}><span className="chat-at-kind">{it.kind==='repo'?'Repo':it.kind==='note'?'Note':'File'}</span><span className="chat-at-name">{it.kind==='repo'?it.label:it.path}</span></button>)}
    </div>}
-   <textarea ref={input} aria-label="Message Aitiarch AI" rows={1} placeholder={pending||planCard||nativeCard?'Review above, then send…':mode==='council'?'Ask the Council… (Enter reviews it first)':'Ask about this note… (@ to attach)'} value={draft} disabled={composing} onChange={e=>onDraft(e.target.value)}
+   <textarea ref={input} data-tour="context" aria-label="Message Aitiarch AI" rows={1} placeholder={pending||planCard||nativeCard?'Review above, then send…':mode==='council'?'Ask the Council… (Enter reviews it first)':'Ask about this note… (@ to attach)'} value={draft} disabled={composing} onChange={e=>onDraft(e.target.value)}
     aria-controls={at?'chat-at-list':undefined} aria-expanded={at?true:undefined}
     onPaste={e=>{
      const files=clipboardImages(e.clipboardData);

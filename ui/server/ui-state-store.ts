@@ -1,3 +1,4 @@
+import {isTourOutcome,type TourOutcome,type TourStatus} from '../shared/tour-state.ts';
 import {validNeverCorrect} from '../shared/typing-preferences.ts';
 import {lstat,readFile,open,rename,unlink,writeFile} from 'node:fs/promises';
 import {execFile} from 'node:child_process';import {promisify} from 'node:util';
@@ -9,7 +10,7 @@ import {exactKeys,validAt,validId} from '../shared/threads.ts';
 import {validSavedNodes,type SavedNodeSettings} from '../shared/node-settings.ts';
 const exec=promisify(execFile);
 export interface ThreadDraft {note:string;inkId:string;text:string;updatedAt:string;revision:string}
-export interface SavedUiState {v:1;tabs:string[];active:string|null;treeCollapsed?:boolean;theme?:'ember'|'moss';confirmAdd?:boolean;typingHelp?:boolean;doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];threadDrafts?:Record<string,ThreadDraft>;investigator?:Record<string,unknown>;starPositions?:Record<string,[number,number]>;nodes?:SavedNodeSettings}
+export interface SavedUiState {v:1;tabs:string[];active:string|null;treeCollapsed?:boolean;theme?:'ember'|'moss';confirmAdd?:boolean;typingHelp?:boolean;doubleSpacePeriod?:boolean;smartCorrections?:boolean;neverCorrect?:string[];tour?:TourOutcome;threadDrafts?:Record<string,ThreadDraft>;investigator?:Record<string,unknown>;starPositions?:Record<string,[number,number]>;nodes?:SavedNodeSettings}
 export type StarPositions=Record<string,[number,number]>;
 const validStarPositions=(v:unknown):v is StarPositions=>{
  if(!v||typeof v!=='object'||Array.isArray(v))return false;
@@ -36,11 +37,15 @@ export class UiStateStore {
   }finally{await unlink(temp).catch(()=>{});await lock.close();await unlink(file+'.aitiarch.lock');}
  }
  private async safe(file:string){try{const s=await lstat(file);if(!s.isFile()||s.isSymbolicLink()||s.nlink!==1||s.size>2*1024*1024)throw new Error('Unsafe UI state.');}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}}
- async read():Promise<SavedUiState>{return this.readAt((await resolvePrivateProjectPath(this.root,'state')).file);}
- private async readAt(file:string):Promise<SavedUiState>{await this.safe(file);let d:any;try{d=JSON.parse(await readFile(file,'utf8'));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return {v:1,tabs:[],active:null};throw e;}
+ async read():Promise<SavedUiState>{
+  const {file,managed}=await resolvePrivateProjectPath(this.root,'state');
+  return this.readAt(file,managed);
+ }
+ private async readAt(file:string,managed:boolean):Promise<SavedUiState>{await this.safe(file);let d:any;try{d=JSON.parse(await readFile(file,'utf8'));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return {v:1,tabs:[],active:null};throw e;}
   if(!d||typeof d!=='object'||Array.isArray(d))throw new Error('Invalid UI state.');
   const tabs:string[]=[];for(const t of Array.isArray(d.tabs)?d.tabs.slice(0,50):[]){try{const n=normalizeRel(t);if(isNotePath(n)&&!tabs.includes(n))tabs.push(n);}catch{}}
   const state:SavedUiState={v:1,tabs,active:tabs.includes(d.active)?d.active:null};
+  if(managed&&isTourOutcome(d.tour))state.tour=d.tour;
   if(typeof d.treeCollapsed==='boolean')state.treeCollapsed=d.treeCollapsed;
   if(['ember','moss'].includes(d.theme))state.theme=d.theme;else if(['system','light','dark'].includes(d.theme))state.theme='ember'; // saved before the remodel: there is no light theme any more
   if(typeof d.confirmAdd==='boolean')state.confirmAdd=d.confirmAdd;
@@ -60,15 +65,26 @@ export class UiStateStore {
   return state;
  }
  private async ignored(file:string,temporary:string){try{await exec('git',['check-ignore','-q','--',file],{cwd:this.root,windowsHide:true,timeout:3000});await exec('git',['check-ignore','-q','--',temporary],{cwd:this.root,windowsHide:true,timeout:3000});}catch{throw new Error('Draft persistence disabled: ui-state.json must be git-ignored. Add /ui-state.json* explicitly (covers atomic temporary files too).');}}
- private mutate<T>(fn:(s:SavedUiState)=>T,requireIgnored=false):Promise<T>{
+ private mutate<T>(fn:(s:SavedUiState)=>T,requireIgnored: boolean|'managed'=false):Promise<T>{
   const job=this.tail.catch(()=>{}).then(()=>this.mutateLocked(fn,requireIgnored));this.tail=job;return job;
  }
- private async mutateLocked<T>(fn:(s:SavedUiState)=>T,requireIgnored=false){
+ private async mutateLocked<T>(fn:(s:SavedUiState)=>T,requireIgnored: boolean|'managed'=false){
   const {file,managed}=await resolvePrivateProjectPath(this.root,'state');
+  if(requireIgnored==='managed'&&!managed)throw Error('Tour progress requires private notebook storage.');
   await this.safe(file);const temp=await privateWriteTemp(file,managed),lock=await open(file+'.lock','wx',0o600);
-  try{const s=await this.readAt(file);if(!managed&&(requireIgnored||s.treeCollapsed!==undefined||s.theme!==undefined||s.confirmAdd!==undefined||s.typingHelp!==undefined||s.doubleSpacePeriod!==undefined||s.smartCorrections!==undefined||s.neverCorrect!==undefined||s.nodes!==undefined||Object.keys(s.threadDrafts??{}).length))await this.ignored(file,temp);const result=fn(s),data=JSON.stringify(s,null,2)+'\n';if(Buffer.byteLength(data)>2*1024*1024)throw new Error('UI state too large.');
+  try{const s=await this.readAt(file,managed);if(!managed&&(requireIgnored||s.treeCollapsed!==undefined||s.theme!==undefined||s.confirmAdd!==undefined||s.typingHelp!==undefined||s.doubleSpacePeriod!==undefined||s.smartCorrections!==undefined||s.neverCorrect!==undefined||s.nodes!==undefined||Object.keys(s.threadDrafts??{}).length))await this.ignored(file,temp);const result=fn(s),data=JSON.stringify(s,null,2)+'\n';if(Buffer.byteLength(data)>2*1024*1024)throw new Error('UI state too large.');
    const f=await open(temp,'wx',0o600);try{await f.writeFile(data);await f.sync();}finally{await f.close();}await this.safe(file);await rename(temp,file);return result;
   }finally{await unlink(temp).catch(()=>{});await lock.close();await unlink(file+'.lock');}
+ }
+ async readWithTour(){
+  const {file,managed}=await resolvePrivateProjectPath(this.root,'state');
+  const state=await this.readAt(file,managed);
+  const tour:TourStatus|undefined=managed?state.tour??'unseen':undefined;
+  return {state,tour};
+ }
+ async saveTour(outcome:unknown){
+  if(!isTourOutcome(outcome))throw Error('Invalid tour outcome.');
+  await this.mutate(state=>{state.tour=outcome;},'managed');
  }
  async updateTabs(tabs:Pick<SavedUiState,'v'|'tabs'|'active'|'treeCollapsed'|'theme'|'confirmAdd'|'typingHelp'|'doubleSpacePeriod'|'smartCorrections'|'neverCorrect'>){
   for(const name of ['typingHelp','doubleSpacePeriod','smartCorrections'] as const)if(tabs[name]!==undefined&&typeof tabs[name]!=='boolean')throw new Error('Invalid typing preference.');

@@ -13,6 +13,7 @@ import {ChatStore} from './chat/store.ts';import {ChatInsertion} from './chat/in
 import {TESTED_CLI_VERSION} from '../shared/diagram-fence.ts';import {DiagramImageError,DiagramImageStore} from './diagram-image-store.ts';import {DIAGRAM_PNG_MAX_BYTES,DIAGRAM_PNG_NAME} from '../shared/diagram-refs.ts';
 import {InsertionStore} from './insertion-store.ts';
 import {SKILL_DIAGRAM_CSP_HEADER,SKILL_DIAGRAM_SVG_CSP_HEADER} from '../shared/skill-diagram.ts';
+import {isTourOutcome,type TourStatus} from '../shared/tour-state.ts';
 import { UiStateStore } from './ui-state-store.ts';
 import {isGitRepository} from './git-repository.ts';
 import {ThreadStore} from './thread-store.ts';
@@ -150,6 +151,7 @@ export async function serveDist(distDir: string, res: http.ServerResponse, url: 
 }
 
 interface UiState {
+  tour?:TourStatus;
   v: 1;
   tabs: string[];
   active: string | null;
@@ -251,7 +253,7 @@ export function createApp(opts: AppOptions) {
   },path=>{for(const c of clients)c.write(`event: ink\ndata: ${JSON.stringify({type:'ink',path})}\n\n`);},(node,options)=>nodeSettings.extras(node,options),opts.provider?.name==='chatgpt-plan'?undefined:opts.council?.routing,stagedImages,codexSkills));
   const imageSurface=(surface:string|null)=>surface==='invoked'?assistance:surface==='thread'?runtimeReady:chatReady;
   async function readUiState(): Promise<UiState> {
-    try { const {v,tabs,active,treeCollapsed,theme,confirmAdd,typingHelp,doubleSpacePeriod,smartCorrections,neverCorrect}=await uiStateStore.read();return {v,tabs,active,...(treeCollapsed!==undefined?{treeCollapsed}:{}),...(theme!==undefined?{theme}:{}),...(confirmAdd!==undefined?{confirmAdd}:{}),...(typingHelp!==undefined?{typingHelp}:{}),...(doubleSpacePeriod!==undefined?{doubleSpacePeriod}:{}),...(smartCorrections!==undefined?{smartCorrections}:{}),...(neverCorrect!==undefined?{neverCorrect}:{})}; }
+    try { const {state:{v,tabs,active,treeCollapsed,theme,confirmAdd,typingHelp,doubleSpacePeriod,smartCorrections,neverCorrect},tour}=await uiStateStore.readWithTour();return {v,tabs,active,...(tour!==undefined?{tour}:{}),...(treeCollapsed!==undefined?{treeCollapsed}:{}),...(theme!==undefined?{theme}:{}),...(confirmAdd!==undefined?{confirmAdd}:{}),...(typingHelp!==undefined?{typingHelp}:{}),...(doubleSpacePeriod!==undefined?{doubleSpacePeriod}:{}),...(smartCorrections!==undefined?{smartCorrections}:{}),...(neverCorrect!==undefined?{neverCorrect}:{})}; }
     catch { return {v:1,tabs:[],active:null}; }
   }
   function sanitizeUiState(raw: unknown): UiState {
@@ -815,6 +817,12 @@ export function createApp(opts: AppOptions) {
       return json(res, 409, { error: "conflict", reason: r.reason, current: r.current ?? null });
     }
     if (url.pathname === "/api/ui-state" && req.method === "GET") return json(res, 200, await readUiState());
+    if (url.pathname === "/api/ui-state/tour" && req.method === "PUT") {
+      const body=await readBody(req) as {tour?:unknown}|null;
+      if(!isTourOutcome(body?.tour))return json(res,400,{error:'invalid_tour',message:'Invalid tour outcome.'});
+      await uiStateStore.saveTour(body.tour);
+      return json(res,200,{tour:body.tour});
+    }
     if (url.pathname === "/api/ui-state" && req.method === "PUT") {
       const s = sanitizeUiState(await readBody(req));
       await writeUiState(s);

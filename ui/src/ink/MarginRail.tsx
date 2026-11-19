@@ -99,7 +99,7 @@ export function MarginRail({placed,renderDraft,blobs}:{placed:PlacedMargin[];ren
     onPointerDown={e=>gripDown(e,item.id)} onPointerMove={gripMove} onPointerUp={gripUp} onPointerCancel={gripUp} onKeyDown={e=>gripKey(e,item.id)}>
     <span className="thought-grip-dots" aria-hidden="true"/></button>}
    {renderDraft?.(item.id)?<div className="thought-ask">{renderDraft(item.id)}</div>:<>
-  <button className="thought-open" aria-label={'Open AI thought thread: '+thoughtText(item).slice(0,80)} onClick={e=>e.currentTarget.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:item.id,thought:true}}))}>
+  <button data-tour="thread" className="thought-open" aria-label={'Open AI thought thread: '+thoughtText(item).slice(0,80)} onClick={e=>e.currentTarget.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:item.id,thought:true}}))}>
     <span className="thought-meta"><span className="thought-dot" aria-hidden="true"/><span className="cm-ink-label">AI</span>{resolved&&<span className="thought-resolved-tag">Resolved</span>}</span>
    </button>
    <div className="thought-text" onClick={e=>{if(!(e.target as HTMLElement).closest('button,input'))e.currentTarget.dispatchEvent(new CustomEvent('open-thread',{bubbles:true,detail:{id:item.id,thought:true}}));}}>{item.generation?.status==='pending'?<Thinking/>:<><ImageInterpretationNotice shown={item.generation?.imageInterpretation}/><Streamed text={thoughtText(item)} fresh={fresh.current.has(item.id)} onDone={()=>fresh.current.delete(item.id)}><ReplyMarkdown text={thoughtText(item)} profile={profileForRole("invoked")}/></Streamed></>}</div>

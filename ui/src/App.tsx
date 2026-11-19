@@ -39,6 +39,8 @@ import {ThoughtInsertionPreview} from './ink/ThoughtInsertionPreview.tsx';
 import {ThoughtChat} from './ink/ThoughtChat.tsx';
 import {SettingsDialog} from './settings/SettingsDialog.tsx';
 import {Setup} from './setup/Setup.tsx';
+import {Tour} from './setup/Tour.tsx';
+import {useTour} from './setup/useTour.ts';
 import {fetchSetup} from './api.ts';
 import type {SetupView} from '../shared/setup.ts';
 import {isolateHistory,undo} from '@codemirror/commands';
@@ -62,6 +64,8 @@ export default function App() {
   const [setup,setSetup]=useState<SetupView|null>(null);
   const [setupPreferences,setSetupPreferences]=useState<SetupView|null>(null);
   const [setupError,setSetupError]=useState<string|null>(null);
+  const [setupSettled,setSetupSettled]=useState(false),commandsRef=useRef<HTMLButtonElement>(null);
+  const tour=useTour(setupSettled&&!setup);
   useEffect(()=>{
     if(boot.state!=='ready')return;
     let active=true;
@@ -69,7 +73,7 @@ export default function App() {
       if(!active||!view.ready)return;
       setSetupPreferences(view);
       if(!view.seen)setSetup(view);
-    }).catch(()=>{});
+    }).catch(()=>{}).finally(()=>{if(active)setSetupSettled(true);});
     return ()=>{active=false;};
   },[boot]);
   async function reopenSetup(){
@@ -253,6 +257,7 @@ export default function App() {
           sessionStorage.setItem(`anchor-cache-notice:${s.rootPath}`, "shown");
         }
         const [t, ui, persistence] = await Promise.all([api.tree(), api.uiState(),api.uiStatePersistence().catch(()=>({enabled:false}))]);
+        tour.restore(ui.tour);
         setConfirmAdd(ui.confirmAdd??false);setTreePersistence(persistence.enabled);
         if(persistence.enabled){setTheme(ui.theme??'ember');setTypingHelpOn(ui.typingHelp??true);setDoubleSpacePeriod(ui.doubleSpacePeriod??true);setSmartCorrections(ui.smartCorrections??true);setNeverCorrect(ui.neverCorrect??[]);}
         setTree(t);
@@ -348,7 +353,7 @@ export default function App() {
   // ---- keyboard: Ctrl/Cmd+P palette, Ctrl/Cmd+O switcher ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      if (tour.open || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
       const k = e.key.toLowerCase();
       if (k === "p" || k === "o" || k === "k") {
         e.preventDefault();
@@ -358,7 +363,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, []);
+  }, [tour.open]);
 
   const activeHandle = () => (active ? panes.current.get(active) : undefined);
   const activeText = active ? (docs[active] ?? files[active]?.text ?? "") : "";
@@ -510,6 +515,7 @@ export default function App() {
   useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(null),9000);return()=>clearTimeout(timer);},[toast]);
   const commands = useMemo(() => {
     const list: Array<OverlayItem & { run: () => void }> = [
+      {id:'replay-tour',label:'Replay tour',group:'Help',run:tour.replay},
       {id:'decisions',label:'Show decisions',group:'Workspace',run:()=>{setDecisionsFocus(true);setMapOpen(true);}},
       ...paths.map(path=>({id:`note:${path}`,label:`Jump to note: ${path}`,group:'Notes',run:()=>void openNote(path)})),
       ...SLASH_ITEMS.map((item,i)=>({id:`insert:${i}`,label:`Insert: ${item.label}`,group:'Insert blocks',run:withView(h=>{
@@ -586,6 +592,7 @@ export default function App() {
     {([['Typing help',typingHelpOn,setTypingHelpOn],['Smart corrections',smartCorrections,setSmartCorrections],['Double-space period',doubleSpacePeriod,setDoubleSpacePeriod]] as const).map(([label,on,set])=>
       <button key={label} type="button" role="switch" aria-checked={on} className="menu-switch" onClick={()=>{set(!on);if(!treePersistence)setTreeNotice(true);}}><span>{label}</span><i aria-hidden="true"/></button>)}
     <ChatGPTSettings/>
+    <button type="button" className="menu-row" onClick={tour.replay}>Replay tour</button>
   </div>;
   return (
     <div className="app">
@@ -594,7 +601,7 @@ export default function App() {
         <Tabs tabs={tabs} active={active} status={status} onSelect={setActive} onClose={(p) => void closeTab(p)} />
         <span className="spacer" />
         <select className="theme-toggle" aria-label="Theme" value={theme} onChange={e=>chooseTheme(e.target.value as typeof theme)}><option value="ember">Ember</option><option value="moss">Moss</option></select>
-        <button className="ghost commands-btn" aria-label="Commands" onClick={() => setOverlay("palette")} title="Command palette (Ctrl+K; Ctrl+P)">
+        <button ref={commandsRef} className="ghost commands-btn" aria-label="Commands" onClick={() => setOverlay("palette")} title="Command palette (Ctrl+K; Ctrl+P)">
           <span className="commands-label">Commands</span>
           <svg className="commands-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M5.5 5.5v5M10.5 5.5v5M5.5 5.5h5M5.5 10.5h5M5.5 5.5a2 2 0 1 1-2-2 2 2 0 0 1 2 2Zm5 0a2 2 0 1 1 2-2 2 2 0 0 1-2 2Zm-5 5a2 2 0 1 0-2 2 2 2 0 0 0 2-2Zm5 0a2 2 0 1 0 2 2 2 2 0 0 0-2-2Z"/></svg>
         </button>
@@ -618,7 +625,7 @@ export default function App() {
             <div className="attach-actions"><button onClick={() => void saveAttach()}>Save re-attachment</button><button onClick={() => setAttachDraft(null)}>Cancel</button></div>
           </section>}
         </NoteMenu>
-        <button ref={mapButtonRef} type="button" className="map-pill" aria-label="Constellation" aria-expanded={mapOpen} onClick={() => setMapOpen(v => !v)} title="Your notes as a map of linked stars">
+        <button ref={mapButtonRef} data-tour="constellation" type="button" className="map-pill" aria-label="Constellation" aria-expanded={mapOpen} onClick={() => setMapOpen(v => !v)} title="Your notes as a map of linked stars">
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"><circle cx="3.5" cy="11.5" r="1.6" fill="currentColor"/><circle cx="8" cy="4" r="2" fill="currentColor"/><circle cx="12.8" cy="10" r="1.3" fill="currentColor"/><path d="M4.6 10.2 7 5.6M9.6 5.2l2.4 3.6M5.1 11.4l6.3-1.2"/></svg>
           <span className="map-pill-label">Constellation</span>
         </button>
@@ -626,7 +633,7 @@ export default function App() {
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><rect x="1.5" y="2" width="4.5" height="3.5" rx="1"/><rect x="10" y="2" width="4.5" height="3.5" rx="1"/><rect x="5.7" y="10.5" width="4.6" height="3.5" rx="1"/><path d="M6 3.8h4M3.8 5.5v2.2h8.4V5.5M8 7.7v2.8"/></svg>
           <span className="map-pill-label">Pipeline</span>
         </button>
-        <button ref={chatPillRef} type="button" className="chat-pill" aria-expanded={chatOpen} aria-controls="chat-panel" onClick={() => setChatOpen(v => !v)}><span className="chat-pill-dot" aria-hidden="true" />Chat</button>
+        <button ref={chatPillRef} data-tour="ai" type="button" className="chat-pill" aria-expanded={chatOpen} aria-controls="chat-panel" onClick={() => setChatOpen(v => !v)}><span className="chat-pill-dot" aria-hidden="true" />Chat</button>
       </header>
       <NotesMenu menu={menu} burger={burgerRef} rootName={boot.rootName} rootPath={boot.rootPath} tree={tree} active={active} onOpen={(p) => void openNote(p)} onSearch={() => setOverlay("palette")} onDecisions={() => {setDecisionsFocus(true);setMapOpen(true);}} onSettings={() => setSettingsOpen(true)} usage={<UsagePanel />} settings={settingsPanel} onTreeChanged={() => refreshTree()} onMoved={m => void afterMove(m)} blocked={moveBlocked} />
       <main className="editor-col" data-note-path={active ?? undefined}
@@ -672,6 +679,7 @@ export default function App() {
       </Suspense>}
       {chatOpen && <ChatPanel setupView={setupPreferences??undefined} onSetupChange={setSetupPreferences} extraNotes={mapNotes} onClearExtraNotes={() => setMapNotes([])} path={active} noteText={active ? (docs[active] ?? activeFile?.text ?? "") : ""} threadsText={chatThreadsText} editor={chatEditor} onShowOnPipeline={(nodeId) => setStudio({ highlight: nodeId })} onAdd={addChatMessage} onShowQuote={(quote) => { const h = active ? panes.current.get(active) : undefined; return !!h && showQuote(h.view, quote); }} onCiteClaim={(heading) => { const h = active ? panes.current.get(active) : undefined; return !!h && !!active && citeAtCursor(h.view, active, { path: active, title: titleOf(h.view.state.doc.toString(), active), ...(heading ? { heading } : {}) }); }} onClose={() => { setChatOpen(false); chatPillRef.current?.focus(); }} />}
       {settingsOpen && <SettingsDialog onClose={() => { setSettingsOpen(false); burgerRef.current?.focus(); }} onOpenStudio={() => { setSettingsOpen(false); setStudio({}); }} onOpenSetup={()=>void reopenSetup()} setupError={setupError} preferences={setupPreferences} onPreferences={setSetupPreferences} />}
+      {tour.open && <Tour onClose={tour.close} focusFallback={()=>commandsRef.current}/>}
       {setup && <Setup data={setup} onPreferences={setSetupPreferences} onClose={message=>{setSetup(null);if(message)setNotice(message);burgerRef.current?.focus();}}/>}
       {studio && <Suspense fallback={<section className="studio" role="status" aria-label="Pipeline Studio"><p className="cn-empty">Drawing the pipeline…</p></section>}>
         <PipelineStudio highlight={studio.highlight} setup={setupPreferences} onSetupChange={setSetupPreferences} onClose={() => { setStudio(null); studioButtonRef.current?.focus(); }} />
