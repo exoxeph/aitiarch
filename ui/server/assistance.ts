@@ -49,7 +49,7 @@ export class Assistance {
   constructor(store: Store, ink: InkStore, provider: Provider, notify: (path: string) => void = () => {}, validationLog:ValidationLog=privateValidationLog(), extras?: ExtrasFor,routing?:RoleRouting,images=new ImageStore(store.rootReal),codexSkills?:CodexSkillConsent) {
     this.routing=routing;
     this.reviews=new ProviderReviews('invoked',routing,provider,codexSkills);
-    this.skillReviews=new ProviderReviews('skill-diagram',routing,provider);
+    this.skillReviews=new ProviderReviews('skill-diagram',routing,provider,codexSkills);
     this.validationLog=validationLog;this.extras=extras;
     this.store = store; this.ink = ink; this.provider = provider; this.notify = notify;
     this.ledger = new LedgerStore(store.rootReal);
@@ -96,7 +96,7 @@ export class Assistance {
       note:frozen.text,decisions:[],turns:[],...(frozen.renderer==='skill'?{render:'skill' as const}:{})};
     if(request.render==='skill'&&provider==='codex'){
       await this.requirePrivateDiagramStorage();
-      if(frozen.skill)throw new PathError(409,'skill_renderer','Codex Skill diagrams use the built-in drawing instructions. Installed skill opt-in is unavailable.');
+      if(frozen.skill)throw new PathError(409,'skill_renderer','Codex Skill diagrams require separate approval for installed skills. A legacy Visualize attachment cannot be sent.');
       return {request:{...request,skillFormat:'codex-svg' as const},names:[],review:null};
     }
     return this.withExtras(request,frozen.skill,provider==='codex');

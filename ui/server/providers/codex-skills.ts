@@ -15,6 +15,9 @@ const MAX_CONSENT_BYTES=128*1024;
 const MAX_CANDIDATES=256;
 const MAX_SKILL_CHARACTERS=2048;
 const MAX_ENABLED=8;
+export const CODEX_SKILL_ROLES=['normal-chat','invoked','thread-reply','skill-diagram','council'] as const satisfies readonly SetupRole[];
+export const isCodexSkillRole=(role:unknown):role is typeof CODEX_SKILL_ROLES[number]=>CODEX_SKILL_ROLES.some(allowed=>allowed===role);
+export const CONFIRM_CODEX_SKILLS='Confirm the reviewed Codex skills before sending.';
 export const codexSkillRoots=(home:string,project:string,codexHome=path.join(home,'.codex'))=>
  [path.join(codexHome,'skills'),path.join(home,'.agents','skills'),path.join(project,'.agents','skills')];
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
@@ -183,6 +186,12 @@ export class CodexSkillConsent {
   block.truncated=skills.some(item=>item.truncated);
   block.text=ordered.map(({text,item})=>'## Codex skill: '+item.name+'\n'+text+(item.truncated?'\n[Skill text truncated]':'')).join('\n\n');
   return {block,skills,key:ordered.length?hash(JSON.stringify(ordered.map(({item,generation})=>[item,generation]))):''};
+ }
+
+ async matchReview(role:SetupRole,key:string){
+  const current=await this.reviewed(role);
+  if(current.key!==key)throw Error('The approved Codex skills changed. Review again before sending.');
+  return current;
  }
 
  async enabled(role:SetupRole){

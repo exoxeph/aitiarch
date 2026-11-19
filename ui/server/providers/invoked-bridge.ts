@@ -22,7 +22,7 @@ export function createInvokedCodexBridge(options:{
  const cap=structuredClone(options.cap),maxOutputBytes=activePipelineConfig().council.outputBytes;
  return {name:'codex',checkAvailability:options.checkAvailability,async invoke(request,invokeOptions){
   const skill=options.profile==='skill-diagram';
-  if(request.chat||(skill?request.render!=='skill'||request.skillFormat!=='codex-svg'||!!invokeOptions?.imageInput||!!request.skills:!!request.render||!!request.skillFormat))throw new ProviderError('unsupported_cli','This bridge supports structured requests without CLI session history.');
+  if(request.chat||(skill?request.render!=='skill'||request.skillFormat!=='codex-svg'||!!invokeOptions?.imageInput:!!request.render||!!request.skillFormat))throw new ProviderError('unsupported_cli','This bridge supports structured requests without CLI session history.');
   if(request.skills&&!options.beforeTurn)throw new ProviderError('unsupported_cli','Sending skill instructions requires reviewed Codex skills for this turn.');
   const images=invokeOptions?.imageInput;
   if(images&&!options.adapter.startImageTurn)throw new ProviderError('unsupported_cli','The selected Codex transport cannot send images.');

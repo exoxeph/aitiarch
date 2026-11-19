@@ -25,3 +25,7 @@ Think and Ask show what will be sent before you send it. Their replies appear in
 Read-only replies render tables, strikethrough, checklists, lists, callouts and code. HTML and images are suppressed, links appear as text, and footnotes and internal note links have less support than in the note editor. AI replies can include Mermaid and dollar-delimited math as source text today. Rendered diagrams from Mermaid and rendered math in replies are planned.
 
 When an explanation needs room, Explain aims for up to 1,200 prose words and 8,000 output tokens. Ordinary rich chat and thread replies aim for up to 600 words and 4,000 output tokens. These are writing guides. Any lower mode, provider or budget limit takes priority.
+
+## Codex skill instructions
+
+Each Codex role can use separately approved, read-only skill instructions. With approved skills, every send lists the exact skills and marks any truncation. A changed skill needs a new approval. In Council, only the Codex participant receives them. Aitiarch sends bounded, redacted text. Native skill and plugin execution is unavailable.

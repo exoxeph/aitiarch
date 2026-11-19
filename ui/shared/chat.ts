@@ -165,6 +165,7 @@ export interface ChatReview {
  otherModePairs?:number;
  /** The node's attached skills: what loaded, what was skipped and why, what is no longer installed. Absent when none are attached. */
  skills?:import('./node-settings.ts').SkillsReview;
+ codexSkills?:import('./invocation.ts').ReviewedCodexSkill[];
  ephemeral?:true;
  /** Sent in a harness chat session: the earlier conversation lives in the session, so no earlier messages are pasted. */
  session?:{id:string;label:string;turns:number};

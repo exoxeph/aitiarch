@@ -8,12 +8,16 @@ import {CouncilHistory,type CouncilRun} from './council-history.ts';import type 
 import {CouncilAvailability,type AvailabilityCheck} from './providers/council-availability.ts';
 import type {RoleRouting} from './providers/routing.ts';
 import type {RequestSettingsSnapshot} from './providers/registry.ts';
+import {CONFIRM_CODEX_SKILLS,type CodexSkillConsent} from './providers/codex-skills.ts';
+import type {SkillBlock} from '../shared/instruction.ts';
 import {DEFAULT_SELECTION} from '../shared/model-settings.ts';
 interface CouncilInput {conversation:string;providers:CouncilProvider[];notes:string[];question:string;caps?:Partial<Record<CouncilProvider,CouncilCap>>;hash?:string;role?:'normal-chat'}
 const sha=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+const requestKey=(b:CouncilInput,planHash:string,providerKey?:string)=>sha({conversation:b.conversation,providers:b.providers,notes:b.notes,question:b.question,planHash,providerKey});
 const unsigned=(g:CouncilGrant)=>{const {confirmed,...rest}=g;return rest;};
-export interface CouncilOptions {store:Store;ink:InkStore;index:SessionIndex;ledger:LedgerStore;adapters:TurnAdapter[];availabilityChecks?:AvailabilityCheck[];history?:CouncilHistory;routing?:RoleRouting}
+export interface CouncilOptions {store:Store;ink:InkStore;index:SessionIndex;ledger:LedgerStore;adapters:TurnAdapter[];availabilityChecks?:AvailabilityCheck[];history?:CouncilHistory;routing?:RoleRouting;codexSkills?:CodexSkillConsent}
 export class CouncilService {
+ private skillReviews=new Map<string,{requestKey:string;skillKey:string;expires:number}>();
  private versionsLogged=new Set<string>();
  readonly availability:CouncilAvailability;
  history(id?:string){if(!this.o.history)throw Error('history_unavailable');return id===undefined?this.o.history.list():this.o.history.get(id);}
@@ -57,20 +61,50 @@ export class CouncilService {
   const eligibility=snapshot?.council();
   return {profile:'council' as const,conversation:session.id,providers:grant.providers.map(id=>{const selected=selection(id);return {id,safetyLabel:selected&&!('available' in selected)?selected.safetyLabel:this.o.adapters.find(a=>a.id===id)?.safetyLabel??defaults.safetyLabels[id],...(selected&&'available' in selected?{available:false,reason:selected.reason}:{}),selection:selected&&!('available' in selected)?selected.selection??DEFAULT_SELECTION:DEFAULT_SELECTION,cap:grant.caps[id],metering:'after-turn; deadline is hard'};}),tools:[] as string[],notesOnly:true,needsApproval:!covered,...(eligibility&&!eligibility.available?{reason:eligibility.reason}:!covered?{reason:'Re-approve the Council plan. A provider grant may have been revoked after reported usage exceeded its cap.'}:{}),hash:sha(unsigned(grant)),grant};
  }
+ async review(raw:unknown){
+  const snapshot=await this.o.routing?.(),plan=await this.plan(raw,snapshot),b=raw as CouncilInput;
+  const skills=!b.role&&b.providers.includes('codex')?await this.o.codexSkills?.reviewed('council').catch(()=>{throw Error('plan_changed');}):undefined;
+  let skillReviewId:string|undefined;
+  if(skills?.key){
+   const now=Date.now();
+   for(const [id,review] of this.skillReviews)if(review.expires<=now)this.skillReviews.delete(id);
+   if(this.skillReviews.size>=100)this.skillReviews.delete(this.skillReviews.keys().next().value!);
+   skillReviewId=randomUUID();
+   this.skillReviews.set(skillReviewId,{requestKey:requestKey(b,plan.hash,snapshot?.providerKey?.('codex')),skillKey:skills.key,expires:now+600000});
+  }
+  return {...plan,providers:plan.providers.map(p=>({...p,...(p.id==='codex'&&skills?.key?{codexSkills:skills.skills}:{})})),...(skillReviewId?{skillReviewId}:{})};
+ }
  async approve(raw:unknown){const b=raw as CouncilInput,p=await this.plan(raw);if(typeof b.hash!=='string'||b.hash!==p.hash)throw Error('plan_changed');await this.o.index.setCouncilGrant(p.conversation,{...p.grant,confirmed:p.hash});return {approved:true};}
  cancel(conversation:unknown,runId:unknown){const active=typeof conversation==='string'?this.running.get(conversation):undefined;if(!active||active.id!==runId)throw Error('invalid_run');active.controller.abort();}
  async run(raw:unknown,signal?:AbortSignal,emit?:(event:CouncilStreamEvent)=>void){
   const snapshot=await this.o.routing?.();
-  const frozen=structuredClone(raw),{b,grant,sources,question}=await this.clean(frozen);if((await this.plan(frozen,snapshot)).needsApproval)throw Error('plan_required');
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))throw Error('notes_only');
+  const {skillReviewId,confirmSkills,...frozen}=structuredClone(raw) as CouncilInput&{skillReviewId?:string;confirmSkills?:boolean};
+  const {b,grant,sources,question}=await this.clean(frozen),plan=await this.plan(frozen,snapshot);
+  if(plan.needsApproval)throw Error('plan_required');
   if(b.role!==undefined)throw Error('notes_only'); // normal chat uses its own reviewed transport
   if(snapshot?.currentProviderKey&&snapshot.providerKey)for(const id of b.providers){if(snapshot.providerKey(id)!==await snapshot.currentProviderKey(id))throw Error('plan_changed');}
+  let skillBlock:SkillBlock|undefined;
+  if(b.providers.includes('codex')&&this.o.codexSkills){
+   const consent=this.o.codexSkills;
+   if(skillReviewId===undefined){
+    await consent.matchReview('council','').catch(()=>{throw Error('plan_changed');});
+   }else{
+    const review=this.skillReviews.get(skillReviewId);
+    if(!review||review.expires<=Date.now()||review.requestKey!==requestKey(b,plan.hash,snapshot?.providerKey?.('codex')))throw Error('plan_changed');
+    if(confirmSkills!==true)throw Error(CONFIRM_CODEX_SKILLS);
+    skillBlock=(await consent.matchReview('council',review.skillKey).catch(()=>{throw Error('plan_changed');})).block;
+    if(this.skillReviews.get(skillReviewId)!==review)throw Error('plan_changed');
+    this.skillReviews.delete(skillReviewId);
+   }
+  }else if(skillReviewId!==undefined)throw Error('plan_changed');
   if(this.running.has(b.conversation))throw Error('already_running');const controller=new AbortController(),run:CouncilRun={id:randomUUID(),question,notes:b.notes,startedAt:new Date().toISOString(),finishedAt:'',providers:b.providers.map(id=>({id,safetyLabel:this.o.adapters.find(a=>a.id===id)?.safetyLabel??defaults.safetyLabels[id]})),results:[]};this.running.set(b.conversation,{id:run.id,controller});this.aborters.add(controller);const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   let ledgerUnavailable=false,historyUnavailable=false,pruned=0;
   const save=async()=>{try{if(this.o.history)pruned=(await this.o.history.saveRun(b.conversation,run)).pruned;}catch{historyUnavailable=true;}};
   try{await save();for(const provider of b.providers)emit?.({type:'provider_start',provider,run:structuredClone(run)});
   const results=await Promise.all(b.providers.map(async id=>{
    const selected=snapshot?.resolveParticipant(id),denied=selected&&'available' in selected?selected:undefined;
-   const cap=grant.caps[id]!,adapter=selected&&!('available' in selected)?selected.createToollessAdapter():snapshot?undefined:this.o.adapters.find(a=>a.id===id);let result:TurnResult=adapter?await runTurn(adapter,{question,notes:sources,cap,deadlineMs:cap.deadlineMs,maxOutputBytes:activePipelineConfig().council.outputBytes},controller.signal):{provider:id,safetyLabel:defaults.safetyLabels[id],status:'unavailable',answer:'',usage:[],durationMs:0,code:denied?.code??'not_configured',...(denied?{message:denied.reason}:{})};
+   const cap=grant.caps[id]!,adapter=selected&&!('available' in selected)?selected.createToollessAdapter():snapshot?undefined:this.o.adapters.find(a=>a.id===id);let result:TurnResult=adapter?await runTurn(adapter,{question,notes:sources,...(id==='codex'&&skillBlock?{skills:skillBlock}:{}),cap,deadlineMs:cap.deadlineMs,maxOutputBytes:activePipelineConfig().council.outputBytes},controller.signal):{provider:id,safetyLabel:defaults.safetyLabels[id],status:'unavailable',answer:'',usage:[],durationMs:0,code:denied?.code??'not_configured',...(denied?{message:denied.reason}:{})};
    if(result.status==='ok'){
     const block=parseClaimsBlock(result.answer);const reply=finishReply({text:result.answer,legacy:false},{note:sources[0]?.text??'',selection:'',decisions:sources.slice(1).map(s=>({id:s.id,text:s.text}))},text=>createHash('sha256').update(text).digest('hex'),redact);
     const invalid=block.block==='missing'||block.block==='malformed'||!reply.body.trim()||!!reply.citation||reply.claims.some(c=>c.status!=='found')||secretKinds(reply.body).length>0;

@@ -159,7 +159,7 @@ export function prepareRequest(request: Request, images?:ReviewedImageManifest):
     };
     return { id: turn.id, user: clip(turn.user), assistant: clip(turn.assistant) };
   });
-  return { instruction:request.skillFormat==='codex-svg'?codexSkillDiagramInstruction():request.render==='skill'?skillDiagramInstruction(request.skills):invokedInstruction(request,images), omittedTurns: Math.max(0, request.turns.length - activePipelineConfig().invoked.historyPairs), clippedMessages,
+  return { instruction:request.skillFormat==='codex-svg'?codexSkillDiagramInstruction(undefined,request.skills):request.render==='skill'?skillDiagramInstruction(request.skills):invokedInstruction(request,images), omittedTurns: Math.max(0, request.turns.length - activePipelineConfig().invoked.historyPairs), clippedMessages,
     data: { id: request.id, action: request.action, question: redact(request.question),
       selection: redact(request.selection), note: redact(request.note),
       decisions: request.decisions.map(d => ({ id: d.id, text: redact(d.text) })), turns } };

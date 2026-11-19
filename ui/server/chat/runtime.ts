@@ -41,10 +41,11 @@ import {confirmImageManifest,reviewImageManifest,type ChatImageDelivery} from '.
 import type {ImageStore} from '../image-store.ts';
 import {imageDeliveryStatus,type ImageDeliveryInput} from '../providers/image-transport.ts';
 import type {ImageAvailability} from '../../shared/image-attachments.ts';
+import {CONFIRM_CODEX_SKILLS,type CodexSkillConsent} from '../providers/codex-skills.ts';
 import {checkContract} from '../../shared/persona-contract.ts';
 import type {PersonaMode} from '../../shared/persona.ts';
 export class ChatError extends Error {code:ChatErrorCode;/** For budget_reached: the numbers the gate used. */budget?:BudgetDetail;/** Which rule said no, for the page's Why? line. Reporting only. */why?:ChatWhy;constructor(code:ChatErrorCode,budget?:BudgetDetail,why?:ChatWhy){super(code);this.code=code;if(budget)this.budget=budget;if(why)this.why=why;}}
-interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true;answerer:NormalAnswerer;normalReset?:boolean;routing?:RequestSettingsSnapshot;
+interface Frozen {review:ChatReview;request:Request;skillNames:string[];created:number;serial:number;reservation:number;privateContext?:true;answerer:NormalAnswerer;normalReset?:boolean;routing?:RequestSettingsSnapshot;skillKey?:string;
  /** Set only by the send path after explicit image confirmation and stage revalidation. */
  confirmedImages?:ConfirmedImageSend;
  /** A harness session turn: the session id and the exact file text the CLI gets (instruction, sources, rules last). */
@@ -83,10 +84,11 @@ export class ChatRuntime {
  /** The saved pictures of the note's diagrams. Absent: no diagram is ever opened by a conversation. */
  private images?:DiagramImageStore;
  private normal?:NormalChat;
+ private readonly codexSkills?:CodexSkillConsent;
  private readonly imageInput?:{store:ImageStore;delivery?:ChatImageDelivery};
 
  constructor(store:Store,ink:InkStore,chats:ChatStore,provider?:Provider,sessions?:ContextModule[],extras?:ExtrasFor,harness?:ChatHarness,images?:DiagramImageStore,normal?:NormalChat,
-  imageInput?:{store:ImageStore;delivery?:ChatImageDelivery}){this.imageInput=imageInput;this.normal=normal;this.images=images;this.harness=harness;this.extras=extras;this.store=store;this.ink=ink;this.chats=chats;this.provider=provider;this.ledger=new LedgerStore(store.rootReal);this.sessions=sessions??sessionModules({project:path.dirname(store.rootReal)});}
+  imageInput?:{store:ImageStore;delivery?:ChatImageDelivery},codexSkills?:CodexSkillConsent){this.codexSkills=codexSkills;this.imageInput=imageInput;this.normal=normal;this.images=images;this.harness=harness;this.extras=extras;this.store=store;this.ink=ink;this.chats=chats;this.provider=provider;this.ledger=new LedgerStore(store.rootReal);this.sessions=sessions??sessionModules({project:path.dirname(store.rootReal)});}
  private imageUnavailable(detail:string){return new ChatError('disabled',undefined,{ruleId:'image_input_unavailable',nodeId:'provider_contracts',detail});}
  private imageEligibility(provider:NormalAnswerer,model:string|null,snapshot?:RequestSettingsSnapshot):ImageAvailability{
   if(provider==='kiro')return imageDeliveryStatus(provider,undefined,model);
@@ -222,6 +224,8 @@ export class ChatRuntime {
    ...(request.selection&&editor?.spans?{span:{from:editor.spans.from.map(x=>redact(x)),to:editor.spans.to.map(x=>redact(x))}}:{}),
    diagrams:diagramRefs.map(d=>({n:d.n,title:redact(d.title),...(withheldWhy.has(d.asset)?{withheld:withheldWhy.get(d.asset)!}:{})})),others:sessionSources.filter(x=>x.id!=='N1'&&x.id!=='S1'&&x.text.length>0).map(x=>({id:x.id,label:cleanLabel(x.label),chars:x.text.length}))});
   if(!session||native||withImages)request.editor=manifest;
+  const skills=answerer==='codex'?await this.codexSkills?.reviewed('normal-chat').catch(()=>{throw this.staleSkills();}):undefined;
+  if(skills?.skills.length)request.skills=skills.block;
   const packet=prepareRequest(request,imageReview);
   const sessionText=!withImages&&!native&&session?chatSessionInstruction(request,sessionSources,{diagrams:diagramRefs.length>0,canOpen}):null;
   const settingsChanged=session?.normalSettingsKey?session.normalSettingsKey!==routing?.contextKey('normal-chat'):!!(selected&&!('available' in selected)&&selected.selection);
@@ -236,7 +240,7 @@ export class ChatRuntime {
   const estimate=nextTurnEstimate(sent,!native&&session?this.replay.get(session.id)??0:0).total;
   const privateContext=!!s.privateContext||sources.some(x=>x.ephemeral);
   const budget={spent:s.usage.spent,next:estimate,budget:s.usage.tokenBudget};
-  const review:ChatReview={reviewId,requestId:input.id,path:input.path,question:request.question,selection:request.selection,sources:sources.map(x=>({id:x.id,label:x.label,text:x.text,characters:x.text.length,estimatedTokens:estimateTokens(x.text)})),historyPairs:history.length,omittedPairs:session?0:s.omittedPairs+sameMode.length-history.length,...(otherModePairs&&!session?{otherModePairs}:{}),instruction:sessionText?.instruction??packet.instruction,history:structuredClone(packet.data.turns),estimatedTokens:estimate,budget,requiresConfirmation:withImages||privateContext||!this.dontAsk,...(imageReview?{images:imageReview}:{})};
+  const review:ChatReview={reviewId,requestId:input.id,path:input.path,question:request.question,selection:request.selection,sources:sources.map(x=>({id:x.id,label:x.label,text:x.text,characters:x.text.length,estimatedTokens:estimateTokens(x.text)})),historyPairs:history.length,omittedPairs:session?0:s.omittedPairs+sameMode.length-history.length,...(otherModePairs&&!session?{otherModePairs}:{}),instruction:sessionText?.instruction??packet.instruction,history:structuredClone(packet.data.turns),estimatedTokens:estimate,budget,requiresConfirmation:withImages||privateContext||!!skills?.key||!this.dontAsk,...(skills?.key?{codexSkills:skills.skills}:{}),...(imageReview?{images:imageReview}:{})};
   review.provider=answerer;if(selected&&!('available' in selected))review.modelSettings=selected.selection??{model:null,effort:null};if(!native&&!session&&this.provider?.demo===true)review.demo=true;
   if(switching)review.continuityNotice='Provider, model or effort changed. A fresh CLI context will be used; only the reviewed app-kept history is carried over.';
   if(carriedHistory!==undefined)review.carriedHistory=carriedHistory;
@@ -253,10 +257,14 @@ export class ChatRuntime {
   if(prepared.withheld.length)review.diagramsWithheld=prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title),why:WITHHELD_WORDS[w.reason]}));
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');
-  this.reviews.set(review.reviewId,{routing,answerer,review:structuredClone(review),request:structuredClone(request),skillNames:answerer==='codex'?[]:extra?.names??[],created:Date.now(),serial:s.serial,reservation:budget.next,...(profile?{profile}:{}),...(privateContext?{privateContext:true as const}:{}),...(session&&(native||withImages)?{session:{id:session.id}}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
+  this.reviews.set(review.reviewId,{routing,answerer,skillKey:skills?.key,review:structuredClone(review),request:structuredClone(request),skillNames:answerer==='codex'?[]:extra?.names??[],created:Date.now(),serial:s.serial,reservation:budget.next,...(profile?{profile}:{}),...(privateContext?{privateContext:true as const}:{}),...(session&&(native||withImages)?{session:{id:session.id}}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
   return review;
  }
- async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean;confirmImages?:boolean;imageIds?:readonly string[]},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
+ private staleSkills(){return new ChatError('stale_review',undefined,{ruleId:'skill_review_changed',nodeId:'permission_gate',detail:'The approved Codex skills changed. Review again before sending.'});}
+ private async assertSkills(key:string|undefined){
+  if(key!==undefined)await this.codexSkills!.matchReview('normal-chat',key).catch(()=>{throw this.staleSkills();});
+ }
+ async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean;confirmImages?:boolean;confirmSkills?:boolean;imageIds?:readonly string[]},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{
   const frozen=this.reviews.get(input.reviewId);if(!frozen)throw new ChatError('review_required');
   if(input.imageIds!==undefined&&!Array.isArray(input.imageIds))throw new ChatError('invalid_chat');
   if(!frozen.review.images&&(input.confirmImages===true||input.imageIds?.length))throw new ChatError('review_required');
@@ -267,6 +275,8 @@ export class ChatRuntime {
   if(selected&&'available' in selected)throw new ChatError('disabled',undefined,{ruleId:selected.code,nodeId:'provider_contracts',detail:selected.reason});
   if(this.closed||Date.now()-frozen.created>600000)throw new ChatError('stale_review');
   if(frozen.review.requiresConfirmation&&input.confirmed!==true)throw new ChatError('review_required');
+  if(frozen.skillKey&&input.confirmSkills!==true)throw new ChatError('review_required',undefined,{ruleId:'skill_confirmation',nodeId:'permission_gate',detail:CONFIRM_CODEX_SKILLS});
+  await this.assertSkills(frozen.skillKey);
   const {review,request}=frozen,s=this.state(review.path,frozen.session?.id);
   if(s.serial!==frozen.serial)throw new ChatError('stale_review');
   if(s.running||[...this.states.values()].filter(x=>x.running).length>=2)throw new ChatError('busy');
@@ -313,7 +323,12 @@ export class ChatRuntime {
    if(controller.signal.aborted)throw new ChatError('cancelled');
    const imageAudit=approvedImages&&{count:approvedImages.manifest.images.length,bytes:approvedImages.manifest.images.reduce((total,image)=>total+image.byteLength,0)};
    await this.audit(review.path,request.id,'chat_started',undefined,imageAudit);
-   if(input.dontAskAgain===true&&!frozen.privateContext&&!approvedImages)this.dontAsk=true;
+   if(frozen.skillKey!==undefined){
+    if(frozen.routing?.currentContextKey&&frozen.routing.contextKey('normal-chat')!==await frozen.routing.currentContextKey('normal-chat'))throw this.staleSkills();
+    await this.assertSkills(frozen.skillKey);
+   }
+   if(controller.signal.aborted)throw new ChatError('cancelled');
+   if(input.dontAskAgain===true&&!frozen.privateContext&&!approvedImages&&!frozen.skillKey)this.dontAsk=true;
    if(frozen.privateContext)s.privateContext=true;
    s.calls.push(Date.now());s.usage.calls++;called=true;emit({type:'start',id:request.id,...(frozen.profile?{profile:frozen.profile}:{})});
    let json='';const outputRoom=s.usage.tokenBudget-s.usage.spent-(frozen.reservation-activePipelineConfig().estimates.replyAllowance),gate=new StreamGate({instruction:review.instruction});

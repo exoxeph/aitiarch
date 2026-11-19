@@ -63,7 +63,7 @@ export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
  const reportedProviders=providers.map(p=>({...p,roles:p.isolation==='metadata-compatible'
   ?ROLE_REGISTRY.filter(role=>providerCapabilities(p.id,WIRED_ROLE_BRIDGES)[role.capability]).map(role=>role.id):[]}));
  return {exitCode:checks.every(c=>c.ok)?0:1,checks,providers:reportedProviders,roles,...(modelChecks?{modelChecks}:{}),
-  ...(leftovers?{privateLeftovers:leftovers}:{}),notice:'AI-off editing remains available when optional providers are missing. Login and entitlement were not checked.'};
+  ...(leftovers?{privateLeftovers:leftovers}:{}),notice:'AI-off editing remains available when optional providers are missing. Login and entitlement were not checked. Codex can receive separately approved skill instructions after per-send review. Native skill and plugin execution is unavailable.'};
 }
 export function formatModelChecks(report:DoctorReport):string[]{
  return (report.modelChecks??[]).map(({id,result,count,timing})=>`${id} models: ${result}; ${count} entries; spawn=${timing?.spawnMs??'unreported'} ms; initialize=${timing?.initializeMs??'unreported'} ms; list=${timing?.listMs??'unreported'} ms; stderr=${timing?.stderr??'unreported'}`);

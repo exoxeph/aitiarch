@@ -1,3 +1,4 @@
+import {CodexSkillsReview} from '../skills/CodexSkillsReview.tsx';
 import {profileForRole} from '../../shared/reply-render-profile.ts';
 import type {CouncilViewRun as CouncilRun} from './council-model.ts';
 import {CouncilPanel,CouncilResults} from './CouncilPanel.tsx';
@@ -81,7 +82,7 @@ function OpenedRows({opened,running}:{opened:readonly {n:number;title:string;why
  </ol>;
 }
 
-export function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel,images=[]}:{review:ChatReview;stopAsking:boolean;setStopAsking:(v:boolean)=>void;onSend:(confirmedImages?:boolean)=>void;onCancel:()=>void;images?:readonly ImagePreview[]}){
+export function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel,images=[]}:{review:ChatReview;stopAsking:boolean;setStopAsking:(v:boolean)=>void;onSend:(confirmedImages?:boolean,confirmedSkills?:boolean)=>void;onCancel:()=>void;images?:readonly ImagePreview[]}){
  const send=useRef<HTMLButtonElement>(null);
  const card=useRef<HTMLElement>(null);
  const [confirmedImages,setConfirmedImages]=useState(false);
@@ -115,12 +116,13 @@ export function ReviewCard({review,stopAsking,setStopAsking,onSend,onCancel,imag
    <dd>{review.session&&!review.images?`Kept in the conversation “${review.session.label}” (${review.session.turns} so far), not pasted again.`:review.historyPairs===0?'None yet.':`${review.historyPairs} earlier ${review.historyPairs===1?'exchange':'exchanges'} included${review.omittedPairs>0?`, ${review.omittedPairs} older left out`:''}.`}{review.otherModePairs?` ${review.otherModePairs} earlier ${review.otherModePairs===1?'exchange':'exchanges'} left out: different mode.`:''}</dd>
   </dl>
   <SkillsReviewList review={review.skills}/>
+  <CodexSkillsReview skills={review.codexSkills}/>
   {review.images&&<ImageConfirmation images={reviewedImages} checked={confirmedImages} onChange={setConfirmedImages}/>}
   <details className="chat-review-source"><summary>Instructions {recipient} gets</summary><pre>{review.instruction}</pre></details>
   <p className="chat-review-total">About {formatCount(review.estimatedTokens)} {review.images?'text tokens':'tokens in all'}</p>
   {review.budget&&<p className="chat-review-budget">Budget: {formatCount(review.budget.spent)} used + about {formatCount(review.budget.next)} for this message of {formatCount(review.budget.budget)}{review.budget.spent+review.budget.next>review.budget.budget?'. This will not fit; the send will be refused.':'.'}</p>}
-  {review.ephemeral?<><p>{SESSION_NOTICES.privacy}</p><details><summary>Recent messages included</summary>{review.history.map(t=><div key={t.id}><pre>{t.user}</pre><pre>{t.assistant}</pre></div>)}</details></>:!review.images&&<label className="chat-review-ask"><input type="checkbox" checked={stopAsking} onChange={e=>setStopAsking(e.target.checked)}/> Don’t ask again this session</label>}
-  <div className="chat-review-actions"><button ref={send} type="button" className="chat-review-send" disabled={!imagesReady} onClick={()=>onSend(review.images?confirmedImages:undefined)}>{review.demo?'Send (demo, no model)':`Send to ${recipient}`}</button><button type="button" className="ghost" onClick={onCancel}>Cancel</button></div>
+  {review.ephemeral?<><p>{SESSION_NOTICES.privacy}</p><details><summary>Recent messages included</summary>{review.history.map(t=><div key={t.id}><pre>{t.user}</pre><pre>{t.assistant}</pre></div>)}</details></>:!review.images&&!review.codexSkills?.length&&<label className="chat-review-ask"><input type="checkbox" checked={stopAsking} onChange={e=>setStopAsking(e.target.checked)}/> Don’t ask again this session</label>}
+  <div className="chat-review-actions"><button ref={send} type="button" className="chat-review-send" disabled={!imagesReady} onClick={()=>onSend(review.images?confirmedImages:undefined,!!review.codexSkills?.length)}>{review.demo?'Send (demo, no model)':`Send to ${recipient}${review.codexSkills?.length?' with reviewed skills':''}`}</button><button type="button" className="ghost" onClick={onCancel}>Cancel</button></div>
  </section>;
 }
 
@@ -251,7 +253,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
   setTurns(t=>t.map(x=>x.id===id?{...x,status:'streaming' as const,sentAt:Date.now()}:x));setNow(Date.now());
   if(question&&conversation&&current&&current.id===conversation&&isPlaceholder(current)){const c=current;setCurrent({...c,label:autoName(question)});void api.harnessSessionCall('rename',{id:c.id,label:autoName(question)}).then(s=>{setCurrent(s);setListRefresh(n=>n+1);}).catch(()=>{});}
  };
- const send=async(review:ChatReview,dontAskAgain:boolean,confirmImages?:boolean)=>{
+ const send=async(review:ChatReview,dontAskAgain:boolean,confirmImages?:boolean,confirmSkills?:boolean)=>{
   const imageIds=imageDraft.images.map(image=>image.id);
   if(review.images&&(!confirmImages||review.images.images.length!==imageIds.length||review.images.images.some((image,index)=>image.id!==imageIds[index]))){
    setNotice('The attached images changed. Review again before sending.');return;
@@ -261,7 +263,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
   startStreaming(id,review.images?undefined:review.question);
   let finished=false;
   try{
-   await streamChat({reviewId:review.reviewId,confirmed:true,dontAskAgain,...(review.images?{confirmImages:true,imageIds}:{})},event=>{
+   await streamChat({reviewId:review.reviewId,confirmed:true,dontAskAgain,...(confirmSkills?{confirmSkills:true}:{}),...(review.images?{confirmImages:true,imageIds}:{})},event=>{
     if(!alive.current)return;
     if(event.type==='complete'||event.type==='error')finished=true;
     setTurns(t=>applyEvent(t,event));
@@ -477,7 +479,7 @@ function ChatPanelBody({path,openPath,noteText,threadsText,editor,onAdd,onClose,
      {t.status==='review'&&planCard&&planCard.id===t.id&&<>{planCard.notice&&<p className="chat-notice chat-plan-notice" role="alert">{planCard.notice}</p>}
       <PlanCard plan={planCard.plan} resume={planCard.resume} busy={busy} onApprove={()=>void approvePlan()} onReplan={b=>void replanCard(b)} onCancel={cancelPlan}/></>}
      {t.status==='review'&&nativeCard&&nativeCard.id===t.id&&nativeCard.review.normalPlan&&<NativePlanCard plan={nativeCard.review.normalPlan} safetyLabel={safety[nativeCard.review.normalPlan.providers[0]]??''} notice={nativeCard.notice} busy={busy} onApprove={()=>void approveNative()} onCancel={cancelNative}/>}
-     {t.status==='review'&&pending&&pending.requestId===t.id&&<ReviewCard key={pending.reviewId} review={pending} images={imageDraft.images} stopAsking={stopAsking} setStopAsking={setStopAsking} onSend={confirmed=>void send(pending,stopAsking,confirmed)} onCancel={cancelReview}/>}
+     {t.status==='review'&&pending&&pending.requestId===t.id&&<ReviewCard key={pending.reviewId} review={pending} images={imageDraft.images} stopAsking={stopAsking} setStopAsking={setStopAsking} onSend={(confirmedImages,confirmedSkills)=>void send(pending,stopAsking,confirmedImages,confirmedSkills)} onCancel={cancelReview}/>}
      {t.inv?<>
       <InvestigateTurnView turn={t.inv} onOpen={(p,l)=>void openExcerpt(p,l)} onRestore={()=>void restore()} restoring={restoring} onContinue={()=>void continueTurn(t)}/>
       {t.status==='streaming'&&!t.inv.text&&!t.inv.trail.length&&!t.inv.thinking&&<p className="chat-wait" role="status" data-wait>{waitText(now-(t.sentAt??now))}</p>}

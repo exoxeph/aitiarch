@@ -106,7 +106,7 @@ export const chatImageAvailability=(surface?:ImageSurface)=>ok<import('../shared
 export const stageChatImage=(data:string,surface?:ImageSurface)=>ok<import('../shared/image-attachments.ts').StagedImage>('PUT','/api/chat/image-stage'+(surface?'?surface='+surface:''),{data});
 export const removeChatImage=(id:string)=>ok<object>('PUT','/api/chat/image-remove',{id});
 
-export async function streamChat(body: { reviewId: string; confirmed?: boolean; dontAskAgain?: boolean; confirmImages?:boolean; imageIds?:string[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal): Promise<void> {
+export async function streamChat(body: { reviewId: string; confirmed?: boolean; dontAskAgain?: boolean; confirmSkills?:boolean; confirmImages?:boolean; imageIds?:string[] }, onEvent: (e: ChatEvent) => void, signal?: AbortSignal): Promise<void> {
   const res = await fetch(scoped("/api/chat/send"), { method: "PUT", credentials: "same-origin", signal, headers: { "Content-Type": "application/json", "X-Aitiarch": "1" }, body: JSON.stringify(body) });
   if (!res.ok || !res.body) {
     let data: any = null;
@@ -171,7 +171,7 @@ export async function streamConversation(body: ConversationBody & { id: string; 
 export const api = {
   councilAvailability:(refresh=false)=>ok<{providers:import('../server/providers/council-availability.ts').Availability[]}>('GET','/api/council/availability'+(refresh?'?refresh=1':'')),
   councilHistory:(id:string)=>ok<import('../server/council-history.ts').CouncilRecord>('GET','/api/council/history?conversation='+encodeURIComponent(id)),
-  councilPlan:(body:unknown)=>ok<Awaited<ReturnType<import('../server/council.ts').CouncilService['plan']>>>('PUT','/api/council/plan',body),
+  councilPlan:(body:unknown)=>ok<Awaited<ReturnType<import('../server/council.ts').CouncilService['review']>>>('PUT','/api/council/plan',body),
   councilApprove:(body:unknown)=>ok<unknown>('PUT','/api/council/plan',{...body as object,approve:true}),
   /** The user's pipeline settings: the one saved file, read and changed only through these three calls. */
   pipelineConfig:()=>ok<PipelineView>('GET','/api/pipeline-config'),

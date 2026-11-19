@@ -83,7 +83,7 @@ it('reviews, stages privately and publishes only on a byte-exact human insertion
 it('pins role-specific Codex model and effort and leaves attached skills out of the prompt',async()=>{
  const f=await fixture();
  f.setup.providers.codex.roles['skill-diagram']={model:'synthetic-codex',effort:'medium'};
- await expect(f.assistance.preview({...f.input,skill:'123456789abc'})).rejects.toThrow(/Installed skill opt-in/);
+ await expect(f.assistance.preview({...f.input,skill:'123456789abc'})).rejects.toThrow(/require separate approval/);
  const packet=await f.assistance.preview(f.input);
  expect(packet.review?.modelSettings).toEqual({model:'synthetic-codex',effort:'medium'});
  await f.run();

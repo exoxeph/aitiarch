@@ -7,7 +7,7 @@ import {invokedUsage,type InvokedUsage} from '../../shared/invoked-usage.ts';
 import type {CouncilCap} from '../../shared/council.ts';
 import type {RoleRouting} from './routing.ts';import type {ProviderDescriptor} from './registry.ts';
 import type {Provider,Request} from './index.ts';
-import type {CodexSkillConsent} from './codex-skills.ts';
+import {CONFIRM_CODEX_SKILLS,type CodexSkillConsent} from './codex-skills.ts';
 import type {ReviewedCodexSkill} from '../../shared/invocation.ts';
 import {VISUALIZE_QUESTION} from '../../shared/diagram.ts';import type {InvokedTurnMetadata} from './invoked-bridge.ts';
 import {imageDeliveryStatus} from './image-transport.ts';
@@ -43,7 +43,7 @@ export class ProviderReviews {
   catch(e){return {available:false,status:'unsupported',reason:e instanceof PathError?e.message:'The selected provider could not be verified.'};}
  }
  async skillPacket(provider:string|undefined,request:Request){
-  if(!this.skills||provider!=='codex'||this.role==='skill-diagram'||request.question===VISUALIZE_QUESTION)return {request,skills:[] as ReviewedCodexSkill[],key:undefined};
+  if(!this.skills||provider!=='codex'||(request.question===VISUALIZE_QUESTION&&request.skillFormat!=='codex-svg'))return {request,skills:[] as ReviewedCodexSkill[],key:undefined};
   const reviewed=await this.skills.reviewed(this.role).catch(()=>{throw staleReview();});
   return {request:reviewed.skills.length?{...request,skills:reviewed.block}:request,skills:reviewed.skills,key:reviewed.key};
  }
@@ -54,8 +54,8 @@ export class ProviderReviews {
   if(!current||Date.now()-review.created>600000||review.contextKey!==current.contextKey||review.contextKey!==freshKey||review.provider.id!==current.provider.id||JSON.stringify(review.cap)!==JSON.stringify(cap))throw staleReview();
   if(review.images&&!current.imageSupport.available)throw staleReview();
   if(review.skillKey!==undefined){
-   const skills=await this.skills?.reviewed(this.role).catch(()=>{throw staleReview();});
-   if(skills?.key!==review.skillKey)throw staleReview();
+   if(!this.skills)throw staleReview();
+   await this.skills.matchReview(this.role,review.skillKey).catch(()=>{throw staleReview();});
   }
  }
  issue(selected:NonNullable<Awaited<ReturnType<ProviderReviews['selection']>>>,fingerprint:string,packet:unknown,images?:ReviewedImageManifest,skills?:{key?:string;skills:ReviewedCodexSkill[]}){
@@ -87,7 +87,7 @@ export class ProviderReviews {
  }
  async consume(id:string|undefined,fingerprint:string,packet:unknown,confirmSkills?:boolean){
   const review=id?this.reviews.get(id):undefined;if(!review)throw staleReview();
-  if(review.skillKey&&confirmSkills!==true)throw new PathError(409,'skill_confirmation','Confirm the reviewed Codex skills before sending.');
+  if(review.skillKey&&confirmSkills!==true)throw new PathError(409,'skill_confirmation',CONFIRM_CODEX_SKILLS);
   await this.assert(review);
   if(review.fingerprint!==fingerprint||review.packet!==JSON.stringify(packet)||this.reviews.get(id!)!==review)throw staleReview();
   this.reviews.delete(id!);return review;

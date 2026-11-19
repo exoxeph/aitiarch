@@ -20,7 +20,7 @@ export const CODEX_BLOCKED_ATTEMPT_LIMIT=3;
 export const isBlockedCodeAttempt=(e:any):boolean=>!!e&&typeof e==='object'&&e.type==='item.completed'&&Object.keys(e).sort().join()==='item,type'&&!!e.item&&typeof e.item==='object'&&e.item.type==='error'&&Object.keys(e.item).sort().join()==='id,message,type'&&e.item.message===CODEX_BLOCKED_MESSAGE;
 export interface CliTurnConfig {id:'codex'|'kiro';command:string;prefixArgs?:string[];selection?:Readonly<ModelEffort>;codexCatalog?:()=>{version:string;catalog:ModelCatalog}|undefined;kiroHomeParent?:string;onScratch?:(path:string)=>void;onHome?:(path:string)=>void;/** Fake Node CLIs only. */startupTimeoutMs?:number}
 const environment=()=>Object.fromEntries(Object.entries(process.env).filter(([k])=>/^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|TEMP|TMP|HOME|USERPROFILE|APPDATA|LOCALAPPDATA)$/i.test(k)));
-export function turnPrompt(input:Pick<TurnInput,'notes'|'question'|'outputFormat'>,config:PipelineConfig=activePipelineConfig()){
+export function turnPrompt(input:Pick<TurnInput,'notes'|'question'|'outputFormat'|'skills'>,config:PipelineConfig=activePipelineConfig()){
  // Structured invoked replies have their own fixed JSON/claims instruction. Do
  // not prepend the contradictory Markdown chat contract or invent absent sources.
  // Transport isolation, pinned flags, tool rejection and caps are identical.
@@ -29,7 +29,7 @@ export function turnPrompt(input:Pick<TurnInput,'notes'|'question'|'outputFormat
  // A second style and guide would conflict with the reviewed mode and inflate its estimate.
  const inlineMessage=turnMessage('Inline notes only; no repository, files, diagrams or session history.',input.question);
  if(input.outputFormat==='assembled-chat')return inlineMessage;
- return chatSessionInstruction({},input.notes,{inlineMessage},config).addendum;
+ return chatSessionInstruction({skills:input.skills},input.notes,{inlineMessage},config).addendum;
 }
 async function kiroHome(parent:string|undefined,created:(p:string)=>void){
  const base=path.resolve(parent??path.join(process.env.LOCALAPPDATA??path.join(os.homedir(),'.local','share'),'Aitiarch','providers'),'kiro-temp');
@@ -134,7 +134,7 @@ export function createCliAdapter(config:CliTurnConfig):TurnAdapter{
     const check=kiroSessionCheck(sessionData,inventory);if(!check.ok)throw new TurnFailure(check.code,'unavailable',check.message);
     if(acpPhase!=='session'&&acpPhase!=='inventory')return;
     clearTimeout(inventoryTimer);
-    session=sessionData.sessionId;acpPhase='prompt';collect=true;send('session/prompt',{sessionId:session,prompt:[{type:'text',text:turnPrompt(input)}]});
+    session=sessionData.sessionId;acpPhase='prompt';collect=true;send('session/prompt',{sessionId:session,prompt:[{type:'text',text:turnPrompt({...input,skills:undefined})}]});
    };
    const codex=(e:any)=>{
     // Known fail-closed notice: record the attempt (a count, never content) and keep the turn running. Every other error below still kills it.

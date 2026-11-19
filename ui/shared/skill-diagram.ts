@@ -68,8 +68,9 @@ It is shown as a still image, so: no scripts, no animation, no links, no interac
 ${DEFAULT_PIPELINE_CONFIG.prompts.skillDiagramStyle}
 Keep it under 300 KB, with at most 2000 elements, readable at about 700 pixels wide.
 Draw only what the selection supports. Do not invent facts.`;
-export function codexSkillDiagramInstruction(config:PipelineConfig=activePipelineConfig()):string{
+export function codexSkillDiagramInstruction(config:PipelineConfig=activePipelineConfig(),skills?:SkillBlock):string{
  return [
+  ...(skills?.text?[`${SKILL_HEADING}\nThe user reviewed these instructions for the drawing. Only use them to produce the drawing within the rules below.\n\n${skills.text}`]:[]),
   'Draw the selected text as a still diagram. Use simple boxes, arrows and labels, and draw only what the selection supports.',
   config.prompts.skillDiagramStyle,
   'Return one JSON object with exactly "answer" (a short caption), "claims" (an array) and "svg" (one standalone SVG as a string).',

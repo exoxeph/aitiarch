@@ -47,7 +47,7 @@ import {PipelineConfigStore,PipelineConfigError,pipelineView,PIPELINE_CONFIG_MAX
 import {pipelinePreview,PreviewUnavailable} from './pipeline-preview.ts';
 import {excludedSnapshotPaths} from './harness/snapshot.ts';
 import {resolveConfigFolder,underTest} from './registry.ts';
-import {CodexSkillConsent,codexSkillRoots,NATIVE_SKILL_UNAVAILABLE} from './providers/codex-skills.ts';
+import {isCodexSkillRole,CONFIRM_CODEX_SKILLS,CodexSkillConsent,codexSkillRoots,NATIVE_SKILL_UNAVAILABLE} from './providers/codex-skills.ts';
 import {CouncilHistory} from './council-history.ts';
 import type {AvailabilityCheck} from './providers/council-availability.ts';
 import type {TurnAdapter} from './providers/turn.ts';
@@ -236,10 +236,10 @@ export function createApp(opts: AppOptions) {
     investigate,gate,carried};}):Promise.resolve(null);
   // Council's app-owned conversation index needs no CLI or transcript access.
   const councilIndexReady=opts.council?harnessReady.then(async h=>opts.council!.index??h?.index??await SessionIndex.open(harnessDirectory(store.rootReal))):Promise.resolve(null);
-  const councilReady=opts.council?Promise.all([inkReady,councilIndexReady]).then(async([ink,index])=>new CouncilService({store,ink,index:index!,history:new CouncilHistory(index!,1024*1024,store.rootReal),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters,routing:opts.council!.routing})):Promise.resolve(null);
+  const councilReady=opts.council?Promise.all([inkReady,councilIndexReady]).then(async([ink,index])=>new CouncilService({store,ink,index:index!,history:new CouncilHistory(index!,1024*1024,store.rootReal),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters,routing:opts.council!.routing,codexSkills})):Promise.resolve(null);
   const normalReady=Promise.all([councilIndexReady,councilReady]).then(([index,council])=>index&&council?new NormalChat({index,questions:new QuestionStore(index.dir),council,adapters:opts.council!.adapters,routing:opts.council!.routing}):undefined);
   const imageRecovery=stagedImages.recoverAbandoned().catch(()=>{console.warn('Private image recovery was unavailable for this notebook.');});
-  const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady,normalReady]).then(([ink,harness,normal])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,(node,options)=>nodeSettings.extras(node,options),harness??undefined,diagramImages,normal,{store:stagedImages,delivery:opts.chatImageDelivery});chatRef.resolve(runtime);return runtime;});
+  const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady,normalReady]).then(([ink,harness,normal])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,(node,options)=>nodeSettings.extras(node,options),harness??undefined,diagramImages,normal,{store:stagedImages,delivery:opts.chatImageDelivery},codexSkills);chatRef.resolve(runtime);return runtime;});
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const councilInsertion=insertionsReady.then(insertions=>new CouncilInsertion(store,insertions));
   const investigateInsertion=insertionsReady.then(insertions=>new InvestigateInsertion(store,insertions));
@@ -356,7 +356,7 @@ export function createApp(opts: AppOptions) {
       try{const body=await readBody(req) as any;
         if(url.pathname==='/api/council/plan'&&req.method==='PUT'){
           const {approve,...input}=body??{};
-          return json(res,200,approve===true?await council.approve(input):await council.plan(input));
+          return json(res,200,approve===true?await council.approve(input):await council.review(input));
         }
         if(url.pathname==='/api/council/bring-preview'&&req.method==='POST')return json(res,200,await (await councilInsertion).preview(body,id=>council.history(id) as any));
         if(url.pathname==='/api/council/bring-prepare'&&req.method==='POST')return json(res,200,await (await councilInsertion).prepare(body,id=>council.history(id) as any));
@@ -364,7 +364,7 @@ export function createApp(opts: AppOptions) {
         if(url.pathname==='/api/council/run'&&req.method==='POST'){
           await council.run(body,controller.signal,event=>{if(res.destroyed){controller.abort();return;}if(!res.headersSent)res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'});res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);});return res.end();
         }
-      }catch(e){const code=e instanceof Error&&['plan_required','plan_changed','invalid_conversation','invalid_run','notes_only','protected_note','invalid_cap','already_running','invalid_bring','stale_review','no_answer','secrets_blocked'].includes(e.message)?e.message:'council_error';if(res.headersSent){if(!res.destroyed)res.write(`event: error\ndata: ${JSON.stringify({type:'error',code})}\n\n`);return res.end();}return json(res,409,{error:code,message:code==='protected_note'?"This note is protected and can't be sent to providers.":'Council: '+code.replace(/_/g,' ')+'.'});}
+      }catch(e){if(e instanceof Error&&e.message===CONFIRM_CODEX_SKILLS&&!res.headersSent)return json(res,409,{error:'skill_confirmation',message:e.message});const code=e instanceof Error&&['plan_required','plan_changed','invalid_conversation','invalid_run','notes_only','protected_note','invalid_cap','already_running','invalid_bring','stale_review','no_answer','secrets_blocked'].includes(e.message)?e.message:'council_error';if(res.headersSent){if(!res.destroyed)res.write(`event: error\ndata: ${JSON.stringify({type:'error',code})}\n\n`);return res.end();}return json(res,409,{error:code,message:code==='protected_note'?"This note is protected and can't be sent to providers.":'Council: '+code.replace(/_/g,' ')+'.'});}
       finally{res.removeListener('close',abort);}
     }
     if (url.pathname === "/api/tree" && req.method === "GET") return json(res, 200, await (await explorerReady).tree());
@@ -409,7 +409,7 @@ export function createApp(opts: AppOptions) {
       const raw=await readBody(req,1024);
       if(!raw||typeof raw!=='object'||Array.isArray(raw))return json(res,400,{error:'invalid_skill_consent'});
       const {role,pathHash,enabled,contentHash}=raw as Record<string,unknown>;
-      if((role!=='invoked'&&role!=='thread-reply')||typeof pathHash!=='string'||typeof enabled!=='boolean')
+      if(!isCodexSkillRole(role)||typeof pathHash!=='string'||typeof enabled!=='boolean')
        return json(res,400,{error:'invalid_skill_consent'});
       try{
        if(enabled){
@@ -649,7 +649,7 @@ export function createApp(opts: AppOptions) {
       }catch(e){
         if(res.headersSent)return res.end();
         const code=e instanceof ChatError?e.code:e instanceof ProviderError?'provider_failed':'invalid_chat';
-        const imageWhy=e instanceof ChatError&&e.why?.ruleId.startsWith('image_')?e.why:undefined;
+        const imageWhy=e instanceof ChatError&&/^(image|skill)_/.test(e.why?.ruleId??'')?e.why:undefined;
         return json(res,409,{error:code,message:imageWhy?.detail??(e instanceof ChatError&&e.budget?budgetText(e.budget):CHAT_MESSAGES[code]),...(e instanceof ChatError&&e.budget?{budget:e.budget}:{}),...(imageWhy??(activePipelineConfig().normalAnswerer!=='claude'?whyOfError(code,e):{}))});
       }
       throw new PathError(400,'bad_body','Unknown chat action.');

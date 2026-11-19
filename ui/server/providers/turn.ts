@@ -4,7 +4,7 @@ import type {ModelEffort} from '../../shared/setup.ts';
 export type SafetyLabel='fenced'|'contained'|'host-gated';
 export type UsageUnit='usd'|'tokens'|'credits';
 export interface TurnUsage {unit:UsageUnit;amount:number;afterTurn:boolean}
-export interface TurnInput {question:string;notes:readonly {id:string;label:string;text:string}[];deadlineMs:number;maxOutputBytes:number;cap:{unit:UsageUnit;amount:number};selection?:Readonly<ModelEffort>;/** Internal prompt format, never a tool/permission profile. */outputFormat?:'invoked-json'|'assembled-chat'}
+export interface TurnInput {question:string;notes:readonly {id:string;label:string;text:string}[];deadlineMs:number;maxOutputBytes:number;cap:{unit:UsageUnit;amount:number};selection?:Readonly<ModelEffort>;skills?:import('../../shared/instruction.ts').SkillBlock;/** Internal prompt format, never a tool/permission profile. */outputFormat?:'invoked-json'|'assembled-chat'}
 /** `blocked` is a running COUNT of host-blocked code attempts (Codex Code Mode failing closed). It carries no content. */
 export type TurnEvent={type:'start'}|{type:'delta';text:string}|{type:'complete';answer:string;model?:string|null}|{type:'refusal';code:string}|{type:'error';code:string}|{type:'usage';usage:TurnUsage}|{type:'blocked';count:number};
 export const BLOCKED_NOTE='Codex tried to run code; blocked';
