@@ -471,7 +471,7 @@ try {
  assert.equal(await investigate.isEnabled(),true);
  const unavailableCodex=investigate.locator('option[value="codex"]');
  assert.equal(await unavailableCodex.isDisabled(),true);
- assert.match(await unavailableCodex.textContent(),/Needs the approved read-only project workflow/);
+ assert.match(await unavailableCodex.textContent(),/snapshot-only reads.*pre-turn budget ceiling/);
  await setupPane.getByText('Choose the model in the chat box.').waitFor();
  const normalRole=setupPane.locator('[data-role="normal-chat"]');
  assert.equal(await setupPane.getByRole('combobox',{name:'Normal chat',exact:true}).inputValue(),'claude');

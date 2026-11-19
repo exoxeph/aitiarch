@@ -5,7 +5,7 @@ import path from 'node:path';
 import {selectClis,type CliSelectionOptions,type SelectedCli} from './cli-selection.ts';
 import {loadMachineSetup,SETUP_FILE} from '../setup-store.ts';
 import {ROLE_REGISTRY,roleDefinition,type SetupRole,type SetupProvider} from '../../shared/setup.ts';
-import {providerCapabilities,WIRED_ROLE_BRIDGES} from '../providers/registry.ts';
+import {investigateAssignmentNotice,providerCapabilities,roleRestriction,WIRED_ROLE_BRIDGES} from '../providers/registry.ts';
 import {createModelCatalogs,readCatalog,type CatalogTiming} from '../providers/model-catalog.ts';
 import {modelSelection,selectionLabel} from '../../shared/model-settings.ts';
 import {effectiveCatalogSelection} from '../../shared/models.ts';
@@ -18,7 +18,7 @@ export interface DoctorOptions extends CliSelectionOptions {
  filesystem?:{buildPresent:(dir:string)=>Promise<boolean>;configWritable:(dir:string)=>Promise<boolean>};
 }
 export type DoctorProvider=SelectedCli;
-export interface DoctorRole {role:SetupRole;provider:SetupProvider|null;version:string|null;reason:string|null;participants?:SetupProvider[];modelSettings?:Readonly<import('../../shared/setup.ts').ModelEffort>;modelNotice?:string}
+export interface DoctorRole {role:SetupRole;provider:SetupProvider|null;version:string|null;reason:string|null;participants?:SetupProvider[];modelSettings?:Readonly<import('../../shared/setup.ts').ModelEffort>;modelNotice?:string;providerReasons?:Partial<Record<SetupProvider,string>>;assignmentNotice?:string}
 export interface DoctorModelCheck {id:SetupProvider;result:string;count:number;timing?:CatalogTiming}
 export interface DoctorReport {exitCode:0|1;checks:{id:string;ok:boolean;code:string;reason:string}[];providers:DoctorProvider[];roles?:DoctorRole[];modelChecks?:DoctorModelCheck[];privateLeftovers?:Awaited<ReturnType<typeof privateLeftovers>>;codexSkills?:{approved:number;needsReview:number}|null;notice:string}
 export async function checkPrerequisites(options:DoctorOptions):Promise<DoctorReport['checks']>{
@@ -44,12 +44,19 @@ export async function doctor(options:DoctorOptions):Promise<DoctorReport>{
  const roles=await Promise.all(ROLE_REGISTRY.map(async({id:role,capability,multiple})=>{
   const id=setup?.roles[role]??null,p=providers.find(p=>p.id===id);
   const capable=id&&providerCapabilities(id,WIRED_ROLE_BRIDGES)[capability];
+  const providerReasons:Partial<Record<SetupProvider,string>>={};
+  for(const tool of providers){
+   const reason=roleRestriction(tool.id,capability);
+   if(reason)providerReasons[tool.id]=reason;
+  }
+  const assignmentNotice=role==='investigate-read'&&setup?investigateAssignmentNotice(setup):null;
   const effective=(role==='skill-diagram'||role==='investigate-read')&&setup&&id&&p&&capable?(()=>{
    const requested=modelSelection(setup,role,id);
    return {requested,listed:setup.providers[id].catalogChoices?.[role]===requested.model};
   })():undefined;
   const selection=effective&&p?effectiveCatalogSelection(p.id,effective.requested,effective.listed,(await catalogs.cached(p))??undefined):undefined;
-  return {role,provider:id,version:p?.version??null,reason:roleError?'Machine setup could not be read. Fix the saved settings.':!id?'No compatible provider is assigned for this role. Start Aitiarch to assign available defaults.':!setup!.providers[id].enabled?'Assigned provider is disabled.':!capable?`${id} has no verified bridge for ${role}.`:p?.isolation!=='metadata-compatible'?p?.reason??'Assigned provider is unavailable.':null,
+  return {role,provider:id,version:p?.version??null,reason:roleError?'Machine setup could not be read. Fix the saved settings.':!id?'No compatible provider is assigned for this role. Start Aitiarch to assign available defaults.':!setup!.providers[id].enabled?'Assigned provider is disabled.':!capable?(providerReasons[id]??`${id} has no verified bridge for ${role}.`):p?.isolation!=='metadata-compatible'?p?.reason??'Assigned provider is unavailable.':null,
+   ...(Object.keys(providerReasons).length?{providerReasons}:{}),...(assignmentNotice?{assignmentNotice}:{}),
    ...(selection?{modelSettings:selection.effective,...(selection.modelNotice?{modelNotice:selection.modelNotice}:{})}:{}),
    ...(multiple?{participants:providers.filter(p=>p.isolation==='metadata-compatible'&&setup?.providers[p.id].enabled&&(!setup.councilParticipants||setup.councilParticipants.includes(p.id))).map(p=>p.id)}:{})};
  }));
@@ -80,6 +87,13 @@ export function formatModelChecks(report:DoctorReport):string[]{
  return (report.modelChecks??[]).map(({id,result,count,timing})=>`${id} models: ${result}; ${count} entries; spawn=${timing?.spawnMs??'unreported'} ms; initialize=${timing?.initializeMs??'unreported'} ms; list=${timing?.listMs??'unreported'} ms; stderr=${timing?.stderr??'unreported'}`);
 }
 export function formatDoctor(report:DoctorReport):string{return [...report.checks.map(c=>`${c.id}: ${c.code} — ${c.reason}`),...report.providers.map(p=>`${p.id}: ${p.code}; path=${p.path??'not found'}; version=${p.version??'unknown'}; isolation=${p.isolation}; roles=${p.roles.join(', ')||'none verified'}; effort=${p.effort===null?'n/a':p.effort} — ${p.reason}`),...(report.roles??[]).map(r=>`${r.role} -> ${r.provider===null?'unset: '+r.reason:(r.provider==='claude'?'Claude':r.provider==='codex'?'Codex':'Kiro')+', version='+(r.version??'not reported')+(r.reason?'; '+r.reason:'')}${r.modelSettings?'; '+selectionLabel(r.modelSettings):''}${r.modelNotice?'; '+r.modelNotice:''}${r.participants?.length?'; participants='+r.participants.join(', '):''} · ${roleDefinition(r.role).label}`),
+ ...(report.roles??[]).flatMap(row=>[
+  ...(row.assignmentNotice?[row.assignmentNotice]:[]),
+  ...Object.entries(row.providerReasons??{}).map(([id,reason])=>{
+   const untested=report.providers.find(provider=>provider.id===id)?.investigateHelp==='untested';
+   return `Codex ${roleDefinition(row.role).label}: ${untested?'untested; help advertises both requirements, but runtime verification is still required. ':''}${reason}`;
+  }),
+ ]),
  ...(report.codexSkills===undefined?[]:[report.codexSkills
   ?`Codex skills: ${report.codexSkills.approved} approved, ${report.codexSkills.needsReview} need review`
   :'Codex skill counts unavailable.']),

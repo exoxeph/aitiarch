@@ -191,6 +191,14 @@ Notes become stars and links become lines. Open threads glow. Notes nothing cite
 
 <br>
 
+## &nbsp;Claude and Codex roles
+
+| Capability | Claude | Codex |
+| --- | --- | --- |
+| Skill diagrams | Staged preview with explicit insertion | Staged static SVG with explicit insertion |
+| Skill instructions | Reviewed instruction attachments | Per-skill opt-in and per-send review. Native plugin execution is unavailable. |
+| Investigate | Available when configured, with reviewed file scope and a dollar cap | Unavailable. CLI help does not establish snapshot-only reads or an equivalent pre-turn budget ceiling. |
+
 ## &nbsp;Run it
 
 Needs Node 24+.

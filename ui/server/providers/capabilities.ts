@@ -47,6 +47,14 @@ function descriptions(help: string): Map<string, string> {
   }
   return result;
 }
+/** Help can advertise a future Investigate profile. This is diagnostic evidence only. */
+export function declaresCodexInvestigateProfile(help:string):boolean {
+ const optionText=[...descriptions(help).values()].map(block=>
+  block.replace(/^\s*(?:-[a-z],\s*)?--[\w-]+(?:[ =]<[^>]+>)*\s+/i,''));
+ return optionText.some(text=>/^Enforce snapshot-only reads\b/i.test(text))&&
+  optionText.some(text=>/^Enforce a pre-turn billed USD ceiling\b/i.test(text));
+}
+
 export function assessCapabilities(config: Pick<Configuration, 'provider' | 'contract'>, versionText: string, help: string): Availability {
   const version=cliVersion(config.provider,versionText)??undefined,check=versionCheck(config.provider,version??null);
   if(!check.available)return {available:false,code:'unsupported_cli',message:check.reason!};

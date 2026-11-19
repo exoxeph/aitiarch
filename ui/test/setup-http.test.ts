@@ -105,7 +105,8 @@ describe('first-run setup endpoints', () => {
  it('rejects incapable, undetected, or malformed assignments without changing saved bytes', async () => {
   await saveMachineSetup(dir, defaultMachineSetup());
   const before = await readFile(path.join(dir, SETUP_FILE), 'utf8');
-  for (const body of [{role:'investigate-read', provider:'codex'}, {role:'invoked', provider:'kiro'}, {seen:true, extra:1}]) {
+  await expect(service().put({role:'investigate-read',provider:'codex'})).rejects.toThrow(/snapshot-only reads/i);
+  for (const body of [{role:'invoked', provider:'kiro'}, {seen:true, extra:1}]) {
    await expect(service().put(body)).rejects.toThrow(/setup|provider/i);
   }
   expect(await readFile(path.join(dir, SETUP_FILE), 'utf8')).toBe(before);

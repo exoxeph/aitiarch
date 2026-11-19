@@ -71,7 +71,7 @@ export async function saveMachineSetup(dir:string,value:unknown,options:{replace
  finally{if(created)await unlink(temp).catch(()=>{/* Only our uniquely named staging file; a leftover is harmless. */});}
 }
 
-/** Explicit startup initialization, not runtime fallback. Existing assignments and provider preferences win. */
+/** Startup initialization. Preserve saved choices except the obsolete Codex Investigate assignment. */
 export async function initializeDefaultRoles(dir:string,providers:readonly ProviderDescriptor[],preferred:readonly SetupProvider[]=[],priorRoles:Partial<Record<SetupRole,SetupProvider>>={}):Promise<MachineSetup>{
  let exists=true;try{await lstat(path.join(folder(dir),SETUP_FILE));}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')exists=false;else throw new SetupError('setup_read');}
  const setup=await loadMachineSetup(dir),before=JSON.stringify(setup);
@@ -82,13 +82,17 @@ export async function initializeDefaultRoles(dir:string,providers:readonly Provi
   for(const id of SETUP_PROVIDERS)setup.providers[id].enabled=available.some(p=>p.id===id);
   for(const role of SETUP_ROLES){const id=priorRoles[role];if(id){setup.roles[role]=id;setup.providers[id].enabled=true;}}
  }
+ if(setup.roles['investigate-read']==='codex'){
+  setup.roles['investigate-read']=null;
+  setup.replacedCodexInvestigate=true;
+ }
  const order=[...new Set([...preferred,...SETUP_PROVIDERS])];
  for(const role of SETUP_ROLES){
   if(setup.roles[role]!==null)continue;
   const selected=order.map(id=>available.find(p=>p.id===id&&p.capabilities[role]&&setup.providers[id].enabled)).find(Boolean);
   if(selected){
    setup.roles[role]=selected.id;
-   (setup.defaultRoles??=[]).push(role);
+   setup.defaultRoles=[...new Set([...(setup.defaultRoles??[]),role])];
   }
  }
  // Council eligibility uses all enabled compatible descriptors, not this legacy single-role slot.

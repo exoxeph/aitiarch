@@ -1,5 +1,5 @@
 import type {SelectedCli} from './platform/cli-selection.ts';
-import {providerCapabilities,WIRED_ROLE_BRIDGES} from './providers/registry.ts';
+import {investigateAssignmentNotice,providerCapabilities,roleRestriction,WIRED_ROLE_BRIDGES} from './providers/registry.ts';
 import {loadMachineSetup, saveMachineSetup, SetupError} from './setup-store.ts';
 import {initProject, privateProtection} from './init.ts';
 import {CAPABILITY_NEEDS, MODEL_ROLES, ROLE_REGISTRY, SETUP_PROVIDERS, SETUP_ROLES, roleDefinition, validCouncilParticipants, type MachineSetup, type ModelEffort, type SetupProvider, type SetupRole, type SetupView} from '../shared/setup.ts';
@@ -26,7 +26,7 @@ export function createSetupHttp(options: {
 }) {
  const binaryPinned = (provider:SetupProvider) => options.overrides?.[provider]!==undefined;
  const hasCapability = (id:SetupProvider, capability:SetupRole) =>
-  (options.capabilities?.(id)??providerCapabilities(id,WIRED_ROLE_BRIDGES))[capability];
+  !roleRestriction(id,capability)&&(options.capabilities?.(id)??providerCapabilities(id,WIRED_ROLE_BRIDGES))[capability];
  const capable = (role:SetupRole) => options.providers.filter(p =>
   p.isolation==='metadata-compatible' && hasCapability(p.id,roleDefinition(role).capability)
  ).map(p => p.id);
@@ -36,7 +36,7 @@ export function createSetupHttp(options: {
    if(!p.path&&p.code==='not_found')return `${labels[p.id]} is not installed or was not found.`;
    return p.reason;
   }
-  if(!hasCapability(p.id,capability))return CAPABILITY_NEEDS[capability];
+  if(!hasCapability(p.id,capability))return roleRestriction(p.id,capability)??CAPABILITY_NEEDS[capability];
   if(!setup.providers[p.id].enabled)return 'This provider is disabled by you.';
   return null;
  };
@@ -90,6 +90,10 @@ export function createSetupHttp(options: {
     else if (provider === null) reason = 'No provider is assigned to this role.';
     else if (!capableProviders.includes(provider)) reason = 'The saved provider is unavailable for this role.';
     else if (!setup.providers[provider].enabled) reason = 'The saved provider is disabled.';
+    if(role==='investigate-read'){
+     const notice=investigateAssignmentNotice(setup);
+     if(notice)reason=[notice,reason].filter(Boolean).join(' ');
+    }
     return {role, provider, capableProviders, providerReasons, reason, source, ...(participants ? {participants,eligibleParticipants} : {})};
    }),
    privacy:{mode:protection.mode, sharedReady:protection.sharedReady, sharedReason:protection.sharedReason, notice:protection.messages.join(' ')},
@@ -115,7 +119,7 @@ export function createSetupHttp(options: {
   if (font && (!Number.isInteger(data.fontSize) || Number(data.fontSize)<14 || Number(data.fontSize)>24))
    throw new SetupRequestError('Choose a whole-number font size from 14 to 24 px.');
   if ((model||assignment) && !capable(role).includes(provider))
-   throw new SetupRequestError('Choose a detected compatible provider that supports this role.');
+   throw new SetupRequestError(roleRestriction(provider,role)??'Choose a detected compatible provider that supports this role.');
   const selection=data.selection as ModelEffort|null;
   if (model && selection!==null) {
    if (!selection || typeof selection!=='object' || Array.isArray(selection))
@@ -162,6 +166,7 @@ export function createSetupHttp(options: {
     setup.roles[role] = provider;
     if (setup.defaultRoles) setup.defaultRoles = setup.defaultRoles.filter(item=>item!==role);
    }
+   if(role==='investigate-read'&&(assignment||reset))delete setup.replacedCodexInvestigate;
    await saveMachineSetup(options.dir, setup);
   });
   writes.set(options.dir, write);

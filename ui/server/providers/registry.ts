@@ -41,6 +41,19 @@ export function providerCapabilities(id:SetupProvider,bridges:Partial<Record<'in
  if(id==='codex'){capabilities.invoked=bridges.invoked===true;capabilities['thread-reply']=bridges['thread-reply']===true;capabilities['skill-diagram']=bridges['skill-diagram']===true;}
  return capabilities;
 }
+export function roleRestriction(provider:SetupProvider,capability:SetupRole):string|null {
+ return provider==='codex'&&capability==='investigate-read'
+  ?"Codex CLI help does not establish snapshot-only reads or a pre-turn budget ceiling equivalent to Claude's Investigate cap."
+  :null;
+}
+
+export function investigateAssignmentNotice(setup:MachineSetup):string|null {
+ if(!setup.replacedCodexInvestigate)return null;
+ return setup.roles['investigate-read']==='claude'
+  ?'The saved Codex Investigate choice was replaced with the Claude default.'
+  :'The saved Codex Investigate choice was cleared. No compatible provider was available at setup.';
+}
+
 export interface RequestSettingsSnapshot {
  readonly skillModelNotice?:string;
  readonly investigateModelNotice?:string;
@@ -100,6 +113,8 @@ export class ProviderRegistry {
  resolveRole(role:SetupRole,setup:MachineSetup):RoleResolution {
   const id=setup.roles[role];
   if(id===null)return unavailable(role,null,'role-unavailable','No compatible provider is selected for this role.');
+  const restriction=roleRestriction(id,roleDefinition(role).capability);
+  if(restriction)return unavailable(role,id,'role-unavailable',restriction);
   if(!setup.providers[id].enabled)return unavailable(role,id,'provider-disabled','The selected provider is disabled. Enable it in machine setup; no other provider was tried.');
   const provider=this.providers.find(p=>p.id===id);
   if(!provider)return unavailable(role,id,'provider-unavailable','The selected provider has no registered adapter. Configure its CLI; no other provider was tried.');

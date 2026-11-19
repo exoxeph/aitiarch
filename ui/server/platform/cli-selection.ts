@@ -1,6 +1,6 @@
 import {resolveCli,type CliId,type DiscoveryOptions} from './cli-discovery.ts';
 import {execFile} from 'node:child_process';
-import {assessCapabilities} from '../providers/capabilities.ts';
+import {assessCapabilities,declaresCodexInvestigateProfile} from '../providers/capabilities.ts';
 import {ROLE_REGISTRY} from '../../shared/setup.ts';
 import {assessToollessMetadata,cliVersion,compareVersions,type CliNotice} from '../providers/cli-compatibility.ts';
 import {helpDeclaresEffort} from '../../shared/model-settings.ts';
@@ -11,7 +11,7 @@ export interface CliSelectionOptions {
  overrides?:Partial<Record<CliId,string>>;timeoutMs?:number;
   runner?:(file:string,args:readonly string[],options:{signal:AbortSignal;cwd:string;env:NodeJS.ProcessEnv})=>Promise<string>;
 }
-export interface SelectedCli {id:CliId;path:string|null;version:string|null;isolation:'unverified'|'metadata-compatible';code:string;reason:string;notices?:CliNotice[];roles:string[];effort:boolean|null;effortCode:'unverified'|'help_flag_present'|'help_flag_absent'|'not_applicable'}
+export interface SelectedCli {id:CliId;path:string|null;version:string|null;isolation:'unverified'|'metadata-compatible';code:string;reason:string;notices?:CliNotice[];roles:string[];effort:boolean|null;effortCode:'unverified'|'help_flag_present'|'help_flag_absent'|'not_applicable';investigateHelp?:'untested'}
 const LIMIT=131072;
 const ids:CliId[]=['claude','codex','kiro'];
 const metadataRunner:NonNullable<CliSelectionOptions['runner']>=(file,args,{signal,cwd,env})=>new Promise((resolve,reject)=>{
@@ -49,6 +49,7 @@ export async function selectClis(options:CliSelectionOptions):Promise<SelectedCl
    if(id==='claude'){provider.effort=helpDeclaresEffort(help);provider.effortCode=provider.effort?'help_flag_present':'help_flag_absent';}
    const assessed=id==='claude'?assessCapabilities({provider:'claude',contract:'claude-canary-2.1.205'},version,help):assessToollessMetadata(id,version,help);
    const compatible=assessed.available;
+   if(id==='codex'&&compatible&&declaresCodexInvestigateProfile(help))provider.investigateHelp='untested';
    provider.notices='notices' in assessed?assessed.notices:[];
    provider.code=compatible?'metadata_compatible':'profile_unverified';provider.isolation=compatible?'metadata-compatible':'unverified';
    // These describe the standalone discovery probe. The doctor role report also

@@ -52,6 +52,7 @@ import {isCodexSkillRole} from '../shared/codex-skills.ts';
 import {CouncilHistory} from './council-history.ts';
 import type {AvailabilityCheck} from './providers/council-availability.ts';
 import type {TurnAdapter} from './providers/turn.ts';
+import {roleRestriction} from './providers/registry.ts';
 import type {RoleRouting} from './providers/routing.ts';
 import {SetupRequestError, type createSetupHttp} from './setup-http.ts';
 import {SetupError} from './setup-store.ts';
@@ -223,7 +224,7 @@ export function createApp(opts: AppOptions) {
     const investigateSettings=routing?async():Promise<import('./harness/conversation.ts').InvestigateSettings>=>{
      const snapshot=await routing(),selected=snapshot.resolveRole('investigate-read');
      if('available' in selected)throw new GateRefusal('investigate_unavailable',{message:selected.reason});
-     if(selected.id!=='claude')throw new GateRefusal('investigate_unavailable',{message:'The configured Investigate provider has no read-only launcher.'});
+     if(selected.id!=='claude')throw new GateRefusal('investigate_unavailable',{message:roleRestriction(selected.id,'investigate-read')??'The configured Investigate provider has no read-only launcher.'});
      const key=snapshot.contextKey('investigate-read');
      if(!snapshot.currentContextKey||await snapshot.currentContextKey('investigate-read')!==key)throw new GateRefusal('plan_changed',{message:'Investigate settings changed. Review the plan again.'});
      const selection=selected.selection??{model:null,effort:null};
@@ -507,6 +508,8 @@ export function createApp(opts: AppOptions) {
           await h.questions.remove(s.id);await h.index.remove(s.id);await h.investigate.forget(s.id); // a conversation of either kind may have run Investigate turns: their stored turns and tripwire copy go too
           return json(res,200,{removed,replies});
         }
+        if(b?.provider==='codex'&&['plan','confirm','send'].some(action=>url.pathname==='/api/harness/investigate/'+action))
+          throw new GateRefusal('investigate_unavailable',{message:roleRestriction('codex','investigate-read')!});
         if(url.pathname==='/api/harness/investigate/repo')return json(res,200,{repo:await h.investigate.chooseRepo(b?.repo)});
         if(url.pathname==='/api/harness/investigate/plan')return json(res,200,await h.investigate.plan(b?.session,b?.budgetUsd));
         if(url.pathname==='/api/harness/investigate/confirm')return json(res,200,await h.investigate.confirm(b?.session,b?.planHash));
@@ -549,6 +552,11 @@ export function createApp(opts: AppOptions) {
         // Which diagrams a turn may open is decided here from the note the turn is about: the note open now (`openNote`; the conversation's own note when the page names none), which must be a real note of this project.
         // Never a path the page merely claims: openableDiagrams reads it through the store (and refuses hidden folders), and the editor line the turn carries must be about the same note.
         const base=async()=>{
+          if(b?.provider==='codex'){
+            const attachments=cleanAttachments(b.attachments);
+            if(attachments.ok&&(attachments.value.repo||attachments.value.files.length))
+              throw new GateRefusal('investigate_unavailable',{message:roleRestriction('codex','investigate-read')!});
+          }
           if(b?.openNote!==undefined&&typeof b.openNote!=='string')throw new PathError(400,'invalid_note','The open note is not a note of this project.');
           const note=typeof b?.openNote==='string'?b.openNote:typeof b?.path==='string'?b.path:'';
           if(b?.editor!==undefined&&(!b.editor||typeof b.editor!=='object'||(note&&b.editor.path!==note)))throw new PathError(400,'invalid_note','The editor line is about another note than the open one.');

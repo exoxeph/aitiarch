@@ -72,6 +72,6 @@ describe('persisted compatible startup role defaults',()=>{
   setup.roles.invoked='kiro';setup.roles['investigate-read']='codex';await writeFile(path.join(dir,SETUP_FILE),JSON.stringify(setup));
   const incompatible=await doctor(o);
   expect(incompatible.roles?.find(r=>r.role==='invoked')).toMatchObject({provider:'kiro',reason:expect.stringMatching(/no verified bridge.*invoked/i)});
-  expect(incompatible.roles?.find(r=>r.role==='investigate-read')).toMatchObject({provider:'codex',reason:expect.stringMatching(/no verified bridge.*investigate-read/i)});
+  expect(incompatible.roles?.find(r=>r.role==='investigate-read')).toMatchObject({provider:'codex',reason:expect.stringMatching(/snapshot-only reads.*pre-turn budget ceiling/i)});
  });
 });

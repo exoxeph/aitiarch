@@ -6,6 +6,11 @@ import {fileURLToPath} from 'node:url';
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {Store} from '../server/store.ts';import {NoteWatcher} from '../server/watch.ts';import {createApp} from '../server/http.ts';
 import {FakeChatProvider} from '../server/chat/fake.ts';
+import type {RoleRouting} from '../server/providers/routing.ts';
+import {descriptorFromAdapter,ProviderRegistry} from '../server/providers/registry.ts';
+import {saveMachineSetup} from '../server/setup-store.ts';
+import {defaultMachineSetup} from '../shared/setup.ts';
+import type {TurnAdapter} from '../server/providers/turn.ts';
 
 // The one conversation API over HTTP (synthetic notebook, repo and CLI): the "@" picker, the plan card, approval, and a turn whose profile the server derives. Nothing real is touched.
 vi.setConfig({testTimeout:30000});
@@ -13,11 +18,11 @@ const here=path.dirname(fileURLToPath(import.meta.url)),cli=path.join(here,'fixt
 const dirs:string[]=[];afterEach(async()=>{for(const d of dirs.splice(0))await rm(d,{recursive:true,force:true,maxRetries:5,retryDelay:100});});
 const temp=async(n:string)=>{const d=await mkdtemp(path.join(os.tmpdir(),n));dirs.push(d);return d;};
 
-async function server(){
+async function server(routing?:RoleRouting){
  const nb=await temp('aitiarch-chttp-nb-'),repo=await temp('aitiarch-chttp-repo-'),harness=await temp('aitiarch-chttp-h-'),record=path.join(harness,'calls.jsonl');
  execFileSync('git',['init','-q'],{cwd:nb});await writeFile(path.join(nb,'.gitignore'),'/chat/\n');await writeFile(path.join(nb,'plan.md'),'# Plan\n\nA short synthetic note.\n');await writeFile(path.join(nb,'ideas.md'),'# Ideas\n');
  execFileSync('git',['init','-q'],{cwd:repo});await mkdir(path.join(repo,'src'));await writeFile(path.join(repo,'src','login.js'),'const sessions = new Map();\n');await writeFile(path.join(repo,'.env'),'KEY=CANARY\n');await writeFile(path.join(repo,'README.md'),'# R\n');
- const store=await Store.open(nb),watcher=new NoteWatcher(store),app=createApp({store,watcher,distDir:nb,provider:new FakeChatProvider(),harness:{command:process.execPath,prefixArgs:[cli,'inv-ok',record],dir:harness}});
+ const store=await Store.open(nb),watcher=new NoteWatcher(store),app=createApp({store,watcher,distDir:nb,provider:new FakeChatProvider(),harness:{command:process.execPath,prefixArgs:[cli,'inv-ok',record],dir:harness},...(routing?{council:{adapters:[],routing}}:{})});
  const base='http://127.0.0.1:'+await app.listen(0),cookie=(await fetch(base+'/api/session')).headers.get('set-cookie')!.split(';')[0];
  const headers={cookie,origin:base,'content-type':'application/json','x-aitiarch':'1'};
  const put=(url:string,body:unknown)=>fetch(base+url,{method:'PUT',headers,body:JSON.stringify(body)});
@@ -69,6 +74,58 @@ describe('the conversation API',()=>{
    const c=await s.conversation(),base={conversationId:c.id,path:'plan.md',text:'q'};
    const denied=await s.put('/api/conversation/turn',{...base,attachments:{files:['.env']}});expect(denied.status).toBe(409);const d=await denied.json() as any;expect(d.error).toBe('file_refused');expect(d.files).toEqual([{path:'.env',ok:false,reason:'denied'}]);
    const escape=await s.put('/api/conversation/turn',{...base,attachments:{files:['../outside.txt']}});expect(escape.status).toBe(409);expect((await escape.json() as any).error).toBe('attachments');
+   expect(await s.calls()).toEqual([]);
+  }finally{await s.close();}
+ });
+ it('rejects a crafted Codex selection at approval and send on both Investigate paths',async()=>{
+  const s=await server();
+  try{
+   const c=await s.conversation(),turn={conversationId:c.id,path:'plan.md',text:'Synthetic question',attachments:{files:['src/login.js']}};
+   const plan=await (await s.put('/api/conversation/plan',turn)).json() as {hash:string};
+   const session=await (await s.put('/api/harness/sessions/new',{mode:'investigate',label:'Synthetic',repo:s.repo})).json() as {id:string};
+   const legacy=await (await s.put('/api/harness/investigate/plan',{session:session.id})).json() as {planHash:string};
+   expect(plan.hash).toMatch(/^[a-f0-9]{64}$/);
+   expect(legacy.planHash).toMatch(/^[a-f0-9]{64}$/);
+   for(const [route,body] of [
+    ['/api/conversation/approve',{...turn,hash:plan.hash}],
+    ['/api/conversation/turn',turn],
+    ['/api/harness/investigate/confirm',{session:session.id,planHash:legacy.planHash}],
+    ['/api/harness/investigate/send',{session:session.id,question:'Synthetic question'}],
+   ] as const){
+    const reply=await s.put(route,{...body,provider:'codex'});
+    expect(reply.status,route).toBe(409);
+    expect(await reply.json()).toMatchObject({error:'investigate_unavailable',message:expect.stringContaining('snapshot-only reads')});
+   }
+   expect(await s.calls()).toEqual([]);
+  }finally{await s.close();}
+ });
+ it('still rejects stale Claude approvals on both Investigate paths before launching',async()=>{
+  const dir=await temp('aitiarch-chttp-setup-'),setup=defaultMachineSetup();
+  const claude=descriptorFromAdapter({id:'claude',label:'Claude'} as TurnAdapter,{
+   detect:async()=>({available:true,reason:null}),bridges:{'investigate-read':true},
+  });
+  const registry=new ProviderRegistry([claude]);
+  await saveMachineSetup(dir,setup);
+  const s=await server(()=>registry.snapshot(dir));
+  try{
+   const c=await s.conversation(),turn={conversationId:c.id,path:'plan.md',text:'Synthetic question',attachments:{files:['src/login.js']}};
+   const plan=await (await s.put('/api/conversation/plan',turn)).json() as {hash:string};
+   const session=await (await s.put('/api/harness/sessions/new',{mode:'investigate',label:'Synthetic',repo:s.repo})).json() as {id:string};
+   const legacy=await (await s.put('/api/harness/investigate/plan',{session:session.id})).json() as {planHash:string};
+   const approve=()=>s.put('/api/conversation/approve',{...turn,hash:plan.hash});
+   const confirm=()=>s.put('/api/harness/investigate/confirm',{session:session.id,planHash:legacy.planHash});
+   expect((await approve()).status).toBe(200);
+   expect((await confirm()).status).toBe(200);
+   setup.providers.claude.roles['investigate-read']={model:'sonnet',effort:null};
+   await saveMachineSetup(dir,setup);
+   for(const request of [
+    approve,confirm,()=>s.put('/api/conversation/turn',turn),
+    ()=>s.put('/api/harness/investigate/send',{session:session.id,question:'Synthetic question'}),
+   ]){
+    const reply=await request();
+    expect(reply.status).toBe(409);
+    expect(await reply.json()).toMatchObject({error:'plan_changed'});
+   }
    expect(await s.calls()).toEqual([]);
   }finally{await s.close();}
  });

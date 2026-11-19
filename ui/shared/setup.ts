@@ -36,6 +36,7 @@ export interface MachineSetup {
  defaultRoles?:SetupRole[];
  councilParticipants?:SetupProvider[];
  fontSizeConfigured?:boolean;
+ replacedCodexInvestigate?:true;
 }
 export interface RoleModelPreference {
  role:ModelRole;
@@ -82,7 +83,8 @@ function modelEffort(v:unknown):v is ModelEffort {
 }
 /** Exact v1 keys at every level. Catalog/role compatibility is slice 5/6, not a safety grant. */
 export function validMachineSetup(v:unknown):v is MachineSetup {
- if(!object(v)||!keys(v,['version','providers','roles','fontSize','tour',...['setupSeen','defaultRoles','fontSizeConfigured','councilParticipants'].filter(k=>Object.hasOwn(v,k))])||v.version!==1||
+ if(!object(v)||!keys(v,['version','providers','roles','fontSize','tour',...['setupSeen','defaultRoles','fontSizeConfigured','councilParticipants','replacedCodexInvestigate'].filter(k=>Object.hasOwn(v,k))])||v.version!==1||
+  (Object.hasOwn(v,'replacedCodexInvestigate')&&v.replacedCodexInvestigate!==true)||
   (Object.hasOwn(v,'councilParticipants')&&!validCouncilParticipants(v.councilParticipants))||
   (Object.hasOwn(v,'fontSizeConfigured')&&typeof v.fontSizeConfigured!=='boolean')||
   (Object.hasOwn(v,'setupSeen')&&typeof v.setupSeen!=='boolean')||
