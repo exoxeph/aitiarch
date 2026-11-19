@@ -12,7 +12,8 @@ import {createApp} from '../server/http.ts';
 import {ProviderError} from '../server/providers/index.ts';
 import {SessionIndex} from '../server/harness/session-index.ts';
 import {locked} from '../shared/pipeline-config.ts';
-import {ROLE_REGISTRY,defaultMachineSetup} from '../shared/setup.ts';
+import {CAPABILITY_NEEDS,ROLE_REGISTRY,defaultMachineSetup} from '../shared/setup.ts';
+import {WIRED_ROLE_BRIDGES,providerCapabilities,roleRestriction} from '../server/providers/registry.ts';
 import {createSetupHttp} from '../server/setup-http.ts';
 import {saveMachineSetup} from '../server/setup-store.ts';
 import {PIPELINE_NODES,edgesOf,nodeById} from '../shared/pipeline-nodes.ts';
@@ -275,8 +276,13 @@ try{
  await page.keyboard.press('Escape');
  const skill=await editRole('role-skill-diagram');
  const disabledCodex=skill.getByLabel('Skill diagrams',{exact:true}).locator('option[value="codex"]');
- assert.equal(await disabledCodex.isDisabled(),true);
- assert.match(await disabledCodex.textContent(),/Needs the Skill workflow/);
+ // Codex Skill diagrams are enabled since 7a403ea: Codex is selectable when its gate passes; Kiro stays off with the registry's reason.
+ assert(!roleRestriction('codex','skill-diagram')&&providerCapabilities('codex',WIRED_ROLE_BRIDGES)['skill-diagram'],'the registry wires Skill diagrams for Codex');
+ assert.equal(providerCapabilities('kiro',WIRED_ROLE_BRIDGES)['skill-diagram'],false,'the registry has no Skill diagram bridge for Kiro');
+ assert.equal(await disabledCodex.isDisabled(),false,'Codex is selectable for Skill diagrams');
+ const kiroSkill=skill.getByLabel('Skill diagrams',{exact:true}).locator('option[value="kiro"]'),kiroWhy=roleRestriction('kiro','skill-diagram')??CAPABILITY_NEEDS['skill-diagram'];
+ assert.equal(await kiroSkill.isDisabled(),true,'Kiro stays disabled for Skill diagrams');
+ assert.match(await kiroSkill.textContent(),new RegExp(kiroWhy.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
  const modelChip=skill.getByRole('button',{name:/^Model:/});
  await modelChip.click();
  const modelMenu=page.getByRole('menu',{name:'Model and effort'});
