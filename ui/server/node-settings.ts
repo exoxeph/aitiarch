@@ -20,7 +20,7 @@ export interface NodeExtras {
  review:SkillsReview|null;
 }
 /** With `one`, only a single attached skill is loaded: the one with that id if it is attached and installed, otherwise the first attached. */
-export type ExtrasFor=(node:PersonaNode,one?:{id?:string})=>Promise<NodeExtras>;
+export type ExtrasFor=(node:PersonaNode,one?:{id?:string;skipSkills?:boolean})=>Promise<NodeExtras>;
 
 export class NodeSettingsService {
  private ui:Pick<UiStateStore,'nodes'|'saveNodes'>;private discover:()=>Promise<SkillInfo[]>;
@@ -30,8 +30,9 @@ export class NodeSettingsService {
   if(!validSavedNodes(value))throw new Error('Invalid node settings.');
   return this.ui.saveNodes(value as SavedNodeSettings);
  }
- async extras(node:PersonaNode,one?:{id?:string}):Promise<NodeExtras>{
+ async extras(node:PersonaNode,one?:{id?:string;skipSkills?:boolean}):Promise<NodeExtras>{
   const setting=(await this.get())[node],chosen:SkillInfo[]=[],missing:string[]=[];
+  if(one?.skipSkills)return {persona:setting.persona,skills:{text:'',loaded:[],skipped:[],truncated:false},names:[],missing:[],review:null};
   if(setting.skills.length){
    const byId=new Map((await this.discover()).map(s=>[s.id,s]));
    for(const id of setting.skills){const s=byId.get(id);if(s)chosen.push(s);else missing.push(id);}

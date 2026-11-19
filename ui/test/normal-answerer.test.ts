@@ -100,9 +100,12 @@ it('chat review resolves the machine role and refuses a stale provider snapshot 
  const setup=compatibleDefaults(ds);setup.roles['normal-chat']='codex';await saveMachineSetup(dir,setup);
  const routing=()=>registry.snapshot(dir),council=new CouncilService({store,ink,index,ledger:new LedgerStore(root),adapters,routing});
  const normal=new NormalChat({index,questions:new QuestionStore(index.dir),council,adapters,routing});
- const runtime=new ChatRuntime(store,ink,new ChatStore(root),undefined,[],undefined,undefined,undefined,normal);
+ const extras=vi.fn(async()=>({persona:'explain' as const,skills:{text:'Unapproved legacy skill instruction.',loaded:[{id:'legacy',name:'legacy',chars:36,tokens:9,truncated:false,files:[]}],skipped:[],truncated:false},names:['legacy'],missing:[],review:{loaded:[{name:'legacy',tokens:9,truncated:false}],skipped:[],missing:[]}}));
+ const runtime=new ChatRuntime(store,ink,new ChatStore(root),undefined,[],extras,undefined,undefined,normal);
  try{
   const review=await runtime.review({id:'request-one',path:'launch.md',question:'When?',context:[]});expect(review.provider).toBe('codex');expect(review.normalPlan?.providers).toEqual(['codex']);
+  expect(extras).toHaveBeenCalledWith('chat',{skipSkills:true});
+  expect(review.skills).toBeUndefined();expect(review.instruction).not.toContain('Unapproved legacy skill instruction.');
   setup.roles['normal-chat']='kiro';await saveMachineSetup(dir,setup);
   await expect(runtime.send({reviewId:review.reviewId,confirmed:true},()=>{})).rejects.toMatchObject({code:'stale_review'});expect(calls).toBe(0);
   setup.providers.kiro.enabled=false;await saveMachineSetup(dir,setup);

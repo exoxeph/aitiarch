@@ -1,16 +1,22 @@
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {constants} from 'node:fs';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import {repoDenied} from '../../shared/harness.ts';
 import {redact} from '../../shared/redact.ts';
 import {privateWriteTemp} from '../private-write-temp.ts';
+import type {ReviewedCodexSkill} from '../../shared/invocation.ts';
+import type {SkillBlock} from '../../shared/instruction.ts';
 import {SETUP_ROLES, type SetupRole} from '../../shared/setup.ts';
 import {assertStoragePath, resolveProjectStorage, storageEntry} from '../project-storage.ts';
 
 const MAX_SKILL_BYTES=32*1024;
 const MAX_CONSENT_BYTES=128*1024;
 const MAX_CANDIDATES=256;
+const MAX_SKILL_CHARACTERS=2048;
+const MAX_ENABLED=8;
+export const codexSkillRoots=(home:string,project:string,codexHome=path.join(home,'.codex'))=>
+ [path.join(codexHome,'skills'),path.join(home,'.agents','skills'),path.join(project,'.agents','skills')];
 const hash=(value:string|Buffer)=>createHash('sha256').update(value).digest('hex');
 const isHash=(value:unknown):value is string=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const safeName=(name:string)=>/^[a-z0-9][a-z0-9_-]{0,79}$/i.test(name)&&
@@ -58,8 +64,9 @@ async function readBounded(file:string,limit:number){
  }finally{await handle.close();}
 }
 
+const frontmatter=/^\uFEFF?---\r?\n([\s\S]{1,4096}?)\r?\n---(?:\r?\n|$)/;
 function metadata(text:string){
- const header=/^\uFEFF?---\r?\n([\s\S]{1,4096}?)\r?\n---(?:\r?\n|$)/.exec(text);
+ const header=frontmatter.exec(text);
  if(!header||/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/u.test(text))return null;
  const fields=new Map<string,string>();
  for(const line of header[1].split(/\r?\n/)){
@@ -86,7 +93,7 @@ function cachedMetadata(bytes:Buffer){
  }
  return {digest,parsed};
 }
-async function examine(folder:string,name:string):Promise<CodexSkillMetadata>{
+async function examine(folder:string,name:string,take?:TakeInstructions):Promise<CodexSkillMetadata>{
  const idPath=process.platform==='win32'?folder.toLowerCase():folder;
  const pathHash=hash(idPath);
  const unavailable=(reason:string):CodexSkillMetadata=>({name,description:'',pathHash,contentHash:null,classification:'needs review',reason});
@@ -99,12 +106,16 @@ async function examine(folder:string,name:string):Promise<CodexSkillMetadata>{
   const {bytes,revision}=await readBounded(path.join(folder,'SKILL.md'),MAX_SKILL_BYTES);
   const {parsed,digest}=cachedMetadata(bytes);
   if(!parsed)return unavailable('The skill metadata is malformed or contains unsupported fields.');
-  return {...parsed,pathHash,contentHash:hash(JSON.stringify([digest,revision])),reason:reasons[parsed.classification]};
+  const item={...parsed,pathHash,contentHash:hash(JSON.stringify([digest,revision])),reason:reasons[parsed.classification]};
+  if(parsed.classification==='read-only')take?.(item,bytes);
+  return item;
  }catch{return unavailable('The skill file is missing, inaccessible, linked or oversized.');}
 }
 
 /** Explicit local roots only. Callers choose the installed roots, never a client-supplied path. */
-export async function discoverCodexSkills(roots:readonly string[]):Promise<CodexSkillMetadata[]>{
+type TakeInstructions=(item:CodexSkillMetadata,bytes:Buffer)=>void;
+export function discoverCodexSkills(roots:readonly string[]){return scan(roots);}
+async function scan(roots:readonly string[],take?:TakeInstructions):Promise<CodexSkillMetadata[]>{
  const found=new Map<string,CodexSkillMetadata>();
  let visited=0;
  for(const root of roots.slice(0,16)){
@@ -115,7 +126,7 @@ export async function discoverCodexSkills(roots:readonly string[]):Promise<Codex
    for await(const entry of await fs.opendir(folder)){
     if(++visited>MAX_CANDIDATES)break;
     if(!safeName(entry.name)||!entry.isDirectory()&&!entry.isSymbolicLink())continue;
-    const item=await examine(path.join(folder,entry.name),entry.name);
+    const item=await examine(path.join(folder,entry.name),entry.name,take);
     found.set(item.pathHash,item);
    }
   }catch{/* No installed entries from an inaccessible or unsafe root. */}
@@ -124,12 +135,12 @@ export async function discoverCodexSkills(roots:readonly string[]):Promise<Codex
  return [...found.values()].sort((a,b)=>a.name.localeCompare(b.name)||a.pathHash.localeCompare(b.pathHash));
 }
 
-type Consent={role:SetupRole;pathHash:string;contentHash:string;classification:'read-only'};
+type Consent={role:SetupRole;pathHash:string;contentHash:string;classification:'read-only';generation?:string};
 const isRole=(value:unknown):value is SetupRole=>SETUP_ROLES.some(role=>role===value);
 const isConsent=(value:unknown):value is Consent=>{
- if(!value||typeof value!=='object'||Object.keys(value).length!==4)return false;
+ if(!value||typeof value!=='object'||Object.keys(value).some(key=>!['role','pathHash','contentHash','classification','generation'].includes(key)))return false;
  const item=value as Partial<Consent>;
- return isRole(item.role)&&isHash(item.pathHash)&&isHash(item.contentHash)&&item.classification==='read-only';
+ return isRole(item.role)&&isHash(item.pathHash)&&isHash(item.contentHash)&&item.classification==='read-only'&&(item.generation===undefined||isHash(item.generation));
 };
 const writes=new Map<string,Promise<void>>();
 
@@ -139,6 +150,39 @@ export class CodexSkillConsent {
  constructor(notebook:string,roots:readonly string[]){
   this.notebook=notebook;
   this.roots=[...roots];
+ }
+
+ inventory(){return discoverCodexSkills(this.roots);}
+
+ async reviewed(role:SetupRole){
+  const block:SkillBlock={text:'',loaded:[],skipped:[],truncated:false};
+  const skills:ReviewedCodexSkill[]=[];
+  const layout=await resolveProjectStorage(this.notebook);
+  if(!layout.ok)return {block,skills,key:''};
+  const approvals=(await this.read(layout.privatePaths.codexSkillConsent)).filter(item=>item.role===role);
+  if(!approvals.length)return {block,skills,key:''};
+  if(approvals.length>MAX_ENABLED)throw Error('Too many approved Codex skills.');
+  const sections=new Map<string,{text:string;item:ReviewedCodexSkill;generation:string}>();
+  await scan(this.roots,(item,bytes)=>{
+   const approved=approvals.find(a=>a.pathHash===item.pathHash&&a.contentHash===item.contentHash);
+   if(!approved)return;
+   const source=bytes.toString('utf8').replace(frontmatter,'');
+   // No linked files are ever read. Also suppress lines naming secret-file paths.
+   const safe=source.split(/\r?\n/).map(line=>line.split(/[\s`"'<>()[\]{};,]+/).some(word=>word&&repoDenied(word.replace(/\\/g,'/')))
+     ?'[Excluded secret-file reference]':line).join('\n');
+   const clean=redact(safe).trim();
+   const text=clean.slice(0,MAX_SKILL_CHARACTERS);
+   sections.set(item.pathHash,{text,item:{name:item.name,pathHash:item.pathHash,contentHash:approved.contentHash,
+    classification:'read-only',truncated:clean.length>text.length},generation:approved.generation??approved.contentHash});
+  });
+  const ordered=[...sections.values()].sort((a,b)=>a.item.pathHash.localeCompare(b.item.pathHash));
+  for(const {text,item} of ordered){
+   skills.push(item);
+   block.loaded.push({id:item.pathHash,name:item.name,chars:text.length,tokens:Math.ceil(text.length/4),truncated:item.truncated,files:[]});
+  }
+  block.truncated=skills.some(item=>item.truncated);
+  block.text=ordered.map(({text,item})=>'## Codex skill: '+item.name+'\n'+text+(item.truncated?'\n[Skill text truncated]':'')).join('\n\n');
+  return {block,skills,key:ordered.length?hash(JSON.stringify(ordered.map(({item,generation})=>[item,generation]))):''};
  }
 
  async enabled(role:SetupRole){
@@ -155,7 +199,9 @@ export class CodexSkillConsent {
    const skill=(await discoverCodexSkills(this.roots)).find(item=>item.pathHash===pathHash);
    if(!skill||skill.contentHash!==contentHash)throw Error('The installed skill changed. Review it again.');
    if(skill.classification!=='read-only')throw Error(skill.reason);
-   return [...approvals.filter(item=>item.role!==role||item.pathHash!==pathHash),{role,pathHash,contentHash,classification:'read-only'}];
+   const next=approvals.filter(item=>item.role!==role||item.pathHash!==pathHash);
+   if(next.filter(item=>item.role===role).length>=MAX_ENABLED)throw Error('Approve at most eight skills for one role.');
+   return [...next,{role,pathHash,contentHash,classification:'read-only',generation:hash(randomUUID())}];
   });
  }
 

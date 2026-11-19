@@ -12,6 +12,8 @@ import {quoteShown} from '../../shared/thoughts.ts';
 import {newThread,questionPlaceholder,threadStatus,savedProviderLabel,type ThreadFailure,type ThreadReply} from '../../shared/threads.ts';
 import {api,type InkSnapshot} from '../api.ts';
 import {rememberQuestion,recalledQuestion,forgetQuestion} from './questions.ts';
+import {CodexSkillsReview} from '../skills/CodexSkillsReview.tsx';
+import type {ReviewedCodexSkill} from '../../shared/invocation.ts';
 import {SkillsReviewList} from '../skills/SkillsReviewList.tsx';
 import type {SkillsReview} from '../../shared/node-settings.ts';
 import {invokedUsageLabel,type InvokedUsage} from '../../shared/invoked-usage.ts';
@@ -64,7 +66,7 @@ export function ThreadPanel(props:Props){
 function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgnoreNotice=true}:Props&{item:InkItem;memory:Map<string,MemoryDraft>}){
  const key=path+':'+item.id;let entry=memory.get(key);if(!entry){entry={text:'',revision:null,loaded:false,dirty:false,enabled:false,sequence:0,queue:Promise.resolve()};memory.set(key,entry);}const draft=entry;
  const [text,setText]=useState(draft.text),[draftNotice,setDraftNotice]=useState(false),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[confirmDelete,setConfirmDelete]=useState(false);
- const [question,setQuestion]=useState(''),[review,setReview]=useState<null|{purpose:'followup'|'summary';replyId:string;parentId:string;provider:string;required:boolean;from:string|null;description:string;packet:unknown;noteVersion:string;question:string;skills?:SkillsReview;modelSettings?:import('../../shared/setup.ts').ModelEffort;reviewId?:string;cap?:{amount:number;unit:string}|null;images?:ReviewedImageManifest}>(null),[confirmed,setConfirmed]=useState(false);
+ const [question,setQuestion]=useState(''),[review,setReview]=useState<null|{purpose:'followup'|'summary';replyId:string;parentId:string;provider:string;required:boolean;from:string|null;description:string;packet:unknown;noteVersion:string;question:string;skills?:SkillsReview;modelSettings?:import('../../shared/setup.ts').ModelEffort;reviewId?:string;cap?:{amount:number;unit:string}|null;images?:ReviewedImageManifest;codexSkills?:ReviewedCodexSkill[]}>(null),[confirmed,setConfirmed]=useState(false);
  const [imagesConfirmed,setImagesConfirmed]=useState(false);
  const imageDraft=useChatImages(null,setNotice,'thread',visible);
  const reviewedIds=review?.images?.images.map(image=>image.id);
@@ -116,14 +118,14 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgno
    const a=await api.assistance(),notice=await api.threadCall<{required:boolean;from:string|null;to:string;description:string}>('notice',{path,id:item.id});
    const replies=[initial,...t.followups,...(t.summary.reply?[t.summary.reply]:[])].filter(r=>r.generation.status==='complete');
    const imageIds=purpose==='followup'?imageDraft.images.map(image=>image.id):[];
-   const replyId=crypto.randomUUID(),parentId=replies.at(-1)?.id??item.id,response=await api.threadCall<{packet:unknown;noteVersion:string;skills?:SkillsReview;review?:{id:string;provider:string;modelSettings?:import('../../shared/setup.ts').ModelEffort;cap:{amount:number;unit:string}|null;images?:ReviewedImageManifest};notice?:typeof notice}>('preview',{path,id:item.id,purpose,question,replyId,parentId,...(imageIds.length?{imageIds}:{})});
+   const replyId=crypto.randomUUID(),parentId=replies.at(-1)?.id??item.id,response=await api.threadCall<{packet:unknown;noteVersion:string;skills?:SkillsReview;review?:{id:string;provider:string;modelSettings?:import('../../shared/setup.ts').ModelEffort;cap:{amount:number;unit:string}|null;images?:ReviewedImageManifest;codexSkills?:ReviewedCodexSkill[]};notice?:typeof notice}>('preview',{path,id:item.id,purpose,question,replyId,parentId,...(imageIds.length?{imageIds}:{})});
    const pinnedNotice=response.notice??notice;
    if(imageIds.length&&!response.review?.images)throw Error('The attachments were not reviewed. Review the reply again.');
-   setImagesConfirmed(false);setConfirmed(!pinnedNotice.required);setReview({purpose,replyId,parentId,provider:response.review?.provider??a.provider??'claude',question,...pinnedNotice,...response,modelSettings:response.review?.modelSettings,reviewId:response.review?.id,cap:response.review?.cap,images:response.review?.images});
+   setImagesConfirmed(false);setConfirmed(!pinnedNotice.required);setReview({purpose,replyId,parentId,provider:response.review?.provider??a.provider??'claude',question,...pinnedNotice,...response,modelSettings:response.review?.modelSettings,reviewId:response.review?.id,cap:response.review?.cap,images:response.review?.images,codexSkills:response.review?.codexSkills});
   }catch(e){fail(e);}finally{setBusy(false);}
  };
  const send=async()=>{if(!review||busy||!confirmed||reviewedIds&&(!sameImages||!imagesConfirmed))return;setBusy(true);try{
-  const body={path,id:item.id,inkVersion:live.current.version,replyId:review.replyId,parentId:review.parentId,purpose:review.purpose,question:review.question,noteVersion:review.noteVersion,confirmed,...(review.reviewId?{reviewId:review.reviewId}:{}),...(reviewedIds?{imageIds:reviewedIds,confirmImages:true}:{})};
+  const body={path,id:item.id,inkVersion:live.current.version,replyId:review.replyId,parentId:review.parentId,purpose:review.purpose,question:review.question,noteVersion:review.noteVersion,confirmed,...(review.reviewId?{reviewId:review.reviewId}:{}),...(reviewedIds?{imageIds:reviewedIds,confirmImages:true}:{}),...(review.codexSkills?.length?{confirmSkills:true}:{})};
   const s=await api.threadCall<InkSnapshot>('invoke',body);rememberQuestion(path,review.replyId,review.purpose==='summary'?'Closing summary':review.question);update(s);setQuestion('');setReview(null);
   if(reviewedIds)imageDraft.clear();
  }catch(e){fail(e);}finally{setBusy(false);}};
@@ -151,10 +153,11 @@ function ThreadCard({item,path,version,saved,insert,memory,visible=true,showIgno
    <p className="small muted">{selectionLabel(review.modelSettings)}. Each reply uses a fresh CLI context with only the reviewed app-kept history.</p>
    {review.cap&&<p className="small muted">Allowance for this request: {review.cap.amount.toLocaleString()} {review.cap.unit}. Reported after the turn; if unreported, the full allowance is charged conservatively. Another reply needs a new review.</p>}
    <SkillsReviewList review={review.skills}/>
+   <CodexSkillsReview skills={review.codexSkills}/>
    <details><summary>Exact redacted request</summary><pre>{JSON.stringify(review.packet,null,2)}</pre></details>
    {review.required&&<label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>Switch from {providerLabel(review.from??'claude')} to {providerLabel(review.provider)}: {review.description} Confirm this first change.</label>}
    {reviewedIds&&sameImages&&<ImageConfirmation images={imageDraft.images} checked={imagesConfirmed} onChange={setImagesConfirmed}/>}
-   <button disabled={busy||!confirmed||!!reviewedIds&&(!imagesConfirmed||!sameImages)} onClick={()=>void send()}>Send reply</button><button onClick={()=>setReview(null)}>Cancel write-back</button></section>}
+   <button disabled={busy||!confirmed||!!reviewedIds&&(!imagesConfirmed||!sameImages)} onClick={()=>void send()}>{review.codexSkills?.length?'Send reply with reviewed skills':'Send reply'}</button><button onClick={()=>setReview(null)}>Cancel write-back</button></section>}
   <div className="thread-actions"><button disabled={busy} onClick={()=>void act({type:t.resolvedAt?'unresolve':'resolve'})}>{t.resolvedAt?'Reopen thought':'Resolve thought'}</button><button disabled={busy} onClick={()=>void act({type:'dismiss'})}>Dismiss thread</button><button onClick={()=>setConfirmDelete(true)}>Delete thread…</button></div>
   {confirmDelete&&<DeleteConfirm busy={busy} cancel={()=>setConfirmDelete(false)} remove={()=>void act({type:'delete',confirmed:true})}/>}
  </article>;

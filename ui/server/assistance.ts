@@ -1,7 +1,7 @@
 import type {Diagram,DiagramIssue} from '../shared/diagram.ts';
 import { randomUUID } from 'node:crypto';
 import { mapInkItems } from '../shared/anchor-mapping.ts';
-import { freezeInvocation, type Invocation } from '../shared/invocation.ts';
+import { freezeInvocation, type Invocation, type ReviewedCodexSkill } from '../shared/invocation.ts';
 import type { InkItem, Generation } from '../shared/ink.ts';
 import { InkStore, type InkSnapshot } from './ink-store.ts';
 import { textHash } from './anchor-cache.ts';
@@ -20,6 +20,7 @@ import { nodeFor, SKILLS_ONLY_WITH_SKILL_RENDERER, type SkillsReview } from '../
 import type {CouncilCap} from '../shared/council.ts';
 import type {InvokedUsage} from '../shared/invoked-usage.ts';
 import type {RoleRouting} from './providers/routing.ts';
+import type {CodexSkillConsent} from './providers/codex-skills.ts';
 import {ProviderReviews,type ReviewedInvocation} from './providers/invoked-review.ts';
 import {ImageStore} from './image-store.ts';
 import {InvalidImageReference} from './chat/reply.ts';
@@ -45,9 +46,9 @@ export class Assistance {
   private reviews:ProviderReviews;
   private skillReviews:ProviderReviews;
   private images:ImageStore;
-  constructor(store: Store, ink: InkStore, provider: Provider, notify: (path: string) => void = () => {}, validationLog:ValidationLog=privateValidationLog(), extras?: ExtrasFor,routing?:RoleRouting,images=new ImageStore(store.rootReal)) {
+  constructor(store: Store, ink: InkStore, provider: Provider, notify: (path: string) => void = () => {}, validationLog:ValidationLog=privateValidationLog(), extras?: ExtrasFor,routing?:RoleRouting,images=new ImageStore(store.rootReal),codexSkills?:CodexSkillConsent) {
     this.routing=routing;
-    this.reviews=new ProviderReviews('invoked',routing,provider);
+    this.reviews=new ProviderReviews('invoked',routing,provider,codexSkills);
     this.skillReviews=new ProviderReviews('skill-diagram',routing,provider);
     this.validationLog=validationLog;this.extras=extras;
     this.store = store; this.ink = ink; this.provider = provider; this.notify = notify;
@@ -98,31 +99,33 @@ export class Assistance {
       if(frozen.skill)throw new PathError(409,'skill_renderer','Codex Skill diagrams use the built-in drawing instructions. Installed skill opt-in is unavailable.');
       return {request:{...request,skillFormat:'codex-svg' as const},names:[],review:null};
     }
-    return this.withExtras(request,frozen.skill);
+    return this.withExtras(request,frozen.skill,provider==='codex');
   }
 
   /** The node's persona goes on every request; its skills only when something loaded. Names are what gets recorded on the answer. */
-  private async withExtras(base: Request, pick?: string): Promise<{ request: Request; names: string[]; review: SkillsReview | null }> {
+  private async withExtras(base: Request, pick?: string, codex=false): Promise<{ request: Request; names: string[]; review: SkillsReview | null }> {
     if (!this.extras) return { request: base, names: [], review: null };
-    const node = nodeFor(base.action, base.question), e = await (node === 'visualize' && base.render === 'skill' ? this.extras(node, { id: pick }) : this.extras(node));
+    const node = nodeFor(base.action, base.question), e = await (codex ? this.extras(node,{skipSkills:true}) : node === 'visualize' && base.render === 'skill' ? this.extras(node, { id: pick }) : this.extras(node));
+    if(codex)return {request:{...base,persona:e.persona},names:[],review:null};
     // Skills attached to Visualize belong to the Skill renderer. The Built-in renderer draws from the app's own JSON spec and carries none of them.
     if (node === 'visualize' && base.render !== 'skill') return { request: { ...base, persona: e.persona }, names: [],
       review: e.review ? { loaded: [], skipped: [], missing: [], note: SKILLS_ONLY_WITH_SKILL_RENDERER } : null };
     return { request: { ...base, persona: e.persona, ...(e.skills.loaded.length ? { skills: e.skills } : {}) }, names: e.names, review: e.review };
   }
   imageAvailability(){return this.reviews.imageAvailability();}
-  async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview;review?:{id:string;provider:string;cap:CouncilCap|null;modelSettings:import('../shared/setup.ts').ModelEffort;modelNotice?:string;images?:ReviewedImageManifest} }> {
+  async preview(input: Invocation): Promise<ReturnType<typeof prepareRequest> & { skills?: SkillsReview;review?:{id:string;provider:string;cap:CouncilCap|null;modelSettings:import('../shared/setup.ts').ModelEffort;modelNotice?:string;images?:ReviewedImageManifest;codexSkills?:ReviewedCodexSkill[]} }> {
     const frozen = freezeInvocation(input);
     const reviews=frozen.renderer==='skill'?this.skillReviews:this.reviews;
     const selected=await reviews.selection();
     const images=await reviews.reviewImages(this.images,selected,frozen.imageIds);
     const { request, review } = await this.invocationRequest(frozen,selected?.provider.id);
     this.checkSkillRenderer(frozen.renderer, request,selected?.provider.id??this.provider.name);
-    const packet = prepareRequest(request,images);
+    const skills=await reviews.skillPacket(selected?.provider.id,request);
+    const packet = prepareRequest(skills.request,images);
     // The instruction in the packet is the exact text; "skills" beside it says what was loaded, skipped or not installed.
     const prepared=review?{...packet,skills:review}:packet;
     if(!selected)return prepared;
-    return {...prepared,review:reviews.issue(selected,invocationFingerprint(frozen),packet,images)};
+    return {...prepared,review:reviews.issue(selected,invocationFingerprint(frozen),packet,images,skills)};
   }
   private serial<T>(fn: () => Promise<T>): Promise<T> { const p = this.writes.catch(() => {}).then(fn); this.writes = p; return p; }
   private async mutate(path: string, before: string, change: (items: InkItem[], text: string | null) => InkItem[]): Promise<InkSnapshot> {
@@ -149,15 +152,17 @@ export class Assistance {
     // Transcript context stays none. Optional source selection is a later slice;
     // never discover a user's global sessions or transmit one implicitly.
     const reviews=frozen.renderer==='skill'?this.skillReviews:this.reviews;
-    const selected=frozen.renderer==='skill'&&this.routing?await reviews.selection():undefined;
-    const {request,names}=await this.invocationRequest(frozen,selected?.provider.id);
+    const selected=await reviews.selection();
+    const base=await this.invocationRequest(frozen,selected?.provider.id);
+    const skills=await reviews.skillPacket(selected?.provider.id,base.request),request=skills.request;
+    const names=base.names;
     const imageInput=frozen.imageIds?.length||reviews.hasImages(frozen.reviewId)?
-      await reviews.confirmImages(this.images,await reviews.selection(),frozen):undefined;
+      await reviews.confirmImages(this.images,selected,frozen):undefined;
     const manifest=imageInput?.approved.manifest;
     const packet = prepareRequest(request,manifest);
     let provider=this.provider,reviewed:ReviewedInvocation|undefined;
     if(this.routing){
-      reviewed=await reviews.consume(frozen.reviewId,invocationFingerprint(frozen),packet);
+      reviewed=await reviews.consume(frozen.reviewId,invocationFingerprint(frozen),packet,frozen.confirmSkills);
       provider=reviews.provider(reviewed,this.ledger,{id:frozen.id,requestId:frozen.id,note:path},(usage,notice)=>{job.usage=usage;if(notice)job.notice=notice;});
     }
     this.checkSkillRenderer(frozen.renderer,request,provider.name);

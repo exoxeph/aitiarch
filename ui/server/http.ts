@@ -46,7 +46,8 @@ import {CouncilService} from './council.ts';
 import {PipelineConfigStore,PipelineConfigError,pipelineView,PIPELINE_CONFIG_MAX_BYTES} from './pipeline-config-store.ts';
 import {pipelinePreview,PreviewUnavailable} from './pipeline-preview.ts';
 import {excludedSnapshotPaths} from './harness/snapshot.ts';
-import {resolveConfigFolder} from './registry.ts';
+import {resolveConfigFolder,underTest} from './registry.ts';
+import {CodexSkillConsent,codexSkillRoots,NATIVE_SKILL_UNAVAILABLE} from './providers/codex-skills.ts';
 import {CouncilHistory} from './council-history.ts';
 import type {AvailabilityCheck} from './providers/council-availability.ts';
 import type {TurnAdapter} from './providers/turn.ts';
@@ -75,6 +76,7 @@ export interface AppOptions {
   usage?: {summary():Promise<import('../shared/usage.ts').UsageSummary>};
   /** Where the Skill library looks. Tests pass temp folders; the real app uses the usual places under your home folder and this project. */
   skillRoots?: SkillRoot[];
+  codexSkillRoots?: readonly string[];
   /** Harness chat sessions through the Claude Code CLI. `dir` (tests) overrides the per-project folder under local app data. */
   harness?: {command:string;prefixArgs?:string[];model?:string;effortSupported?:boolean;dir?:string;/** The folder whose .claude holds the CLI's transcripts (default: the user's home). Tests pass a fake one. */home?:string};
 }
@@ -160,11 +162,13 @@ export function createApp(opts: AppOptions) {
   const { store, watcher } = opts;
   const inkReady = InkStore.open(store.rootReal);
   const stagedImages=new ImageStore(store.rootReal);
+  const codexSkills=new CodexSkillConsent(store.rootReal,opts.codexSkillRoots??(underTest()||opts.skillRoots?[]:
+    codexSkillRoots(homedir(),path.dirname(store.rootReal),process.env.CODEX_HOME||undefined)));
   const clients = new Set<http.ServerResponse>();
   const assistance = inkReady.then(ink => new Assistance(store, ink, opts.provider ?? {
     checkAvailability: async () => ({ available: false, code: "unsupported_cli", message: "Claude is not configured. Start with --claude and an absolute executable path. Codex is disabled." }),
     invoke: async () => { throw new ProviderError("unsupported_cli"); },
-  }, path => { for (const c of clients) c.write(`event: ink\ndata: ${JSON.stringify({ type: "ink", path })}\n\n`); }, undefined, (node, one) => nodeSettings.extras(node, one),opts.provider?.name==='chatgpt-plan'?undefined:opts.council?.routing,stagedImages));
+  }, path => { for (const c of clients) c.write(`event: ink\ndata: ${JSON.stringify({ type: "ink", path })}\n\n`); }, undefined, (node, one) => nodeSettings.extras(node, one),opts.provider?.name==='chatgpt-plan'?undefined:opts.council?.routing,stagedImages,codexSkills));
   let port = 0;
   // Shared with the multi-project host when it embeds this app; otherwise this app is its own front door.
   const security = opts.security ?? createSecurity({ port: () => port, extraOrigins: opts.allowOrigins, requireLaunch: opts.requireLaunch });
@@ -235,14 +239,14 @@ export function createApp(opts: AppOptions) {
   const councilReady=opts.council?Promise.all([inkReady,councilIndexReady]).then(async([ink,index])=>new CouncilService({store,ink,index:index!,history:new CouncilHistory(index!,1024*1024,store.rootReal),availabilityChecks:opts.council!.availabilityChecks,ledger:new (await import('./ledger-store.ts')).LedgerStore(store.rootReal),adapters:opts.council!.adapters,routing:opts.council!.routing})):Promise.resolve(null);
   const normalReady=Promise.all([councilIndexReady,councilReady]).then(([index,council])=>index&&council?new NormalChat({index,questions:new QuestionStore(index.dir),council,adapters:opts.council!.adapters,routing:opts.council!.routing}):undefined);
   const imageRecovery=stagedImages.recoverAbandoned().catch(()=>{console.warn('Private image recovery was unavailable for this notebook.');});
-  const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady,normalReady]).then(([ink,harness,normal])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,node=>nodeSettings.extras(node),harness??undefined,diagramImages,normal,{store:stagedImages,delivery:opts.chatImageDelivery});chatRef.resolve(runtime);return runtime;});
+  const chatReady:Promise<ChatRuntime>=Promise.all([inkReady,harnessReady,normalReady]).then(([ink,harness,normal])=>{const runtime=new ChatRuntime(store,ink,chatStore,opts.provider,opts.sessionModules,(node,options)=>nodeSettings.extras(node,options),harness??undefined,diagramImages,normal,{store:stagedImages,delivery:opts.chatImageDelivery});chatRef.resolve(runtime);return runtime;});
   const chatInsertion=insertionsReady.then(insertions=>new ChatInsertion(store,chatStore,insertions));
   const councilInsertion=insertionsReady.then(insertions=>new CouncilInsertion(store,insertions));
   const investigateInsertion=insertionsReady.then(insertions=>new InvestigateInsertion(store,insertions));
   const threadsReady=inkReady.then(async ink=>new ThreadStore(ink,uiStateStore,(await assistance).ledger));
   const runtimeReady=threadsReady.then(threads=>new ThreadRuntime(store,threads,opts.provider??{
     name:'claude',checkAvailability:async()=>({available:false,code:'unsupported_cli',message:'Provider disabled. Enable it explicitly at server startup.'}),invoke:async()=>{throw new ProviderError('unsupported_cli');}
-  },path=>{for(const c of clients)c.write(`event: ink\ndata: ${JSON.stringify({type:'ink',path})}\n\n`);},node=>nodeSettings.extras(node),opts.provider?.name==='chatgpt-plan'?undefined:opts.council?.routing,stagedImages));
+  },path=>{for(const c of clients)c.write(`event: ink\ndata: ${JSON.stringify({type:'ink',path})}\n\n`);},(node,options)=>nodeSettings.extras(node,options),opts.provider?.name==='chatgpt-plan'?undefined:opts.council?.routing,stagedImages,codexSkills));
   const imageSurface=(surface:string|null)=>surface==='invoked'?assistance:surface==='thread'?runtimeReady:chatReady;
   async function readUiState(): Promise<UiState> {
     try { const {v,tabs,active,treeCollapsed,theme,confirmAdd,typingHelp,doubleSpacePeriod,smartCorrections,neverCorrect}=await uiStateStore.read();return {v,tabs,active,...(treeCollapsed!==undefined?{treeCollapsed}:{}),...(theme!==undefined?{theme}:{}),...(confirmAdd!==undefined?{confirmAdd}:{}),...(typingHelp!==undefined?{typingHelp}:{}),...(doubleSpacePeriod!==undefined?{doubleSpacePeriod}:{}),...(smartCorrections!==undefined?{smartCorrections}:{}),...(neverCorrect!==undefined?{neverCorrect}:{})}; }
@@ -398,6 +402,22 @@ export function createApp(opts: AppOptions) {
     if(url.pathname==='/api/skills'&&req.method==='GET'){
       const ids=(url.searchParams.get('ids')??'').split(',').filter(Boolean);
       return json(res,200,skillLibrary(await discoveredSkills(url.searchParams.get('refresh')==='1'),{q:url.searchParams.get('q')??'',ids,limit:Number(url.searchParams.get('limit'))||undefined}));
+    }
+    if(url.pathname==='/api/codex-skills'){
+      if(req.method==='GET')return json(res,200,{skills:await codexSkills.inventory(),nativeUnavailable:NATIVE_SKILL_UNAVAILABLE});
+      if(req.method!=='PUT')return json(res,405,{error:'method_not_allowed'});
+      const raw=await readBody(req,1024);
+      if(!raw||typeof raw!=='object'||Array.isArray(raw))return json(res,400,{error:'invalid_skill_consent'});
+      const {role,pathHash,enabled,contentHash}=raw as Record<string,unknown>;
+      if((role!=='invoked'&&role!=='thread-reply')||typeof pathHash!=='string'||typeof enabled!=='boolean')
+       return json(res,400,{error:'invalid_skill_consent'});
+      try{
+       if(enabled){
+        if(typeof contentHash!=='string')return json(res,400,{error:'invalid_skill_consent'});
+        await codexSkills.approve(role,pathHash,contentHash);
+       }else await codexSkills.revoke(role,pathHash);
+       return json(res,200,{enabled:await codexSkills.enabled(role)});
+      }catch{return json(res,409,{error:'skill_consent_unavailable',message:'Could not save skill consent. Check private storage and review the current skill again.'});}
     }
     if(url.pathname==='/api/usage'&&req.method==='GET'){
       const chats=(await chatReady).usage(),h=await harnessReady,investigate=h?await h.investigate.usage():null;
@@ -728,7 +748,7 @@ export function createApp(opts: AppOptions) {
     if (url.pathname.startsWith("/api/assistance/") && req.method === "PUT") {
       const b = await readBody(req) as Record<string, unknown>, service = await assistance;
       if (url.pathname === "/api/assistance/preview" || url.pathname === "/api/assistance/invoke") {
-        const input = { id: b.id, path: b.path, action: b.action, question: b.question, text: b.text, from: b.from, to: b.to, ...(b.reviewId===undefined?{}:{reviewId:b.reviewId}), ...(b.renderer === undefined ? {} : { renderer: b.renderer }), ...(b.skill === undefined ? {} : { skill: b.skill }),...(b.imageIds===undefined?{}:{imageIds:b.imageIds}),...(b.confirmImages===true?{confirmImages:true}:{}) } as Invocation;
+        const input = { id: b.id, path: b.path, action: b.action, question: b.question, text: b.text, from: b.from, to: b.to, ...(b.reviewId===undefined?{}:{reviewId:b.reviewId}), ...(b.renderer === undefined ? {} : { renderer: b.renderer }), ...(b.skill === undefined ? {} : { skill: b.skill }),...(b.imageIds===undefined?{}:{imageIds:b.imageIds}),...(b.confirmImages===true?{confirmImages:true}:{}),...(b.confirmSkills===true?{confirmSkills:true}:{}) } as Invocation;
         if (url.pathname.endsWith("preview")) return json(res, 200, await service.preview(input));
         return json(res, 202, await service.start(input));
       }

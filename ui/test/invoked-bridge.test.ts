@@ -35,6 +35,11 @@ async function bridge(adapter:TurnAdapter,turns:unknown[]=[]){
  const {createInvokedCodexBridge}=await import('../server/providers/invoked-bridge.ts');
  return createInvokedCodexBridge({adapter,checkAvailability:async()=>({available:true}),cap:limit,onTurn:async metadata=>{turns.push(metadata);}});
 }
+it('rejects skill text on a Codex bridge without a send review callback',async()=>{
+ const provider=await bridge(fakeAdapter([{type:'complete',answer:resultText}]));
+ await expect(provider.invoke({...request,skills:{text:'An unreviewed instruction.',loaded:[],skipped:[],truncated:false}}))
+  .rejects.toThrow(/reviewed Codex skills/i);
+});
 const fakeAdapter=(events:TurnEvent[]):TurnAdapter=>({id:'codex',label:'Codex',safetyLabel:'contained',async *startTurn(){yield*events;}});
 async function fixture(provider:Provider,records:unknown[]=[],routing?:RoleRouting){
  const bytes=Buffer.from('\uFEFF'+note.replace(/\n/g,'\r\n'));

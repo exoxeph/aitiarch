@@ -5,7 +5,7 @@ import {invokedUsageLabel,type InvokedUsage} from '../../shared/invoked-usage.ts
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { EditorView } from '@codemirror/view';
 import { captureAnchor } from '../../shared/anchors.ts';
-import type { Invocation, Renderer } from '../../shared/invocation.ts';
+import type { Invocation, Renderer, ReviewedCodexSkill } from '../../shared/invocation.ts';
 import { api, ApiError, type InkSnapshot } from '../api.ts';
 import type { NoteSession } from './session.ts';
 import type { InvokeAction, SelectedSource } from './toolbar.ts';
@@ -13,6 +13,7 @@ import { VISUALIZE_QUESTION } from '../../shared/diagram.ts';
 import { addInk, removeInk, setInk } from './ink.ts';
 import {rememberQuestion} from '../threads/questions.ts';
 import {Thinking} from '../ink/streaming.tsx';
+import {CodexSkillsReview} from '../skills/CodexSkillsReview.tsx';
 import {SkillsReviewList} from '../skills/SkillsReviewList.tsx';
 import {SkillPick} from '../skills/SkillPick.tsx';
 import {PersonaSwitch} from '../skills/PersonaSwitch.tsx';
@@ -36,6 +37,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   const imageDraft=useChatImages(path,setImageNotice,'invoked',!!draft&&!isVisualize);
   const imageIds=imageDraft.images.map(image=>image.id);
   const reviewedImages=(draft?.packet as {review?:{images?:ReviewedImageManifest}}|undefined)?.review?.images?.images??[];
+  const reviewedSkills=(draft?.packet as {review?:{codexSkills?:ReviewedCodexSkill[]}}|undefined)?.review?.codexSkills??[];
   const imagesReviewed=imageIds.length===reviewedImages.length&&imageIds.every((id,i)=>id===reviewedImages[i].id);
   const canSendImages=imagesReviewed&&!imageDraft.loading&&(!imageIds.length||imagesConfirmed&&imageDraft.support.available);
   const providerLabel=draft?.providerLabel??availableProviderLabel;
@@ -112,7 +114,7 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
   useEffect(()=>{if(!draft)return;return transient(()=>document.querySelector<HTMLElement>('.ink-surface[data-note-path='+JSON.stringify(path)+'] .invocation-review'),cancelPreview,180,()=>busy||(draft.input.action==='ask'&&draft.input.question!==VISUALIZE_QUESTION&&!!draft.input.question.trim()));},[draft,busy,path]);
   const send = async () => {
     if (!draft?.packet || busy || !canSendImages) return;
-    const input = {...draft.input,...(imageIds.length?{confirmImages:true}:{})};
+    const input = {...draft.input,...(imageIds.length?{confirmImages:true}:{}),...(reviewedSkills.length?{confirmSkills:true}:{})};
     setBusy(true);
     try {
       // Save only the human's current draft through the existing byte-preserving
@@ -193,13 +195,14 @@ export function useInvocations(path: string, view: RefObject<EditorView | null>,
       <SkillsReviewList review={(draft.packet as { skills?: SkillsReview }).skills} />
       <details><summary>Exact redacted request</summary><pre>{JSON.stringify(exactRequest(draft.packet), null, 2)}</pre></details></details>}
     {hasPacket && <p className="small muted">{providerLabel} · {selectionLabel((draft.packet as {review?:{modelSettings?:import('../../shared/setup.ts').ModelEffort}}).review?.modelSettings)}. This request uses a fresh CLI context.</p>}
+    {hasPacket&&<CodexSkillsReview skills={reviewedSkills}/>}
     {hasPacket && modelNotice && <p className="small muted">{modelNotice}</p>}
     {hasPacket && <p className="small muted ask-hint">{canSendImages?'Enter to send · Esc to cancel':'Confirm the reviewed images before sending.'}</p>}
     {hasPacket&&reviewedCap&&<p className="small muted">{providerLabel} allowance for this request: {reviewedCap.amount.toLocaleString()} {reviewedCap.unit}. Usage is reported after the turn; if it is not reported, the full allowance is charged conservatively. Another request needs a new review.</p>}
     {draft.error && <p role="alert">{draft.error}</p>}
     {draft.warnings?.map(warning => <p role="note" key={warning}>{warning}</p>)}
     <div className="attach-actions">{hasPacket
-      ? <button ref={sendRef} disabled={busy||!canSendImages} onClick={() => void send()}>Send to {providerLabel}</button>
+      ? <button ref={sendRef} disabled={busy||!canSendImages} onClick={() => void send()}>Send to {providerLabel}{reviewedSkills.length?' with reviewed skills':''}</button>
       : <button disabled={busy || imageDraft.loading || (draft.input.action === 'ask' && !draft.input.question.trim())} onClick={() => void review(draft.input)}>Review request</button>}
       <button disabled={busy} onClick={cancelPreview}>Cancel preview</button></div>
   </section> : null;

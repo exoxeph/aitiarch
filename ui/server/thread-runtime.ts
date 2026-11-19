@@ -5,6 +5,7 @@ import {ProductValidationError} from './product-validation.ts';
 import type {ExtrasFor} from './node-settings.ts';
 import type {SkillsReview} from '../shared/node-settings.ts';
 import type {ThreadFailure} from '../shared/threads.ts';
+import type {CodexSkillConsent} from './providers/codex-skills.ts';
 import {ProviderReviews,staleReview,type ReviewedInvocation} from './providers/invoked-review.ts';
 import type {RoleRouting} from './providers/routing.ts';
 import type {InkItem} from '../shared/ink.ts';
@@ -13,7 +14,7 @@ import {PathError} from './paths.ts';
 import {ImageStore} from './image-store.ts';
 import {InvalidImageReference} from './chat/reply.ts';
 import {validImageIds} from '../shared/image-attachments.ts';
-export interface ThreadRequest {path:string;id:string;inkVersion:string|null;replyId:string;parentId:string;purpose:'followup'|'summary';question:string;confirmed:boolean;noteVersion?:string;reviewId?:string;imageIds?:string[];confirmImages?:boolean}
+export interface ThreadRequest {path:string;id:string;inkVersion:string|null;replyId:string;parentId:string;purpose:'followup'|'summary';question:string;confirmed:boolean;noteVersion?:string;reviewId?:string;imageIds?:string[];confirmImages?:boolean;confirmSkills?:boolean}
 type PreviewInput=Pick<ThreadRequest,'path'|'id'|'replyId'|'purpose'|'question'|'imageIds'> & {parentId?:string};
 function imageIds(input:PreviewInput){
  if(input.imageIds===undefined)return;
@@ -41,7 +42,7 @@ export class ThreadRuntime {
  private reviews:ProviderReviews;private routing?:RoleRouting;
  private questions=new Map<string,string>();private usage=new Map<string,{usage:InvokedUsage;notice?:string}>();
  private images:ImageStore;
- constructor(store:Store,threads:ThreadStore,provider:Provider,notify:(path:string)=>void=()=>{},extras?:ExtrasFor,routing?:RoleRouting,images=new ImageStore(store.rootReal)){this.store=store;this.threads=threads;this.provider=provider;this.notify=notify;this.extras=extras;this.routing=routing;this.reviews=new ProviderReviews('thread-reply',routing,provider);this.images=images;}
+ constructor(store:Store,threads:ThreadStore,provider:Provider,notify:(path:string)=>void=()=>{},extras?:ExtrasFor,routing?:RoleRouting,images=new ImageStore(store.rootReal),codexSkills?:CodexSkillConsent){this.store=store;this.threads=threads;this.provider=provider;this.notify=notify;this.extras=extras;this.routing=routing;this.reviews=new ProviderReviews('thread-reply',routing,provider,codexSkills);this.images=images;}
  imageAvailability(){return this.reviews.imageAvailability();}
  async notice(path:string,id:string){const selected=await this.reviews.selection();return this.continuity(path,id,selected?.provider.id==='codex'?'codex':this.provider.name??'claude');}
  /** Only accepted app-side AI messages, never CLI sessions, drafts or hidden summaries.
@@ -50,7 +51,7 @@ export class ThreadRuntime {
   return [{id:i.id,body:i.body,generation:i.generation},...(i.thread?.followups??[])].filter(r=>r.generation?.status==='complete').map(r=>({id:r.id,user:this.questions.get(r.id)??'Earlier question unavailable after reload.',assistant:r.body}));
  }
  private async request(input:PreviewInput,i:InkItem,note:string,codex:boolean){
-  return this.withExtras({id:input.replyId,action:'ask',surface:'thread-reply',question:input.purpose==='summary'?'Provide a closing summary of the selected note. Never write or suggest a takeaway, why or failed-reason.':input.question,selection:i.anchor.quote,note,decisions:[],turns:codex?this.history(i):[]});
+  return this.withExtras({id:input.replyId,action:'ask',surface:'thread-reply',question:input.purpose==='summary'?'Provide a closing summary of the selected note. Never write or suggest a takeaway, why or failed-reason.':input.question,selection:i.anchor.quote,note,decisions:[],turns:codex?this.history(i):[]},codex);
  }
  private async continuity(path:string,id:string,provider:'claude'|'codex'|'chatgpt-plan'){
   const notice=await this.threads.providerNotice(path,id,provider);
@@ -58,9 +59,10 @@ export class ThreadRuntime {
  }
  accounting(id:string){return this.usage.get(id)??{};}
  /** A follow-up or closing summary is an Ask: it carries the Ask step's persona, and its skills only when something loaded. */
- private async withExtras(base:Request):Promise<{request:Request;names:string[];review:SkillsReview|null}>{
+ private async withExtras(base:Request,codex:boolean):Promise<{request:Request;names:string[];review:SkillsReview|null}>{
   if(!this.extras)return {request:base,names:[],review:null};
-  const e=await this.extras('ask');
+  const e=await this.extras('ask',codex?{skipSkills:true}:undefined);
+  if(codex)return {request:{...base,persona:e.persona},names:[],review:null};
   return {request:{...base,persona:e.persona,...(e.skills.loaded.length?{skills:e.skills}:{})},names:e.names,review:e.review};
  }
  activeIds(){return new Set([...this.starting,...[...this.jobs].filter(([,j])=>j.active||j.retry).map(([id])=>id)]);}
@@ -71,8 +73,9 @@ export class ThreadRuntime {
   if(!i||i.attachment.status!=='attached'||note.text.slice(i.attachment.from,i.attachment.to)!==i.anchor.quote)throw new Error('Re-attach the thread before asking a new question.');
   const {request,review}=await this.request(input,i,note.text,selected?.provider.id==='codex');
   const images=await this.reviews.reviewImages(this.images,selected,draft);
-  const packet=prepareRequest(request,images);
-  return {noteVersion:note.version,packet,...(review?{skills:review}:{}),...(selected?{review:this.reviews.issue(selected,fingerprint(input),packet,images),notice:await this.continuity(input.path,input.id,selected.provider.id==='codex'?'codex':this.provider.name??'claude')}:{})};
+  const skills=await this.reviews.skillPacket(selected?.provider.id,request);
+  const packet=prepareRequest(skills.request,images);
+  return {noteVersion:note.version,packet,...(review?{skills:review}:{}),...(selected?{review:this.reviews.issue(selected,fingerprint(input),packet,images,skills),notice:await this.continuity(input.path,input.id,selected.provider.id==='codex'?'codex':this.provider.name??'claude')}:{})};
  }
  async start(input:ThreadRequest){
   input={...input,imageIds:imageIds(input)};
@@ -83,7 +86,8 @@ export class ThreadRuntime {
   if(!i||i.attachment.status!=='attached'||note.text.slice(i.attachment.from,i.attachment.to)!==i.anchor.quote)throw new Error('Re-attach the thread before asking a new question.');
   if(this.activeIds().size>=2)throw new Error('Two requests are already running. Wait before sending another.');
   const selected=await this.reviews.selection();
-  const {request,names}=await this.request(input,i,note.text,selected?.provider.id==='codex');
+  const base=await this.request(input,i,note.text,selected?.provider.id==='codex');
+  const {request}=await this.reviews.skillPacket(selected?.provider.id,base.request),names=base.names;
   let reviewed:ReviewedInvocation|undefined,provider=this.provider;
   // Confirm the provider switch before consuming its one-use approval.
   const providerName=selected?.provider.id==='codex'?'codex':provider.name??'claude';
@@ -91,7 +95,7 @@ export class ThreadRuntime {
   if(notice.required&&!input.confirmed)throw new Error('Confirm sending to a different provider.');
   const imageInput=await this.reviews.confirmImages(this.images,selected,input),manifest=imageInput?.approved.manifest;
   const packet=prepareRequest(request,manifest);
-  if(this.routing){reviewed=await this.reviews.consume(input.reviewId,fingerprint(input),packet);
+  if(this.routing){reviewed=await this.reviews.consume(input.reviewId,fingerprint(input),packet,input.confirmSkills);
    if(reviewed.provider.id!==selected?.provider.id)throw staleReview();
    provider=this.reviews.provider(reviewed,this.threads.ledger,{id:input.id,requestId:input.replyId,note:input.path},(usage,notice)=>this.usage.set(input.replyId,{usage,...(notice?{notice}:{})}));}
   if(this.jobs.has(input.replyId)||this.starting.has(input.replyId))throw new Error('Request id already used.');

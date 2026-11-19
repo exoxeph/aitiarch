@@ -1,4 +1,4 @@
-import {mkdtemp,readFile,writeFile} from 'node:fs/promises';
+import {mkdir,mkdtemp,readFile,writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {expect,it,vi} from 'vitest';
@@ -6,6 +6,7 @@ import {Assistance} from '../server/assistance.ts';
 import {Store} from '../server/store.ts';
 import {InkStore} from '../server/ink-store.ts';
 import {ImageStore} from '../server/image-store.ts';
+import {CodexSkillConsent} from '../server/providers/codex-skills.ts';
 import {resolveProjectStorage} from '../server/project-storage.ts';
 import {ProviderRegistry,descriptorFromAdapter,type InvokedBridgeFactory} from '../server/providers/registry.ts';
 import {createInvokedCodexBridge} from '../server/providers/invoked-bridge.ts';
@@ -20,7 +21,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4n
 const note='# Synthetic\n\nThe selected line is frozen.\n\nAnother line.\n';
 const quote='The selected line is frozen.';
 const ready=async()=>({available:true as const});
-async function fixture(id:'claude'|'codex',action:'think'|'ask',mode:'invalid'|'echo'|'refusal'|'cli'|'fake'='fake'){
+async function fixture(id:'claude'|'codex',action:'think'|'ask',mode:'invalid'|'echo'|'refusal'|'cli'|'fake'='fake',withSkill=false){
  const temp=await mkdtemp(path.join(os.tmpdir(),'aitiarch-invoked-images-'));
  const root=path.join(temp,'.aitiarch'),config=await mkdtemp(path.join(temp,'config-'));
  expect((await resolveProjectStorage(root,{create:true})).ok).toBe(true);
@@ -54,7 +55,15 @@ async function fixture(id:'claude'|'codex',action:'think'|'ask',mode:'invalid'|'
   return {id:request.id,provider:'claude' as const,model:null,usage:null,...result(options.imageInput.approved.manifest)};
  })};
  const store=await Store.open(root),ink=await InkStore.open(root);
- const service=new Assistance(store,ink,provider,undefined,{write:async()=>{}},undefined,()=>registry.snapshot(config,async()=>structuredClone(setup)),images);
+ const skillRoot=path.join(temp,'skills'),consent=new CodexSkillConsent(root,[skillRoot]);
+ if(withSkill){
+  const dir=path.join(skillRoot,'example');
+  await mkdir(dir,{recursive:true});
+  await writeFile(path.join(dir,'SKILL.md'),'---\nname: example\ndescription: Synthetic skill\nclassification: read-only\n---\nDescribe the image briefly.');
+  const [entry]=await consent.inventory();
+  await consent.approve('invoked',entry.pathHash,entry.contentHash!);
+ }
+ const service=new Assistance(store,ink,provider,undefined,{write:async()=>{}},undefined,()=>registry.snapshot(config,async()=>structuredClone(setup)),images,withSkill?consent:undefined);
  const input:Invocation&{imageIds:string[]}={id:'synthetic-invoke',path:'fixture.md',action,question:action==='ask'?'What shape is visible?':'',
   text:note,from:note.indexOf(quote),to:note.indexOf(quote)+quote.length,imageIds:[staged.id]};
  return {root,ink,service,input,staged,calls,setup,record};
@@ -77,6 +86,23 @@ it.each([['claude','think'],['codex','ask']] as const)('reviews and sends frozen
  const saved=JSON.stringify({item,ledger:await f.service.ledger.read()});
  expect(saved).not.toContain(f.staged.id);
  expect(saved).not.toContain(png.toString('base64'));
+});
+
+it('sends Codex images and reviewed instructions together only after both confirmations',async()=>{
+ const f=await fixture('codex','ask','fake',true);
+ const packet=await f.service.preview(f.input);
+ expect(packet.review?.codexSkills).toEqual([expect.objectContaining({name:'example',classification:'read-only'})]);
+ expect(packet.review?.images?.images).toHaveLength(1);
+ const request={...f.input,reviewId:packet.review!.id};
+ await expect(f.service.start({...request,confirmSkills:true})).rejects.toThrow(/Confirm the reviewed images/);
+ await expect(f.service.start({...request,confirmImages:true})).rejects.toThrow(/Confirm the reviewed Codex skills/);
+ await f.service.start({...request,confirmImages:true,confirmSkills:true});
+ await f.service.wait(f.input.id);
+ expect(f.calls).toHaveLength(1);
+ expect(f.calls[0]).toContain('Describe the image briefly.');
+ const [item]=(await f.ink.read(f.input.path)).document.items;
+ expect(item.generation).toMatchObject({status:'complete',imageInterpretation:true});
+ expect(item.generation?.skills).toBeUndefined();
 });
 
 it.each(['invalid','echo'] as const)('fails closed on changed settings and an %s image response',async mode=>{
@@ -103,9 +129,9 @@ it('rejects a Codex refusal even when a valid image answer follows',async()=>{
 });
 
 it.each([['claude','think'],['claude','ask'],['codex','think'],['codex','ask']] as const)('sends %s %s images through the real launcher with a synthetic CLI',async(id,action)=>{
- const f=await fixture(id,action,'cli');
+ const f=await fixture(id,action,'cli',id==='codex');
  const packet=await f.service.preview(f.input);
- await f.service.start({...f.input,reviewId:packet.review!.id,confirmImages:true});
+ await f.service.start({...f.input,reviewId:packet.review!.id,confirmImages:true,confirmSkills:id==='codex'});
  await f.service.wait(f.input.id);
  const item=(await f.ink.read(f.input.path)).document.items[0];
  expect(item).toMatchObject({body:'Synthetic image interpretation.',generation:{status:'complete',imageInterpretation:true,evidence:[]}});

@@ -1,6 +1,7 @@
 import { captureAnchor } from './anchors.ts';
 import { VISUALIZE_QUESTION } from './diagram.ts';
 import {validImageIds} from './image-attachments.ts';
+export interface ReviewedCodexSkill {name:string;pathHash:string;contentHash:string;classification:'read-only';truncated:boolean}
 export type Renderer = 'builtin' | 'skill';
 export interface Invocation {
   id: string; path: string; action: 'think' | 'ask'; question: string;
@@ -13,6 +14,7 @@ export interface Invocation {
   reviewId?:string;
   imageIds?:string[];
   confirmImages?:boolean;
+  confirmSkills?:boolean;
 }
 export function freezeInvocation(input: Invocation) {
   if(input?.reviewId!==undefined&&(typeof input.reviewId!=='string'||!/^[a-f0-9-]{36}$/.test(input.reviewId)))throw new Error('Review again before sending.');

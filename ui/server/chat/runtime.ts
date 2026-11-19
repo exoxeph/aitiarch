@@ -199,7 +199,7 @@ export class ChatRuntime {
   // A one-off chat counts against its note; a conversation counts against itself (budget, hourly cap, calls), whichever note is open.
   const s=this.state(input.path,session?.id);if(session)s.usage.label=session.label;
   // The chat node's persona always rides along; its skills only when something loaded. Fixed here, so the review shows what is sent.
-  const extra=this.extras?await this.extras('chat'):null;
+  const extra=this.extras?await this.extras('chat',answerer==='codex'?{skipSkills:true}:undefined):null;
   // Earlier replies written in another mode are left out, not tagged: a tagged reply is still a worked example of the other style.
   const sameMode=s.history.filter(p=>p.persona===extra?.persona),otherModePairs=s.history.length-sameMode.length;
   let history=session?[]:sameMode.map(({id,user,assistant})=>({id,user,assistant}));while(history.length>CHAT_LIMITS.historyPairs||history.reduce((n,p)=>n+p.user.length+p.assistant.length,0)>CHAT_LIMITS.historyCharacters)history.shift();
@@ -208,7 +208,7 @@ export class ChatRuntime {
    history=normalHistory(messages.flatMap(m=>asked[m.id]?[{id:m.id,user:asked[m.id],assistant:m.body}]:[]));
   }
   const request:Request={id:input.id,action:'ask',chat:true,note:sources.find(x=>x.id==='N1')?.text??'',selection:redact(input.selection??''),decisions:sources.filter(x=>x.id!=='N1').map(x=>({id:x.id,text:x.text})),turns:history,question:redact(input.question)};
-  if(extra){request.persona=extra.persona;if(extra.skills.loaded.length)request.skills=extra.skills;}
+  if(extra){request.persona=extra.persona;if(answerer!=='codex'&&extra.skills.loaded.length)request.skills=extra.skills;}
   // A selection that goes with the request is recorded by size and line range, with the note it was taken from; its text never enters the ledger.
   if(request.selection)await appendLedger(this.ledger,{id:randomUUID(),inkId:'chat-'+hash(input.path),requestId:input.id,note:input.path,event:'context_read',moduleId:'this-note',sourceHash:hash('selection'),path:open,
    selection:{chars:request.selection.length,...(editor?.lines?{fromLine:editor.lines.from,toLine:editor.lines.to}:{})},at:new Date().toISOString()});
@@ -240,7 +240,7 @@ export class ChatRuntime {
   review.provider=answerer;if(selected&&!('available' in selected))review.modelSettings=selected.selection??{model:null,effort:null};if(!native&&!session&&this.provider?.demo===true)review.demo=true;
   if(switching)review.continuityNotice='Provider, model or effort changed. A fresh CLI context will be used; only the reviewed app-kept history is carried over.';
   if(carriedHistory!==undefined)review.carriedHistory=carriedHistory;
-  if(extra?.review)review.skills=extra.review;
+  if(answerer!=='codex'&&extra?.review)review.skills=extra.review;
   if(privateContext)review.ephemeral=true;
   if(session)review.session={id:session.id,label:session.label,turns:session.turns};
   if(native&&session){const plan=await this.normal!.plan(session.id,answerer,request.question,routing);review.normalPlan=plan.input;profile='notes';needsPlan=plan.needsApproval;
@@ -253,7 +253,7 @@ export class ChatRuntime {
   if(prepared.withheld.length)review.diagramsWithheld=prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title),why:WITHHELD_WORDS[w.reason]}));
   for(const [id,r] of this.reviews)if(Date.now()-r.created>600000)this.reviews.delete(id);
   if(this.reviews.size>=20)throw new ChatError('busy');
-  this.reviews.set(review.reviewId,{routing,answerer,review:structuredClone(review),request:structuredClone(request),skillNames:extra?.names??[],created:Date.now(),serial:s.serial,reservation:budget.next,...(profile?{profile}:{}),...(privateContext?{privateContext:true as const}:{}),...(session&&(native||withImages)?{session:{id:session.id}}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
+  this.reviews.set(review.reviewId,{routing,answerer,review:structuredClone(review),request:structuredClone(request),skillNames:answerer==='codex'?[]:extra?.names??[],created:Date.now(),serial:s.serial,reservation:budget.next,...(profile?{profile}:{}),...(privateContext?{privateContext:true as const}:{}),...(session&&(native||withImages)?{session:{id:session.id}}:{}),...(session&&sessionText?{session:{id:session.id},addendum:sessionText.addendum,manifest}:{}),...(diagramRefs.length?{diagrams:{open:prepared.open.map(o=>({n:o.ref.n,asset:o.ref.asset,title:o.ref.title})),note:open,all:diagramRefs.map(d=>({n:d.n,asset:d.asset})),earlier:[...earlier],withheld:prepared.withheld.map(w=>({n:w.ref.n,title:redact(w.ref.title).slice(0,80),why:WITHHELD_WORDS[w.reason]}))}}:{})});
   return review;
  }
  async send(input:{reviewId:string;confirmed?:boolean;dontAskAgain?:boolean;confirmImages?:boolean;imageIds?:readonly string[]},emit:(e:ChatEvent)=>void,signal?:AbortSignal):Promise<void>{

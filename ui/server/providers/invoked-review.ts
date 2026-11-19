@@ -6,18 +6,21 @@ import {activePipelineConfig} from '../../shared/pipeline-config.ts';
 import {invokedUsage,type InvokedUsage} from '../../shared/invoked-usage.ts';
 import type {CouncilCap} from '../../shared/council.ts';
 import type {RoleRouting} from './routing.ts';import type {ProviderDescriptor} from './registry.ts';
-import type {Provider} from './index.ts';import type {InvokedTurnMetadata} from './invoked-bridge.ts';
+import type {Provider,Request} from './index.ts';
+import type {CodexSkillConsent} from './codex-skills.ts';
+import type {ReviewedCodexSkill} from '../../shared/invocation.ts';
+import {VISUALIZE_QUESTION} from '../../shared/diagram.ts';import type {InvokedTurnMetadata} from './invoked-bridge.ts';
 import {imageDeliveryStatus} from './image-transport.ts';
 import type {ReviewedImageManifest,ImageAvailability} from '../../shared/image-attachments.ts';
 import {confirmImageManifest,reviewImageManifest} from '../chat/image-review.ts';
 import type {ImageStore} from '../image-store.ts';
 import type {ImageDeliveryInput} from './image-transport.ts';
-export interface ReviewedInvocation {created:number;fingerprint:string;packet:string;contextKey:string;provider:ProviderDescriptor;cap:CouncilCap|null;images?:ReviewedImageManifest}
+export interface ReviewedInvocation {created:number;fingerprint:string;packet:string;contextKey:string;provider:ProviderDescriptor;cap:CouncilCap|null;images?:ReviewedImageManifest;skillKey?:string}
 export const staleReview=()=>new PathError(409,'stale_review','The request or selected provider changed. Review again before sending. No provider was called.');
 export class ProviderReviews {
  private reviews=new Map<string,ReviewedInvocation>();
- private role:'invoked'|'thread-reply'|'skill-diagram';private routing?:RoleRouting;private legacy:Provider;
- constructor(role:ProviderReviews['role'],routing:RoleRouting|undefined,legacy:Provider){this.role=role;this.routing=routing;this.legacy=legacy;}
+ private role:'invoked'|'thread-reply'|'skill-diagram';private routing?:RoleRouting;private legacy:Provider;private skills?:CodexSkillConsent;
+ constructor(role:ProviderReviews['role'],routing:RoleRouting|undefined,legacy:Provider,skills?:CodexSkillConsent){this.role=role;this.routing=routing;this.legacy=legacy;this.skills=skills;}
  private factory(provider:ProviderDescriptor){
   return this.role==='skill-diagram'?provider.createSkillDiagramProvider:
    this.role==='invoked'?provider.createInvokedProvider:provider.createThreadProvider;
@@ -39,20 +42,29 @@ export class ProviderReviews {
   try{return (await this.selection())?.imageSupport??{available:false,status:'unsupported',reason:'Image delivery requires a verified Claude or Codex role.'};}
   catch(e){return {available:false,status:'unsupported',reason:e instanceof PathError?e.message:'The selected provider could not be verified.'};}
  }
+ async skillPacket(provider:string|undefined,request:Request){
+  if(!this.skills||provider!=='codex'||this.role==='skill-diagram'||request.question===VISUALIZE_QUESTION)return {request,skills:[] as ReviewedCodexSkill[],key:undefined};
+  const reviewed=await this.skills.reviewed(this.role).catch(()=>{throw staleReview();});
+  return {request:reviewed.skills.length?{...request,skills:reviewed.block}:request,skills:reviewed.skills,key:reviewed.key};
+ }
  async assert(review:ReviewedInvocation){
   const current=await this.selection();let freshKey:string|undefined;
   try{freshKey=await current?.currentContextKey?.(this.role);}catch{throw staleReview();}
   const cap=review.provider.id==='codex'?activePipelineConfig().council.caps.codex:null;
   if(!current||Date.now()-review.created>600000||review.contextKey!==current.contextKey||review.contextKey!==freshKey||review.provider.id!==current.provider.id||JSON.stringify(review.cap)!==JSON.stringify(cap))throw staleReview();
   if(review.images&&!current.imageSupport.available)throw staleReview();
+  if(review.skillKey!==undefined){
+   const skills=await this.skills?.reviewed(this.role).catch(()=>{throw staleReview();});
+   if(skills?.key!==review.skillKey)throw staleReview();
+  }
  }
- issue(selected:NonNullable<Awaited<ReturnType<ProviderReviews['selection']>>>,fingerprint:string,packet:unknown,images?:ReviewedImageManifest){
+ issue(selected:NonNullable<Awaited<ReturnType<ProviderReviews['selection']>>>,fingerprint:string,packet:unknown,images?:ReviewedImageManifest,skills?:{key?:string;skills:ReviewedCodexSkill[]}){
   const id=images?.sendId??randomUUID(),cap=selected.provider.id==='codex'?structuredClone(activePipelineConfig().council.caps.codex):null;
   for(const [key,value] of this.reviews)if(Date.now()-value.created>600000)this.reviews.delete(key);
   if(this.reviews.size>=100)this.reviews.delete(this.reviews.keys().next().value!);
-  this.reviews.set(id,{created:Date.now(),fingerprint,packet:JSON.stringify(packet),contextKey:selected.contextKey,provider:selected.provider,cap,...(images?{images:structuredClone(images)}:{})});
+  this.reviews.set(id,{created:Date.now(),fingerprint,packet:JSON.stringify(packet),contextKey:selected.contextKey,provider:selected.provider,cap,...(images?{images:structuredClone(images)}:{}),skillKey:skills?.key});
   return {id,provider:selected.provider.id,cap,modelSettings:selected.provider.selection??{model:null,effort:null},
-   ...(selected.modelNotice?{modelNotice:selected.modelNotice}:{}),...(images?{images}:{})};
+   ...(selected.modelNotice?{modelNotice:selected.modelNotice}:{}),...(images?{images}:{}),...(skills?.skills.length?{codexSkills:skills.skills}:{})};
  }
  async reviewImages(store:ImageStore,selected:Awaited<ReturnType<ProviderReviews['selection']>>,ids:readonly string[]|undefined){
   if(!ids?.length)return undefined;
@@ -73,8 +85,9 @@ export class ProviderReviews {
    return {approved,storage:store,version:selected.version};
   }catch{throw new PathError(409,'image_confirmation','Confirm the reviewed images, or attach them again if they changed.');}
  }
- async consume(id:string|undefined,fingerprint:string,packet:unknown){
+ async consume(id:string|undefined,fingerprint:string,packet:unknown,confirmSkills?:boolean){
   const review=id?this.reviews.get(id):undefined;if(!review)throw staleReview();
+  if(review.skillKey&&confirmSkills!==true)throw new PathError(409,'skill_confirmation','Confirm the reviewed Codex skills before sending.');
   await this.assert(review);
   if(review.fingerprint!==fingerprint||review.packet!==JSON.stringify(packet)||this.reviews.get(id!)!==review)throw staleReview();
   this.reviews.delete(id!);return review;
