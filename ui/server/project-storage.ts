@@ -6,9 +6,9 @@ import {promisify} from 'node:util';
 
 export const PRIVATE_PROJECT_PATHS=Object.freeze({
  state:'ui-state.json',ledger:'ledger.json',cache:'.cache',chat:'chat',insertionJournal:'insertions.json',
- skillDiagrams:'skill-diagrams',runs:'runs',measurements:'measurements',backups:'backups',usage:'usage.jsonl',images:'images',
+ skillDiagrams:'skill-diagrams',runs:'runs',measurements:'measurements',backups:'backups',usage:'usage.jsonl',images:'images',codexSkillConsent:'codex-skill-consent.json',
 } as const);
-const FILE_KEYS=new Set<keyof typeof PRIVATE_PROJECT_PATHS>(['state','ledger','insertionJournal','usage']);
+const FILE_KEYS=new Set<keyof typeof PRIVATE_PROJECT_PATHS>(['state','ledger','insertionJournal','usage','codexSkillConsent']);
 const VERSION_FILE='.storage-v1';
 const ROOT_VERSION_FILE='.local-storage-v1';
 const VERSION='1\n';
